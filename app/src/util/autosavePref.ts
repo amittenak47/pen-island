@@ -74,9 +74,9 @@ export const AUTOSAVE_BANNER_CHOICES: ReadonlyArray<[AutosaveBanner, string, str
   [
     "on",
     "On screen",
-    "Show Saved on the focused pad. A split pair shares one banner. Parked tabs still write, silently.",
+    "Show Saved on the pad you are viewing.",
   ],
-  ["off", "Hide", "Writes still happen. Nothing pops up."],
+  ["off", "Hide", "Save silently."],
 ];
 
 function isBanner(value: string): value is AutosaveBanner {

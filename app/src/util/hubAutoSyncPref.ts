@@ -18,12 +18,12 @@ export const HUB_AUTOSYNC_CHOICES: ReadonlyArray<[HubAutoSyncPref, string, strin
   [
     "off",
     "Off",
-    "This device stays local. No background ping, pull, queue flush, or idle kick touches the hub. Manual sync still works.",
+    "Nothing syncs until you tap Sync.",
   ],
   [
     "on",
     "On",
-    "Every 15s this device pings the hub, applies newer pads, and pushes autosaved ink. The old behaviour.",
+    "Syncs every 15 seconds, and when you open or save a document.",
   ],
 ];
 

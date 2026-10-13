@@ -198,7 +198,7 @@ export function ColorSlotEditor({ color, anchor, onConfirm, onDiscard, zIndex = 
       ref={rootRef}
       className="lc-color-slot-editor"
       role="dialog"
-      aria-label="Edit ink colour"
+      aria-label="Edit ink color"
       style={{ zIndex }}
       onPointerDown={(event) => event.stopPropagation()}
     >
@@ -293,8 +293,8 @@ export function ColorSlotEditor({ color, anchor, onConfirm, onDiscard, zIndex = 
         <button
           type="button"
           className="lc-color-slot-go"
-          aria-label="Use this colour"
-          title="Use this colour"
+          aria-label="Use this color"
+          title="Use this color"
           onClick={() => onConfirm(hex)}
         >
           <CheckIcon />
@@ -303,7 +303,7 @@ export function ColorSlotEditor({ color, anchor, onConfirm, onDiscard, zIndex = 
         <button
           type="button"
           className="lc-color-slot-stop"
-          aria-label="Discard colour"
+          aria-label="Discard color"
           title="Discard"
           onClick={onDiscard}
         >

@@ -170,6 +170,7 @@ import { compareIndexFacts, indexFacts } from "../util/indexReport";
 import type { SettingsFact } from "../util/settingsFacts";
 import { SettingsFacts, factsFromMessage } from "./SettingsFacts";
 import { auditInkDuplicates } from "../util/inkDuplicates";
+import { VOCABULARY_PRESETS, vocabularyPresetId } from "../util/voiceVocabulary";
 
 type TabId = "workspace" | "personalise" | "ai" | "llm";
 
@@ -292,12 +293,12 @@ const COACH_FLAG_GROUPS: Array<{
     id: "coach-knows",
     title: "Agent Planning",
     blurb:
-      "Optional approach planning makes an extra model call per problem and starts off.",
+      "Optional. Adds one model call per problem. Off by default.",
     flags: [
       [
         "planner_enabled",
         "Plan the approaches first",
-        "One call per problem, to the planner provider on the LLM tab, cataloging the approach families the problem admits — so a small local model is asked the narrow questions it is good at and a bigger one answers the broad one. Built from the statement and the sample cases only: it cannot reach a solution, and a test keeps it that way.",
+        "Before reading your board, list the approaches the problem allows, using the Planner model on the LLM page. Uses only the problem statement and sample cases, never a solution.",
       ],
     ],
   },
@@ -331,12 +332,26 @@ const SHARED_AGENT_FLAGS: Array<[keyof CoachFlags, string, string]> = [
 
 /** What each coach mode is for, shown under its provider picker. */
 const MODE_HINTS: Record<(typeof MODES)[number], string> = {
-  ambient: "Every-2m glance at the board.",
-  review: "The staged review, and Ask.",
-  bridge: "The stepwise path shown after an explicit reveal.",
-  viz: "Tool calls for diagrams and animations.",
-  planner:
-    "One call per problem that catalogs the approaches it admits. Point this at a frontier model to guide the local agent — it never sees or writes a solution.",
+  ambient: "Glances at the board every 2 minutes.",
+  review: "Staged reviews and Ask.",
+  bridge: "The step-by-step path shown after you choose Reveal.",
+  viz: "Draws diagrams and animations.",
+  planner: "Lists the approaches each problem allows. A larger model works best; it never sees or writes a solution.",
+};
+
+/** Display names for the agent modes and providers (their ids stay in config). */
+const MODE_LABELS: Record<(typeof MODES)[number], string> = {
+  ambient: "Background check",
+  review: "Review and Ask",
+  bridge: "Reveal",
+  viz: "Diagrams",
+  planner: "Planner",
+};
+const PROVIDER_LABELS: Record<(typeof PROVIDERS)[number], string> = {
+  local: "Local",
+  ollama: "Ollama",
+  openai: "OpenAI",
+  groq: "Groq",
 };
 
 /**
@@ -912,6 +927,8 @@ export function SettingsModal({
   const [baselineChatBotClient, setBaselineChatBotClient] = useState<ChatBotClient>(loadChatBotClient);
   const [chatBotAnswerMode, setChatBotAnswerMode] = useState<ChatBotAnswerMode>(loadChatBotAnswerMode);
   const [baselineChatBotAnswerMode, setBaselineChatBotAnswerMode] = useState<ChatBotAnswerMode>(loadChatBotAnswerMode);
+  /** The last hand-edited vocabulary, so picking a preset and back to Custom restores it. */
+  const [customVocabulary, setCustomVocabulary] = useState("");
   const [hubUrl, setHubUrl] = useState("");
   const [hubToken, setHubToken] = useState("");
   const [baselineHubUrl, setBaselineHubUrl] = useState("");
@@ -1385,7 +1402,7 @@ export function SettingsModal({
   const voiceLabel = VOICE_ENGINES.find((engine) => engine.id === voice.engine)?.label ?? "Android";
   const summaries: Record<string,string> = {
     writing: `${handedness === "left" ? "Left hand" : "Right hand"} · ${chromeWake === "off" ? "No marker" : chromeWake === "pulse" ? "Checkerboard pulse" : "Grey smear"}`,
-    "ink-tools": `${palettePrefs.tags.map(paletteTagLabel).join(", ")}${palettePrefs.mixColours ? " · Mix colours" : ""}`,
+    "ink-tools": `${palettePrefs.tags.map(paletteTagLabel).join(", ")}${palettePrefs.mixColours ? " · Mix colors" : ""}`,
     reading: `Momentum ${pdfFlickMomentum}`,
     storage: `${autosaveMs ? `Autosave ${autosaveMs/1000}s` : "Autosave off"} / ${hubAutoSync === "off" ? "Manual sync" : "Auto sync"}`,
     ui: `${uiHandedness === "left" ? "Left hand" : "Right hand"} · ${readingMode === "pages" ? "Pages" : "Scroll"}`,
@@ -1759,7 +1776,7 @@ export function SettingsModal({
               <SettingsFold id="writing" title="Annotate">
               <div className="lc-setting-row">
 <div className="lc-settings-subhead">Writing hand</div>
-              <p className="lc-settings-hint">Where ink tools, colour wheels and the preset editor sit. Everything else follows UI hand.</p>
+              <p className="lc-settings-hint">Where ink tools, color wheels and the preset editor sit. Everything else follows UI hand.</p>
               <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Writing hand">
                 <button
                   type="button"
@@ -1833,11 +1850,11 @@ export function SettingsModal({
               </SettingsChoices>
 
               {chromeWake !== "off" && <>
-              <div className="lc-settings-subhead">Marker colour</div>
+              <div className="lc-settings-subhead">Marker color</div>
               <SettingsChoices
                 className="lc-settings-choice"
                 role="radiogroup"
-                aria-label="Hidden-controls marker colour"
+                aria-label="Hidden-controls marker color"
               >
                 {(
                   [
@@ -2073,7 +2090,7 @@ export function SettingsModal({
               <SettingsFold id="ink-tools" title="Ink tools">
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Confirm with OK</div>
-              <p className="lc-settings-hint">On: tap OK in the wheel’s centre to apply. Off: applies when you lift from the colour.</p>
+              <p className="lc-settings-hint">On: tap OK in the center of the wheel to apply. Off: applies when you lift from the color.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
@@ -2108,12 +2125,12 @@ export function SettingsModal({
               </SettingsChoices>
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Colour wheel on the toolbar</div>
-              <p className="lc-settings-hint">A quick colour that leaves your presets alone until you save one.</p>
+<div className="lc-settings-subhead">Color wheel on the toolbar</div>
+              <p className="lc-settings-hint">A quick color that leaves your presets alone until you save one.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
-                aria-label="Colour wheel on the toolbar"
+                aria-label="Color wheel on the toolbar"
               >
                 <button
                   type="button"
@@ -2158,7 +2175,7 @@ export function SettingsModal({
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-wrap"
                 role="group"
-                aria-label="Palette colours"
+                aria-label="Palette colors"
               >
                 {PALETTE_TAGS.map((tag) => (
                   <button
@@ -2188,7 +2205,7 @@ export function SettingsModal({
                 <button type="button" role="switch" aria-checked={palettePrefs.mixColours}
                   className={palettePrefs.mixColours ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                   onClick={() => setPalettePrefs(prefs => ({ ...prefs, mixColours: !prefs.mixColours }))}>
-                  <strong>Mix colours</strong><span className="lc-muted">Build four distinct colours that contrast with the page.</span>
+                  <strong>Mix colors</strong><span className="lc-muted">Build four distinct colors that contrast with the page.</span>
                 </button>
               </SettingsChoices>
 
@@ -2331,10 +2348,8 @@ export function SettingsModal({
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Autosave</div>
               <p className="lc-settings-hint">
-                How often the board writes itself down, so a crash or a closed lid
-                costs nothing. This is not the same as saving: Discard still rolls
-                back to where the session started, whatever the autosave has
-                written since.
+                How often your work is saved to this device, so a crash or a closed
+                lid loses nothing. Discard still returns to where the session started.
               </p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
@@ -2359,8 +2374,7 @@ export function SettingsModal({
                 ))}
               </SettingsChoices>
               <p className="lc-settings-hint">
-                The write is independent of the banner. Parked tabs still save;
-                they just do not flash Saved over the pad you are looking at.
+                Saving happens either way. This only controls the Saved banner.
               </p>
               <SettingsChoices
                 className="lc-settings-choice"
@@ -2390,11 +2404,9 @@ export function SettingsModal({
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Hub auto-sync</div>
               <p className="lc-settings-hint">
-                Whether this device pushes itself to the pad hub on its own: the 15s ping,
-                the idle kick after opening a file, pulling and flushing on connect, and
-                the pad copy that rides along with each autosave. Off keeps everything on
-                this device until you sync by hand. Autosave above only controls writing
-                to this device; it does not stop or start hub traffic.
+                Sync with the pad hub automatically in the background. When off,
+                nothing leaves this device until you tap Sync. Autosave is separate:
+                it only saves to this device.
               </p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
@@ -2616,7 +2628,7 @@ export function SettingsModal({
                   {([
                     ["autoCollapseThinking", "Collapse when the answer arrives", ""],
                     ["collapseThinkingSteps", "Start steps collapsed", ""],
-                    ["colorThinkingSteps", "Colour steps", "Colours only tell neighbouring steps apart."],
+                    ["colorThinkingSteps", "Color steps", "Colors only tell neighboring steps apart."],
                   ] as const).map(([key, label, hint]) => <button key={key} type="button" role="switch"
                     aria-checked={agentDisplay[key]} className={agentDisplay[key] ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                     onClick={() => setAgentDisplay(prefs => ({ ...prefs, [key]: !prefs[key] }))}>
@@ -2774,9 +2786,8 @@ export function SettingsModal({
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Load bar</div>
               <p className="lc-settings-hint">
-                5px load bar scaled to one display vsync (Auto or the refresh
-                you pick), with a lift hint when the stroke is missing several
-                beats. Off hides the bar only.
+                A thin bar on the whiteboard showing how long each stroke takes to
+                draw, measured against the display refresh rate set above.
               </p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
@@ -3042,7 +3053,7 @@ export function SettingsModal({
                 >
                   {PROVIDERS.map((p) => (
                     <option key={p} value={p}>
-                      {p}
+                      {PROVIDER_LABELS[p]}
                     </option>
                   ))}
                 </select>
@@ -3262,7 +3273,7 @@ export function SettingsModal({
 <div className="lc-settings-subhead">Agent mode providers</div>
               {MODES.map((mode) => (
                 <label key={mode}>
-                  <span>{mode}</span>
+                  <span>{MODE_LABELS[mode]}</span>
                   <select
                     value={draft.modes[mode]}
                     onChange={(e) =>
@@ -3274,7 +3285,7 @@ export function SettingsModal({
                   >
                     {PROVIDERS.map((p) => (
                       <option key={p} value={p}>
-                        {p}
+                        {PROVIDER_LABELS[p]}
                       </option>
                     ))}
                   </select>
@@ -3324,7 +3335,7 @@ export function SettingsModal({
                   <p className="lc-settings-hint">This choice saves your setup guide. Connect the assistant in its own app; all connected assistants share the footnote inbox.</p>
                   <label><span>Local MCP command (on the PC)</span><input readOnly value="lc mcp" /></label>
                   <label><span>Private HTTP adapter (optional)</span><input readOnly value="lc mcp --listen 127.0.0.1:7879 --auth-token-file path-to-token.txt" /></label>
-                  <p className="lc-settings-hint">The adapter provides http://127.0.0.1:7879/mcp for a tunnel and exposes only footnote requests and answers. Use a separate random token file (32–256 characters) and set the assistant&apos;s Authorization header to Bearer followed by that token. The local command reads the hub token from your config.</p>
+                  <p className="lc-settings-hint">Serves http://127.0.0.1:7879/mcp for a tunnel and exposes only footnote requests and answers. It requires its own random token file (32–256 characters). Assistants that sign in with OAuth, such as Grok Bot, connect through the ChatBot OAuth bridge; see docs/AI-SETUP-GUIDE.md. The local command reads the hub token from your config.</p>
                   {chatBotClient === "dots" && <>
                     <p className="lc-settings-hint">For OpenAI Dots, connect a custom MCP plugin using Secure MCP Tunnel. A tunnel needs a Platform tunnel ID, a runtime API key, and association with your ChatGPT workspace. A ChatGPT subscription alone does not configure this connection.</p>
                     <a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noreferrer">OpenAI connection guide</a>
@@ -3481,15 +3492,37 @@ export function SettingsModal({
                   ))}
                 </SettingsChoices>
                 <p className="lc-settings-hint">After you stop talking, an LLM can tidy punctuation, casing and hesitations. Rewrites that change your words are discarded. Vocabulary hints help the transcription engine recognize technical terms.</p>
+                <div className="lc-settings-subhead">Vocabulary</div>
+                <p className="lc-settings-hint">Words the transcriber should spell correctly, such as names and technical terms. Start from a list, then edit it; your edits become Custom. Not used by Android dictation.</p>
+                <SettingsChoices className="lc-settings-choice lc-settings-choice-compact" role="radiogroup" aria-label="Vocabulary list">
+                  {[...VOCABULARY_PRESETS.map(preset => ({ id: preset.id, label: preset.label, words: preset.words })),
+                    { id: "custom", label: "Custom", words: customVocabulary }].map(choice => {
+                    const active = vocabularyPresetId(voice.vocabulary) === choice.id;
+                    return (
+                      <button key={choice.id} type="button" role="radio" aria-checked={active}
+                        className={active ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                        onClick={() => {
+                          // Keep hand-edited words before a preset replaces them.
+                          if (vocabularyPresetId(voice.vocabulary) === "custom") setCustomVocabulary(voice.vocabulary);
+                          patchVoice({ vocabulary: choice.words });
+                        }}>
+                        <strong>{choice.label}</strong>
+                      </button>
+                    );
+                  })}
+                </SettingsChoices>
                 <label>
-                  <span>Vocabulary</span>
+                  <span>Words</span>
                   <textarea
                     rows={3}
                     value={voice.vocabulary}
                     placeholder="memoization, heapq, BFS, two pointers"
-                    onChange={(e) => patchVoice({ vocabulary: e.target.value })}
+                    onChange={(e) => {
+                      patchVoice({ vocabulary: e.target.value });
+                      if (vocabularyPresetId(e.target.value) === "custom") setCustomVocabulary(e.target.value);
+                    }}
                   />
-                  <p className="lc-settings-hint">Comma or newline separated. Sent with each clip so these come out spelled right. Android&apos;s recognizer ignores it.</p>
+                  <p className="lc-settings-hint">Separate words with commas or new lines.</p>
                 </label>
               </div>
               </SettingsFold>

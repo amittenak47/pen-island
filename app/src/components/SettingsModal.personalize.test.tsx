@@ -121,7 +121,7 @@ it("saves selected palette styles together and All clears the selection", async(
   const api=client(); await show(api);
   await act(async()=>button('Ink tools').click());
   const tag=(name:string)=>button(name);
-  await act(async()=>{tag('Neon')!.click();tag('Dark')!.click();switchButton('Mix colours').click();});
+  await act(async()=>{tag('Neon')!.click();tag('Dark')!.click();switchButton('Mix colors').click();});
   expect(tag('Neon')!.getAttribute('aria-pressed')).toBe('true');
   expect(tag('Dark')!.getAttribute('aria-pressed')).toBe('true');
   expect(tag('All')!.getAttribute('aria-pressed')).toBe('false');

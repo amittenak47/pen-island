@@ -197,7 +197,7 @@ export function createColorHuntSource(
         const fallback = COLORHUNT_FALLBACK_CODES.map(paletteFromColorHuntCode).filter((p): p is InkPalette => p !== null);
         const offlineMix = mixInkPalette(fallback, paper, seed, mixOptions);
         if (offlineMix) return offlineMix;
-        throw new Error("No distinct, readable ink colours for this paper");
+        throw new Error("No distinct, readable ink colors for this paper");
       }
       if (feeds.length) {
         const key = queries.join("|");

@@ -470,7 +470,7 @@ export function InkPresetEditor({
                 <p className="lc-settings-hint">
                   {livePreview
                     ? kind === "pen"
-                      ? "Ink lab pad. Nib, colour, pressure, hold grow, and lift smoothing apply as you draw. Switching Live off, or Erase, clears the pad."
+                      ? "Ink lab pad. Nib, color, pressure, hold grow, and lift smoothing apply as you draw. Switching Live off, or Erase, clears the pad."
                       : kind === "highlighter"
                         ? "Draw here with this highlighter before you Save. A translucent chisel — writing stays readable underneath. Switching Live off, or Erase, clears the pad."
                         : "Draw here with this preset before you Save. Switching Live off, or Erase, clears the pad."
@@ -542,7 +542,7 @@ export function InkPresetEditor({
                 )}
                 {draw && (
                   <SettingsBlock
-                    title="Colour"
+                    title="Color"
                     hint={
                       <>
                         Tap a wedge to pick it. Tap the hub to cycle palettes. Hold a wedge

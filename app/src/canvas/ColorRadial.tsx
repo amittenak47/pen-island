@@ -477,7 +477,7 @@ export function ColorRadial({
               : "lc-color-wheel is-open"
         }
         role="menu"
-        aria-label="Ink colour"
+        aria-label="Ink color"
         data-cycle={cycleDir}
         style={
           embedded || !anchor
@@ -515,8 +515,8 @@ export function ColorRadial({
           style={{ background: shown }}
           aria-label={
             onCyclePrev || onCycleNext
-              ? "Current ink colour — tap to cycle palettes"
-              : "Current ink colour"
+              ? "Current ink color — tap to cycle palettes"
+              : "Current ink color"
           }
           onClick={() => {
             if (slotEditLock.current) return;
@@ -567,7 +567,7 @@ export function ColorRadial({
         <button
           type="button"
           className={open ? "lc-color-dot lc-color-dot-open" : "lc-color-dot"}
-          aria-label="Ink colour"
+          aria-label="Ink color"
           aria-haspopup="true"
           aria-expanded={open}
           onPointerDown={() => {

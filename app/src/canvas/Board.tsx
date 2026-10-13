@@ -11219,7 +11219,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                   <button
                     type="button"
                     className="lc-lined-toggle lc-tip-target"
-                    aria-label="Recentre and refresh the view"
+                    aria-label="Recenter and refresh the view"
                     onClick={() => recentreKeepPlace()}
                   >
                     <RecentreIcon />
