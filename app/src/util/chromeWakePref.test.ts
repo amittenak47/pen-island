@@ -47,8 +47,8 @@ describe("chrome wake marker", () => {
   });
 
   it("names each marker for Settings", () => {
-    expect(chromeWakeMarkerLabel("smear")).toBe("Grey smear");
-    expect(chromeWakeMarkerLabel("pulse")).toBe("Checkerboard pulse");
+    expect(chromeWakeMarkerLabel("smear")).toBe("Faint smudge");
+    expect(chromeWakeMarkerLabel("pulse")).toBe("Pulsing squares");
     expect(chromeWakeMarkerLabel("off")).toBe("Hidden");
   });
 });

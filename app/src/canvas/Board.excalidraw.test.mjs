@@ -514,10 +514,10 @@ describe("SettingsModal", () => {
   it("keeps the performance overlay in Diagnostics", () => {
     const src = readFileSync(join(here, "../components/SettingsModal.tsx"), "utf8");
     expect(src).toMatch(/id="diagnostics"/);
-    expect(src).toMatch(/Frame overlay/);
-    expect(src).toMatch(/Load bar/);
-    expect(src).toMatch(/HUD refresh/);
-    expect(src).toMatch(/Full refresh rate/);
+    expect(src).toMatch(/Speed overlay/);
+    expect(src).toMatch(/Drawing speed bar/);
+    expect(src).toMatch(/Measurement refresh rate/);
+    expect(src).toMatch(/Smoother motion/);
     expect(src).toMatch(/loadInkPerfOverlay/);
     expect(src).toMatch(/loadInkPerfBar/);
     expect(src).toMatch(/loadInkDisplayHz/);

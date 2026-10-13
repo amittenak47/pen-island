@@ -62,7 +62,7 @@ function fold(title: string) {
 }
 
 function radio(label: string) {
-  return [...fold("Voice dictation").querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
+  return [...fold("Voice typing").querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
     (button) => button.querySelector("strong")?.textContent === label,
   )!;
 }
@@ -75,9 +75,9 @@ async function openVoice() {
   const api = client();
   await act(async () => root.render(<SettingsModal open client={api} onClose={() => {}} />));
   await act(async () => {});
-  const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent?.trim() === "LLM")!;
+  const tab = [...host.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((button) => button.textContent?.trim() === "AI")!;
   await act(async () => tab.click());
-  const summary = fold("Voice dictation").querySelector<HTMLButtonElement>(".lc-settings-fold-summary")!;
+  const summary = fold("Voice typing").querySelector<HTMLButtonElement>(".lc-settings-fold-summary")!;
   await act(async () => summary.click());
   return api;
 }
@@ -91,11 +91,11 @@ async function fill(input: HTMLInputElement, value: string) {
 
 it("shows Voice dictation in the LLM tab, and saving Groq sends the engine and key", async () => {
   const api = await openVoice();
-  const voice = fold("Voice dictation");
+  const voice = fold("Voice typing");
   expect(voice).toBeTruthy();
-  expect(radio("Android dictation").getAttribute("aria-checked")).toBe("true");
+  expect(radio("Android").getAttribute("aria-checked")).toBe("true");
   expect(voice.querySelector('input[type="password"]')).toBeNull();
-  await act(async () => radio("Whisper via Groq").click());
+  await act(async () => radio("Groq").click());
   expect(voice.querySelector('input[type="password"]')).not.toBeNull();
   expect([...voice.querySelectorAll("label span")].some((node) => node.textContent === "Model")).toBe(true);
   expect(voice.querySelector(".lc-settings-fold-header")?.getAttribute("data-changed")).toBe("true");
@@ -113,7 +113,7 @@ it("shows Voice dictation in the LLM tab, and saving Groq sends the engine and k
 it("sends deepgram_api_key when Deepgram is picked and a key is typed", async () => {
   const api = await openVoice();
   await act(async () => radio("Deepgram").click());
-  await fill(fold("Voice dictation").querySelector<HTMLInputElement>('input[type="password"]')!, "dg_test");
+  await fill(fold("Voice typing").querySelector<HTMLInputElement>('input[type="password"]')!, "dg_test");
   await act(async () => save().click());
   const payload = vi.mocked(api.putConfig).mock.calls[0][0] as LcConfigPut;
   expect(payload.deepgram_api_key).toBe("dg_test");
@@ -123,8 +123,8 @@ it("sends deepgram_api_key when Deepgram is picked and a key is typed", async ()
 it("offers PC Whisper separately from Android dictation and saves its endpoint and model", async () => {
   const api = await openVoice();
   await act(async () => radio("Whisper on your PC").click());
-  const voice = fold("Voice dictation");
-  expect(voice.textContent).toContain("selecting it does not install or start one");
+  const voice = fold("Voice typing");
+  expect(voice.textContent).toContain("The Whisper app must be running on your PC");
   const input = (label: string) => [...voice.querySelectorAll("label")].find(l => l.querySelector("span")?.textContent === label)!.querySelector("input")!;
   await fill(input("Whisper server URL"), "http://192.168.1.20:8000/v1");
   await fill(input("Model"), "Systran/faster-whisper-small");
@@ -153,7 +153,7 @@ it("saves the regular-LLM answer mode and hides external bot setup", async () =>
   expect(select.value).toBe("bot");
   await act(async () => { select.value = "llm"; select.dispatchEvent(new Event("change", { bubbles: true })); });
   expect(fold("ChatBot").querySelector('[aria-label="ChatBot assistant"]')).toBeNull();
-  expect(fold("ChatBot").textContent).toContain("desktop hub answers automatically");
+  expect(fold("ChatBot").textContent).toContain("answers automatically with the AI model set up above");
   await act(async () => save().click());
   expect(localStorage.getItem("whiteboard.chatBotAnswerMode.v1")).toBe("llm");
   expect(api.putConfig).not.toHaveBeenCalled();
@@ -161,7 +161,7 @@ it("saves the regular-LLM answer mode and hides external bot setup", async () =>
 
 it("sends voice.cleanup local when Local is picked on the clean-up pass", async () => {
   const api = await openVoice();
-  const group = fold("Voice dictation").querySelector<HTMLElement>('[aria-label="Clean-up pass"]')!;
+  const group = fold("Voice typing").querySelector<HTMLElement>('[aria-label="Tidy up text"]')!;
   const choice = (label: string) => [...group.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(
     (button) => button.querySelector("strong")?.textContent === label,
   )!;
@@ -174,10 +174,10 @@ it("sends voice.cleanup local when Local is picked on the clean-up pass", async 
 
 it("renders Android for an older config and omits voice when that group is left alone", async () => {
   const api = await openVoice();
-  expect(radio("Android dictation").getAttribute("aria-checked")).toBe("true");
-  const llm = fold("LLM").querySelector<HTMLButtonElement>(".lc-settings-fold-summary")!;
+  expect(radio("Android").getAttribute("aria-checked")).toBe("true");
+  const llm = fold("AI model").querySelector<HTMLButtonElement>(".lc-settings-fold-summary")!;
   await act(async () => llm.click());
-  const select = fold("LLM").querySelector("select")!;
+  const select = fold("AI model").querySelector("select")!;
   await act(async () => {
     select.value = "openai";
     select.dispatchEvent(new Event("change", { bubbles: true }));

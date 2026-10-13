@@ -74,9 +74,9 @@ export const AUTOSAVE_BANNER_CHOICES: ReadonlyArray<[AutosaveBanner, string, str
   [
     "on",
     "On screen",
-    "Show Saved on the pad you are viewing.",
+    "Briefly shows Saved.",
   ],
-  ["off", "Hide", "Save silently."],
+  ["off", "Hide", "Saves without a message."],
 ];
 
 function isBanner(value: string): value is AutosaveBanner {

@@ -39,7 +39,7 @@ const button = (text:string) => [...host.querySelectorAll<HTMLButtonElement>("bu
 const count = () => host.querySelector('.lc-settings-change-count')?.textContent;
 async function show(api:LcClient,onClose=()=>{}) {
   await act(async()=>root.render(<SettingsModal open client={api} onClose={onClose}/>));
-  await act(async()=>button("UI").click());
+  await act(async()=>button("Display").click());
 }
 it("keeps header visibility as a draft on Cancel and persists each mode on Save", async()=>{
   const api=client(),close=vi.fn(); await show(api,close);

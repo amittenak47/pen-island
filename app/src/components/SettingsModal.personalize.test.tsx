@@ -50,18 +50,18 @@ async function search(value:string) {
 }
 async function show(api:LcClient,onClose=()=>{}) {
   await act(async()=>root.render(<SettingsModal open client={api} onClose={onClose}/>));
-  await act(async()=>button("UI").click());
+  await act(async()=>button("Display").click());
 }
 it("keeps UI drafts local until Save and Cancel does not persist", async()=>{
   const api=client(),close=vi.fn(); await show(api,close);
-  await act(async()=>{ button("Left hand").click(); switchButton("Collapse when the answer arrives").click(); });
+  await act(async()=>{ button("Left hand").click(); switchButton("Collapse steps when the answer arrives").click(); });
   expect(loadUiHandedness()).toBe("right"); expect(loadAgentDisplayPrefs().autoCollapseThinking).toBe(false);
   await act(async()=>button("Cancel").click()); expect(close).toHaveBeenCalledOnce();
   expect(loadUiHandedness()).toBe("right"); expect(api.putConfig).not.toHaveBeenCalled();
 });
 it("saves UI hand and Thinking preferences without changing ink or making a model config write", async()=>{
   const api=client(); await show(api);
-  await act(async()=>{ button("Left hand").click(); switchButton("Start steps collapsed").click(); });
+  await act(async()=>{ button("Left hand").click(); switchButton("Start with steps collapsed").click(); });
   await act(async()=>button("Save").click());
   expect(loadUiHandedness()).toBe("left"); expect(loadInkHandedness()).toBe("right");
   expect(loadAgentDisplayPrefs()).toMatchObject({collapseThinkingSteps:true,autoCollapseThinking:false});
@@ -69,35 +69,35 @@ it("saves UI hand and Thinking preferences without changing ink or making a mode
 });
 it("preserves shared coach flags when moving controls into UI", async()=>{
   const api=client(); await show(api);
-  await act(async()=>switchButton("Answer over the live connection").click());
+  await act(async()=>switchButton("Show replies as they’re written").click());
   await act(async()=>button("Save").click());
   expect(api.putConfig).toHaveBeenCalledWith(expect.objectContaining({coach:expect.objectContaining({ws_runs:false,process_events_ui:true})}), {timeoutMs:30000});
 });
 it("counts individual changes and removes reverted drafts across groups", async()=>{
   await show(client()); expect(count()).toBe('No changes');
-  await act(async()=>{button('Left hand').click();switchButton('Start steps collapsed').click();});
+  await act(async()=>{button('Left hand').click();switchButton('Start with steps collapsed').click();});
   expect(count()).toBe('2 changes');
   await act(async()=>button('Right hand').click()); expect(count()).toBe('1 change');
   await act(async()=>button('Scroll').click()); expect(count()).toBe('1 change');
-  await act(async()=>button('UI').click());
-  expect(switchButton('Start steps collapsed').getAttribute('aria-checked')).toBe('true');
-  await act(async()=>switchButton('Start steps collapsed').click()); expect(count()).toBe('No changes');
+  await act(async()=>button('Display').click());
+  expect(switchButton('Start with steps collapsed').getAttribute('aria-checked')).toBe('true');
+  await act(async()=>switchButton('Start with steps collapsed').click()); expect(count()).toBe('No changes');
   expect(button('Save').disabled).toBe(true);
 });
 it("searches existing controls across tabs without losing edits", async()=>{
   await show(client()); await act(async()=>button('Left hand').click());
-  await search('Default provider');
-  expect([...host.querySelectorAll('.lc-settings-fold-title')].map(n=>n.textContent)).toEqual(['LLM']);
+  await search('Server address');
+  expect([...host.querySelectorAll('.lc-settings-fold-title')].map(n=>n.textContent)).toEqual(['AI model']);
   await act(async()=>host.querySelector<HTMLButtonElement>('.lc-settings-fold-summary')!.click());
   expect(host.querySelector('select')).not.toBeNull(); expect(count()).toBe('1 change');
   await search('doesnotexist'); expect(host.querySelector('.lc-settings-fold')).toBeNull();
-  await search('Debug log'); expect(host.querySelector('.lc-settings-fold-title')?.textContent).toBe('Diagnostics');
-  await search(''); await act(async()=>button('UI').click());
+  await search('Debug log'); expect(host.querySelector('.lc-settings-fold-title')?.textContent).toBe('Troubleshooting');
+  await search(''); await act(async()=>button('Display').click());
   expect(button('Left hand').getAttribute('aria-checked')).toBe('true');
 });
 it("counts only unsaved settings after partial save failure and retries", async()=>{
   const api=client(),close=vi.fn(); await show(api,close);
-  await act(async()=>{button('Left hand').click();switchButton('Answer over the live connection').click();});
+  await act(async()=>{button('Left hand').click();switchButton('Show replies as they’re written').click();});
   expect(count()).toBe('2 changes');
   vi.mocked(api.putConfig).mockRejectedValueOnce(new Error('Fixture save failed'));
   await act(async()=>button('Save').click());
@@ -107,7 +107,7 @@ it("counts only unsaved settings after partial save failure and retries", async(
 });
 it("blocks closing during a pending save", async()=>{
   const api=client(),close=vi.fn(); await show(api,close);
-  await act(async()=>switchButton('Answer over the live connection').click());
+  await act(async()=>switchButton('Show replies as they’re written').click());
   let finish!: (value:LcConfig)=>void;
   vi.mocked(api.putConfig).mockImplementationOnce(()=>new Promise(resolve=>{finish=resolve;}));
   await act(async()=>button('Save').click());
@@ -138,15 +138,15 @@ it("saves selected palette styles together and All clears the selection", async(
 
 it("resets one changed section without losing another section's drafts", async()=>{
   await show(client());
-  await act(async()=>{button('Left hand').click();switchButton('Answer over the live connection').click();});
+  await act(async()=>{button('Left hand').click();switchButton('Show replies as they’re written').click();});
   await act(async()=>button('Ink tools').click());
   await act(async()=>button('Neon').click());
   expect(count()).toBe('3 changes');
   await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Reset Ink tools"]')!.click());
   expect(count()).toBe('2 changes');
-  await act(async()=>button('UI').click());
+  await act(async()=>button('Display').click());
   expect(button('Left hand').getAttribute('aria-checked')).toBe('true');
-  await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Reset UI"]')!.click());
+  await act(async()=>host.querySelector<HTMLButtonElement>('[aria-label="Reset Display"]')!.click());
   expect(count()).toBe('No changes');
   expect(button('Right hand').getAttribute('aria-checked')).toBe('true');
 });
@@ -155,8 +155,8 @@ it("keeps capture in Annotate and places all debug controls in Diagnostics", asy
   await show(client());
   await act(async()=>button('Annotate').click());
   expect(host.querySelector('[aria-label="What a capture does"]')).not.toBeNull();
-  expect(host.querySelector('[aria-label="HUD refresh"]')).toBeNull();
-  await act(async()=>button('Diagnostics').click());
-  for(const label of ['HUD refresh','Frame overlay','Load bar','Flick landing preview','Sync pill on the board','Debug log'])
+  expect(host.querySelector('[aria-label="Measurement refresh rate"]')).toBeNull();
+  await act(async()=>button('Troubleshooting').click());
+  for(const label of ['Measurement refresh rate','Speed overlay','Drawing speed bar','Page preview while flicking','Floating Sync button','Activity log'])
     expect(host.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
 });

@@ -22153,3 +22153,25 @@ html[data-corners="rounded"] {
 }
 .lc-footnote-mini-note.is-chatbot-complete .lc-footnote-note-body::after,
 .lc-footnote-note-workspace.is-chatbot-complete .lc-footnote-note-body::after { right: 8px; top: 6px; }
+
+/* Settings → ChatBot: rarely needed connection commands, folded away. */
+.lc-settings-advanced {
+  margin-top: 8px;
+}
+
+.lc-settings-advanced > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 4px 0;
+}
+
+.lc-settings-advanced[open] > summary {
+  margin-bottom: 6px;
+}
+
+/* Links inside Settings sections use the accent, readable on dark themes. */
+.lc-settings-fold-body a {
+  color: var(--accent);
+  text-underline-offset: 2px;
+}

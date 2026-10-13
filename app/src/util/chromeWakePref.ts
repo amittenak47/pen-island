@@ -77,9 +77,9 @@ export function saveChromeWakeTint(tint: ChromeWakeTint): void {
 export function chromeWakeMarkerLabel(marker: ChromeWakeMarker): string {
   switch (marker) {
     case "smear":
-      return "Grey smear";
+      return "Faint smudge";
     case "pulse":
-      return "Checkerboard pulse";
+      return "Pulsing squares";
     default:
       return "Hidden";
   }
