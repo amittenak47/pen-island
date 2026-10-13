@@ -11,6 +11,26 @@ use serde_json::{json, Value};
 use crate::config::Config;
 use crate::pads::footnotes::{self, FootnoteLink};
 
+/// How the inbox works, sent to every assistant when it connects. Assistants
+/// only act when prompted or scheduled, so this asks them to offer the watch.
+pub const WORKFLOW: &str = "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a document and asks for a footnote; each request waits here until an assistant answers it. To answer: call list_footnote_requests, then for each request call get_footnote_request and submit_footnote. Only answer requests listed here, and never invent request ids. If the inbox is empty, say so. If you can run scheduled or repeating tasks, offer to check the inbox every few minutes and answer new requests as they arrive.";
+
+/// Ready-made prompts: (name, title, description, text sent as the user's message).
+pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
+    (
+        "answer_footnotes",
+        "Answer my footnote requests",
+        "Answer every pending footnote request once.",
+        "Answer my pending Pen Island footnote requests: list them, read each one, and submit a footnote for each. Then tell me how many you answered.",
+    ),
+    (
+        "watch_footnotes",
+        "Keep answering footnote requests",
+        "Answer pending requests now, then keep checking for new ones.",
+        "Answer my pending Pen Island footnote requests now, then keep checking every few minutes and answer new ones as they arrive. If you can't run scheduled or repeating tasks, tell me so, and just answer the current ones.",
+    ),
+];
+
 pub const INSTRUCTIONS: &str = "Explain the selected words in the context of the surrounding text, for a reader who is in the middle of this document. 1-3 short markdown notes; lead with the direct explanation; add links only to sources you are confident exist. If the request has a prompt, follow it.";
 
 const SUPPORTED_PROTOCOLS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
@@ -212,6 +232,11 @@ pub fn dispatch(hub: &dyn FootnoteHub, message: &Value) -> Option<Value> {
         "initialize" => result_reply(id, initialize_result(&params)),
         "ping" => result_reply(id, json!({})),
         "tools/list" => result_reply(id, json!({ "tools": tool_list() })),
+        "prompts/list" => result_reply(id, json!({ "prompts": prompt_list() })),
+        "prompts/get" => match get_prompt(&params) {
+            Some(prompt) => result_reply(id, prompt),
+            None => error_reply(id, -32602, "Unknown prompt"),
+        },
         "tools/call" => result_reply(id, call_tool(hub, &params)),
         _ => error_reply(id, -32601, "Method not found"),
     })
@@ -226,10 +251,36 @@ fn initialize_result(params: &Value) -> Value {
     };
     json!({
         "protocolVersion": protocol,
-        "capabilities": { "tools": {} },
+        "capabilities": { "tools": {}, "prompts": {} },
         "serverInfo": { "name": "lc-footnotes", "version": env!("CARGO_PKG_VERSION") },
-        "instructions": INSTRUCTIONS,
+        "instructions": server_instructions(),
     })
+}
+
+/// The inbox workflow, then the house style for each footnote.
+pub fn server_instructions() -> String {
+    format!("{WORKFLOW}\n\nHow to write each footnote: {INSTRUCTIONS}")
+}
+
+fn prompt_list() -> Vec<Value> {
+    PROMPTS
+        .iter()
+        .map(|(name, title, description, _)| json!({
+            "name": name,
+            "title": title,
+            "description": description,
+            "arguments": [],
+        }))
+        .collect()
+}
+
+fn get_prompt(params: &Value) -> Option<Value> {
+    let name = params.get("name").and_then(Value::as_str)?;
+    let (_, _, description, text) = PROMPTS.iter().find(|(candidate, ..)| *candidate == name)?;
+    Some(json!({
+        "description": description,
+        "messages": [{ "role": "user", "content": { "type": "text", "text": text } }],
+    }))
 }
 
 fn tool_list() -> Vec<Value> {
@@ -482,8 +533,33 @@ mod tests {
         }))).unwrap();
         assert_eq!(reply["result"]["protocolVersion"], "2025-03-26");
         assert_eq!(reply["result"]["capabilities"]["tools"], json!({}));
+        assert_eq!(reply["result"]["capabilities"]["prompts"], json!({}));
         assert_eq!(reply["result"]["serverInfo"]["name"], "lc-footnotes");
-        assert_eq!(reply["result"]["instructions"], INSTRUCTIONS);
+        let instructions = reply["result"]["instructions"].as_str().unwrap();
+        assert!(instructions.starts_with(WORKFLOW));
+        assert!(instructions.ends_with(INSTRUCTIONS));
+    }
+
+    #[test]
+    fn lists_and_serves_the_ready_made_prompts() {
+        let hub = fake();
+        let listed = dispatch(&hub, &request(1, "prompts/list", json!({}))).unwrap();
+        let names: Vec<&str> = listed["result"]["prompts"].as_array().unwrap().iter()
+            .map(|prompt| prompt["name"].as_str().unwrap()).collect();
+        assert_eq!(names, ["answer_footnotes", "watch_footnotes"]);
+        assert_eq!(listed["result"]["prompts"][0]["title"], "Answer my footnote requests");
+        assert_eq!(listed["result"]["prompts"][0]["arguments"], json!([]));
+
+        let prompt = dispatch(&hub, &request(2, "prompts/get", json!({ "name": "watch_footnotes" }))).unwrap();
+        let message = &prompt["result"]["messages"][0];
+        assert_eq!(message["role"], "user");
+        assert_eq!(message["content"]["type"], "text");
+        assert!(message["content"]["text"].as_str().unwrap().contains("keep checking every few minutes"));
+
+        let unknown = dispatch(&hub, &request(3, "prompts/get", json!({ "name": "nope" }))).unwrap();
+        assert_eq!(unknown["error"]["code"], -32602);
+        let missing = dispatch(&hub, &request(4, "prompts/get", json!({}))).unwrap();
+        assert_eq!(missing["error"]["code"], -32602);
     }
 
     #[test]

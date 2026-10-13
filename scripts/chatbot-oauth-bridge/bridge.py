@@ -37,10 +37,22 @@ DEFAULT_CONFIG = PROJECT_ROOT / ".tmp-current-grok-oauth-config.json"
 BIND_HOST, BIND_PORT = "127.0.0.1", 7880
 BACKEND_URL = "http://127.0.0.1:7879/mcp"
 TOOLS = frozenset({"list_footnote_requests", "get_footnote_request", "submit_footnote"})
+# Keep in step with WORKFLOW and INSTRUCTIONS in src/mcp.rs: the bridge sends
+# these when an assistant connects, before any call reaches `lc mcp`.
+WORKFLOW = (
+    "You are connected to a reader's Pen Island footnote inbox. The reader selects text "
+    "in a document and asks for a footnote; each request waits here until an assistant "
+    "answers it. To answer: call list_footnote_requests, then for each request call "
+    "get_footnote_request and submit_footnote. Only answer requests listed here, and never "
+    "invent request ids. If the inbox is empty, say so. If you can run scheduled or "
+    "repeating tasks, offer to check the inbox every few minutes and answer new requests "
+    "as they arrive."
+)
 INSTRUCTIONS = (
-    "Explain the selected words in the context of the surrounding document. "
-    "Write 1-3 short markdown notes with the direct explanation first. "
-    "Add links only to sources you are confident exist; follow any request prompt."
+    f"{WORKFLOW}\n\nHow to write each footnote: Explain the selected words in the context "
+    "of the surrounding text, for a reader who is in the middle of this document. 1-3 short "
+    "markdown notes; lead with the direct explanation; add links only to sources you are "
+    "confident exist. If the request has a prompt, follow it."
 )
 
 
@@ -204,6 +216,22 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
                 content=result.content, structured_content=result.structured_content,
                 meta=result.meta, is_error=result.is_error,
             )
+
+    async def relay_prompt(name: str) -> str:
+        # The prompt wording lives in `lc mcp`; the bridge only passes it on.
+        async with backend.new() as client:
+            result = await client.get_prompt_mcp(name)
+        return "\n\n".join(m.content.text for m in result.messages if getattr(m.content, "text", None))
+
+    @bridge.prompt(name="answer_footnotes", title="Answer my footnote requests",
+                   description="Answer every pending footnote request once.")
+    async def answer_footnotes() -> str:
+        return await relay_prompt("answer_footnotes")
+
+    @bridge.prompt(name="watch_footnotes", title="Keep answering footnote requests",
+                   description="Answer pending requests now, then keep checking for new ones.")
+    async def watch_footnotes() -> str:
+        return await relay_prompt("watch_footnotes")
 
     @bridge.tool(name="list_footnote_requests", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
