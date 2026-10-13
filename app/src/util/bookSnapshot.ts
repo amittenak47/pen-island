@@ -12,6 +12,7 @@ import { mergeAgentMessages } from "../modes/coachSessions";
 import { equalStored } from "./queueMigration";
 import { requireArtifactCatalogTransition } from "./artifactCatalogEdits";
 import { bookWireRecord } from "./bookWireRecord";
+import { isAnnotatePageFrame } from "../templates/annotate";
 
 export interface BookCapture extends BookIdentity {
   metadata: BookMeta | null;
@@ -156,6 +157,22 @@ export function preserveRecordView(remote: Record<string, unknown>, local: Recor
     }
   };
   preserve(record.board, local?.board);
+  // PDF pages were localized to this device's captured column before publication.
+  // Keep that column with them; adopting the hub frame would change the layout
+  // underneath already-localized ink on the next open or save.
+  if (record.doc_type === "pdf" && local?.doc_type === "pdf" && record.hash === local.hash
+      && object(record.board) && object(local.board)
+      && Array.isArray(record.board.elements) && Array.isArray(local.board.elements)) {
+    const frames = new Map(local.board.elements.filter(element => object(element) && isAnnotatePageFrame(element))
+      .map(element => [element.id, element]));
+    record.board.elements = record.board.elements.map(element => {
+      if (!object(element) || !isAnnotatePageFrame(element)) return element;
+      const prior = frames.get(element.id);
+      if (!prior || typeof prior.width !== "number" || !Number.isFinite(prior.width) || prior.width <= 0) return element;
+      return { ...element, width: prior.width,
+        ...(typeof prior.height === "number" && Number.isFinite(prior.height) && prior.height > 0 ? { height: prior.height } : {}) };
+    });
+  }
   if (object(record.footnote_boards)) for (const [id, child] of Object.entries(record.footnote_boards)) {
     if (object(child)) preserve(child.board, object(local?.footnote_boards) && object(local.footnote_boards[id]) ? local.footnote_boards[id].board : null);
   }

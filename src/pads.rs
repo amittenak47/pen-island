@@ -29,8 +29,8 @@ pub use revisions::{bump_book_head, list_book_heads, next_rev, read_transaction,
 /// Mirrored by HUB_MAX_DOCUMENT_BYTES in the client.
 pub const MAX_BLOB_BYTES: usize = 512 * 1024 * 1024;
 
-pub const WHITEBOARD_LIVE_CAP: usize = 50;
-pub const ANNOTATE_LIVE_CAP: usize = 200;
+pub const WHITEBOARD_LIVE_CAP: usize = 250;
+pub const ANNOTATE_LIVE_CAP: usize = 250;
 
 pub fn db_path() -> Result<PathBuf> {
     Ok(config_dir()?.join("pads.db"))
@@ -191,6 +191,7 @@ pub fn open(path: &Path) -> Result<Connection> {
         ON footnote_requests(status, created_at);
     CREATE INDEX IF NOT EXISTS idx_footnote_requests_device
         ON footnote_requests(device_id, status, done_at);")?;
+    ensure_column(&conn, "footnote_requests", "answer_mode", "TEXT NOT NULL DEFAULT 'bot'")?;
     migrate_tombstones_to_gone(&conn)?;
     revisions::migrate(&conn)?;
     atomic_sync::migrate(&conn)?;

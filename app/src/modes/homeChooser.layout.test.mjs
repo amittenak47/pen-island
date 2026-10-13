@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 const src = readFileSync(new URL("./HomeChooser.tsx", import.meta.url), "utf8");
 const css = readFileSync(new URL("../styles.css", import.meta.url), "utf8");
+const tracer = readFileSync(new URL("./whiteboardTracer.ts", import.meta.url), "utf8");
 
 describe("home chooser cards", () => {
   it("labels modes with a colored kicker and blurb, not a bold title", () => {
@@ -22,7 +23,8 @@ describe("home chooser cards", () => {
   it("plays practice, whiteboard, and annotate icon scenes on hover", () => {
     expect(src).toContain('const HOVER_SCENES = new Set(["practice", "whiteboard", "annotate"])');
     expect(src).toContain('data-scene={hoverable ? scene : undefined}');
-    expect(src).toContain("M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z");
+    expect(src).toContain("M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z");
+    expect(src).not.toContain("PAGE_FOLD");
     expect(src).toContain("lc-home-wb-draw-a");
     expect(src).toContain("lc-home-wb-draw-b");
     expect(src).toContain("lc-home-box-a");
@@ -31,19 +33,24 @@ describe("home chooser cards", () => {
     expect(src).toContain("lc-home-graph");
     expect(css).toContain('data-scene="in"');
     expect(css).toContain('data-scene="out"');
-    expect(css).toContain("lc-home-bra-in-l");
+    // Practice braces open/close from their live pose (practiceBraces.ts); CSS keeps the idle loop.
+    expect(src).toContain("createPracticeBraces");
+    expect(css).not.toContain("lc-home-bra-in-l");
     expect(css).toContain("lc-home-bra-idle-l");
     expect(css).toContain("lc-home-slash-idle");
-    expect(css).toContain("lc-home-nib-write");
-    expect(css).toContain("lc-home-nib-write 8s linear 0.56s infinite");
+    // Whiteboard hover and leave are traced from the strokes' own geometry;
+    // CSS keeps only the resting nib loop, and the page never slides.
     expect(css).toContain("lc-home-nib-place");
-    expect(css).toContain("lc-home-nib-flick");
-    expect(css).toContain("lc-home-wb-cycle");
-    expect(src).toContain("NIB_WRITE_START");
-    expect(src).toContain("freezeWhiteboardNib");
-    expect(css).toContain("lc-home-page-scroll");
-    expect(css).toContain("lc-home-page-refresh");
-    expect(css).toContain("lc-home-ann-lines");
+    expect(css).not.toContain("lc-home-nib-write");
+    expect(css).not.toContain("lc-home-page-scroll");
+    expect(src).toContain("createWhiteboardTracer");
+    expect(tracer).toContain("getPointAtLength");
+    expect(src).toContain('className="lc-home-trace"');
+    // Annotate scrolls its text and curls/turns the page; lines no longer cascade in.
+    expect(css).toContain("lc-home-ann-scroll");
+    expect(css).toContain("lc-home-ann-turn");
+    expect(css).toContain("lc-home-ann-curl");
+    expect(css).not.toContain("lc-home-ann-lines");
     expect(css).toContain("lc-home-net-shoot");
     expect(css).toContain("lc-home-nib-arm");
   });

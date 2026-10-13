@@ -21,6 +21,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   SCOPE_ATTR,
   anchorFromRange,
+  anchorFromUniqueQuote,
   excerptOf,
   isRegionAnchor,
   isTextAnchor,
@@ -44,6 +45,7 @@ import {
   type DocFootnoteSubMarkKind,
 } from "../util/docFootnotes";
 import { AI_TAB_HEIGHT, AI_TAB_WIDTH, aiBookTabLeft, stackAiTabTops } from "../util/aiBookTabs";
+import { footnoteDisplayThemes, paletteForMarkIndex } from "../util/inkPaletteHistory";
 import { HoldButton } from "../components/HoldButton";
 import {
   HOLD_SENSITIVE_MS,
@@ -149,7 +151,9 @@ function ribbonsPlacementEqual(a: RibbonPlacement[], b: RibbonPlacement[]): bool
     const x = a[i];
     const y = b[i];
     if (
-      x.footnote.id !== y.footnote.id ||
+      // A saved answer changes content without moving the bookmark. Keep the
+      // live footnote so pending state, titles and click handlers update too.
+      x.footnote !== y.footnote ||
       x.number !== y.number ||
       x.useBands !== y.useBands ||
       !localRectEqual(x.at, y.at) ||
@@ -298,8 +302,8 @@ export interface DocSelectionLayerProps {
     anchorRect: DOMRect | null,
   ) => void | boolean | Promise<void | boolean>;
   onSearch?: (selection: DocSelectionResult, anchorRect: DOMRect | null) => void;
-  /** Ask GrokBot to write an AI footnote for this text selection. */
-  onAskGrokBot?: (selection: DocSelectionResult, anchorRect: DOMRect | null) => void;
+  /** Ask ChatBot to write an AI footnote for this text selection. */
+  onAskChatBot?: (selection: DocSelectionResult, anchorRect: DOMRect | null) => void;
   /** Leave the mark and nothing else — the highlighter's plain outcome. */
   onMark?: (selection: DocSelectionResult, anchorRect: DOMRect | null) => void;
   /** Tap on an existing ribbon — reopen the overview for that mark. */
@@ -355,6 +359,15 @@ function screenBoxOfLocalRects(
  * region already *is* a box, in its scope's coordinates, so it only needs
  * shifting by where that scope sits in the body.
  */
+function liveFootnoteAnchor(root: HTMLElement, footnote: DocFootnote): DocAnchor | null {
+  if (isTextAnchor(footnote.anchor)) return footnote.anchor;
+  // Older Android ChatBot requests kept only a box. Its excerpt can recover
+  // the words after font scaling or reflow, but repeated quotes stay a box.
+  return footnote.kind === "ai"
+    ? anchorFromUniqueQuote(root, footnote.blockText?.trim() || footnote.excerpt, footnote.anchor.scope)
+    : null;
+}
+
 function rectForAnchor(
   body: HTMLElement,
   root: HTMLElement,
@@ -402,7 +415,7 @@ export function DocSelectionLayer({
   onAskAgent,
   onCopy,
   onSearch,
-  onAskGrokBot,
+  onAskChatBot,
   onMark,
   onOpenFootnote,
   onRemoveFootnote,
@@ -770,6 +783,10 @@ export function DocSelectionLayer({
         subMarkParent.bands && subMarkParent.bands.length > 0
           ? tightLocalRects(body, subMarkParent.bands)
           : [];
+      const liveAnchor = liveFootnoteAnchor(root, subMarkParent);
+      const range = liveAnchor ? rangeFromAnchor(root, liveAnchor) : null;
+      const live = range ? tightLocalRects(body, localRects(body, range)) : [];
+      if (live.length > 0) return live;
       if (stored.length > 0) return stored;
       const at = rectForAnchor(body, root, subMarkParent.anchor);
       return at && !localRectCoversHost(body, at) ? [at] : null;
@@ -884,7 +901,10 @@ export function DocSelectionLayer({
         const at = rectForAnchor(body, root, subMarkParent.anchor);
         return at && !localRectCoversHost(body, at) ? [at] : [];
       })();
-      const bands = stored.length > 0 ? stored : fallback;
+      const liveAnchor = liveFootnoteAnchor(root, subMarkParent);
+      const range = liveAnchor ? rangeFromAnchor(root, liveAnchor) : null;
+      const live = range ? tightLocalRects(body, localRects(body, range)) : [];
+      const bands = live.length > 0 ? live : stored.length > 0 ? stored : fallback;
       if (bands.length === 0) return false;
       return pointInLocalBands(body, bands, clientX, clientY, SUBMARK_HIT_PAD);
     };
@@ -1853,10 +1873,11 @@ export function DocSelectionLayer({
           footnote.bands && footnote.bands.length > 0
             ? tightLocalRects(body, footnote.bands)
             : [];
+        const liveAnchor = liveFootnoteAnchor(root, footnote);
         const live =
-          isTextAnchor(footnote.anchor)
+          liveAnchor
             ? (() => {
-                const range = rangeFromAnchor(root, footnote.anchor);
+                const range = rangeFromAnchor(root, liveAnchor);
                 return range ? tightLocalRects(body, localRects(body, range)) : [];
               })()
             : [];
@@ -2046,7 +2067,17 @@ export function DocSelectionLayer({
     };
     window.addEventListener("resize", onViewResize);
     window.visualViewport?.addEventListener("resize", onViewResize);
+    // A restored paper column and its fonts can settle after first placement,
+    // without a window resize. Observe layout size, never the camera transform.
+    const paperResize = typeof ResizeObserver === "function"
+      ? new ResizeObserver(onViewResize)
+      : null;
+    paperResize?.observe(body);
+    let placementAlive = true;
+    void document.fonts?.ready?.then(() => { if (placementAlive) onViewResize(); });
     const unbindView = () => {
+      placementAlive = false;
+      paperResize?.disconnect();
       window.removeEventListener("resize", onViewResize);
       window.visualViewport?.removeEventListener("resize", onViewResize);
     };
@@ -2156,6 +2187,10 @@ export function DocSelectionLayer({
 
   /** Numbering, so an offered mark is named the way the page names it. */
   const footnoteNumbers = numberFootnotes(footnotes);
+  const displayThemes = useMemo(() => {
+    const numbers = numberFootnotes(footnotes);
+    return footnoteDisplayThemes(footnotes.map(mark => ({ ...mark, number: numbers.get(mark.id) })));
+  }, [footnotes]);
   /** The mark this selection already is, if any — see `footnoteAtSamePlace`. */
   const existingHere = selection ? footnoteAtSamePlace(footnotes, selection.anchor) : null;
   /** Marks it merely touches. The exact match is not repeated among them. */
@@ -2512,13 +2547,12 @@ export function DocSelectionLayer({
              * heading followed by its paragraph put the ribbon at the end of
              * the heading, mid-selection, because that band happened to be
              * first and short. See `markChipLeft` for why beside and not
-             * inside. AI marks: a book tab on the page's right edge, half on
-             * the paper and half hanging off.
+             * inside. ChatBot bookmarks sit on the left; their square controls
+             * stay on the right so both sides identify the same passage.
              */
-            const tint = footnoteThemeVars(
-              footnote.color ?? inkPalette[0],
-              inkPalette,
-            );
+            const displayTheme = displayThemes.get(footnote.id);
+            const markPalette = displayTheme?.palette ?? footnote.palette ?? paletteForMarkIndex(number - 1);
+            const tint = footnoteThemeVars(displayTheme?.color ?? footnote.color ?? markPalette[0], markPalette);
             const paintBands = (
               useBands && bands.length > 0 ? bands : at ? [at] : []
             ).filter(
@@ -2540,10 +2574,10 @@ export function DocSelectionLayer({
             );
             const isAiTab = footnote.kind === "ai";
             const chipPad = 3;
-            const chipW = isAiTab ? AI_TAB_WIDTH : 16;
+            const chipW = 16;
             const pageWidth = bodyRef.current?.offsetWidth ?? 0;
             const chipLeft = isAiTab
-              ? aiBookTabLeft(pageWidth)
+              ? Math.max(0, pageWidth - chipW - chipPad)
               : markChipLeft({
                   blockLeft: block.left,
                   blockRight: block.right,
@@ -2557,7 +2591,6 @@ export function DocSelectionLayer({
             const chipStyle = {
               left: chipLeft,
               top: chipTop,
-              ...(isAiTab ? { width: AI_TAB_WIDTH, height: AI_TAB_HEIGHT } : {}),
               ...tint,
             };
             const caption = footnote.title?.replace(/\s+/g, " ").trim() ?? "";
@@ -2586,6 +2619,15 @@ export function DocSelectionLayer({
                     />
                   );
                 })}
+                {isAiTab ? (
+                  <span
+                    className="lc-doc-footnote lc-doc-footnote-ai lc-doc-footnote-tab"
+                    aria-hidden="true"
+                    style={{ left: aiBookTabLeft(), top: chipTop, width: AI_TAB_WIDTH, height: AI_TAB_HEIGHT, ...tint }}
+                  >
+                    {number}
+                  </span>
+                ) : null}
                 {caption ? (
                   <span
                     className="lc-doc-footnote-caption"
@@ -2596,9 +2638,7 @@ export function DocSelectionLayer({
                 ) : null}
                 <HoldButton
                   label={String(number)}
-                  className={`lc-doc-footnote lc-doc-footnote-bookmark lc-doc-footnote-${footnote.kind}${
-                    isAiTab ? " lc-doc-footnote-tab" : ""
-                  }${footnote.pending ? " lc-doc-footnote-pending" : ""}`}
+                  className={`lc-doc-footnote lc-doc-footnote-bookmark lc-doc-footnote-${footnote.kind}${footnote.pending ? " lc-doc-footnote-pending" : ""}`}
                   style={chipStyle}
                   dataId={footnote.id}
                   ariaLabel={`${footnoteTitle(footnote, number)} — tap to open, hold to delete`}
@@ -2914,16 +2954,23 @@ export function DocSelectionLayer({
                             <SearchActionIcon />
                             <span>Google</span>
                           </button>
-                          {onAskGrokBot && isTextAnchor(selection.anchor) && (
+                          {onAskChatBot && (
                             <button
                               type="button"
                               role="menuitem"
                               className="lc-doc-sheet-action"
-                              aria-label="Ask GrokBot"
-                              onClick={() => act(onAskGrokBot)}
+                              aria-label="Ask ChatBot"
+                              onClick={() => act((current, rect) => {
+                                const body = bodyRef.current;
+                                const root = body ? scopeRootIn(body, current.anchor.scope) : null;
+                                const anchor = isRegionAnchor(current.anchor) && root
+                                  ? anchorFromUniqueQuote(root, current.text, current.anchor.scope)
+                                  : null;
+                                onAskChatBot(anchor ? { ...current, anchor } : current, rect);
+                              })}
                             >
-                              <GrokBotActionIcon />
-                              <span>Ask GrokBot</span>
+                              <ChatBotActionIcon />
+                              <span>Ask ChatBot</span>
                             </button>
                           )}
                         </>
@@ -2965,7 +3012,7 @@ function footnoteTitle(footnote: DocFootnote, number: number): string {
       return `${head} Highlight — ${what}`;
     case "ai":
       return footnote.pending
-        ? `${head} AI tab — ${what}. GrokBot is writing.`
+        ? `${head} AI tab — ${what}. ChatBot is writing.`
         : `${head} AI tab — ${what}`;
     default:
       return `${head} Agent — ${what}`;
@@ -2987,7 +3034,7 @@ function CopyActionIcon() {
   );
 }
 
-function GrokBotActionIcon() {
+function ChatBotActionIcon() {
   return (
     <svg className="lc-doc-sheet-action-icon" viewBox="0 0 16 16" width="12" height="12" aria-hidden>
       <path

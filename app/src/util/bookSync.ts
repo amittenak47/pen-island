@@ -26,7 +26,7 @@ import type { BoardBlob } from "../canvas/BoardHandle";
 import { bookDisplay, type BookDisplay } from "./bookSyncMessages";
 
 export type BookErrorKind = "unreachable" | "storage" | "needs_choice" | "merge_mount" | "local_page" | "hub_page"
-  | "stage" | "unconfirmed" | "hub_changed" | "local_changed" | "missing_staging" | "dependency" | "gone" | "cap" | "invalid";
+  | "stage" | "unconfirmed" | "hub_changed" | "local_changed" | "missing_staging" | "missing_parent" | "dependency" | "gone" | "cap" | "invalid";
 export class BookSyncError extends Error {
   missing = false;
   constructor(readonly kind: BookErrorKind, message: string, readonly pages: Array<{ key: string; pageId: number }> = [], readonly cause?: unknown) {
@@ -364,6 +364,11 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           seenPages.add(key);
         }
         const restoring = capture.state.lifecycle?.action === "restore", deleting = capture.state.lifecycle?.action === "delete";
+        // Legacy orphan ink can outlive its document/index. Do not stage it
+        // into an absent book or manufacture a parent from incomplete data.
+        if (!effectiveCapture.record && remote.state === "absent" && local.size > 0 && !deleting) {
+          throw new BookSyncError("missing_parent", "Handwriting is retained, but its document record is missing. Restore the document from Retained copies before syncing.");
+        }
         if (remote.state === "gone" && capture.metadata?.deletedAt !== undefined && !capture.state.lifecycle) {
           await publishBook(capture, { book: remote, record: null, recordLocalHash: null, pages: [] });
           return { ...owner, status: committed ? "synced" : "unchanged", committed };
@@ -549,7 +554,11 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
                 catch (repair) { if (repair instanceof LcApiError && repair.status === 422) throw new BookSyncError("missing_staging", "A page could not be staged", missing.map(row => ({ key: row.key, pageId: row.page_id })), repair); throw repair; }
               } else if (cause instanceof LcApiError && [409, 410, 403].includes(cause.status)) throw cause;
               else {
-                const receipt = await boundedBookRequest(() => client.getPadCommit(uploadId, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs).catch(() => null);
+                let receiptFailure: unknown;
+                const receipt = await boundedBookRequest(() => client.getPadCommit(uploadId, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs).catch(error => { receiptFailure = error; return null; });
+                if (!receipt && cause instanceof LcApiError && cause.status === 0 && receiptFailure instanceof LcApiError && receiptFailure.status === 0) {
+                  throw new BookSyncError("unreachable", "Can't reach the hub. Your local changes and pending confirmation are kept.", [], cause);
+                }
                 if (!receipt) throw new BookSyncError("unconfirmed", "The hub did not confirm this sync", [], cause);
                 result = receipt;
               }

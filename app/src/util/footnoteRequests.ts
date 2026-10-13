@@ -1,5 +1,5 @@
 /**
- * Ask GrokBot: a pending footnote on this device, an inbox row on the hub,
+ * Ask ChatBot: a pending footnote on this device, an inbox row on the hub,
  * and the answer applied back here. The document is only written on the device.
  */
 
@@ -21,7 +21,7 @@ const PAGE_FOOTNOTE_CAP = 20;
 const PAGE_FOOTNOTE_BYTES = 16000;
 
 export const FOOTNOTE_REJECTED_NOTE = "The request was rejected.";
-export const FOOTNOTE_UNSENT_NOTE = "Not sent to GrokBot: this document has not been saved yet.";
+export const FOOTNOTE_UNSENT_NOTE = "Not sent to ChatBot: this document has not been saved yet.";
 
 export type FootnoteWriteResult = "saved" | "gone" | "failed" | "miss";
 
@@ -108,6 +108,7 @@ export function pageFootnotesFor(
 }
 
 export function buildFootnoteRequest(input: {
+  answerMode?: "bot" | "llm";
   id: string;
   deviceId: string;
   docId: string;
@@ -124,6 +125,7 @@ export function buildFootnoteRequest(input: {
   const pageText = input.pageText ?? "";
   const scope = input.anchor.scope;
   return {
+    ...(input.answerMode ? { answer_mode: input.answerMode } : {}),
     id: input.id,
     device_id: input.deviceId,
     doc_id: input.docId,

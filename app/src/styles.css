@@ -7222,7 +7222,7 @@ body[data-lc-sash-drag="horizontal"] {
   padding: 16px 18px;
   border: 1px solid color-mix(in srgb, var(--lc-home-mode, var(--ink)) 28%, transparent);
   border-radius: 16px;
-  background: color-mix(in srgb, var(--paper) 92%, var(--ink) 8%);
+  background: transparent;
   color: var(--ink);
   text-align: left;
   cursor: pointer;
@@ -7235,10 +7235,58 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 .lc-home-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 45%, transparent);
-  background: color-mix(in srgb, var(--paper) 88%, var(--lc-home-mode, var(--accent)) 12%);
-  box-shadow: 0 6px 20px rgb(0 0 0 / 10%);
-  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 75%, transparent);
+  background: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 7%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 30%, transparent),
+    0 10px 28px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 22%, transparent);
+  transform: translateY(-3px);
+}
+
+/* Hover runs the loading tab's sweep around the card's border, in the card's
+   colour: a 2px ring masked out of the box with a conic sweep spinning behind
+   it. Only a transform animates, and only while the card is hovered/focused. */
+.lc-home-card-sweep {
+  position: absolute;
+  inset: -1px;
+  pointer-events: none;
+  z-index: 2;
+  overflow: hidden;
+  border-radius: inherit;
+  padding: 2px;
+  color: var(--lc-home-mode, var(--accent));
+  opacity: 0;
+  transition: opacity 160ms ease;
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+.lc-home-card-sweep::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 200vmax;
+  height: 200vmax;
+  max-width: 1600px;
+  max-height: 1600px;
+  translate: -50% -50%;
+  background: conic-gradient(from 0deg, transparent 0 62%, currentColor 86%, transparent 100%);
+  will-change: transform;
+  animation: lc-tab-border-lap 1.6s linear infinite paused;
+}
+
+.lc-home-card:is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep {
+  opacity: 1;
+}
+
+.lc-home-card:is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep::before {
+  animation-play-state: running;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-home-card-sweep::before { animation: none; background: currentColor; }
 }
 
 .lc-home-card:focus-visible {
@@ -7249,7 +7297,7 @@ body[data-lc-sash-drag="horizontal"] {
 .lc-home-card:active:not(:disabled) {
   transform: scale(0.985);
   border-color: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 55%, transparent);
-  background: color-mix(in srgb, var(--paper) 86%, var(--lc-home-mode, var(--accent)) 14%);
+  background: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 8%, transparent);
   box-shadow: none;
 }
 
@@ -7301,7 +7349,7 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 .lc-home-card:hover:not(:disabled) .lc-home-card-icon {
-  background: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 22%, transparent);
+  background: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 28%, transparent);
   color: var(--lc-home-ink, var(--lc-home-mode, var(--ink)));
 }
 
@@ -7424,6 +7472,11 @@ body[data-lc-sash-drag="horizontal"] {
   overflow: hidden;
 }
 
+/* Code waits for the braces to finish opening; practiceBraces sets the real delay per hover. */
+.lc-home-card[data-mode="practice"] {
+  --lc-home-code-start: 1.6s;
+}
+
 .lc-home-card[data-mode="practice"] .lc-home-card-icon > svg {
   width: 92%;
   height: 92%;
@@ -7442,85 +7495,24 @@ body[data-lc-sash-drag="horizontal"] {
   animation: lc-home-slash-idle 4.4s ease-in-out infinite;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-bra-l {
-  animation: lc-home-bra-in-l 1.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-bra-r {
-  animation: lc-home-bra-in-r 1.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-}
-
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-slash {
-  animation: lc-home-slash-in 0.45s ease forwards;
-}
-
-.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-bra-l {
-  animation: lc-home-bra-out-l 1.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-bra-r {
-  animation: lc-home-bra-out-r 1.35s cubic-bezier(0.22, 1, 0.36, 1) forwards;
-}
-
-.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-slash {
-  animation: lc-home-slash-out 1.35s ease forwards;
-}
-
-@keyframes lc-home-bra-in-l {
-  0% { transform: translateX(-5.6px); }
-  100% { transform: translateX(-28px); }
-}
-
-@keyframes lc-home-bra-in-r {
-  0% { transform: translateX(5.6px); }
-  100% { transform: translateX(28px); }
-}
-
-@keyframes lc-home-slash-in {
-  0% { opacity: 1; }
-  100% { opacity: 0; }
-}
-
-@keyframes lc-home-bra-out-l {
-  0% { transform: translateX(-28px); }
-  28% { transform: translateX(-5.2px); }
-  48% { transform: translateX(-5.2px); }
-  62% { transform: translateX(-2.4px); }
-  78% { transform: translateX(-2.4px); }
-  100% { transform: none; }
-}
-
-@keyframes lc-home-bra-out-r {
-  0% { transform: translateX(28px); }
-  28% { transform: translateX(5.2px); }
-  48% { transform: translateX(5.2px); }
-  62% { transform: translateX(2.4px); }
-  78% { transform: translateX(2.4px); }
-  100% { transform: none; }
-}
-
-@keyframes lc-home-slash-out {
-  0%, 48% { opacity: 0; }
-  56%, 78% { opacity: 1; }
-  100% { opacity: 1; }
-}
-
+/* Idle starts with a long closed hold, so the loop that follows a leave
+   doesn't reopen the brackets right after they close. */
 @keyframes lc-home-bra-idle-l {
-  0%, 8% { transform: none; }
-  22%, 58% { transform: translateX(-5.6px); }
-  74%, 100% { transform: none; }
+  0%, 50% { transform: none; }
+  62%, 82% { transform: translateX(-5.6px); }
+  94%, 100% { transform: none; }
 }
 
 @keyframes lc-home-bra-idle-r {
-  0%, 8% { transform: none; }
-  22%, 58% { transform: translateX(5.6px); }
-  74%, 100% { transform: none; }
+  0%, 50% { transform: none; }
+  62%, 82% { transform: translateX(5.6px); }
+  94%, 100% { transform: none; }
 }
 
 @keyframes lc-home-slash-idle {
-  0%, 14% { opacity: 1; }
-  24%, 50% { opacity: 0; }
-  62%, 100% { opacity: 1; }
+  0%, 54% { opacity: 1; }
+  62%, 82% { opacity: 0; }
+  92%, 100% { opacity: 1; }
 }
 
 .lc-home-live-code {
@@ -7536,13 +7528,75 @@ body[data-lc-sash-drag="horizontal"] {
   color: currentColor;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-live-code {
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-live-code {
   display: grid;
 }
 
 .lc-home-fn {
   grid-area: 1 / 1;
   min-width: 0;
+  position: relative;
+}
+
+/* Each written line gets its own text-width selection and caret. The block
+   still clears all four lines together, just as multi-caret Backspace does. */
+.lc-home-fn-line::before {
+  content: "";
+  position: absolute;
+  inset: 1px 0;
+  opacity: 0;
+  background: color-mix(in srgb, currentColor 35%, transparent);
+  pointer-events: none;
+}
+
+.lc-home-fn-line::after {
+  content: "";
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  right: 0;
+  width: 1px;
+  opacity: 0;
+  background: currentColor;
+  pointer-events: none;
+}
+
+.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-line::before,
+.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-line::after {
+  animation: lc-home-code-select 8s step-end var(--lc-home-code-start) infinite;
+}
+
+@keyframes lc-home-code-select {
+  0% { opacity: 0; }
+  68% { opacity: 1; }
+  82%, 100% { opacity: 0; }
+}
+
+@keyframes lc-home-code-clear {
+  0% { clip-path: inset(-1px); }
+  82%, 100% { clip-path: inset(0 0 100% 0); }
+}
+
+/* A leave freezes the code, selects every written line for 450ms, and
+   deletes them together. Only then may the outer brackets start closing. */
+.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-live-code {
+  animation: lc-home-code-leave-clear 0.45s step-end forwards;
+}
+
+.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-live-code .lc-home-fn,
+.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-live-code .lc-home-fn:is(.lc-home-fn-a, .lc-home-fn-b) .lc-home-fn-line {
+  animation-play-state: paused;
+}
+
+.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-fn-line::before,
+.lc-home-card[data-mode="practice"][data-scene="out"] .lc-home-fn-line::after {
+  animation: none;
+  opacity: 1;
+}
+
+@keyframes lc-home-code-leave-clear {
+  0% { clip-path: inset(-1px); }
+  100% { clip-path: inset(0 0 100% 0); }
 }
 
 .lc-home-fn-a,
@@ -7550,12 +7604,12 @@ body[data-lc-sash-drag="horizontal"] {
   animation: none;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-a {
-  animation: lc-home-fn-swap-a 16s linear infinite;
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-a {
+  animation: lc-home-fn-swap-a 16s linear var(--lc-home-code-start) infinite, lc-home-code-clear 8s step-end var(--lc-home-code-start) infinite;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-b {
-  animation: lc-home-fn-swap-b 16s linear infinite;
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-b {
+  animation: lc-home-fn-swap-b 16s linear var(--lc-home-code-start) infinite, lc-home-code-clear 8s step-end var(--lc-home-code-start) infinite;
 }
 
 @keyframes lc-home-fn-swap-a {
@@ -7569,67 +7623,61 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 .lc-home-fn-line {
+  position: relative;
   display: block;
   overflow: hidden;
-  white-space: nowrap;
+  /* pre, so indentation is typed and kept like real code. */
+  white-space: pre;
   width: 0;
   border-right: 0.7px solid transparent;
   box-sizing: content-box;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-a .lc-home-fn-line:nth-child(1),
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-b .lc-home-fn-line:nth-child(1) {
-  animation: lc-home-type-l1 8s steps(18, end) infinite;
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-a .lc-home-fn-line:nth-child(1),
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-b .lc-home-fn-line:nth-child(1) {
+  animation: lc-home-type-l1 8s steps(18, end) var(--lc-home-code-start) infinite;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-a .lc-home-fn-line:nth-child(2),
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-b .lc-home-fn-line:nth-child(2) {
-  animation: lc-home-type-l2 8s steps(18, end) infinite;
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-a .lc-home-fn-line:nth-child(2),
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-b .lc-home-fn-line:nth-child(2) {
+  animation: lc-home-type-l2 8s steps(18, end) var(--lc-home-code-start) infinite;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-a .lc-home-fn-line:nth-child(3),
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-b .lc-home-fn-line:nth-child(3) {
-  animation: lc-home-type-l3 8s steps(18, end) infinite;
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-a .lc-home-fn-line:nth-child(3),
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-b .lc-home-fn-line:nth-child(3) {
+  animation: lc-home-type-l3 8s steps(18, end) var(--lc-home-code-start) infinite;
 }
 
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-a .lc-home-fn-line:nth-child(4),
-.lc-home-card[data-mode="practice"][data-scene="in"] .lc-home-fn-b .lc-home-fn-line:nth-child(4) {
-  animation: lc-home-type-l4 8s steps(18, end) infinite;
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-a .lc-home-fn-line:nth-child(4),
+.lc-home-card[data-mode="practice"]:is([data-scene="in"], [data-scene="out"]) .lc-home-fn-b .lc-home-fn-line:nth-child(4) {
+  animation: lc-home-type-l4 8s steps(18, end) var(--lc-home-code-start) infinite;
 }
 
 @keyframes lc-home-type-l1 {
   0% { width: 0; border-right-color: currentColor; }
   12% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  13%, 67% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
-  68% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  82%, 100% { width: 0; border-right-color: transparent; }
+  13%, 100% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
 }
 
 @keyframes lc-home-type-l2 {
   0%, 12% { width: 0; border-right-color: transparent; }
   12.1% { width: 0; border-right-color: currentColor; }
   24% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  25%, 67% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
-  68% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  82%, 100% { width: 0; border-right-color: transparent; }
+  25%, 100% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
 }
 
 @keyframes lc-home-type-l3 {
   0%, 24% { width: 0; border-right-color: transparent; }
   24.1% { width: 0; border-right-color: currentColor; }
   36% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  37%, 67% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
-  68% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  82%, 100% { width: 0; border-right-color: transparent; }
+  37%, 100% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
 }
 
 @keyframes lc-home-type-l4 {
   0%, 36% { width: 0; border-right-color: transparent; }
   36.1% { width: 0; border-right-color: currentColor; }
   48% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  49%, 67% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
-  68% { width: var(--lc-ch, 12ch); border-right-color: currentColor; }
-  82%, 100% { width: 0; border-right-color: transparent; }
+  49%, 100% { width: var(--lc-ch, 12ch); border-right-color: transparent; }
 }
 
 .lc-home-card[data-mode="whiteboard"] .lc-home-card-icon,
@@ -7664,85 +7712,6 @@ body[data-lc-sash-drag="horizontal"] {
   transform-origin: center top;
 }
 
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw,
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw,
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-b .lc-home-draw,
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-b .lc-home-draw {
-  animation: lc-home-wb-cycle 8s linear infinite;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw:nth-child(1),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw:nth-child(1) {
-  animation-delay: 0.56s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw:nth-child(2),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw:nth-child(2) {
-  animation-delay: 0.66s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw:nth-child(3),
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw:nth-child(4),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw:nth-child(3),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw:nth-child(4) {
-  animation-delay: 0.76s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw:nth-child(5),
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw:nth-child(6),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw:nth-child(5),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw:nth-child(6) {
-  animation-delay: 0.86s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-a .lc-home-draw:nth-child(7),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw:nth-child(7) {
-  animation-delay: 1.02s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-b .lc-home-draw:nth-child(1),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-b .lc-home-draw:nth-child(1) {
-  animation-delay: 4.56s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-b .lc-home-draw:nth-child(2),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-b .lc-home-draw:nth-child(2) {
-  animation-delay: 4.68s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-b .lc-home-draw:nth-child(3),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-b .lc-home-draw:nth-child(3) {
-  animation-delay: 4.8s;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-wb-draw-b .lc-home-draw:nth-child(4),
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-b .lc-home-draw:nth-child(4) {
-  animation-delay: 4.92s;
-}
-
-@keyframes lc-home-wb-cycle {
-  0% { stroke-dashoffset: 1; opacity: 1; }
-  16% { stroke-dashoffset: 0; opacity: 1; }
-  32% { stroke-dashoffset: 0; opacity: 1; }
-  46% { stroke-dashoffset: 1; opacity: 0; }
-  100% { stroke-dashoffset: 1; opacity: 0; }
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-a .lc-home-draw,
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-draw-b .lc-home-draw {
-  animation-play-state: paused;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-wb-scroll {
-  animation: lc-home-page-scroll 0.5s cubic-bezier(0.18, 0.82, 0.28, 1) 0.4s both;
-}
-
-@keyframes lc-home-page-scroll {
-  0% { transform: translateY(0); }
-  16% { transform: translateY(2px); }
-  100% { transform: translateY(-22px); }
-}
-
 .lc-home-nib-arm {
   transform-box: view-box;
   transform-origin: 0 0;
@@ -7754,150 +7723,65 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 .lc-home-card[data-mode="whiteboard"][data-scene="rest"] .lc-home-nib-arm {
-  animation: lc-home-nib-place 4.6s cubic-bezier(0.45, 0.05, 0.2, 1) infinite;
+  animation: lc-home-nib-place 6s linear infinite;
 }
 
-.lc-home-card[data-mode="whiteboard"][data-scene="out"] .lc-home-nib-arm {
-  animation: lc-home-nib-flick 0.96s cubic-bezier(0.22, 0.72, 0.28, 1) forwards;
-}
-
-.lc-home-card[data-mode="whiteboard"][data-scene="in"] .lc-home-nib-arm {
-  animation: lc-home-nib-write 8s linear 0.56s infinite;
-}
-
+/* Idle: the pencil twirls around its own middle like a pen spun on a finger.
+   A flick spins it two turns, slowing to a stop; it drifts a little, then
+   settles back. The arm's origin is the tip, so the spin pivots on the
+   pencil's centre (4.1, -4.1 from the tip) and ends where it started. */
 @keyframes lc-home-nib-place {
-  0%, 8% { transform: translate(67.5%, 46.67%) rotate(18deg); }
-  22% { transform: translate(72.5%, 75.83%) rotate(52deg); }
-  40% { transform: translate(34.17%, 78.33%) rotate(128deg); }
-  58% { transform: translate(33.33%, 42.5%) rotate(214deg); }
-  76% { transform: translate(69.17%, 39.17%) rotate(302deg); }
-  92%, 100% { transform: translate(67.5%, 46.67%) rotate(18deg); }
+  0%, 6% {
+    transform: translate(67.5%, 46.67%) rotate(18deg) translate(4.1px, -4.1px) rotate(0deg) translate(-4.1px, 4.1px);
+    animation-timing-function: cubic-bezier(0.12, 0.7, 0.3, 1);
+  }
+  46% {
+    transform: translate(62.5%, 50.83%) rotate(18deg) translate(4.1px, -4.1px) rotate(720deg) translate(-4.1px, 4.1px);
+    animation-timing-function: ease-in-out;
+  }
+  58% {
+    transform: translate(62.5%, 50.83%) rotate(18deg) translate(4.1px, -4.1px) rotate(712deg) translate(-4.1px, 4.1px);
+    animation-timing-function: ease-in-out;
+  }
+  70% {
+    transform: translate(62.5%, 50.83%) rotate(18deg) translate(4.1px, -4.1px) rotate(720deg) translate(-4.1px, 4.1px);
+    animation-timing-function: cubic-bezier(0.45, 0.05, 0.2, 1);
+  }
+  92%, 100% {
+    transform: translate(67.5%, 46.67%) rotate(18deg) translate(4.1px, -4.1px) rotate(720deg) translate(-4.1px, 4.1px);
+  }
 }
 
-@keyframes lc-home-nib-flick {
-  0% { transform: translate(50%, 58.33%) rotate(-8deg); }
-  32% { transform: translate(50%, 79.17%) rotate(12deg); }
-  44% { transform: translate(54.17%, 83.33%) rotate(22deg); }
-  56% { transform: translate(47.5%, 77.5%) rotate(4deg); }
-  74% { transform: translate(58.33%, 58.33%) rotate(14deg); }
-  100% { transform: translate(67.5%, 46.67%) rotate(18deg); }
-}
-
-@keyframes lc-home-nib-write {
-  0% { transform: translate(38.54%, 56.67%) rotate(-8deg); }
-  3% { transform: translate(34.17%, 61.04%) rotate(8deg); }
-  5.5% { transform: translate(29.79%, 56.67%) rotate(18deg); }
-  8% { transform: translate(34.17%, 61.25%) rotate(4deg); }
-  10.5% { transform: translate(34.17%, 74.17%) rotate(2deg); }
-  12% { transform: translate(28.33%, 70.83%) rotate(-28deg); }
-  13.5% { transform: translate(40.42%, 70.42%) rotate(24deg); }
-  15.5% { transform: translate(29.17%, 82.5%) rotate(-22deg); }
-  17% { transform: translate(39.58%, 82.5%) rotate(20deg); }
-  18.5% { transform: translate(55.83%, 38.33%) rotate(-12deg); }
-  22% { transform: translate(71.67%, 37.08%) rotate(16deg); }
-  26%, 30% { transform: translate(85.42%, 40.83%) rotate(18deg); }
-  32% { transform: translate(71.67%, 37.08%) rotate(22deg); }
-  34% { transform: translate(55.83%, 38.33%) rotate(-8deg); }
-  36% { transform: translate(38.54%, 56.67%) rotate(-6deg); }
-  38% { transform: translate(34.17%, 68%) rotate(6deg); }
-  40% { transform: translate(28.33%, 70.83%) rotate(-24deg); }
-  42% { transform: translate(39.58%, 82.5%) rotate(18deg); }
-  44% { transform: translate(29.17%, 82.5%) rotate(-16deg); }
-  47% { transform: translate(29.58%, 39.17%) rotate(-12deg); }
-  50% { transform: translate(29.58%, 42.5%) rotate(0deg); }
-  53% { transform: translate(53.75%, 42.5%) rotate(8deg); }
-  55% { transform: translate(53.75%, 60.83%) rotate(18deg); }
-  57% { transform: translate(29.58%, 60.83%) rotate(-8deg); }
-  59% { transform: translate(33.33%, 70%) rotate(4deg); }
-  61% { transform: translate(73.33%, 70%) rotate(10deg); }
-  63% { transform: translate(45.83%, 53.33%) rotate(-18deg); }
-  66% { transform: translate(55.42%, 62.08%) rotate(14deg); }
-  68% { transform: translate(70.83%, 43.33%) rotate(-16deg); }
-  70%, 80% { transform: translate(74.17%, 49.58%) rotate(12deg); }
-  82% { transform: translate(70.83%, 43.33%) rotate(-10deg); }
-  85% { transform: translate(55.42%, 62.08%) rotate(16deg); }
-  88% { transform: translate(73.33%, 70%) rotate(8deg); }
-  91% { transform: translate(53.75%, 51.67%) rotate(14deg); }
-  94% { transform: translate(29.58%, 42.5%) rotate(-6deg); }
-  97% { transform: translate(43.33%, 50.83%) rotate(-10deg); }
-  100% { transform: translate(38.54%, 56.67%) rotate(-8deg); }
-}
-
+/* Annotate: the text sits still at rest. On hover it alternates between
+   scrolling the page's contents and flipping to a fresh page (8s loop):
+   marks A land (6-16%), the text scrolls up three rows carrying them (22-42%),
+   marks B land on the scrolled rows (52-62%), then the page flips (82-94%). */
 .lc-home-rule {
-  stroke-dasharray: 1;
-  stroke-dashoffset: 1;
+  opacity: 0.9;
+}
+
+.lc-home-ann-page {
+  transform-box: view-box;
+  transform-origin: 4px 12px;
+}
+
+.lc-home-ann-under {
   opacity: 0;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="rest"] .lc-home-rule-1,
-.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-rule-1 {
-  animation: lc-home-page-refresh 6.5s ease-in-out infinite;
+/* The sheet's fold line, moved in step with the curl (5.5 units at full curl
+   means sliding the line x + y = 42 by 2.75 along both axes). */
+.lc-home-ann-peel {
+  transform-box: view-box;
+  transform-origin: 0 0;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="rest"] .lc-home-rule-2,
-.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-rule-2 {
-  animation: lc-home-page-refresh 6.5s ease-in-out 0.1s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="rest"] .lc-home-rule-3,
-.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-rule-3 {
-  animation: lc-home-page-refresh 6.5s ease-in-out 0.2s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="rest"] .lc-home-rule-4,
-.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-rule-4 {
-  animation: lc-home-page-refresh 6.5s ease-in-out 0.3s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="rest"] .lc-home-rule-5,
-.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-rule-5 {
-  animation: lc-home-page-refresh 6.5s ease-in-out 0.4s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="rest"] .lc-home-rule-6,
-.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-rule-6 {
-  animation: lc-home-page-refresh 6.5s ease-in-out 0.5s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-rule-1 {
-  animation: lc-home-ann-lines 8s ease-in-out infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-rule-2 {
-  animation: lc-home-ann-lines 8s ease-in-out 0.08s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-rule-3 {
-  animation: lc-home-ann-lines 8s ease-in-out 0.16s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-rule-4 {
-  animation: lc-home-ann-lines 8s ease-in-out 0.24s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-rule-5 {
-  animation: lc-home-ann-lines 8s ease-in-out 0.32s infinite;
-}
-
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-rule-6 {
-  animation: lc-home-ann-lines 8s ease-in-out 0.4s infinite;
-}
-
-@keyframes lc-home-page-refresh {
-  0% { stroke-dashoffset: 1; opacity: 1; }
-  12% { stroke-dashoffset: 0; opacity: 1; }
-  70% { stroke-dashoffset: 0; opacity: 1; }
-  82%, 100% { stroke-dashoffset: 1; opacity: 0; }
-}
-
-@keyframes lc-home-ann-lines {
-  0% { stroke-dashoffset: 1; opacity: 1; }
-  8% { stroke-dashoffset: 0; opacity: 1; }
-  40% { stroke-dashoffset: 0; opacity: 1; }
-  46%, 50% { stroke-dashoffset: 1; opacity: 0; }
-  58% { stroke-dashoffset: 0; opacity: 1; }
-  90% { stroke-dashoffset: 0; opacity: 1; }
-  96%, 100% { stroke-dashoffset: 1; opacity: 0; }
+.lc-home-ann-curl {
+  fill: color-mix(in srgb, currentColor 24%, transparent);
+  stroke-linejoin: round;
+  transform-box: view-box;
+  transform-origin: 20px 22px;
+  transform: scale(0);
 }
 
 .lc-home-mark {
@@ -7914,81 +7798,167 @@ body[data-lc-sash-drag="horizontal"] {
   pointer-events: none;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-mark-a-hl {
+/* A leave curls the corner and turns the page away, revealing the clean
+   next page underneath, which is exactly what rest shows. */
+.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-ann-page {
+  animation: lc-home-ann-turn-out 0.34s ease-in forwards;
+}
+
+.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-ann-curl {
+  animation: lc-home-ann-curl-out 0.34s ease-out forwards;
+}
+
+.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-ann-under {
+  opacity: 1;
+}
+
+.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-ann-curl {
+  animation: lc-home-ann-curl 8s linear infinite;
+}
+
+.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-ann-peel {
+  animation: lc-home-ann-peel 8s linear infinite;
+}
+
+.lc-home-card[data-mode="annotate"][data-scene="out"] .lc-home-ann-peel {
+  animation: lc-home-ann-peel-out 0.34s ease-out forwards;
+}
+
+.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-ann-under {
+  animation: lc-home-ann-under 8s step-end infinite;
+}
+
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) .lc-home-ann-scroll {
+  animation: lc-home-ann-scroll 8s ease-in-out infinite;
+}
+
+.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-ann-page {
+  animation: lc-home-ann-turn 8s linear infinite;
+}
+
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) .lc-home-mark-a-hl {
   animation: lc-home-ann-hl-a 8s ease-in-out infinite;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-mark-a-ul {
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) .lc-home-mark-a-ul {
   animation: lc-home-ann-mark-a 8s ease-in-out 0.12s infinite;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-box-a,
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-box-a2 {
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) :is(.lc-home-box-a, .lc-home-box-a2) {
   animation: lc-home-ann-box-a 8s ease-in-out infinite;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-box-a2 {
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) .lc-home-box-a2 {
   animation-delay: 0.16s;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-mark-b-ul,
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-mark-b-strike {
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) :is(.lc-home-mark-b-ul, .lc-home-mark-b-strike) {
   animation: lc-home-ann-mark-b 8s ease-in-out infinite;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-mark-b-strike {
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) .lc-home-mark-b-strike {
   animation-delay: 0.1s;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-box-b,
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-box-b2 {
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) :is(.lc-home-box-b, .lc-home-box-b2) {
   animation: lc-home-ann-box-b 8s ease-in-out infinite;
 }
 
-.lc-home-card[data-mode="annotate"][data-scene="in"] .lc-home-box-b2 {
+.lc-home-card[data-mode="annotate"]:is([data-scene="in"], [data-scene="out"]) .lc-home-box-b2 {
   animation-delay: 0.12s;
 }
 
+/* A leave freezes the marks where they are while the page folds away. */
+.lc-home-card[data-mode="annotate"][data-scene="out"] :is(.lc-home-ann-scroll, .lc-home-mark, .lc-home-box) {
+  animation-play-state: paused;
+}
+
+@keyframes lc-home-ann-scroll {
+  0%, 22% { transform: translateY(0); }
+  42%, 88% { transform: translateY(-6px); }
+  88.01%, 100% { transform: translateY(0); }
+}
+
+/* The corner lifts (76-82%), then the sheet turns over its left edge with a
+   slight skew so it reads as curling (82-88%). At 88% the turned sheet is
+   replaced by the identical next page, so the loop starts on a fresh page. */
+@keyframes lc-home-ann-curl {
+  0%, 76% { transform: scale(0); animation-timing-function: cubic-bezier(0.3, 0, 0.4, 1); }
+  82%, 87.9% { transform: scale(1); }
+  88%, 100% { transform: scale(0); }
+}
+
+@keyframes lc-home-ann-turn {
+  0%, 82% { transform: none; opacity: 1; animation-timing-function: cubic-bezier(0.5, 0, 0.9, 0.5); }
+  87.9% { transform: scaleX(0) skewY(-14deg); opacity: 0.35; }
+  88%, 100% { transform: none; opacity: 1; }
+}
+
+@keyframes lc-home-ann-under {
+  0% { opacity: 0; }
+  76% { opacity: 1; }
+  88%, 100% { opacity: 0; }
+}
+
+@keyframes lc-home-ann-peel {
+  0%, 76% { transform: translate(0, 0); animation-timing-function: cubic-bezier(0.3, 0, 0.4, 1); }
+  82%, 87.9% { transform: translate(-2.75px, -2.75px); }
+  88%, 100% { transform: translate(0, 0); }
+}
+
+@keyframes lc-home-ann-peel-out {
+  from { transform: translate(0, 0); }
+  40%, to { transform: translate(-2.75px, -2.75px); }
+}
+
+@keyframes lc-home-ann-curl-out {
+  from { transform: scale(0); }
+  40%, to { transform: scale(1); }
+}
+
+@keyframes lc-home-ann-turn-out {
+  0%, 30% { transform: none; opacity: 1; }
+  to { transform: scaleX(0) skewY(-14deg); opacity: 0.35; }
+}
+
 @keyframes lc-home-ann-hl-a {
-  0%, 10% { stroke-dashoffset: 1; opacity: 0; }
-  18% { stroke-dashoffset: 0; opacity: 0.42; }
-  38% { stroke-dashoffset: 0; opacity: 0.42; }
-  44%, 100% { stroke-dashoffset: 1; opacity: 0; }
+  0%, 6% { stroke-dashoffset: 1; opacity: 0; }
+  14% { stroke-dashoffset: 0; opacity: 0.42; }
+  46% { stroke-dashoffset: 0; opacity: 0.42; }
+  50%, 100% { stroke-dashoffset: 0; opacity: 0; }
 }
 
 @keyframes lc-home-ann-mark-a {
-  0%, 10% { stroke-dashoffset: 1; opacity: 0; }
-  18% { stroke-dashoffset: 0; opacity: 1; }
-  38% { stroke-dashoffset: 0; opacity: 1; }
-  44%, 100% { stroke-dashoffset: 1; opacity: 0; }
-}
-
-@keyframes lc-home-ann-mark-b {
-  0%, 58% { stroke-dashoffset: 1; opacity: 0; }
-  66% { stroke-dashoffset: 0; opacity: 1; }
-  88% { stroke-dashoffset: 0; opacity: 1; }
-  94%, 100% { stroke-dashoffset: 1; opacity: 0; }
+  0%, 8% { stroke-dashoffset: 1; opacity: 0; }
+  16% { stroke-dashoffset: 0; opacity: 1; }
+  46% { stroke-dashoffset: 0; opacity: 1; }
+  50%, 100% { stroke-dashoffset: 0; opacity: 0; }
 }
 
 @keyframes lc-home-ann-box-a {
-  0%, 16% { opacity: 0; transform: scale(0.2); }
-  22% { opacity: 1; transform: scale(1); }
-  38% { opacity: 1; transform: scale(1); }
-  44%, 100% { opacity: 0; transform: scale(0.2); }
+  0%, 12% { opacity: 0; transform: scale(0.2); }
+  18% { opacity: 1; transform: scale(1); }
+  46% { opacity: 1; transform: scale(1); }
+  50%, 100% { opacity: 0; transform: scale(1); }
+}
+
+@keyframes lc-home-ann-mark-b {
+  0%, 52% { stroke-dashoffset: 1; opacity: 0; }
+  60% { stroke-dashoffset: 0; opacity: 1; }
+  87.9% { stroke-dashoffset: 0; opacity: 1; }
+  88%, 100% { stroke-dashoffset: 1; opacity: 0; }
 }
 
 @keyframes lc-home-ann-box-b {
-  0%, 64% { opacity: 0; transform: scale(0.2); }
-  70% { opacity: 1; transform: scale(1); }
-  88% { opacity: 1; transform: scale(1); }
-  94%, 100% { opacity: 0; transform: scale(0.2); }
+  0%, 56% { opacity: 0; transform: scale(0.2); }
+  62% { opacity: 1; transform: scale(1); }
+  87.9% { opacity: 1; transform: scale(1); }
+  88%, 100% { opacity: 0; transform: scale(0.2); }
 }
 
+/* Routes stay invisible; only the packets travelling along them show. */
 .lc-home-net-mesh {
-  fill: none;
-  stroke: currentColor;
-  stroke-width: 0.65;
-  opacity: 0.055;
+  display: none;
 }
 
 .lc-home-net-flow {
@@ -8032,6 +8002,11 @@ body[data-lc-sash-drag="horizontal"] {
 
 .lc-home-graph-node {
   opacity: 0.88;
+  animation: lc-home-graph-node-in 320ms ease-out;
+}
+
+@keyframes lc-home-graph-node-in {
+  from { opacity: 0; }
 }
 
 .lc-home-card[data-mode="explore"] .lc-home-card-icon > svg circle {
@@ -8074,11 +8049,15 @@ body[data-lc-sash-drag="horizontal"] {
   .lc-home-slash,
   .lc-home-fn,
   .lc-home-fn-line,
+  .lc-home-fn-line::before,
+  .lc-home-fn-line::after,
   .lc-home-nib,
   .lc-home-nib-arm,
   .lc-home-draw,
   .lc-home-wb-scroll,
   .lc-home-rule,
+  .lc-home-ann-page,
+  .lc-home-ann-scroll,
   .lc-home-mark,
   .lc-home-box,
   .lc-home-net-flow,
@@ -18912,8 +18891,7 @@ button.lc-row-selected:hover:not(:disabled) {
   animation: lc-doc-footnote-pop 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
 }
 
-/* Speech-bubble / bookmark-tab silhouettes retired — inset chip only.
- * AI marks (`.lc-doc-footnote-tab`) bring a right-edge book tab back. */
+/* Square controls stay beside the passage; ChatBot bookmarks use the left edge. */
 .lc-doc-footnote::after {
   content: none;
 }
@@ -18926,6 +18904,7 @@ button.lc-row-selected:hover:not(:disabled) {
   border-radius: 0 7px 7px 0;
   overflow: visible;
   box-shadow: 0 1px 3px rgb(0 0 0 / 22%);
+  pointer-events: none;
 }
 
 .lc-doc-footnote-ai {
@@ -19036,10 +19015,11 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 .lc-doc-footnote .lc-hold-reveal-label {
-  display: inline-flex;
-  align-items: flex-start;
-  justify-content: center;
+  display: grid;
+  place-items: center;
   width: 100%;
+  height: 100%;
+  line-height: 1;
 }
 
 :root[data-theme="dark"] .lc-doc-footnote {
@@ -19070,9 +19050,9 @@ button.lc-row-selected:hover:not(:disabled) {
 :root .lc-doc-footnote[style*="--lc-fn-color"],
 :root .lc-fn-badge[style*="--lc-fn-color"],
 :root .lc-footnote-chip[style*="--lc-fn-color"] .lc-fn-badge {
-  --lc-fn-fill: color-mix(in srgb, var(--lc-fn-color) 38%, var(--lc-fn-light, #fff));
+  --lc-fn-fill: var(--lc-fn-badge-fill, var(--lc-fn-color));
   --lc-fn-edge: var(--lc-fn-color);
-  --lc-fn-text: var(--lc-fn-deep, color-mix(in srgb, var(--lc-fn-color) 22%, #000));
+  --lc-fn-text: var(--lc-fn-badge-ink, #000);
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -19517,6 +19497,18 @@ button.lc-row-selected:hover:not(:disabled) {
   padding: 0;
   align-items: center;
   align-content: flex-start;
+}
+
+.lc-agent-composer-field > .lc-agent-mark-chips {
+  box-sizing: border-box;
+  padding: 6px 32px 6px 8px;
+  border-bottom: 1px solid var(--chrome-edge);
+  flex-shrink: 0;
+}
+
+[data-ui-handedness="left"] .lc-agent-composer-field > .lc-agent-mark-chips {
+  padding-right: 8px;
+  padding-left: 32px;
 }
 
 .lc-agent-mark-chips .lc-footnote-chip {
@@ -21640,6 +21632,16 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-hold-reveal:not(.lc-progress-fill)[data-filling] > .lc-hold-reveal-fill {
   animation: lc-hold-flow 1080ms linear infinite;
 }
+
+/* Footnote controls are tiny squares. A sliding wave outside an unclipped
+ * bookmark looked like a second flag even at zero progress. */
+.lc-hold-reveal.lc-doc-footnote > .lc-hold-reveal-fill {
+  width: calc(var(--lc-hold, 0) * 100%);
+  transform: none;
+  mask: none;
+  -webkit-mask: none;
+  animation: none;
+}
 @keyframes lc-hold-flow {
   from { -webkit-mask-position: left top, right 0; mask-position: left top, right 0; }
   to { -webkit-mask-position: left top, right 24px; mask-position: left top, right 24px; }
@@ -22011,3 +22013,143 @@ button.lc-row-selected:hover:not(:disabled) {
 html[data-corners="rounded"] {
   --lc-r-block: 8px;
 }
+
+
+/* Footnote note windows and tabs keep their parent's palette. */
+.lc-doc-footnote { box-sizing: border-box; }
+.lc-footnote-note-row {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  min-width: 0;
+}
+.lc-footnote-note-row > .lc-agent-scope-option {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: left;
+  overflow: hidden;
+}
+.lc-footnote-note-actions { display: flex; flex: 0 0 auto; gap: 2px; align-items: center; }
+.lc-footnote-note-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding-bottom: 5px;
+  border-bottom: 1px solid color-mix(in srgb, var(--lc-fn-color, var(--border)) 35%, transparent);
+  font-size: 12px;
+}
+.lc-footnote-note-head > strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-footnote-mini-tray {
+  position: fixed;
+  inset: 0;
+  z-index: 234;
+  display: block;
+  pointer-events: none;
+}
+.lc-footnote-mini-note {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 7px;
+  box-sizing: border-box;
+  overflow: hidden;
+  pointer-events: auto;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--lc-fn-color) 72%, var(--lc-fn-deep));
+  background: var(--lc-fn-wash, var(--panel));
+  color: var(--lc-fn-ink, var(--ink));
+  box-shadow: 0 8px 28px color-mix(in srgb, var(--lc-fn-deep) 32%, transparent), inset 0 2px 0 var(--lc-fn-color);
+}
+.lc-footnote-note-body {
+  position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 2px;
+  color: var(--lc-fn-ink, var(--ink));
+  font-size: 13px;
+  line-height: 1.6;
+  overflow-wrap: anywhere;
+}
+.lc-footnote-note-body p { margin: 0 0 .65em; }
+.lc-footnote-note-body p:last-child { margin-bottom: 0; }
+.lc-footnote-note-body a { color: inherit; text-decoration: underline; }
+.lc-footnote-note-body pre { overflow-x: auto; }
+.lc-footnote-note-body .lc-footnote-note-images { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.lc-footnote-note-body img { max-width: 100%; max-height: 260px; object-fit: contain; }
+.lc-footnote-note-workspace {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  box-sizing: border-box;
+  padding: 16px clamp(12px, 3vw, 48px);
+  background: var(--lc-fn-wash, var(--panel));
+  color: var(--lc-fn-ink, var(--ink));
+}
+.lc-footnote-note-workspace .lc-footnote-note-body {
+  font-size: 15px;
+  line-height: 1.7;
+  padding: 14px 0;
+}
+.lc-footnote-note-workspace > .lc-footnote-note-head { flex-wrap: wrap; }
+.lc-footnote-note-workspace > .lc-footnote-note-head > div:first-child { flex: 1 1 160px; min-width: 0; }
+.lc-footnote-note-workspace > .lc-footnote-note-head > div:first-child > strong,
+.lc-footnote-note-workspace .lc-footnote-note-parent { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-footnote-note-workspace .lc-footnote-note-actions { flex-wrap: wrap; max-width: 100%; }
+.lc-footnote-note-parent { display: block; color: var(--lc-fn-muted, var(--muted)); font-size: 11px; margin-top: 2px; }
+.lc-footnote-mini-note .lc-footnote-mark-tool,
+.lc-footnote-note-workspace .lc-footnote-mark-tool,
+.lc-footnote-note-workspace .lc-secondary {
+  background: var(--lc-fn-chip, var(--panel)) !important;
+  color: var(--lc-fn-ink, var(--ink)) !important;
+  border-color: color-mix(in srgb, var(--lc-fn-color) 45%, transparent);
+}
+.lc-footnote-note-head .lc-secondary { min-height: 28px; padding: 4px 8px; font-size: 12px; }
+.lc-footnote-note-drag { cursor: grab; touch-action: none; user-select: none; }
+.lc-footnote-note-drag:active { cursor: grabbing; }
+.lc-footnote-note-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  background: var(--lc-fn-chip, var(--panel));
+  color: var(--lc-fn-ink, var(--ink));
+  cursor: nwse-resize;
+  touch-action: none;
+  border-radius: 6px 0 0 0;
+}
+.lc-footnote-note-resize:focus-visible { outline: 2px solid var(--lc-fn-color); outline-offset: -2px; }
+.lc-footnote-note-restore { display: inline-flex; align-items: center; gap: 5px; }
+.lc-footnote-note-actions .lc-footnote-mark-tool:disabled { opacity: .4; cursor: default; }
+.lc-footnote-note-actions .lc-footnote-mark-tool[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--lc-fn-color); }
+.lc-footnote-note-actions .lc-footnote-mark-tool:focus-visible { outline: 2px solid var(--lc-fn-color); outline-offset: 1px; }
+.lc-footnote-mini-note.is-chatbot-complete .lc-footnote-note-body,
+.lc-footnote-note-workspace.is-chatbot-complete .lc-footnote-note-body {
+  background-image: radial-gradient(ellipse at 100% 0, color-mix(in srgb, var(--lc-fn-light) 22%, transparent), transparent 58%);
+}
+.lc-footnote-overview.is-chatbot-complete .lc-footnote-note-row::after,
+.lc-footnote-mini-note.is-chatbot-complete .lc-footnote-note-body::after,
+.lc-footnote-note-workspace.is-chatbot-complete .lc-footnote-note-body::after {
+  content: "\2726 \00b7 \2727";
+  position: absolute;
+  right: 96px;
+  top: 1px;
+  color: var(--lc-fn-color);
+  opacity: .18;
+  font-size: 17px;
+  letter-spacing: 4px;
+  pointer-events: none;
+}
+.lc-footnote-mini-note.is-chatbot-complete .lc-footnote-note-body::after,
+.lc-footnote-note-workspace.is-chatbot-complete .lc-footnote-note-body::after { right: 8px; top: 6px; }

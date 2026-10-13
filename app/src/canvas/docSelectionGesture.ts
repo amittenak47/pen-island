@@ -368,7 +368,7 @@ export function requestDocScroll(dy: number, origin?: Node | null): number {
  * the hub tap and the footnote closer dismisses the card.
  */
 const DOC_CHROME_SELECTOR =
-  ".lc-doc-footnote, .lc-doc-confirm, .lc-doc-sheet, .lc-doc-sheet-backdrop, .lc-doc-selection-chrome, .lc-footnote-overview, .lc-doc-submark-grip, .lc-split-sash, .lc-color-wheel";
+  ".lc-doc-footnote, .lc-doc-confirm, .lc-doc-sheet, .lc-doc-sheet-backdrop, .lc-doc-selection-chrome, .lc-footnote-overview, .lc-footnote-mini-tray, .lc-doc-submark-grip, .lc-split-sash, .lc-color-wheel";
 
 export function isDocChromeTarget(target: EventTarget | null): boolean {
   const element = target as Element | null;

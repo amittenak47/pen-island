@@ -64,7 +64,7 @@ import {
 } from "./util/workspaceLoad";
 import { installSafeAreaInsets } from "./util/safeArea";
 import { isAndroidDevice } from "./util/androidDevice";
-import { useIsMobile } from "./util/mobile";
+import { isHandheldDevice, useIsMobile } from "./util/mobile";
 import {
   HOME_TAB_ID,
   activeTab as activeTabOf,
@@ -74,6 +74,7 @@ import {
   pinLive,
   promoteLive,
   tabKindLoads,
+  isFootnoteNoteTab,
   tabsReducer,
   tabUsesPdfWorker,
   visibleTabIds,
@@ -101,6 +102,7 @@ import { bumpRetry, planWorkspaceMounts, workspaceMountKey } from "./util/worksp
 import type { WebPadEntry } from "./util/webPadSession";
 import { Workspace } from "./Workspace";
 import { ArtifactWorkspace } from "./modes/ArtifactWorkspace";
+import { FootnoteNoteWorkspace } from "./modes/FootnoteNoteWorkspace";
 import {
   chromeLooksSame,
   NO_CHROME,
@@ -1344,6 +1346,7 @@ export function App() {
     <ShellContext.Provider value={shell}>
       <NotificationStack />
       <div
+        data-lc-device={isHandheldDevice() ? "handheld" : "desktop"}
         className={[
           "lc-app",
           mobile ? "lc-mobile" : "",
@@ -1467,7 +1470,8 @@ export function App() {
             never between workspaces.
           */}
           {workspaceMounts.map(({ tab, active, showing, splitRole }) => (
-            tab.artifact ? <ArtifactWorkspace key={workspaceMountKey(tab.id, retryByTab)} tab={tab} active={active} showing={showing} splitRole={splitRole} /> : <Workspace
+            tab.artifact ? <ArtifactWorkspace key={workspaceMountKey(tab.id, retryByTab)} tab={tab} active={active} showing={showing} splitRole={splitRole} /> :
+            isFootnoteNoteTab(tab) ? <FootnoteNoteWorkspace key={workspaceMountKey(tab.id, retryByTab)} tab={tab} active={active} showing={showing} splitRole={splitRole} /> : <Workspace
               key={workspaceMountKey(tab.id, retryByTab)}
               tab={tab}
               active={active}

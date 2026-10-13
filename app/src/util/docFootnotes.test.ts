@@ -551,7 +551,7 @@ describe("footnoteRevision", () => {
     expect(footnoteRevision([withBoard])).not.toBe(footnoteRevision([base]));
   });
 
-  it("changes when a pending GrokBot request is cleared", () => {
+  it("changes when a pending ChatBot request is cleared", () => {
     const pending = { ...base, pending: "fr-1" };
     expect(footnoteRevision([pending])).not.toBe(footnoteRevision([base]));
     const { pending: requestId, ...cleared } = pending;

@@ -134,6 +134,31 @@ it("offers PC Whisper separately from Android dictation and saves its endpoint a
   }) }), { timeoutMs: 30000 });
 });
 
+it("saves ChatBot assistant guidance without changing model or voice configuration", async () => {
+  const api = await openVoice();
+  await act(async () => fold("ChatBot").querySelector<HTMLButtonElement>(".lc-settings-fold-summary")!.click());
+  const select = fold("ChatBot").querySelector<HTMLSelectElement>('select[aria-label="ChatBot assistant"]')!;
+  expect(select.value).toBe("grok");
+  expect(fold("ChatBot").textContent).toContain("Grok Bot");
+  await act(async () => { select.value = "local"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  await act(async () => save().click());
+  expect(localStorage.getItem("whiteboard.chatBotClient.v1")).toBe("local");
+  expect(api.putConfig).not.toHaveBeenCalled();
+});
+
+it("saves the regular-LLM answer mode and hides external bot setup", async () => {
+  const api = await openVoice();
+  await act(async () => fold("ChatBot").querySelector<HTMLButtonElement>(".lc-settings-fold-summary")!.click());
+  const select = fold("ChatBot").querySelector<HTMLSelectElement>('select[aria-label="ChatBot answer mode"]')!;
+  expect(select.value).toBe("bot");
+  await act(async () => { select.value = "llm"; select.dispatchEvent(new Event("change", { bubbles: true })); });
+  expect(fold("ChatBot").querySelector('[aria-label="ChatBot assistant"]')).toBeNull();
+  expect(fold("ChatBot").textContent).toContain("desktop hub answers automatically");
+  await act(async () => save().click());
+  expect(localStorage.getItem("whiteboard.chatBotAnswerMode.v1")).toBe("llm");
+  expect(api.putConfig).not.toHaveBeenCalled();
+});
+
 it("sends voice.cleanup local when Local is picked on the clean-up pass", async () => {
   const api = await openVoice();
   const group = fold("Voice dictation").querySelector<HTMLElement>('[aria-label="Clean-up pass"]')!;

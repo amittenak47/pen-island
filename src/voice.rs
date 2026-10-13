@@ -21,6 +21,11 @@ pub struct Clip {
 /// Send `clip` to the engine chosen in `cfg.voice` and return the trimmed text
 /// (may be empty when nothing was said).
 pub fn transcribe(cfg: &Config, clip: Clip) -> Result<String> {
+    // Whisper can hallucinate a phrase even for digital silence. Our Android
+    // and desktop recorders both produce PCM WAV; never submit an all-zero clip.
+    if cfg.voice.engine != "android" && silent_pcm_wav(&clip.bytes) {
+        return Ok(String::new());
+    }
     match cfg.voice.engine.as_str() {
         "android" => bail!("Dictation is set to Android's built-in recognizer"),
         "openai" => transcribe_openai(
@@ -48,6 +53,25 @@ pub fn transcribe(cfg: &Config, clip: Clip) -> Result<String> {
             crate::config::VOICE_ENGINES.join(", ")
         ),
     }
+}
+
+fn silent_pcm_wav(bytes: &[u8]) -> bool {
+    if bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" { return false; }
+    let mut offset = 12usize;
+    let mut pcm16 = false;
+    while offset.checked_add(8).is_some_and(|end| end <= bytes.len()) {
+        let len = u32::from_le_bytes(bytes[offset + 4..offset + 8].try_into().unwrap()) as usize;
+        let start = offset + 8;
+        let Some(end) = start.checked_add(len).filter(|end| *end <= bytes.len()) else { return false; };
+        match &bytes[offset..offset + 4] {
+            b"fmt " if len >= 16 => pcm16 = bytes[start..start + 2] == [1, 0] && bytes[start + 14..start + 16] == [16, 0],
+            b"data" => return pcm16 && len % 2 == 0 && bytes[start..end].iter().all(|byte| *byte == 0),
+            _ => {},
+        }
+        let Some(next) = end.checked_add(len % 2) else { return false; };
+        offset = next;
+    }
+    false
 }
 
 fn transcribe_openai(
@@ -94,6 +118,9 @@ fn post_transcription(
     provider: &str,
     local: bool,
 ) -> Result<String> {
+    if !local && clip.bytes.len() > 25_000_000 {
+        bail!("{provider} dictation accepts clips up to 25 MB. Record a shorter clip (about 13 minutes or less).");
+    }
     let base = base_url.trim().trim_end_matches('/');
     if local && base.is_empty() {
         bail!("Set the local speech server URL in Settings → LLM → Voice dictation");
@@ -125,6 +152,8 @@ fn post_transcription(
         Err(err) if local && err.is_connect() => bail!(
             "The speech server at {base} could not be reached ({err}). On the tablet, localhost is the tablet itself."
         ),
+        Err(err) if err.is_timeout() => bail!("{provider} transcription timed out after 90 seconds. Try a shorter clip or a faster speech model."),
+        Err(err) if local => bail!("The speech server at {base} could not complete the request ({err}). Check that the server is running and the URL ends in /v1."),
         Err(err) => return Err(err.into()),
     };
     response_text(response, provider, parse_openai_text)
@@ -457,6 +486,30 @@ mod tests {
         let cfg = Config::default();
         let err = transcribe(&cfg, clip()).unwrap_err().to_string();
         assert_eq!(err, "Dictation is set to Android's built-in recognizer");
+    }
+
+    #[test]
+    fn cloud_clip_limit_is_checked_before_network_io() {
+        let err = post_transcription("http://127.0.0.1:1/v1", None, "test", "", Clip {
+            bytes: vec![0; 25_000_001], filename: "dictation.wav".into(), mime: "audio/wav".into(),
+        }, "OpenAI", false).unwrap_err().to_string();
+        assert!(err.contains("25 MB"));
+        assert!(err.contains("shorter clip"));
+    }
+
+    #[test]
+    fn silent_pcm_clip_inserts_nothing_without_calling_whisper() {
+        let mut bytes = vec![0; 44 + 32_000];
+        bytes[..4].copy_from_slice(b"RIFF"); bytes[8..12].copy_from_slice(b"WAVE");
+        bytes[12..16].copy_from_slice(b"fmt "); bytes[16..20].copy_from_slice(&16u32.to_le_bytes());
+        bytes[20..22].copy_from_slice(&1u16.to_le_bytes()); bytes[22..24].copy_from_slice(&1u16.to_le_bytes());
+        bytes[24..28].copy_from_slice(&16_000u32.to_le_bytes()); bytes[34..36].copy_from_slice(&16u16.to_le_bytes());
+        bytes[36..40].copy_from_slice(b"data"); bytes[40..44].copy_from_slice(&32_000u32.to_le_bytes());
+        assert!(silent_pcm_wav(&bytes));
+        let mut cfg = Config::default(); cfg.voice.engine = "local".into(); cfg.voice.local_base_url = "http://127.0.0.1:1/v1".into();
+        assert_eq!(transcribe(&cfg, Clip { bytes: bytes.clone(), filename: "silence.wav".into(), mime: "audio/wav".into() }).unwrap(), "");
+        bytes[44] = 1; assert!(!silent_pcm_wav(&bytes));
+        bytes[40..44].copy_from_slice(&u32::MAX.to_le_bytes()); assert!(!silent_pcm_wav(&bytes));
     }
 
     #[test]

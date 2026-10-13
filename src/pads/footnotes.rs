@@ -12,6 +12,18 @@ use super::write_transaction;
 pub const LIST_CAP: i64 = 50;
 pub const PING_CAP: i64 = 20;
 
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum AnswerMode {
+    #[default]
+    Bot,
+    Llm,
+}
+
+impl AnswerMode {
+    fn as_str(self) -> &'static str { match self { Self::Bot => "bot", Self::Llm => "llm" } }
+}
+
 #[derive(Debug)]
 pub enum FootnoteFail {
     Invalid(String),
@@ -48,6 +60,8 @@ pub struct FootnoteResult {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FootnoteRequest {
+    #[serde(default)]
+    pub answer_mode: AnswerMode,
     pub id: String,
     pub device_id: String,
     pub doc_id: String,
@@ -89,6 +103,8 @@ pub struct FootnotePingResult {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct NewFootnoteRequest {
+    #[serde(default)]
+    pub answer_mode: AnswerMode,
     pub id: String,
     pub device_id: String,
     pub doc_id: String,
@@ -228,8 +244,8 @@ pub fn create_request(
         conn.execute(
             "INSERT INTO footnote_requests (
                 id, device_id, doc_id, doc_name, page, anchor, excerpt, context, wide_context,
-                page_footnotes, prompt, status, result, created_at, done_at, acked_at
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', NULL, ?12, NULL, NULL)",
+                page_footnotes, prompt, status, result, created_at, done_at, acked_at, answer_mode
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', NULL, ?12, NULL, NULL, ?13)",
             params![
                 body.id,
                 body.device_id,
@@ -243,6 +259,7 @@ pub fn create_request(
                 serde_json::to_string(&pages)?,
                 body.prompt,
                 now,
+                body.answer_mode.as_str(),
             ],
         )?;
         get_request(conn, &body.id)?.ok_or(FootnoteFail::NotFound)
@@ -253,7 +270,7 @@ pub fn get_request(conn: &Connection, id: &str) -> Result<Option<FootnoteRequest
     let row = conn
         .query_row(
             "SELECT id, device_id, doc_id, doc_name, page, anchor, excerpt, context, wide_context,
-                    page_footnotes, prompt, status, result, created_at, done_at, acked_at
+                    page_footnotes, prompt, status, result, created_at, done_at, acked_at, answer_mode
              FROM footnote_requests WHERE id = ?1",
             params![id],
             map_request,
@@ -268,7 +285,7 @@ pub fn get_request(conn: &Connection, id: &str) -> Result<Option<FootnoteRequest
 pub fn list_pending(conn: &Connection) -> Result<Vec<FootnoteRequestSummary>, FootnoteFail> {
     let mut stmt = conn.prepare(
         "SELECT id, doc_name, page, excerpt, context, prompt, created_at
-         FROM footnote_requests WHERE status = 'pending'
+         FROM footnote_requests WHERE status = 'pending' AND answer_mode = 'bot'
          ORDER BY created_at ASC, id ASC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![LIST_CAP], |row| {
@@ -283,6 +300,15 @@ pub fn list_pending(conn: &Connection) -> Result<Vec<FootnoteRequestSummary>, Fo
         })
     })?;
     rows.collect::<Result<Vec<_>, _>>().map_err(FootnoteFail::from)
+}
+
+/// LLM jobs are durable and separate from the external assistant's inbox.
+pub fn list_pending_llm(conn: &Connection, device: Option<&str>) -> Result<Vec<FootnoteRequest>, FootnoteFail> {
+    let mut stmt = conn.prepare("SELECT id FROM footnote_requests WHERE status='pending' AND answer_mode='llm'
+        AND (?1 IS NULL OR device_id=?1) ORDER BY created_at, id LIMIT ?2")?;
+    let ids = stmt.query_map(params![device, LIST_CAP], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter().map(|id| get_request(conn, &id)?.ok_or(FootnoteFail::NotFound)).collect()
 }
 
 pub fn submit_result(
@@ -382,6 +408,7 @@ struct PackedRequest {
 fn map_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PackedRequest> {
     Ok(PackedRequest {
         request: FootnoteRequest {
+            answer_mode: if row.get::<_, String>(16)? == "llm" { AnswerMode::Llm } else { AnswerMode::Bot },
             id: row.get(0)?,
             device_id: row.get(1)?,
             doc_id: row.get(2)?,

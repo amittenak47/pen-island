@@ -16,8 +16,8 @@
 .lc-home-chooser .lc-home-chooser-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: minmax(var(--lc-home-row-a, 0px),1.45fr) minmax(var(--lc-home-row-b, 0px),1fr) minmax(var(--lc-home-row-c, 0px),.72fr); gap: 14px; min-height: 0; }
 .lc-home-cell[data-mode="whiteboard"] { grid-column: 1 / -1; }
 .lc-home-cell[data-mode="annotate"]:first-child { grid-column: 1 / -1; }
-.lc-home-chooser .lc-home-card { background: color-mix(in srgb, var(--panel) 92%, var(--ink) 8%); padding: 12px; gap: 14px; border-radius: var(--lc-r-block); }
-.lc-home-chooser .lc-home-card-icon { border-radius: var(--lc-r-block); background-color: color-mix(in srgb,var(--lc-home-mode) 13%,transparent); background-image: radial-gradient(circle,color-mix(in srgb,var(--lc-home-mode) 36%,transparent) 1px,transparent 1.4px); background-size: 13px 13px; }
+.lc-home-chooser .lc-home-card { background: transparent; padding: 12px; gap: 14px; border-radius: var(--lc-r-block); }
+.lc-home-chooser .lc-home-card-icon { border-radius: var(--lc-r-block); background-color: color-mix(in srgb,var(--lc-home-mode) 16%,transparent); background-image: none; }
 .lc-home-cell:is([data-mode="practice"],[data-mode="annotate"]) .lc-home-card { flex-direction: column; align-items: stretch; min-height: 230px; padding-bottom: 28px; }
 .lc-home-cell:is([data-mode="practice"],[data-mode="annotate"]) .lc-home-card-icon { width: 100%; height: auto; aspect-ratio: 2.2; min-height: 95px; max-height: 190px; }
 .lc-home-chooser .lc-home-card-icon > svg { width: 48px; height: 48px; max-width: 90%; }
@@ -27,9 +27,21 @@
 .lc-home-chooser .lc-home-card[data-mode="whiteboard"] .lc-home-card-icon > svg { width: 120px; height: 120px; }
 .lc-home-chooser .lc-home-card[data-mode="annotate"] .lc-home-card-icon { color: var(--lc-mode-annotate); }
 .lc-home-card[data-mode="annotate"] .lc-home-glyph-sheet > path:first-of-type { fill: var(--bg); }
-.lc-home-wb-rest { opacity: 0; }
-.lc-home-card[data-mode="whiteboard"][data-scene="rest"] .lc-home-wb-rest { opacity: 1; }
-.lc-home-card[data-mode="whiteboard"][data-scene="rest"] .lc-home-nib-arm { opacity: 0; }
+/* The resting sketch is never hidden by scene; the whiteboard tracer erases and
+   redraws its strokes with the pencil tip through their dash offsets. */
+.lc-home-wb-rest .lc-home-trace { stroke-dasharray: 1; stroke-dashoffset: 0; }
+/* Before the tracer takes over, only the first sketch (the diagram) shows. */
+.lc-home-wb-sketch:not(:first-child) .lc-home-trace { stroke-dashoffset: 1; opacity: 0; }
+.lc-home-card[data-mode="whiteboard"][data-scene="rest"] .lc-home-nib-arm { opacity: 1; }
+
+.lc-home-chooser .lc-home-card-icon { container-type: size; }
+.lc-home-chooser .lc-home-live-code {
+  inset: 6px;
+  place-content: center;
+  font-size: clamp(6px, min(calc((100cqh - 12px) / 5.2), calc((100cqw - 12px) / 12.6)), 52px);
+  line-height: 1.3;
+}
+.lc-home-chooser .lc-home-fn { justify-self: center; width: max-content; max-width: 100%; }
 .lc-home-cell[data-mode="whiteboard"] .lc-home-card { min-height: 158px; }
 .lc-home-cell[data-mode="whiteboard"] .lc-home-card-icon { width: 38%; height: 142px; }
 .lc-home-cell:is([data-mode="browse"],[data-mode="explore"]) .lc-home-card { min-height: 112px; }
@@ -42,7 +54,7 @@
 /* Share the actual canvas height: recent work above, Start tiles below. */
 .lc-home-recents { display: flex; flex-direction: column; min-height: 0; padding-bottom: 8px; }
 .lc-home-recents-window { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; flex: 1; min-height: 0; align-content: start; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: none; }
-.lc-home-recent { --lc-home-mode: var(--lc-mode-annotate); display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 76px; padding: 10px 12px; text-align: left; border: 1px solid color-mix(in srgb,var(--lc-home-mode) 40%,transparent); border-radius: var(--lc-r-block); background: color-mix(in srgb,var(--panel) 92%,var(--ink) 8%); color: var(--ink); cursor: pointer; touch-action: pan-y; }
+.lc-home-recent { --lc-home-mode: var(--lc-mode-annotate); display: flex; align-items: center; gap: 12px; min-width: 0; min-height: 76px; padding: 10px 12px; text-align: left; border: 1px solid color-mix(in srgb,var(--lc-home-mode) 40%,transparent); border-radius: var(--lc-r-block); background: transparent; color: var(--ink); cursor: pointer; touch-action: pan-y; }
 .lc-home-recent[data-mode="whiteboard"] { --lc-home-mode: var(--lc-mode-whiteboard); }
 .lc-home-recent[data-mode="practice"] { --lc-home-mode: var(--lc-mode-practice); }
 .lc-home-recent[data-mode="browse"] { --lc-home-mode: var(--lc-mode-browse); }
@@ -55,7 +67,9 @@
 .lc-home-recent-text { display: flex; flex-direction: column; gap: 5px; min-width: 0; }
 .lc-home-recent-text strong { font: 600 13px/1.3 var(--lc-sans); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; }
 .lc-home-recent-text > span { color: var(--muted); font: 600 10px/1.4 var(--lc-sans); letter-spacing: .06em; text-transform: uppercase; }
-.lc-home-chooser[data-home-active="false"] * { animation-play-state: paused !important; }
+.lc-home-chooser:is([data-home-active="false"], [data-page-visible="false"]) *,
+.lc-home-chooser:is([data-home-active="false"], [data-page-visible="false"]) *::before,
+.lc-home-chooser:is([data-home-active="false"], [data-page-visible="false"]) *::after { animation-play-state: paused !important; }
 /* Under Annotate's or Whiteboard's file menu the tiles fade out; their headings go with them. */
 .lc-home-chooser .lc-home-section-title { transition: opacity .14s; }
 .lc-home-chooser[data-covered] .lc-home-section-title { opacity: 0; visibility: hidden; transition: opacity .12s, visibility 0s .12s; }
@@ -196,4 +210,108 @@
   .lc-home-chooser.lc-home-redesign .lc-home-chooser-grid { grid-template-rows: minmax(var(--lc-home-row-a), 1.25fr) minmax(var(--lc-home-row-b), 1fr) minmax(var(--lc-home-row-c), .9fr); }
   .lc-home-chooser.lc-home-redesign .lc-home-chooser-grid:not(:has(> [data-tier="2"])) { grid-template-rows: minmax(var(--lc-home-row-a), 1.25fr) minmax(var(--lc-home-row-c), .9fr); }
   .lc-home-chooser.lc-home-redesign .lc-home-cell[data-tier] .lc-home-card-blurb { min-height: 0; }
+}
+
+/* Desktop resizing keeps a real illustration box in every tier. When captions
+   and icons need more room than the window offers, Home scrolls instead of
+   shrinking Web/Explore down to a line. The tablet's height-fitting layout stays. */
+@media (min-width: 481px) {
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-chooser-grid {
+    grid-template-rows: minmax(min-content, 1.45fr) minmax(min-content, 1fr) minmax(min-content, .9fr);
+  }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-chooser-grid:not(:has(> [data-tier="2"])) {
+    grid-template-rows: minmax(min-content, 1.45fr) minmax(min-content, .9fr);
+  }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-cell[data-tier] .lc-home-card {
+    min-height: min-content;
+    container-type: normal;
+  }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-cell[data-tier] .lc-home-card-icon { min-height: 64px; }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-cell[data-tier="1"] .lc-home-card-icon { min-height: 120px; }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-cell[data-tier="2"] .lc-home-card-icon { min-height: 88px; }
+}
+@media (max-width: 480px) {
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-chooser-grid { grid-auto-rows: minmax(min-content, 1fr); }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-card { min-height: min-content; container-type: normal; }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-card[data-mode] .lc-home-card-icon {
+    flex: 0 0 112px;
+    width: 112px;
+    height: 112px;
+    min-height: 112px;
+    aspect-ratio: 1;
+  }
+  .lc-app[data-lc-device="desktop"] .lc-home-chooser.lc-home-redesign .lc-home-card[data-mode] .lc-home-card-icon > svg { width: 72%; height: 72%; max-width: none; max-height: none; }
+}
+
+/* Hover/focus adds traffic to the existing Web routes without replacing or
+   restarting its quiet loop. Touch shows the same boost while pressed. */
+.lc-home-net-boost { opacity: 0; transition: opacity 180ms ease-out; }
+.lc-home-net-stream, .lc-home-net-burst {
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  animation-play-state: paused;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.lc-home-net-stream { stroke-width: 1.05; stroke-dasharray: 2.3 31; opacity: .7; animation-name: lc-home-net-stream; }
+.lc-home-net-burst { stroke-width: 1.65; stroke-dasharray: 3 97; animation-name: lc-home-net-burst; }
+.lc-home-card[data-mode="browse"][data-boosted="true"] .lc-home-net-boost { opacity: 1; }
+.lc-home-card[data-mode="browse"][data-boosted="true"] :is(.lc-home-net-stream, .lc-home-net-burst) { animation-play-state: running; }
+.lc-home-card[data-mode="explore"][data-boosted="true"] .lc-home-graph-node { opacity: 1; }
+.lc-home-graph-node { transition: opacity 280ms ease-out; }
+@keyframes lc-home-net-stream { from { stroke-dashoffset: 100; } to { stroke-dashoffset: 0; } }
+@keyframes lc-home-net-burst {
+  0% { stroke-dashoffset: 100; opacity: 0; }
+  5%, 80% { opacity: 1; }
+  100% { stroke-dashoffset: 0; opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-home-net-boost { transition: none; }
+  .lc-home-net-stream, .lc-home-net-burst { animation: none !important; }
+}
+
+/* Longitude rotates inside the round silhouette; the fixed axis is tilted
+   23.4 degrees against the illustrative, horizontal orbital plane. */
+.lc-home-card[data-mode="browse"] .lc-home-card-icon > svg.lc-home-earth { animation: none; }
+.lc-home-earth-meridian {
+  transform-box: view-box;
+  transform-origin: 50% 50%;
+  animation: lc-home-earth-longitude 14s cubic-bezier(.37, 0, .63, 1) infinite;
+  stroke-width: 1;
+}
+.lc-home-earth-equator { stroke-width: 1.1; }
+.lc-home-earth-orbit { opacity: .32; stroke-width: .55; }
+.lc-home-earth-glow { opacity: .035; animation: lc-home-earth-pulse 4.2s ease-in-out infinite; }
+.lc-home-earth-outline, .lc-home-earth-tilt { transition: filter 350ms ease-out; }
+.lc-home-earth-orbiter { transform: translate(11px, 0); animation: lc-home-earth-orbit 7s linear infinite; }
+.lc-home-card[data-mode="browse"][data-boosted="true"] :is(.lc-home-earth-outline, .lc-home-earth-tilt) { filter: drop-shadow(0 0 .8px currentColor); }
+@keyframes lc-home-earth-longitude {
+  0%, 100% { transform: scaleX(1); opacity: .75; }
+  25% { transform: scaleX(0); opacity: 1; }
+  50% { transform: scaleX(-1); opacity: .75; }
+  75% { transform: scaleX(0); opacity: .28; }
+}
+@keyframes lc-home-earth-pulse { 0%, 100% { opacity: .025; } 50% { opacity: .09; } }
+@keyframes lc-home-earth-orbit {
+  0%, 100% { transform: translate(11px, 0); opacity: .75; }
+  6.25% { transform: translate(10.16px, -1.38px); }
+  12.5% { transform: translate(7.78px, -2.55px); }
+  18.75% { transform: translate(4.21px, -3.33px); }
+  25% { transform: translate(0, -3.6px); opacity: .32; }
+  31.25% { transform: translate(-4.21px, -3.33px); }
+  37.5% { transform: translate(-7.78px, -2.55px); }
+  43.75% { transform: translate(-10.16px, -1.38px); }
+  50% { transform: translate(-11px, 0); opacity: .75; }
+  56.25% { transform: translate(-10.16px, 1.38px); }
+  62.5% { transform: translate(-7.78px, 2.55px); }
+  68.75% { transform: translate(-4.21px, 3.33px); }
+  75% { transform: translate(0, 3.6px); opacity: 1; }
+  81.25% { transform: translate(4.21px, 3.33px); }
+  87.5% { transform: translate(7.78px, 2.55px); }
+  93.75% { transform: translate(10.16px, 1.38px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-home-earth-meridian, .lc-home-earth-glow, .lc-home-earth-orbiter { animation: none !important; }
+  .lc-home-earth-outline, .lc-home-earth-tilt, .lc-home-graph-node { transition: none; filter: none; }
 }

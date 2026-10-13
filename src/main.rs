@@ -43,11 +43,17 @@ enum Cmd {
         #[arg(long)]
         dataset: Option<String>,
     },
-    /// Answer footnote requests over MCP (stdio JSON-RPC)
+    /// Answer ChatBot footnote requests over MCP
     Mcp {
         /// Hub base URL. Defaults to http://127.0.0.1:<serve.port> from config.
         #[arg(long)]
         hub: Option<String>,
+        /// Serve Streamable HTTP on loopback instead of stdio (e.g. 127.0.0.1:7879).
+        #[arg(long)]
+        listen: Option<std::net::SocketAddr>,
+        /// File containing a separate strong bearer token. Required for HTTP.
+        #[arg(long, requires = "listen")]
+        auth_token_file: Option<std::path::PathBuf>,
     },
 
 }
@@ -111,7 +117,10 @@ fn run_cmd(cmd: Cmd) -> Result<()> {
             print_datasets(&index::dataset_infos(&conn, &cfg)?);
             Ok(())
         }
-        Cmd::Mcp { hub } => mcp::serve_from_config(hub),
+        Cmd::Mcp { hub, listen, auth_token_file } => match listen {
+            Some(address) => mcp::serve_http_from_config(hub, address, auth_token_file.as_deref()),
+            None => mcp::serve_from_config(hub),
+        },
     }
 }
 

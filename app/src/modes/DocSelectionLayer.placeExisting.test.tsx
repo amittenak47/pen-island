@@ -90,6 +90,54 @@ afterEach(() => {
 });
 
 describe("placeExisting", () => {
+  it("places an older ChatBot marquee and its tab on the live quote after reflow", () => {
+    const quote = "Page 7 reference words for synchronization.";
+    const mark: DocFootnote = {
+      ...REGION_MARK, kind: "ai", excerpt: quote,
+      anchor: { kind: "region", x: 28, y: 900, w: 200, h: 24 },
+      bands: [{ left: 28, top: 900, width: 586, height: 28 }],
+    };
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(642);
+    vi.spyOn(HTMLElement.prototype, "offsetHeight", "get").mockReturnValue(1200);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 642, 1200));
+    const priorRects = Object.getOwnPropertyDescriptor(Range.prototype, "getClientRects");
+    Object.defineProperty(Range.prototype, "getClientRects", {
+      configurable: true, value: () => [new DOMRect(50, quoteTop, 280, 24)],
+    });
+    let quoteTop = 380;
+    let paperResize: ResizeObserverCallback | undefined;
+    vi.stubGlobal("ResizeObserver", class {
+      constructor(private callback: ResizeObserverCallback) {}
+      observe(node: HTMLElement) { if (node.classList.contains("lc-doc-selectable-body")) paperResize = this.callback; }
+      unobserve() {}
+      disconnect() {}
+    });
+    vi.useFakeTimers();
+    vi.spyOn(window, "requestAnimationFrame").mockImplementation(callback => window.setTimeout(() => callback(0), 0));
+    const host = document.createElement("div");
+    document.body.append(host);
+    const root = createRoot(host);
+    try {
+      act(() => root.render(<DocSelectionLayer enabled={false} footnotes={[mark]}><p>{quote}</p></DocSelectionLayer>));
+      const band = host.querySelector<HTMLElement>(".lc-doc-footnote-band")!;
+      const tab = host.querySelector<HTMLElement>(".lc-doc-footnote-tab")!;
+      expect(parseFloat(band.style.top) + parseFloat(band.style.height) / 2).toBeCloseTo(392);
+      expect(parseFloat(tab.style.top)).toBe(380);
+      expect(parseFloat(tab.style.left)).toBe(-14);
+      expect(parseFloat(host.querySelector<HTMLElement>(".lc-doc-footnote-bookmark")!.style.left)).toBe(623);
+      // The paper finishes loading without a new note or a window resize.
+      quoteTop = 520;
+      act(() => { paperResize!([], {} as ResizeObserver); vi.advanceTimersByTime(1); });
+      expect(parseFloat(host.querySelector<HTMLElement>(".lc-doc-footnote-tab")!.style.top)).toBe(520);
+      expect(parseFloat(host.querySelector<HTMLElement>(".lc-doc-footnote-band")!.style.top)).toBeGreaterThan(500);
+    } finally {
+      act(() => root.unmount());
+      vi.useRealTimers();
+      if (priorRects) Object.defineProperty(Range.prototype, "getClientRects", priorRects);
+      else Reflect.deleteProperty(Range.prototype, "getClientRects");
+    }
+  });
+
   it("watches for the text layer, which the reader deliberately does not", () => {
     /*
      * `enabled` arms the selection gestures, and the conflict panes must not
@@ -185,6 +233,23 @@ describe("marks made on a wider copy of the same page", () => {
       },
     };
   }
+
+  it("clears a ChatBot spinner when an answer changes content at the same position", () => {
+    const pending: DocFootnote = { ...REGION_MARK, kind: "ai", pending: "request" };
+    const { host, root, setFootnotes } = mountScaled(0.5, "", [pending]);
+    try {
+      setFootnotes([{ ...pending }]);
+      expect(host.querySelector(".lc-doc-footnote-spinner")).not.toBeNull();
+      const before = host.querySelector<HTMLElement>(".lc-doc-footnote-bookmark")!.style.cssText;
+      setFootnotes([{ ...pending, pending: undefined, title: "Answered quote" }]);
+      const tab = host.querySelector<HTMLElement>(".lc-doc-footnote-bookmark")!;
+      expect(host.querySelector(".lc-doc-footnote-spinner")).toBeNull();
+      expect(tab.classList.contains("lc-doc-footnote-pending")).toBe(false);
+      expect(tab.getAttribute("aria-label")).not.toContain("ChatBot is writing");
+      expect(tab.getAttribute("aria-label")).toContain("Answered quote");
+      expect(tab.style.cssText).toBe(before);
+    } finally { act(() => root.unmount()); }
+  });
 
   it("preserves the authored bands relative to their page, excluding earlier page gaps", () => {
     const {host,root,setFootnotes} = mountScaled(0.5,"",[REGION_MARK],false,[{pageId:6,minY:4000,maxY:5000}]);

@@ -40,7 +40,7 @@ import { webIdentityUrl } from "./webIdentity";
 import { artifactCatalogFields, type ArtifactCatalog } from "./padArtifacts";
 import { getCachedBookMetadata, mutateLocalBook, type LocalBookEdit } from "./localBookStore";
 
-export const ANNOTATE_LIBRARY_LIMIT = 30;
+export const ANNOTATE_LIBRARY_LIMIT = 250;
 export const ANNOTATE_TRASH_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 
 /**

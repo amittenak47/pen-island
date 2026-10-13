@@ -82,10 +82,10 @@ describe("applyFootnoteResult", () => {
     const reader = { id: "nt-reader", text: "my note", createdAt: 2, updatedAt: 2 };
     const next = applyFootnoteResult(
       [mark({ notes: [reader] })],
-      { id: "fr-1", notes: ["from GrokBot"] },
+      { id: "fr-1", notes: ["from ChatBot"] },
       80,
     );
-    expect(next[0]?.notes?.map((note) => note.text)).toEqual(["my note", "from GrokBot"]);
+    expect(next[0]?.notes?.map((note) => note.text)).toEqual(["my note", "from ChatBot"]);
     expect(next[0]?.notes?.[0]).toEqual(reader);
   });
 

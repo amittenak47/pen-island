@@ -109,7 +109,7 @@ async function executePass(client: LcClient, options: BookPassOptions): Promise<
       result.notices.push({
         kind: "footnote",
         book: typeof row.doc_id === "string" ? { kind: "annotate", id: row.doc_id } : undefined,
-        cause: new Error(`GrokBot answer ${row.id} was not saved`),
+        cause: new Error(`ChatBot answer ${row.id} was not saved`),
       });
     }
     if (signal.aborted) throw new HubSyncCancelled();

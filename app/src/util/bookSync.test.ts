@@ -99,6 +99,29 @@ const drawing = (color = "#111111") => encodeInkOps([{ kind: "draw", color, base
   points: [{ x: 1, y: 2, pressure: .5 }, { x: 4, y: 5, pressure: .5 }] }]);
 
 describe("modern current-state book sync", () => {
+  it("reports an unreachable hub after staging and retains the pending receipt and dirty ink", async () => {
+    await initial();
+    await putInkPages("wb:book", [[50, drawing()]]);
+    const before = await getInkPageRecord("wb:book", 50);
+    vi.mocked(api.commitPad).mockRejectedValue(new LcApiError("connection failed", 0));
+    vi.mocked(api.getPadCommit).mockRejectedValue(new LcApiError("connection failed", 0));
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.kind).toBe("unreachable");
+    expect(bookFailureMessage(result)).toContain("Can't reach the hub");
+    expect(await getInkPageRecord("wb:book", 50)).toEqual(before);
+    expect((await getBookSyncState("whiteboard", "book"))?.lastAttempt).not.toBeNull();
+  });
+  it("retains orphan handwriting without staging pages into an absent parent", async () => {
+    await putInkPages("wb:book", [[50, drawing()]]);
+    const before = await getInkPageRecord("wb:book", 50);
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.status).toBe("failed");
+    expect(result.error?.kind).toBe("missing_parent");
+    expect(bookFailureMessage(result)).toContain("document record is missing");
+    expect(api.stageInkPage).not.toHaveBeenCalled();
+    expect(api.commitPad).not.toHaveBeenCalled();
+    expect(await getInkPageRecord("wb:book", 50)).toEqual(before);
+  });
   it("names a corrupt hub page from a direct metadata read and keeps the complete local copy", async () => {
     await initial();const before=await captureBook({kind:"whiteboard",id:"book"});
     vi.mocked(api.getBookState).mockRejectedValue(new LcApiError("Unreadable bytes",422,undefined,

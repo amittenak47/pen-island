@@ -50,6 +50,14 @@ function parseFootnoteBoard(raw: unknown): { docId: string; wbId: string } | und
   return { docId, wbId };
 }
 
+function parseFootnoteNote(raw: unknown) {
+  if (!isRecord(raw)) return undefined;
+  const docId = asString(raw.docId);
+  const footnoteId = asString(raw.footnoteId);
+  const noteId = asString(raw.noteId);
+  return docId && footnoteId && noteId ? { docId, footnoteId, noteId } : undefined;
+}
+
 function persistable(tab: TabRecord): TabRecord | null {
   if (tab.artifact) return { ...tab, dirty: false };
   switch (tab.kind) {
@@ -136,6 +144,12 @@ function parseTab(raw: unknown): TabRecord | null {
     });
   }
   if (kind === "annotate") {
+    const footnoteNote = parseFootnoteNote(raw.footnoteNote);
+    if (raw.footnoteNote !== undefined && !footnoteNote) return null;
+    if (footnoteNote) return persistable({
+      id, kind, title, dirty, lastActive, group, footnoteNote,
+      docId: footnoteNote.docId, hash: null, source: null, docType: "markdown", indexed: "idle",
+    });
     const docType = raw.docType;
     if (
       docType !== "markdown" &&

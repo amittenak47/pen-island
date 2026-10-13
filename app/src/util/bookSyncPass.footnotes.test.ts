@@ -52,7 +52,7 @@ function mark(pending = "fr-1"): DocFootnote {
 }
 
 function answer(id = "fr-1", docId = "notes") {
-  return { id, doc_id: docId, result: { notes: ["from GrokBot"] } };
+  return { id, doc_id: docId, result: { notes: ["from ChatBot"] } };
 }
 
 beforeEach(async () => {
@@ -147,7 +147,7 @@ it("saves a ping answer into a clean book before that pass chooses what to uploa
     const result = await syncBookPass(api, { ping });
     expect(vi.mocked(syncBook).mock.calls.map((call) => call[2])).toContain("notes");
     const stored = await getAnnotateDoc("notes");
-    expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from GrokBot"]);
+    expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from ChatBot"]);
     expect(stored?.source).toBe("original");
     expect(result.books.map((book) => book.id)).toContain("notes");
   } finally {
@@ -180,7 +180,7 @@ it("keeps a competing edit when the answer is written", async () => {
   expect(stored?.source).toBe("rewritten");
   expect(stored?.agent).toEqual([{ id: "t2", role: "user", text: "newer" }]);
   expect((stored?.board as { elements?: { id: string }[] }).elements).toEqual([{ id: "kept" }]);
-  expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from GrokBot"]);
+  expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from ChatBot"]);
 });
 
 function applyPadSyncAnswer() {
@@ -221,7 +221,7 @@ it("saves a polled answer without uploading, then a later sync sends the book", 
   expect(api.pingPadSync).not.toHaveBeenCalled();
   expect(syncBook).not.toHaveBeenCalled();
   const stored = await getAnnotateDoc("notes");
-  expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from GrokBot"]);
+  expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from ChatBot"]);
   ping.footnote_results = [];
   await syncBookPass(api, { ping });
   expect(vi.mocked(syncBook).mock.calls.map((call) => call[2])).toContain("notes");
@@ -285,7 +285,7 @@ it("finishes an answer already writing when the pass is cancelled, and skips the
     const outcome = await pending;
     expect(outcome.saved).toEqual(["fr-1"]);
     expect(outcome.failed).toEqual([]);
-    expect((await getAnnotateDoc("notes"))?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from GrokBot"]);
+    expect((await getAnnotateDoc("notes"))?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from ChatBot"]);
     expect((await getAnnotateDoc("other"))?.footnotes?.[0]?.pending).toBe("fr-1");
   } finally {
     unregister();
@@ -311,5 +311,5 @@ it("saves a legacy ping answer before that ping can tombstone the document", asy
   await holder;
   await running;
   const stored = await getAnnotateDoc("notes");
-  expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from GrokBot"]);
+  expect(stored?.footnotes?.[0]?.notes?.map((note) => note.text)).toEqual(["from ChatBot"]);
 });

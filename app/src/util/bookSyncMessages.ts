@@ -41,6 +41,7 @@ export function bookFailureMessage(book: BookResult, libraryPull = false): strin
     case "local_page": return `${title}: ${label} can't be read on this device.`;
     case "hub_page": return libraryPull && error.missing ? `${title}: ${label} isn't on the hub yet. Sync the other device.` : `${title}: ${label} can't be read from the hub.`;
     case "missing_staging": return `${title}: ${label} couldn't be staged.`;
+    case "missing_parent": return `${title}: handwriting is kept, but its document record is missing. Restore the document from Retained copies before syncing.`;
     case "dependency": return `${title}: the source file or attachment didn't upload.`;
     case "gone": return `${title} was deleted on another device. Your local copy is kept.`;
     case "cap": {
@@ -59,7 +60,7 @@ export function bookNoticeMessage(notice: BookPassNotice): string {
   if (notice.kind === "old_hub") return "Update the desktop app to sync safely.";
   if (notice.kind === "footnote") {
     const name = notice.title ?? (notice.book ? bookDisplay(notice.book).title : "A document");
-    return `${name}: a GrokBot answer was not saved. It will be tried again.`;
+    return `${name}: a ChatBot answer was not saved. It will be tried again.`;
   }
   if (notice.kind === "links") return "Links didn't sync.";
   return `${notice.title ?? (notice.book ? bookDisplay(notice.book).title : "Book")}: snapshots didn't sync. They are kept on this device.`;

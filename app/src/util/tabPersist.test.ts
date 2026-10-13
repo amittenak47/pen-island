@@ -137,6 +137,17 @@ describe("serializeTabState", () => {
     expect(serial.tabs.find((tab) => tab.id === "d1")).toMatchObject({ indexed: "idle" });
   });
 
+  it("restores a full note by reference without persisting a separate text copy", () => {
+    const ref = { docId: "d-1", footnoteId: "f1", noteId: "n1" };
+    const state: TabState = { ...initialTabState(), tabs: [initialTabState().tabs[0]!,
+      doc("full-note", { footnoteNote: ref, hash: null, source: null })], activeId: "full-note" };
+    const restored = parseTabState({ v: 1, ...serializeTabState(state) });
+    expect(restored?.activeId).toBe("full-note");
+    expect(restored?.tabs[1]).toMatchObject({ footnoteNote: ref, docId: "d-1", source: null, hash: null });
+    const invalid = parseTabState({ v: 1, ...state, tabs: [state.tabs[0], { ...state.tabs[1], footnoteNote: { docId: "d-1" } }] });
+    expect(invalid?.tabs.map(tab => tab.id)).toEqual([HOME_TAB_ID]);
+  });
+
   it("keeps a split only when both children survive", () => {
     const state: TabState = {
       tabs: [

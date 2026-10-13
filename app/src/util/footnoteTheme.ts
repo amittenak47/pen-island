@@ -151,6 +151,9 @@ export function footnoteThemeVars(
   const chip = mixHex(light, paper, CHIP_MIX);
   const ink = readableInkOn(wash, [deep, ...rest, pick]);
   const muted = mixHex(ink, wash, 0.62);
+  // Number badges use the selected swatch itself, not the card's pale wash.
+  const badgeInk = contrastRatio(pick, "#000000") >= contrastRatio(pick, "#ffffff")
+    ? "#000000" : "#ffffff";
 
   /* Rotate: primary first, then remaining in wheel order — roles reassign on pick. */
   const rotated = [pick, ...rest];
@@ -158,6 +161,8 @@ export function footnoteThemeVars(
 
   return {
     ["--lc-fn-color" as string]: pick,
+    ["--lc-fn-badge-fill" as string]: pick,
+    ["--lc-fn-badge-ink" as string]: badgeInk,
     ["--lc-fn-ink" as string]: ink,
     ["--lc-fn-muted" as string]: muted,
     ["--lc-fn-wash" as string]: wash,

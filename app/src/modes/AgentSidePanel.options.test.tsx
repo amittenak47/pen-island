@@ -33,6 +33,16 @@ function mount(props: Partial<ComponentProps<typeof AgentSidePanel>> = {}) {
   act(() => root.render(<AgentSidePanel open mode="review" onModeChange={() => {}} busy={false} messages={[]} onSend={send} {...props} />));
   return send;
 }
+
+it("keeps attached footnotes inside the input above the editable text", () => {
+  const remove = vi.fn();
+  mount({ attachedMarks: [{ id: "one", number: 1 }], onRemoveAttached: remove });
+  const field = host.querySelector(".lc-agent-composer-field")!;
+  const chips = field.querySelector('[aria-label="Attached annotations"]')!;
+  expect(chips).not.toBeNull();
+  expect(chips.compareDocumentPosition(field.querySelector("textarea")!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(remove).not.toHaveBeenCalled();
+});
 function button(label: string) {
   return document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
 }

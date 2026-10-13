@@ -1,0 +1,5 @@
+fastmcp==4.1.0
+cryptography==50.0.2
+httpx2==2.13.1
+py-key-value-aio==0.4.6
+uvicorn==0.54.0

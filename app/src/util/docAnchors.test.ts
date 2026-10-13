@@ -9,6 +9,7 @@ import { beforeEach, describe, expect, it } from "vitest";
 
 import {
   anchorFromRange,
+  anchorFromUniqueQuote,
   normalizeAnchor,
   regionAnchorFromRect,
   scopeOfNode,
@@ -31,6 +32,20 @@ function mount(html: string): HTMLElement {
 
 beforeEach(() => {
   document.body.innerHTML = "";
+});
+
+it("recovers a unique marquee quote with context, preserving scope", () => {
+  const root = mount("<p>Before the selected words after.</p>");
+  const anchor = anchorFromUniqueQuote(root, "selected words", "chapter");
+  expect(anchor).toMatchObject({ kind: "text", start: 11, end: 25, scope: "chapter", exact: "selected words" });
+  expect(rangeFromAnchor(root, anchor!)?.toString()).toBe("selected words");
+  expect(anchorFromUniqueQuote(root, "words that are gone")).toBeNull();
+});
+
+it("keeps an ambiguous marquee as a region instead of guessing a quote", () => {
+  const root = mount("<p>Repeated words</p><p>Repeated words</p>");
+  expect(anchorFromUniqueQuote(root, "Repeated words")).toBeNull();
+  expect(anchorFromUniqueQuote(root, "  ")).toBeNull();
 });
 
 describe("textOf", () => {

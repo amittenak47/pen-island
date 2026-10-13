@@ -2,12 +2,22 @@ import { describe, expect, it } from "vitest";
 
 import {
   footnoteThemeVars,
+  contrastRatio,
   readableInk,
   readableInkOn,
   relativeLuminance,
 } from "./footnoteTheme";
 
 describe("footnoteThemeVars", () => {
+  it("keeps numbers readable on light, dark and mid-tone badge colours", () => {
+    for (const color of ["#fff3e2", "#111111", "#777777", "#0d9488", "#e90074"]) {
+      const style = footnoteThemeVars(color, [color, color]);
+      const fill = String(style["--lc-fn-badge-fill" as keyof typeof style]);
+      const ink = String(style["--lc-fn-badge-ink" as keyof typeof style]);
+      expect(fill).toBe(color);
+      expect(contrastRatio(fill, ink)).toBeGreaterThanOrEqual(4.5);
+    }
+  });
   it("puts selected color in --lc-fn-color and rotates it to --lc-fn-p0", () => {
     const palette = ["#483838", "#42855b", "#90b77d", "#d2d79f"];
     const style = footnoteThemeVars("#90b77d", palette);

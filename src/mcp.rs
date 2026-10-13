@@ -96,6 +96,80 @@ pub fn serve_from_config(hub: Option<String>) -> Result<()> {
     serve(&client)
 }
 
+/// A private HTTP adapter for clients/tunnels that do not launch stdio servers.
+/// Only footnote tools are exposed; the LAN hub's other routes stay private.
+pub fn serve_http_from_config(hub: Option<String>, address: std::net::SocketAddr, token_file: Option<&std::path::Path>) -> Result<()> {
+    anyhow::ensure!(address.ip().is_loopback(), "MCP HTTP must listen on a loopback address; use an authenticated private tunnel for cloud assistants");
+    let token_file = token_file.context("MCP HTTP requires --auth-token-file with a separate strong bearer token; do not use the LAN pairing code")?;
+    let token = std::fs::read_to_string(token_file).context("cannot read the MCP bearer token file")?;
+    let token = token.trim();
+    anyhow::ensure!(valid_http_token(token), "MCP bearer token must contain 32 to 256 ASCII letters, digits, '-' or '_'");
+    let token = token.to_owned();
+    let cfg = Config::load()?;
+    let base = hub.unwrap_or_else(|| format!("http://127.0.0.1:{}", cfg.serve.port));
+    // Construct/drop reqwest's blocking client outside the async runtime.
+    let client = std::sync::Arc::new(HttpFootnoteHub::new(base, cfg.serve.token)?);
+    tokio::runtime::Runtime::new()?.block_on(async {
+        let listener = tokio::net::TcpListener::bind(address).await?;
+        eprintln!("ChatBot MCP: http://{}/mcp", listener.local_addr()?);
+        axum::serve(listener, http_router(client.clone(), address, token)).await?;
+        Ok(())
+    })
+}
+
+fn valid_http_token(token: &str) -> bool {
+    (32..=256).contains(&token.len()) && token.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+#[derive(Clone)]
+struct HttpGuard {
+    address: std::net::SocketAddr,
+    token: String,
+}
+
+fn http_router(hub: std::sync::Arc<dyn FootnoteHub + Send + Sync>, address: std::net::SocketAddr, token: String) -> axum::Router {
+    use axum::{extract::{DefaultBodyLimit, Request, State}, http::StatusCode, middleware::{self, Next}, response::{IntoResponse, Response}, routing::post, Json};
+    async fn guard(State(guard): State<HttpGuard>, request: Request, next: Next) -> Response {
+        let mut headers = request.headers().get_all("authorization").iter();
+        let supplied = headers.next().and_then(|header| header.to_str().ok())
+            .and_then(|header| header.split_once(' '))
+            .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("Bearer"))
+            .map(|(_, value)| value);
+        if headers.next().is_some() || !supplied.is_some_and(|token| crate::serve::constant_time_eq(token.as_bytes(), guard.token.as_bytes())) {
+            return (StatusCode::UNAUTHORIZED, [("www-authenticate", "Bearer realm=\"Pen Island MCP\"")]).into_response();
+        }
+        let address = guard.address;
+        if let Some(origin) = request.headers().get("origin") {
+            // Compare the complete origin, never prefixes (localhost.evil etc.).
+            let allowed = [format!("http://{address}"), format!("http://localhost:{}", address.port())];
+            if !origin.to_str().ok().is_some_and(|origin| allowed.iter().any(|value| value == origin)) {
+                return StatusCode::FORBIDDEN.into_response();
+            }
+        }
+        if let Some(version) = request.headers().get("mcp-protocol-version") {
+            if !version.to_str().ok().is_some_and(|version| SUPPORTED_PROTOCOLS.contains(&version)) {
+                return StatusCode::BAD_REQUEST.into_response();
+            }
+        }
+        next.run(request).await
+    }
+    async fn handle(State(hub): State<std::sync::Arc<dyn FootnoteHub + Send + Sync>>, Json(message): Json<Value>) -> Response {
+        if !message.is_object() || message.get("jsonrpc").and_then(Value::as_str) != Some("2.0") {
+            return (StatusCode::BAD_REQUEST, Json(error_reply(&Value::Null, -32600, "Invalid Request"))).into_response();
+        }
+        match tokio::task::spawn_blocking(move || dispatch(hub.as_ref(), &message)).await {
+            Ok(Some(reply)) => Json(reply).into_response(),
+            Ok(None) => StatusCode::ACCEPTED.into_response(),
+            Err(_) => StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+        }
+    }
+    axum::Router::new()
+        .route("/mcp", post(handle).get(|| async { StatusCode::METHOD_NOT_ALLOWED }))
+        .route_layer(middleware::from_fn_with_state(HttpGuard { address, token }, guard))
+        .layer(DefaultBodyLimit::max(1024 * 1024))
+        .with_state(hub)
+}
+
 /// Newline-delimited JSON-RPC on stdin/stdout. Notifications get no reply.
 pub fn serve(hub: &dyn FootnoteHub) -> Result<()> {
     let stdin = std::io::stdin();
@@ -162,11 +236,13 @@ fn tool_list() -> Vec<Value> {
     vec![
         json!({
             "name": "list_footnote_requests",
+            "annotations": { "readOnlyHint": true, "openWorldHint": false },
             "description": "List pending footnote requests, oldest first. Each item has id, doc_name, page, excerpt, context, prompt, and created_at.",
             "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
         }),
         json!({
             "name": "get_footnote_request",
+            "annotations": { "readOnlyHint": true, "openWorldHint": false },
             "description": "Fetch one footnote request, including wide_context and page_footnotes (other footnotes already on that page).",
             "inputSchema": {
                 "type": "object",
@@ -177,6 +253,7 @@ fn tool_list() -> Vec<Value> {
         }),
         json!({
             "name": "submit_footnote",
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false },
             "description": format!("Store the footnote for a pending request. {INSTRUCTIONS}"),
             "inputSchema": {
                 "type": "object",
@@ -330,6 +407,71 @@ mod tests {
 
     fn request(id: i64, method: &str, params: Value) -> Value {
         json!({ "jsonrpc": "2.0", "id": id, "method": method, "params": params })
+    }
+
+    #[tokio::test]
+    async fn http_adapter_negotiates_and_rejects_foreign_origins_and_protocols() {
+        use axum::{body::Body, http::{Request, StatusCode}};
+        use tower::ServiceExt;
+        let app = http_router(std::sync::Arc::new(fake()), "127.0.0.1:7879".parse().unwrap(), "test-token-with-at-least-32-characters".into());
+        let post = || Request::post("/mcp").header("content-type", "application/json")
+            .header("authorization", "Bearer test-token-with-at-least-32-characters")
+            .body(Body::from(request(1, "initialize", json!({"protocolVersion":"2025-06-18"})).to_string())).unwrap();
+        let response = app.clone().oneshot(post()).await.unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), 16_384).await.unwrap();
+        let body: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(body["result"]["protocolVersion"], "2025-06-18");
+        for origin in ["https://evil.example", "http://localhost.evil:7879", "null"] {
+            let mut request = post(); request.headers_mut().insert("origin", origin.parse().unwrap());
+            assert_eq!(app.clone().oneshot(request).await.unwrap().status(), StatusCode::FORBIDDEN);
+        }
+        let mut request = post(); request.headers_mut().insert("mcp-protocol-version", "unsupported".parse().unwrap());
+        assert_eq!(app.clone().oneshot(request).await.unwrap().status(), StatusCode::BAD_REQUEST);
+        let notification = Request::post("/mcp").header("content-type", "application/json")
+            .header("authorization", "Bearer test-token-with-at-least-32-characters")
+            .body(Body::from(json!({"jsonrpc":"2.0","method":"notifications/initialized"}).to_string())).unwrap();
+        assert_eq!(app.clone().oneshot(notification).await.unwrap().status(), StatusCode::ACCEPTED);
+        assert_eq!(app.oneshot(Request::get("/mcp").header("authorization", "Bearer test-token-with-at-least-32-characters").body(Body::empty()).unwrap()).await.unwrap().status(), StatusCode::METHOD_NOT_ALLOWED);
+    }
+
+    #[tokio::test]
+    async fn http_adapter_requires_bearer_auth_before_tools_or_notifications() {
+        use axum::{body::Body, http::{Request, StatusCode}};
+        use tower::ServiceExt;
+        let token = "test-token-with-at-least-32-characters";
+        let app = http_router(std::sync::Arc::new(fake()), "127.0.0.1:7879".parse().unwrap(), token.into());
+        for method in ["initialize", "tools/list", "tools/call", "notifications/initialized"] {
+            for supplied in [None, Some("Bearer wrong-token"), Some("Basic test-token-with-at-least-32-characters")] {
+                let mut request = Request::post("/mcp").header("content-type", "application/json");
+                if let Some(value) = supplied { request = request.header("authorization", value); }
+                let response = app.clone().oneshot(request.body(Body::from(request_body(method))).unwrap()).await.unwrap();
+                assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+                assert_eq!(response.headers()["www-authenticate"], "Bearer realm=\"Pen Island MCP\"");
+            }
+        }
+        let duplicate = Request::post("/mcp").header("content-type", "application/json")
+            .header("authorization", format!("Bearer {token}"))
+            .header("authorization", format!("Bearer {token}"))
+            .body(Body::from(request_body("tools/list"))).unwrap();
+        assert_eq!(app.clone().oneshot(duplicate).await.unwrap().status(), StatusCode::UNAUTHORIZED);
+        let valid = Request::post("/mcp").header("content-type", "application/json")
+            .header("authorization", format!("bearer {token}"))
+            .body(Body::from(request_body("tools/list"))).unwrap();
+        assert_eq!(app.oneshot(valid).await.unwrap().status(), StatusCode::OK);
+    }
+
+    fn request_body(method: &str) -> String {
+        json!({"jsonrpc":"2.0","id":1,"method":method}).to_string()
+    }
+
+    #[test]
+    fn http_tokens_reject_pairing_codes_empty_or_header_unsafe_values() {
+        for invalid in ["", "123456", "short-token", " spaces-are-not-allowed-in-a-token ", "unicode-not-allowed-in-a-token-é"] {
+            assert!(!valid_http_token(invalid));
+        }
+        assert!(!valid_http_token(&"a".repeat(257)));
+        assert!(valid_http_token("test-token-with-at-least-32-characters"));
     }
 
     #[test]

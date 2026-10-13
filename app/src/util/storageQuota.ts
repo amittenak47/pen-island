@@ -9,8 +9,8 @@
  *
  * So the quota failure gets a type of its own. It is deliberately *not* one of
  * the existing `*LibraryFullError`s: those are entry-count errors that fire at
- * 30 and 20 entries regardless of size, and the byte wall is always hit long
- * before either. Reporting "at most 30 documents" to someone with four is how
+ * a fixed number of entries regardless of size, and the byte wall is always hit long
+ * before either. Reporting "at most 250 documents" to someone with four is how
  * the real problem stayed invisible.
  */
 

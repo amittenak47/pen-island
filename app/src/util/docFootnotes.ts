@@ -199,7 +199,7 @@ export interface DocFootnote {
    */
   subMarks?: DocFootnoteSubMark[];
   /**
-   * Request id while GrokBot has not answered.
+   * Request id while ChatBot has not answered.
    *
    * Cleared when the answer is written onto this mark. Empty or non-string
    * values are dropped on read — a spinner with no request is a stuck mark.

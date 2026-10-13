@@ -7,6 +7,8 @@
  */
 
 import { inkSwatches } from "../canvas/inkColors";
+import { mixHex } from "./footnoteTheme";
+import { paletteDeltaE } from "./paletteMix";
 
 /** One palette = the swatches on the colour wheel. */
 export type InkPalette = string[];
@@ -216,13 +218,71 @@ export function stepFallbackPalette(current: readonly string[], delta: 1 | -1): 
   return paletteForMarkIndex(i + delta);
 }
 
-/** First swatch of {@link paletteForMarkIndex} — the colour a new mark starts on. */
-export function footnoteThemeSeed(existingCount: number): {
+function footnoteColorKey(color: string): string {
+  const raw = color.trim().replace(/^#/, "").toLowerCase();
+  return raw.length === 3 ? [...raw].map(c => c + c).join("") : raw;
+}
+
+function unusedFootnoteShade(base: string, used: readonly string[]): string | null {
+  const keys = new Set(used.map(footnoteColorKey));
+  let best: string | null = null, bestDistance = -1;
+  for (let shade = 0; shade <= 16; shade++) {
+    const color = shade === 0 ? base : mixHex(
+      shade % 2 ? "#ffffff" : "#000000", base, Math.ceil(shade / 2) * 0.1,
+    );
+    if (keys.has(footnoteColorKey(color))) continue;
+    const distance = Math.min(...used.map(other => paletteDeltaE(color, other)));
+    if (distance >= 8) return color;
+    if (distance > bestDistance) { best = color; bestDistance = distance; }
+  }
+  return best;
+}
+
+/** Seed locally, shading a repeated swatch before choosing another palette. */
+export function footnoteThemeSeed(existing: number | readonly { color?: string; palette?: readonly string[] }[]): {
   color: string;
   palette: InkPalette;
 } {
+  const existingCount = typeof existing === "number" ? existing : existing.length;
   const palette = paletteForMarkIndex(existingCount);
+  if (typeof existing === "number") return { color: palette[0]!, palette };
+  const used = existing.map((mark, index) => (
+    mark.color ?? mark.palette?.[0] ?? paletteForMarkIndex(index)[0]!
+  ));
+  for (let offset = 0; offset < COLORHUNT_FALLBACK_CODES.length; offset++) {
+    const next = paletteForMarkIndex(existingCount + offset);
+    const color = unusedFootnoteShade(next[0]!, used);
+    if (color) return { color, palette: [color, ...next.slice(1)] };
+  }
+  // Beyond the local shade pool, keep exact colours unique without a network call.
+  const keys = new Set(used.map(footnoteColorKey));
+  const base = parseInt(footnoteColorKey(palette[0]!), 16);
+  for (let offset = 1; offset <= keys.size + 1; offset++) {
+    const color = `#${((base + offset) & 0xffffff).toString(16).padStart(6, "0")}`;
+    if (!keys.has(footnoteColorKey(color))) return { color, palette: [color, ...palette.slice(1)] };
+  }
   return { color: palette[0]!, palette };
+}
+
+/** Shared page/card/chat colours, including legacy duplicates; stored marks stay intact. */
+export function footnoteDisplayThemes(marks: readonly {
+  id: string; number?: number; color?: string; palette?: readonly string[];
+}[]): Map<string, { color: string; palette: InkPalette }> {
+  const themes = new Map<string, { color: string; palette: InkPalette }>();
+  const used: string[] = [];
+  const ordered = [...marks].sort((a, b) => (a.number ?? Infinity) - (b.number ?? Infinity) || a.id.localeCompare(b.id));
+  for (let index = 0; index < ordered.length; index++) {
+    const mark = ordered[index]!;
+    const palette = normalizePalette(mark.palette) ?? paletteForMarkIndex((mark.number ?? index + 1) - 1);
+    const base = mark.color?.trim() || palette[0]!;
+    let color = base;
+    if (used.some(other => footnoteColorKey(other) === footnoteColorKey(base))) {
+      color = unusedFootnoteShade(base, used) ?? footnoteThemeSeed([...themes.values()]).color;
+    }
+    themes.set(mark.id, { color, palette: color === base ? palette : [color, ...palette.filter(other => footnoteColorKey(other) !== footnoteColorKey(base))].slice(0, 4) });
+    used.push(color);
+  }
+  return themes;
 }
 
 /** Keep the same wheel slot when this mark's palette set changes. */

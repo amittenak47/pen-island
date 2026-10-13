@@ -10,7 +10,7 @@ export const RECENT_WORKSPACE_LIMIT = 12;
 
 /** Entity identity, including files read without saving an annotation set. */
 export function recentWorkspaceKey(tab: TabRecord): string | null {
-  if (tab.artifact) return null;
+  if (tab.artifact || tab.kind === "annotate" && tab.footnoteNote) return null;
   switch (tab.kind) {
     case "practice": return `practice:${tab.dataset}/${tab.taskId}`;
     case "whiteboard": return !tab.footnoteBoard && tab.notebookId ? `whiteboard:${tab.notebookId}` : null;

@@ -200,6 +200,20 @@ describe("tabsReducer", () => {
     expect(sameEntity(a, board("b3", "nb-1"))).toBe(false);
   });
 
+  it("keeps a full note separate from its document and other notes, but reuses the same note", () => {
+    const parent = doc("parent", "h-1", 0, "book");
+    const note: AnnotateTab = { ...parent, id: "note", footnoteNote: { docId: "book", footnoteId: "f1", noteId: "n1" } };
+    expect(sameEntity(parent, note)).toBe(false);
+    expect(sameEntity(note, parent)).toBe(false);
+    expect(sameEntity(note, { ...note, id: "other-chip" })).toBe(true);
+    expect(sameEntity(note, { ...note, footnoteNote: { ...note.footnoteNote!, noteId: "n2" } })).toBe(false);
+    expect(sameEntity(note, { ...note, footnoteNote: { ...note.footnoteNote!, footnoteId: "f2" } })).toBe(false);
+    const state = run(initialTabState(), { type: "open", tab: parent, at: 1 },
+      { type: "open", tab: note, at: 2 }, { type: "open", tab: { ...note, id: "again" }, at: 3 });
+    expect(state.tabs.map(tab => tab.id)).toEqual([HOME_TAB_ID, "parent", "note"]);
+    expect(state.activeId).toBe("note");
+  });
+
   it("caps web tabs and evicts the least recently used one", () => {
     const state = run(
       initialTabState(),

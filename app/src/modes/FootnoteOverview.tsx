@@ -21,7 +21,9 @@ import {
 } from "../util/docFootnotes";
 import { ColorRadial } from "../canvas/ColorRadial";
 import { HoldButton } from "../components/HoldButton";
-import { UnderlineIcon } from "../components/MarkToolIcons";
+import { PenToolIcon, UnderlineIcon } from "../components/MarkToolIcons";
+import { ExpandNoteIcon, PictureInPictureIcon } from "../components/NoteWindowIcons";
+import { FootnoteMiniNotes, MINI_NOTE_LIMIT, openMiniNote, type MiniNoteRef } from "./FootnoteMiniNotes";
 import { isDocChromeTarget, pointerInSubMark } from "../canvas/docSelectionGesture";
 import { copyTextToClipboard } from "../util/clipboard";
 import { loadInkHandedness } from "../util/inkHandedness";
@@ -48,6 +50,11 @@ export interface FootnoteOverviewProps {
   onManageArtifacts?: () => void;
   footnote: DocFootnote;
   number?: number;
+  displayTheme?: { color: string; palette: readonly string[] };
+  onOpenMiniNote?: (noteId: string) => void;
+  onOpenFullNote?: (noteId: string) => void;
+  openMiniNoteIds?: readonly string[];
+  miniNoteCount?: number;
   /** The turns of one saved thread — the card asks per thread, as it opens them. */
   threadMessages: (rootId: string) => AgentChatMessage[];
   availableThreads?: readonly {rootId: string; title: string}[];
@@ -249,14 +256,15 @@ function clampPanel(node: HTMLElement, anchorRect: DOMRect | null | undefined) {
   }
   settle(node, left, top, pane);
 }
-function applyViewportSize(node: HTMLElement, task: Task | null, compact = false) {
+function applyViewportSize(node: HTMLElement, task: Task | null, compact = false, bounds?: DOMRect) {
   const margin = 16;
   const { width, height } = viewport();
   node.style.setProperty("--lc-vvh", `${Math.round(height)}px`);
   node.style.setProperty("--lc-vvw", `${Math.round(width)}px`);
   const maxH = Math.round(height - margin * 2);
-  const maxW = Math.min(280, Math.round(width - margin * 2));
+  const maxW = Math.min(280, Math.round(width - margin * 2), bounds ? bounds.width - 16 : width);
   node.style.maxWidth = `${maxW}px`;
+  node.style.width = "";
   node.style.height = "";
   if (task?.kind === "thread") {
     node.style.maxHeight = `${Math.min(Math.round(height * 0.62), maxH, 520)}px`;
@@ -361,6 +369,11 @@ export function FootnoteOverview({
   onManageArtifacts,
   footnote,
   number: footnoteNumber,
+  displayTheme,
+  onOpenMiniNote,
+  onOpenFullNote,
+  openMiniNoteIds = [],
+  miniNoteCount = 0,
   threadMessages,
   availableThreads = [],
   onClose,
@@ -392,24 +405,19 @@ export function FootnoteOverview({
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   const [task, setTask] = useState<Task | null>(null);
   const [draft, setDraft] = useState("");
+  const [localMiniNotes, setLocalMiniNotes] = useState<MiniNoteRef[]>([]);
   const palette =
-    normalizePalette(footnote.palette) ?? paletteForMarkIndex((footnoteNumber ?? 1) - 1);
+    normalizePalette(displayTheme?.palette ?? footnote.palette) ?? paletteForMarkIndex((footnoteNumber ?? 1) - 1);
   const handedness = loadInkHandedness();
-  const markColor = footnote.color ?? palette[0] ?? "#0d9488";
+  const markColor = displayTheme?.color ?? footnote.color ?? palette[0] ?? "#0d9488";
   const userLinks = footnote.userLinks ?? [];
   const notes = footnote.notes ?? [];
   const whiteboards = footnote.whiteboards ?? [];
   const threads = footnote.threads ?? [];
   const subMarks = footnote.subMarks ?? [];
-  /*
-   * Rows that only read.
-   *
-   * A coach mark already renders this way — its notes and boards are the
-   * agent's account of the mark, not a list to edit — so read-only reuses that
-   * shape rather than inventing a second one.
-   */
+  // Completed ChatBot marks accept the same manual notes as other marks.
   const isAiTab = footnote.kind === "ai";
-  const rowsAreReadOnly = isAiTab || readOnly;
+  const rowsAreReadOnly = readOnly;
   const searchLink =
     footnote.kind === "search" && footnote.url
       ? { title: footnote.query || "Search", url: footnote.url }
@@ -503,6 +511,7 @@ export function FootnoteOverview({
     const onDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
       if (isDocChromeTarget(event.target)) return;
+      if (event.target instanceof Element && event.target.closest(".lc-footnote-mini-tray")) return;
       if (pointerInSubMark(event.clientX, event.clientY)) return;
       if (task) {
         setTask(null);
@@ -537,7 +546,13 @@ export function FootnoteOverview({
     const node = panelRef.current;
     if (!node) return;
     const live = liveFootnoteAnchorRect(footnote.id, anchorRect) ?? anchorRect ?? null;
-    applyViewportSize(node, task);
+    const bounds = paneBox(live);
+    applyViewportSize(node, task, false, bounds);
+    if (miniNoteCount > 0 || localMiniNotes.length > 0) {
+      node.style.maxHeight = `${Math.max(100, bounds.height * .48 - 16)}px`;
+      settle(node, bounds.left + 8, bounds.top + 8, bounds);
+      return;
+    }
     if (
       hasUsableViewportBox(live) &&
       live &&
@@ -547,7 +562,7 @@ export function FootnoteOverview({
       return;
     }
     clampPanel(node, live);
-  }, [anchorRect, footnote.id, onClose, task]);
+  }, [anchorRect, footnote.id, onClose, task, miniNoteCount, localMiniNotes.length]);
   useLayoutEffect(() => {
     place();
     const node = panelRef.current;
@@ -667,6 +682,21 @@ export function FootnoteOverview({
   const editingLink =
     task?.kind === "link" && task.index != null ? userLinks[task.index] ?? null : null;
   const tint = footnoteThemeVars(markColor, palette);
+  const localMiniEntries = localMiniNotes.flatMap(ref => {
+    const note = notes.find(entry => entry.id === ref.noteId);
+    return ref.footnoteId === footnote.id && note ? [{ ...ref, note, footnote,
+      number: footnoteNumber, noteNumber: notes.indexOf(note) + 1,
+      theme: { color: markColor, palette } }] : [];
+  });
+  const activeMiniIds = onOpenMiniNote ? openMiniNoteIds : localMiniEntries.map(entry => entry.noteId);
+  const activeMiniCount = onOpenMiniNote ? miniNoteCount : localMiniEntries.length;
+  const canOpenMini = (id: string) => activeMiniIds.includes(id) || activeMiniCount < MINI_NOTE_LIMIT;
+  const showMini = (id: string) => {
+    if (!canOpenMini(id)) return;
+    if (onOpenMiniNote) onOpenMiniNote(id);
+    else setLocalMiniNotes(current => openMiniNote(current, { footnoteId: footnote.id, noteId: id }));
+  };
+  const localMiniBounds = useCallback(() => paneBox(anchorRect), [anchorRect]);
   const taskMotion = {
     initial: { opacity: 0 },
     animate: { opacity: 1 },
@@ -689,7 +719,7 @@ export function FootnoteOverview({
         style={{ zIndex: 232 }}
       />
       <motion.div
-        className={`lc-doc-sheet lc-footnote-overview${taskClass}`}
+        className={`lc-doc-sheet lc-footnote-overview${taskClass}${isAiTab && !footnote.pending ? " is-chatbot-complete" : ""}`}
         ref={panelRef}
         role="dialog"
         aria-label={
@@ -703,6 +733,13 @@ export function FootnoteOverview({
                 ? `Footnote ${footnoteNumber}`
                 : "Footnote"
         }
+        onKeyDown={event => {
+          if (event.key !== "Escape") return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (task) setTask(null);
+          else onClose();
+        }}
         style={{ visibility: "hidden", zIndex: 233, ...tint }}
       >
         <AnimatePresence mode="wait" initial={false}>
@@ -1003,45 +1040,42 @@ export function FootnoteOverview({
                   )}
                 </HubSection>
               )}
-              {rowsAreReadOnly ? (
-                notes.length > 0 || footnote.pending ? (
-                  <HubSection title="Notes">
-                    {footnote.pending ? <p className="lc-muted">GrokBot is writing...</p> : null}
-                    {notes.length > 0 && (
-                    <ul className={listClass(notes.length)}>
-                      {notes.map((note) => (
-                        <li key={note.id}>
-                          <span className="lc-agent-scope-option">
-                            {note.text && <strong className="lc-footnote-overview-entry-text">{note.text}</strong>}
-                            <NoteImages images={note.images} />
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                    )}
-                  </HubSection>
-                ) : null
-              ) : (
-              <HubSection title="Notes" onAdd={() => openTask({ kind: "note", id: null })}>
-                {footnote.pending ? <p className="lc-muted">GrokBot is writing...</p> : null}
+              {(!rowsAreReadOnly || notes.length > 0 || footnote.pending) && (
+              <HubSection title="Notes" onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}>
+                {footnote.pending ? <p className="lc-muted">ChatBot is writing...</p> : null}
                 {notes.length > 0 && (
                   <ul className={listClass(notes.length)}>
-                    {notes.map((note) => (
-                      <li key={note.id}>
-                        <HoldButton
+                    {notes.map((note, index) => (
+                      <li key={note.id} className="lc-footnote-note-row">
+                        {rowsAreReadOnly ? <button type="button" className="lc-agent-scope-option lc-footnote-note-mini"
+                          aria-label={`Preview note ${index + 1}`} disabled={!canOpenMini(note.id)}
+                          onClick={() => showMini(note.id)}>
+                          {note.text && <strong className="lc-footnote-overview-entry-text">{note.text}</strong>}
+                          <NoteImages images={note.images} />
+                        </button> : <HoldButton
                           label={note.text || "Picture"}
                           className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
-                          ariaLabel={`${note.text || "Picture note"} — tap to edit, hold to delete`}
+                          ariaLabel={`Preview note ${index + 1} — hold to delete`}
                           holdMs={HOLD_SENSITIVE_MS}
                           holdThrough
-                          onTap={() => openTask({ kind: "note", id: note.id })}
+                          onTap={() => showMini(note.id)}
                           onConfirm={() =>
                             updateNotes(notes.filter((entry) => entry.id !== note.id))
                           }
                         >
                           {note.text && <strong className="lc-footnote-overview-entry-text">{note.text}</strong>}
                           <NoteImages images={note.images} />
-                        </HoldButton>
+                        </HoldButton>}
+                        <div className="lc-footnote-note-actions">
+                          <button type="button" className="lc-footnote-mark-tool" aria-label={`Open mini note ${index + 1}`}
+                            disabled={!canOpenMini(note.id)} aria-pressed={activeMiniIds.includes(note.id)}
+                            title={canOpenMini(note.id) ? "Open mini note" : "Close a mini note to open another (3 maximum)"}
+                            onClick={() => showMini(note.id)}><PictureInPictureIcon /></button>
+                          {onOpenFullNote && <button type="button" className="lc-footnote-mark-tool" aria-label={`Open full note ${index + 1}`}
+                            title="Open note in tab" onClick={() => onOpenFullNote(note.id)}><ExpandNoteIcon /></button>}
+                          {!readOnly && <button type="button" className="lc-footnote-mark-tool" aria-label={`Edit note ${index + 1}`}
+                            title="Edit note" onClick={() => openTask({ kind: "note", id: note.id })}><PenToolIcon /></button>}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -1132,6 +1166,9 @@ export function FootnoteOverview({
           )}
         </AnimatePresence>
       </motion.div>
+      {!onOpenMiniNote && <FootnoteMiniNotes entries={localMiniEntries} getBounds={localMiniBounds}
+        onClose={ref => setLocalMiniNotes(current => current.filter(entry => entry.noteId !== ref.noteId))}
+        onOpenExternal={onOpenExternal} />}
     </>,
     document.body,
   );

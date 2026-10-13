@@ -1,15 +1,16 @@
 /**
- * Microphone dictation for the agent composer, on Android only.
+ * Microphone dictation for the agent composer on Android and desktop.
  *
- * The page cannot run the recognizer itself: speech is a native service, and
- * a desktop build has none. The composer asks the shell to start and stop,
- * and the shell pushes what it heard as window events. A partial replaces the
+ * Android's live recognizer is a native service. Desktop captures a WAV clip
+ * in the WebView and asks the shell to transcribe it on Stop. Both paths use
+ * session-scoped window events. A partial replaces the
  * guess for the current segment; a final commits that segment, and the next
  * partial starts a new one. Spoken words replace the textarea selection that
  * was current when listening began.
  */
 
 import { isAndroidDevice } from "./androidDevice";
+import { cancelDesktopRecording, startDesktopRecording, stopDesktopRecording } from "./desktopVoiceRecorder";
 
 export const VOICE_EVENT = "lc-voice";
 
@@ -26,8 +27,8 @@ export type VoiceEvent = { sessionId: string } & (
 let known: Promise<boolean> | null = null;
 
 /**
- * Whether the native recognizer exists here. Cached after the first answer.
- * False off Android, outside Tauri, or if the invoke throws — a throw is not
+ * Whether microphone dictation is supported here. Cached after the first answer.
+ * False without desktop capture APIs, outside Tauri, or if invoke throws — a throw is not
  * cached, so a probe that failed during startup is asked again next time.
  */
 export function voiceDictationAvailable(): Promise<boolean> {
@@ -40,8 +41,9 @@ export function voiceDictationAvailable(): Promise<boolean> {
 }
 
 async function ask(): Promise<boolean> {
-  if (typeof window === "undefined" || !isAndroidDevice()) return false;
+  if (typeof window === "undefined") return false;
   if (!(window as { __TAURI_INTERNALS__?: unknown }).__TAURI_INTERNALS__) return false;
+  if (!isAndroidDevice() && (!navigator.mediaDevices?.getUserMedia || typeof AudioContext === "undefined")) return false;
   const { invoke } = await import("@tauri-apps/api/core");
   const ok = await invoke<boolean>("voice_available");
   return ok === true;
@@ -52,6 +54,15 @@ export async function startVoiceDictation(sessionId: string): Promise<void> {
   const { invoke } = await import("@tauri-apps/api/core");
   try {
     await invoke("voice_start", { sessionId });
+    if (!isAndroidDevice()) {
+      try {
+        const started = await startDesktopRecording(sessionId, () => window.dispatchEvent(new CustomEvent(VOICE_EVENT, { detail: { sessionId, type: "limit" } })));
+        if (!started) await invoke("voice_cancel", { sessionId });
+      } catch (error) {
+        await cancelVoiceDictation(sessionId);
+        throw error;
+      }
+    }
   } catch (err) {
     if (typeof err === "string") throw new Error(err);
     throw err;
@@ -62,9 +73,18 @@ export async function startVoiceDictation(sessionId: string): Promise<void> {
 export async function stopVoiceDictation(sessionId: string): Promise<void> {
   try {
     const { invoke } = await import("@tauri-apps/api/core");
+    if (!isAndroidDevice()) {
+      const audioBase64 = stopDesktopRecording(sessionId);
+      if (audioBase64 !== null) await invoke("voice_transcribe", { sessionId, audioBase64 });
+      else await invoke("voice_stop", { sessionId });
+      return;
+    }
     await invoke("voice_stop", { sessionId });
-  } catch {
-    // Stopping is best-effort: the recognizer may already be gone.
+  } catch (error) {
+    if (!isAndroidDevice()) {
+      window.dispatchEvent(new CustomEvent(VOICE_EVENT, { detail: { sessionId, type: "error", code: "transcription", message: error instanceof Error ? error.message : String(error) } }));
+      window.dispatchEvent(new CustomEvent(VOICE_EVENT, { detail: { sessionId, type: "end" } }));
+    }
   }
 }
 
@@ -80,6 +100,7 @@ export async function cleanupDictation(text: string): Promise<string> {
 
 /** Drop the session without transcribing. Never rejects. */
 export async function cancelVoiceDictation(sessionId: string): Promise<void> {
+  if (!isAndroidDevice()) cancelDesktopRecording(sessionId);
   try {
     const { invoke } = await import("@tauri-apps/api/core");
     await invoke("voice_cancel", { sessionId });

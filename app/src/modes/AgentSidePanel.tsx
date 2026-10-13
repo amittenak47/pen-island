@@ -44,6 +44,7 @@ import {
   type AgentReasoningLevel,
 } from "../util/agentPrefs";
 import { footnoteThemeVars } from "../util/footnoteTheme";
+import { paletteForMarkIndex } from "../util/inkPaletteHistory";
 import { useIsMobile } from "../util/mobile";
 import { PHOTO_ATTACH_LIMIT, pickPhotos } from "../util/photoAttach";
 import { drawingHeading } from "../viz/vizProse";
@@ -2495,54 +2496,6 @@ export function AgentSidePanel({
         <form className="lc-agent-composer" inert={chatFocus === "messages"} aria-hidden={chatFocus === "messages" || undefined} onSubmit={(event) => submit("queue", event)}>
           <div className="lc-agent-composer-clip">
           <div className="lc-agent-composer-body">
-          {allowAnnotations && attachedMarks.length > 0 && (
-            <>
-            <div className="lc-agent-mark-chips" aria-label="Attached annotations">
-              {attachedMarks.map((mark) => {
-                const overflow = Boolean(askPackPreview?.omittedMarkIds.includes(mark.id));
-                const chipLabel = footnoteChipLabel(mark.number, mark.title);
-                return (
-                <HoldButton
-                  key={mark.id}
-                  className={`lc-footnote-chip lc-hold-danger${overflow ? " is-overflow" : ""}`}
-                  label={chipLabel}
-                  ariaLabel={`Hold to remove ${chipLabel}`}
-                  style={footnoteThemeVars(mark.color, mark.palette ?? [])}
-                  dataTip={
-                    overflow
-                      ? "Will not be sent — this Ask is full. Hold to remove."
-                      : "Hold to remove"
-                  }
-                  dataTipPlacement="top"
-                  disabled={!onRemoveAttached}
-                  onConfirm={() => onRemoveAttached?.(mark.id)}
-                >
-                  <span className="lc-fn-badge" aria-hidden>
-                    {mark.number ?? ""}
-                  </span>
-                  {mark.title?.trim() ? (
-                    <span className="lc-footnote-chip-label">{mark.title.trim()}</span>
-                  ) : null}
-                </HoldButton>
-                );
-              })}
-            </div>
-            {askPackPreview &&
-              (askPackPreview.omittedMarkIds.length > 0 || askPackPreview.questionTruncated) && (
-                <p className="lc-agent-mark-fit">
-                  {askPackPreview.questionTruncated
-                    ? "The question will be truncated for the model."
-                    : null}
-                  {askPackPreview.questionTruncated && askPackPreview.omittedMarkIds.length > 0
-                    ? " "
-                    : null}
-                  {askPackPreview.omittedMarkIds.length > 0
-                    ? `Only ${askPackPreview.includedMarkIds.length} of ${attachedMarks.length} marks fit this Ask. The rest stay on the page.`
-                    : null}
-                </p>
-              )}
-            </>
-          )}
           {pageQuote && (
             <div className="lc-agent-reply-chip lc-agent-quote-chip">
               <span className="lc-agent-reply-chip-mark" aria-hidden />
@@ -2611,6 +2564,54 @@ export function AgentSidePanel({
           {photoError && <p className="lc-warning">{photoError}</p>}
           {voice.error && <p className="lc-warning">{voice.error}</p>}
           <div className="lc-agent-composer-field">
+          {allowAnnotations && attachedMarks.length > 0 && (
+            <>
+            <div className="lc-agent-mark-chips" aria-label="Attached annotations">
+              {attachedMarks.map((mark) => {
+                const overflow = Boolean(askPackPreview?.omittedMarkIds.includes(mark.id));
+                const chipLabel = footnoteChipLabel(mark.number, mark.title);
+                return (
+                <HoldButton
+                  key={mark.id}
+                  className={`lc-footnote-chip lc-hold-danger${overflow ? " is-overflow" : ""}`}
+                  label={chipLabel}
+                  ariaLabel={`Hold to remove ${chipLabel}`}
+                  style={footnoteThemeVars(mark.color, mark.palette ?? paletteForMarkIndex((mark.number ?? 1) - 1))}
+                  dataTip={
+                    overflow
+                      ? "Will not be sent — this Ask is full. Hold to remove."
+                      : "Hold to remove"
+                  }
+                  dataTipPlacement="top"
+                  disabled={!onRemoveAttached}
+                  onConfirm={() => onRemoveAttached?.(mark.id)}
+                >
+                  <span className="lc-fn-badge" aria-hidden>
+                    {mark.number ?? ""}
+                  </span>
+                  {mark.title?.trim() ? (
+                    <span className="lc-footnote-chip-label">{mark.title.trim()}</span>
+                  ) : null}
+                </HoldButton>
+                );
+              })}
+            </div>
+            {askPackPreview &&
+              (askPackPreview.omittedMarkIds.length > 0 || askPackPreview.questionTruncated) && (
+                <p className="lc-agent-mark-fit">
+                  {askPackPreview.questionTruncated
+                    ? "The question will be truncated for the model."
+                    : null}
+                  {askPackPreview.questionTruncated && askPackPreview.omittedMarkIds.length > 0
+                    ? " "
+                    : null}
+                  {askPackPreview.omittedMarkIds.length > 0
+                    ? `Only ${askPackPreview.includedMarkIds.length} of ${attachedMarks.length} marks fit this Ask. The rest stay on the page.`
+                    : null}
+                </p>
+              )}
+            </>
+          )}
           <span className="lc-agent-composer-expand">
             <PaneExpandButton
               pane="composer"
@@ -2974,7 +2975,7 @@ export function AgentSidePanel({
             return <button key={mark.id} type="button" role="menuitemcheckbox" aria-checked={picked}
               aria-label={footnoteChipLabel(mark.number, mark.title)} disabled={annotateUnavailable}
               className={`lc-footnote-chip${picked ? " is-picked" : ""}`}
-              style={footnoteThemeVars(mark.color, mark.palette ?? [])} onClick={() => onToggleAttached?.(mark.id)}>
+              style={footnoteThemeVars(mark.color, mark.palette ?? paletteForMarkIndex((mark.number ?? 1) - 1))} onClick={() => onToggleAttached?.(mark.id)}>
               <span className="lc-fn-badge" aria-hidden>{mark.number ?? ""}</span>
               {mark.title?.trim() ? <span className="lc-footnote-chip-label">{mark.title.trim()}</span> : null}
             </button>;

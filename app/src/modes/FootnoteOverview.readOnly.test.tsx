@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 
-import { FootnoteOverview } from "./FootnoteOverview";
+import { FootnoteOverview, type FootnoteOverviewProps } from "./FootnoteOverview";
 import type { DocFootnote } from "../util/docFootnotes";
 
 const MARK: DocFootnote = {
@@ -18,15 +18,17 @@ const MARK: DocFootnote = {
   whiteboards: [{ id: "wb1", title: "scratch", createdAt: 1, updatedAt: 1 }],
 };
 
-function mount(readOnly: boolean) {
+let mountedRoot: ReturnType<typeof createRoot> | undefined;
+function mount(readOnly: boolean, footnote = MARK, props: Partial<FootnoteOverviewProps> = {}) {
   const host = document.createElement("div");
   document.body.append(host);
   const root = createRoot(host);
+  mountedRoot = root;
   const onChange = vi.fn();
   act(() =>
     root.render(
       <FootnoteOverview
-        footnote={MARK}
+        footnote={footnote}
         readOnly={readOnly}
         onChange={onChange}
         onClose={() => {}}
@@ -35,6 +37,7 @@ function mount(readOnly: boolean) {
         onOpenExternal={() => {}}
         subMarkMode={null}
         onSubMarkModeChange={() => {}}
+        {...props}
       />,
     ),
   );
@@ -46,6 +49,8 @@ function addButtons() {
 }
 
 afterEach(() => {
+  if (mountedRoot) act(() => mountedRoot!.unmount());
+  mountedRoot = undefined;
   document.body.textContent = "";
 });
 
@@ -80,5 +85,58 @@ describe("FootnoteOverview readOnly", () => {
     mount(false);
     expect(addButtons().length).toBeGreaterThan(0);
     expect(document.querySelector('[aria-label="Underline"]')).not.toBeNull();
+  });
+
+  it("opens a separate mini while keeping the completed ChatBot footnote visible", async () => {
+    const { onChange } = mount(false, { ...MARK, kind: "ai" }, { number: 2,
+      displayTheme: { color: "#0d9488", palette: ["#0d9488", "#115e59", "#5eead4", "#ccfbf1"] } });
+    expect(document.querySelector('[aria-label="Add Notes"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Underline"]')).not.toBeNull();
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label^="Preview note 1"]')!.click());
+    await vi.waitFor(() => expect(document.querySelector('.lc-footnote-mini-note .lc-footnote-note-body')?.textContent).toContain(MARK.notes![0]!.text));
+    const card = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Footnote 2"]')!;
+    const mini = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Mini note 2.1"]')!;
+    expect(card).not.toBeNull();
+    expect(mini).not.toBeNull();
+    for (const variable of ["--lc-fn-color", "--lc-fn-wash", "--lc-fn-ink"]) {
+      expect(mini.style.getPropertyValue(variable)).toBe(card.style.getPropertyValue(variable));
+    }
+    act(() => mini.querySelector<HTMLButtonElement>('[aria-label="Close mini note"]')!.click());
+    expect(document.querySelector('.lc-footnote-mini-note')).toBeNull();
+    expect(document.querySelector('[aria-label="Footnote 2"]')).not.toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("reads a conflict copy in a mini without offering editing or a tab of a different copy", async () => {
+    const { onChange } = mount(true, { ...MARK, kind: "ai" });
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open mini note 1"]')!.click());
+    await vi.waitFor(() => expect(document.querySelector('.lc-footnote-mini-note .lc-footnote-note-body')?.textContent).toContain(MARK.notes![0]!.text));
+    expect(document.querySelector('[aria-label="Edit note 1"]')).toBeNull();
+    expect(document.querySelector('[aria-label="Open full note 1"]')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("sends full opening to the tab owner and leaves the footnote card in place", () => {
+    const onOpenFullNote = vi.fn();
+    const { onChange } = mount(false, MARK, { onOpenFullNote });
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open full note 1"]')!.click());
+    expect(onOpenFullNote).toHaveBeenCalledWith("n1");
+    expect(document.querySelector('[aria-label="Footnote"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Full note"]')).toBeNull();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("limits separate minis to three, reuses an open note, and permits another after closing", () => {
+    mount(false, { ...MARK, notes: Array.from({ length: 4 }, (_, i) => ({
+      id: `n${i + 1}`, text: `note ${i + 1}`, createdAt: 1, updatedAt: 1,
+    })) });
+    const open = (n: number) => act(() => document.querySelector<HTMLButtonElement>(`[aria-label="Open mini note ${n}"]`)!.click());
+    open(1); open(2); open(3); open(1); open(4);
+    expect(document.querySelectorAll('.lc-footnote-mini-note')).toHaveLength(3);
+    expect(document.querySelector<HTMLButtonElement>('[aria-label="Open mini note 4"]')!.disabled).toBe(true);
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Close mini note"]')!.click());
+    open(4);
+    expect(document.querySelectorAll('.lc-footnote-mini-note')).toHaveLength(3);
+    expect(document.querySelector('.lc-footnote-mini-note[data-note-id="n4"]')).not.toBeNull();
   });
 });

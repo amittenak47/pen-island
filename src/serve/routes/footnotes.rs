@@ -26,6 +26,7 @@ pub async fn create_footnote_request(Json(body): Json<Value>) -> Result<Json<foo
     })
     .await
     .map_err(map_store_error)?;
+    crate::serve::footnote_answers::schedule(row.clone());
     Ok(Json(row))
 }
 
@@ -103,6 +104,7 @@ fn footnote_results_on(conn: &rusqlite::Connection, device: &str) -> Result<Valu
 
 pub async fn footnote_results(Query(query): Query<ResultsQuery>) -> Result<Json<Value>, AppError> {
     let device = query.device.unwrap_or_default();
+    let pending_device = device.clone();
     // `blocking` flattens every failure to 500. A rejected device has to leave
     // the worker still marked 400.
     let value = tokio::task::spawn_blocking(move || -> Result<Value, AppError> {
@@ -111,6 +113,7 @@ pub async fn footnote_results(Query(query): Query<ResultsQuery>) -> Result<Json<
     })
     .await
     .map_err(|err| AppError::from(anyhow::anyhow!("a background task panicked: {err}")))??;
+    crate::serve::footnote_answers::resume(Some(pending_device));
     Ok(Json(value))
 }
 
@@ -198,6 +201,7 @@ mod footnote_tests {
 
     fn sample(id: &str, device: &str) -> NewFootnoteRequest {
         NewFootnoteRequest {
+            answer_mode: footnotes::AnswerMode::Bot,
             id: id.into(),
             device_id: device.into(),
             doc_id: "mdink-1".into(),
@@ -235,6 +239,30 @@ mod footnote_tests {
         assert_eq!(full.wide_context, "a lemma in a wider context");
         assert_eq!(full.page_footnotes[0]["excerpt"], "other");
         assert!(footnotes::get_request(&conn, "missing").unwrap().is_none());
+    }
+
+    #[test]
+    fn llm_requests_keep_their_route_across_reopen_and_do_not_enter_the_bot_inbox() {
+        let (dir, conn) = open();
+        let mut request = sample("fr-llm", "dev-a");
+        request.answer_mode = footnotes::AnswerMode::Llm;
+        footnotes::create_request(&conn, request, 10).unwrap();
+        footnotes::create_request(&conn, sample("fr-bot", "dev-a"), 20).unwrap();
+        let bot_rows = footnotes::list_pending(&conn).unwrap();
+        assert_eq!(bot_rows.len(), 1);
+        assert_eq!(bot_rows[0].id, "fr-bot");
+        assert!(footnotes::list_pending_llm(&conn, Some("dev-b")).unwrap().is_empty());
+        drop(conn);
+        let conn = crate::pads::open(&dir.path().join("pads.db")).unwrap();
+        let jobs = footnotes::list_pending_llm(&conn, Some("dev-a")).unwrap();
+        assert_eq!(jobs.len(), 1);
+        assert_eq!(jobs[0].answer_mode, footnotes::AnswerMode::Llm);
+        // A retried POST must not change the route or overwrite an answer.
+        let retried = footnotes::create_request(&conn, sample("fr-llm", "dev-a"), 30).unwrap();
+        assert_eq!(retried.answer_mode, footnotes::AnswerMode::Llm);
+        footnotes::submit_result(&conn, "fr-llm", &["Saved answer".into()], &[], 40).unwrap();
+        assert!(footnotes::list_pending_llm(&conn, None).unwrap().is_empty());
+        assert_eq!(footnotes::list_results(&conn, Some("dev-a")).unwrap().len(), 1);
     }
 
     #[test]

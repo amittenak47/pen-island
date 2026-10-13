@@ -1,0 +1,275 @@
+"""Optional GitHub OAuth front end for Pen Island's bearer-protected MCP.
+
+Only the three footnote tools are exposed. The public tunnel must target
+127.0.0.1:7880; the normal, authenticated lc adapter remains on 127.0.0.1:7879.
+Credentials are read from an ignored local JSON file, never command arguments.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+from dataclasses import dataclass, field
+import hashlib
+import hmac
+import json
+import logging
+from pathlib import Path
+import re
+import sys
+from typing import Annotated, Any
+from urllib.parse import urlsplit
+
+import httpx2
+from cryptography.fernet import Fernet
+from fastmcp import FastMCP
+from fastmcp.client.transports import StreamableHttpTransport
+from fastmcp.server.auth import AuthContext
+from fastmcp.server.auth.providers.github import GitHubProvider
+from fastmcp.server.middleware import AuthMiddleware
+from fastmcp.server.providers.proxy import ProxyClient
+from fastmcp.tools import ToolResult
+from key_value.aio.stores.filetree import FileTreeStore
+from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
+from pydantic import BaseModel, ConfigDict, Field
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_CONFIG = PROJECT_ROOT / ".tmp-current-grok-oauth-config.json"
+BIND_HOST, BIND_PORT = "127.0.0.1", 7880
+BACKEND_URL = "http://127.0.0.1:7879/mcp"
+TOOLS = frozenset({"list_footnote_requests", "get_footnote_request", "submit_footnote"})
+INSTRUCTIONS = (
+    "Explain the selected words in the context of the surrounding document. "
+    "Write 1-3 short markdown notes with the direct explanation first. "
+    "Add links only to sources you are confident exist; follow any request prompt."
+)
+
+
+class SetupError(ValueError):
+    """Only static, safe messages may be placed in this exception."""
+
+
+@dataclass(frozen=True, repr=False)
+class BridgeConfig:
+    public_base_url: str
+    github_owner_id: int
+    github_client_id: str
+    github_client_secret: str = field(repr=False)
+    backend_token_file: Path
+    state_dir: Path
+    storage_key_file: Path
+    backend_token: str = field(repr=False)
+    storage_key: bytes = field(repr=False)
+
+
+def _local_path(value: Any, field_name: str, root: Path) -> Path:
+    if not isinstance(value, str) or not value.strip():
+        raise SetupError(f"{field_name} must name a project-local path")
+    try:
+        path = Path(value)
+        path = (path if path.is_absolute() else root / path).resolve()
+        path.relative_to(root.resolve())
+    except (OSError, ValueError):
+        raise SetupError(f"{field_name} must stay inside the project") from None
+    return path
+
+
+def load_config(path: Path = DEFAULT_CONFIG, *, root: Path = PROJECT_ROOT) -> BridgeConfig:
+    try:
+        if path.stat().st_size > 16_384:
+            raise SetupError("OAuth configuration is too large")
+        raw = json.loads(path.read_text(encoding="utf-8-sig"))
+    except (OSError, UnicodeError, json.JSONDecodeError):
+        raise SetupError("Cannot read a valid local OAuth configuration") from None
+    fields = {
+        "public_base_url", "github_owner_id", "github_client_id", "github_client_secret",
+        "backend_token_file", "state_dir", "storage_key_file",
+    }
+    if not isinstance(raw, dict) or set(raw) != fields:
+        raise SetupError("OAuth configuration must contain exactly the documented fields")
+    origin = raw["public_base_url"]
+    if not isinstance(origin, str):
+        raise SetupError("public_base_url must be an HTTPS origin")
+    try:
+        url = urlsplit(origin)
+        valid_origin = (url.scheme == "https" and bool(url.hostname)
+                        and url.username is None and url.password is None
+                        and url.port is None and url.path in ("", "/")
+                        and not url.query and not url.fragment
+                        and re.fullmatch(r"[A-Za-z0-9.-]+", url.hostname) is not None)
+    except ValueError:
+        valid_origin = False
+    if not valid_origin:
+        raise SetupError("public_base_url must be an HTTPS origin without credentials, query or path")
+    origin = origin.rstrip("/")
+    owner = raw["github_owner_id"]
+    if type(owner) is not int or owner <= 0:
+        raise SetupError("github_owner_id must be the verified positive integer account ID")
+    client_id, secret = raw["github_client_id"], raw["github_client_secret"]
+    if not client_id or not secret:
+        raise SetupError("GitHub OAuth client ID and client secret are required; the bridge stays disabled")
+    if not isinstance(client_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{10,200}", client_id):
+        raise SetupError("GitHub OAuth client ID has an invalid format")
+    if not isinstance(secret, str) or not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", secret):
+        raise SetupError("GitHub OAuth client secret has an invalid format")
+    token_path = _local_path(raw["backend_token_file"], "backend_token_file", root)
+    state = _local_path(raw["state_dir"], "state_dir", root)
+    key_path = _local_path(raw["storage_key_file"], "storage_key_file", root)
+    try:
+        if token_path.stat().st_size > 4096 or key_path.stat().st_size > 4096:
+            raise SetupError("Local authentication files are invalid")
+        token = token_path.read_text(encoding="ascii").strip()
+        key = key_path.read_bytes().strip()
+        seed = base64.b64decode(key, altchars=b"-_", validate=True)
+    except (OSError, UnicodeError, ValueError):
+        raise SetupError("Cannot read valid local authentication files") from None
+    if not re.fullmatch(r"[A-Za-z0-9_-]{32,256}", token) or len(seed) != 32:
+        raise SetupError("Local authentication files are invalid")
+    if len(set(seed)) < 8:
+        raise SetupError("The OAuth storage key must be randomly generated")
+    return BridgeConfig(origin, owner, client_id, secret, token_path, state, key_path, token, key)
+
+
+def owner_check(owner_id: int):
+    def allowed(ctx: AuthContext) -> bool:
+        # In pinned FastMCP4.1, GitHubProvider obtains these claims from the
+        # authenticated GitHub /user API after OAuthProxy token verification.
+        token = ctx.token
+        claims = token.claims if token is not None else None
+        user = claims.get("github_user_data") if isinstance(claims, dict) else None
+        identity = user.get("id") if isinstance(user, dict) else None
+        return (type(identity) is int and identity == owner_id
+                and claims.get("sub") == str(identity))
+    return allowed
+
+
+def backend_http_client(token: str, *, transport=None, **_kwargs) -> httpx2.AsyncClient:
+    # No environment proxy, cookie, client header or redirect can take this
+    # private backend credential away from its fixed loopback destination.
+    return httpx2.AsyncClient(
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=30.0, follow_redirects=False, trust_env=False, transport=transport,
+    )
+
+
+def github_auth(config: BridgeConfig) -> GitHubProvider:
+    store = FileTreeStore(data_directory=config.state_dir / "oauth")
+    encrypted = FernetEncryptionWrapper(key_value=store, fernet=Fernet(config.storage_key))
+    seed = base64.b64decode(config.storage_key, altchars=b"-_", validate=True)
+    signing_key = hmac.digest(seed, b"Pen Island MCP OAuth signing key v1", hashlib.sha256)
+    return GitHubProvider(
+        client_id=config.github_client_id,
+        client_secret=config.github_client_secret,
+        base_url=config.public_base_url,
+        redirect_path="/auth/callback",
+        required_scopes=["read:user"],
+        client_storage=encrypted,
+        jwt_signing_key=signing_key,
+        require_authorization_consent=True,
+        enable_cimd=False,
+    )
+
+
+class FootnoteLink(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    url: str
+    title: str | None = None
+
+
+def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=None) -> FastMCP:
+    """The optional arguments are in-process test seams, never CLI options."""
+    auth = auth_provider if auth_provider is not None else github_auth(config)
+    backend = ProxyClient(
+        StreamableHttpTransport(
+            BACKEND_URL,
+            headers={"Authorization": f"Bearer {config.backend_token}"},
+            httpx_client_factory=lambda **kw: backend_http_client(
+                config.backend_token, transport=backend_transport, **kw),
+        ),
+        forward_incoming_headers=False,
+        mode="legacy",
+        timeout=30.0,
+    )
+    bridge = FastMCP(
+        "Pen Island ChatBot", instructions=INSTRUCTIONS, version="1.0.0",
+        auth=auth, middleware=[AuthMiddleware(auth=owner_check(config.github_owner_id))],
+        mask_error_details=True,
+    )
+
+    async def relay(name: str, arguments: dict[str, Any]) -> ToolResult:
+        if name not in TOOLS:
+            raise ValueError("Unknown footnote tool")
+        async with backend.new() as client:
+            result = await client.call_tool_mcp(name, arguments, timeout=30.0)
+            return ToolResult(
+                content=result.content, structured_content=result.structured_content,
+                meta=result.meta, is_error=result.is_error,
+            )
+
+    @bridge.tool(name="list_footnote_requests", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def list_footnote_requests() -> ToolResult:
+        """List pending footnote requests, oldest first, including excerpt and context."""
+        return await relay("list_footnote_requests", {})
+
+    @bridge.tool(name="get_footnote_request", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def get_footnote_request(id: str) -> ToolResult:
+        """Read one footnote request, including wide context and existing page notes."""
+        return await relay("get_footnote_request", {"id": id})
+
+    @bridge.tool(name="submit_footnote", output_schema=None,
+                 annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+    async def submit_footnote(
+        id: str, notes: Annotated[list[str], Field(min_length=1, max_length=8)],
+        links: list[FootnoteLink] | None = None,
+    ) -> ToolResult:
+        """Save notes and optional source links for one pending footnote request."""
+        return await relay("submit_footnote", {
+            "id": id, "notes": notes,
+            "links": [link.model_dump(exclude_none=True) for link in links or []],
+        })
+
+    return bridge
+
+
+def build_app(config: BridgeConfig, **test_seams):
+    bridge = build_bridge(config, **test_seams)
+    app = bridge.http_app(
+        path="/mcp", stateless_http=True, json_response=True,
+        host_origin_protection=True,
+        allowed_hosts=[urlsplit(config.public_base_url).netloc],
+        allowed_origins=[config.public_base_url],
+    )
+    return app
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG,
+                        help="Path to the local JSON setup file; never pass credentials here")
+    args = parser.parse_args(argv)
+    try:
+        config = load_config(args.config)
+        app = build_app(config)
+    except SetupError as error:
+        print(f"ChatBot OAuth setup: {error}", file=sys.stderr)
+        return 2
+    except Exception:
+        print("ChatBot OAuth could not initialize; check local setup and pinned dependencies.", file=sys.stderr)
+        return 2
+    # OAuth callback URLs contain codes and state. No access/debug/error trace
+    # is allowed to echo those URLs, credentials or local configuration values.
+    logging.disable(logging.CRITICAL)
+    import uvicorn
+    print("Starting authenticated ChatBot OAuth bridge on 127.0.0.1:7880.")
+    try:
+        uvicorn.run(app, host=BIND_HOST, port=BIND_PORT, access_log=False,
+                    log_config=None, log_level="critical")
+    except (OSError, SystemExit):
+        print("ChatBot OAuth stopped; check that its loopback port is available.", file=sys.stderr)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

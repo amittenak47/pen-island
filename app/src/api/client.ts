@@ -715,6 +715,7 @@ export interface FootnotePageNoteDto {
 }
 
 export interface FootnoteRequestDto {
+  answer_mode?: "bot" | "llm";
   id: string;
   device_id: string;
   doc_id: string;

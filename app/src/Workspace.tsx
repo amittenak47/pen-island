@@ -183,7 +183,7 @@ import {
   type DocFootnoteSubMark,
   type DocFootnoteSubMarkKind,
 } from "./util/docFootnotes";
-import { footnoteThemeSeed } from "./util/inkPaletteHistory";
+import { footnoteDisplayThemes, footnoteThemeSeed } from "./util/inkPaletteHistory";
 import { hashBytesAsync, loadBinaryDocBytesWithRetry, bytesCameFromStore, putDocBytesVerified } from "./util/docBytes";
 import { handOffPickedDoc, takePickedDoc } from "./util/pickedDocHandoff";
 import {
@@ -192,7 +192,7 @@ import {
   pageTextForAsk,
   rememberExtractedPages,
 } from "./util/docExtract";
-import { isTextAnchor, type DocAnchor } from "./util/docAnchors";
+import type { DocAnchor } from "./util/docAnchors";
 import {
   buildFootnoteRequest,
   enqueueFootnoteRequest,
@@ -214,6 +214,9 @@ import { WEB_HOME, fetchWebPage, hostLabelFromUrl, webPageWidthForViewport, type
 import { CodeDocument } from "./modes/CodeDocument";
 import { DocSelectionLayer, type DocSelectionResult } from "./modes/DocSelectionLayer";
 import { FootnoteOverview } from "./modes/FootnoteOverview";
+import { FootnoteMiniNotes, openMiniNote, type MiniNoteRef } from "./modes/FootnoteMiniNotes";
+import { footnoteNoteTab } from "./modes/FootnoteNoteWorkspace";
+import { loadMiniNotePlacements, saveMiniNotePlacements, MINI_NOTE_RESTORE_EVENT, takeMiniNoteRestore, type MiniNotePlacements } from "./util/miniNoteWindows";
 import { EpubDocument } from "./modes/EpubDocument";
 import { WebDocument } from "./modes/WebDocument";
 import {
@@ -377,6 +380,7 @@ import { resolveProblemLeave } from "./util/problemLeave";
 import { isPadHubOffline } from "./util/padHubStatus";
 import { pullMissingHubFiles, waitForPadPushes } from "./util/padSync";
 import { hubReloadAppState, hubReloadDocumentElements } from "./util/boardHubReload";
+import { loadChatBotAnswerMode } from "./util/chatBotClient";
 import {
   applyConflictFootnoteBoards,
   deleteFootnoteWhiteboard,
@@ -4892,6 +4896,16 @@ export const Workspace = memo(function Workspace({
     boardSaveSuspendedRef.current = true;
     try {
       const live = board.saveBoard({ assembleInk: false });
+      const pageWidth = annotateFrameWidthFromElements(doc.board.elements as {
+        width?: number;
+        customData?: { lcMdInkFrame?: boolean } | null;
+      }[]);
+      if (pageWidth != null && pageWidth !== annotatePageWidthRef.current) {
+        annotatePageWidthRef.current = pageWidth;
+        setAnnotatePageWidth(pageWidth);
+        annotateHeightRef.current = null;
+        setAnnotateHeight(null);
+      }
       board.restoreBoard(hubReloadDocumentElements(doc.board.elements, live.elements),
         hubReloadAppState(live.appState, doc.board.appState), {
         skipFit: true,
@@ -6845,7 +6859,7 @@ export const Workspace = memo(function Workspace({
           createdAt: Date.now(),
           ...(notes ? { notes } : {}),
           ...(links.length > 0 ? { userLinks: links } : {}),
-          ...footnoteThemeSeed(next.length),
+          ...footnoteThemeSeed(next),
         });
       }
       return next;
@@ -7393,7 +7407,7 @@ export const Workspace = memo(function Workspace({
             createdAt: now,
             threadRootId: rootId,
             threads: [thread],
-            ...footnoteThemeSeed(current.length),
+            ...footnoteThemeSeed(current),
             ...(quoted.hitRects.length > 0 ? { bands: quoted.hitRects } : {}),
             ...(quoted.text.trim() ? { blockText: quoted.text } : {}),
           }),
@@ -8780,7 +8794,7 @@ export const Workspace = memo(function Workspace({
           excerpt: selection.excerpt,
           createdAt: Date.now(),
           ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
-          ...footnoteThemeSeed(current.length),
+          ...footnoteThemeSeed(current),
           ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
           ...(selection.text.trim() ? { blockText: selection.text } : {}),
         }),
@@ -8875,7 +8889,7 @@ export const Workspace = memo(function Workspace({
           createdAt: Date.now(),
           query,
           url,
-          ...footnoteThemeSeed(current.length),
+          ...footnoteThemeSeed(current),
           ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
           ...(selection.text.trim() ? { blockText: selection.text } : {}),
         }),
@@ -8909,13 +8923,16 @@ export const Workspace = memo(function Workspace({
       const pageEntry = matched ?? (pages?.length === 1 ? pages[0] : undefined);
       try {
         await enqueueFootnoteRequest(buildFootnoteRequest({
+          answerMode: ask.answerMode ?? "bot",
           id: ask.requestId,
           deviceId: loadDeviceId(),
           docId: saved.id,
           docName: source.name,
           anchor: mark.anchor,
           excerpt: mark.excerpt,
-          pageText: pageEntry?.text ?? null,
+          pageText: pageEntry?.text ?? (
+            source.docType === "markdown" || source.docType === "code" ? source.text : null
+          ),
           pages,
           viewerPage: source.docType === "pdf" ? pdfNavRef.current?.current ?? null : null,
           footnotes,
@@ -8925,7 +8942,7 @@ export const Workspace = memo(function Workspace({
         // A durable queue failure must leave every unsent ask held for the
         // next save. The already saved pending marks remain in the document.
         heldFootnoteAsksRef.current = [...asks.slice(index), ...heldFootnoteAsksRef.current];
-        throw new Error(`GrokBot request could not be queued. Save again to retry. ${messageOf(cause)}`);
+        throw new Error(`ChatBot request could not be queued. Save again to retry. ${messageOf(cause)}`);
       }
     }
     // Not awaited: a save can run inside the inbox chain (an answer being
@@ -8934,9 +8951,10 @@ export const Workspace = memo(function Workspace({
   }, [client]);
   deliverHeldFootnoteAsksRef.current = deliverHeldFootnoteAsks;
 
-  const onAskGrokBot = useCallback(
+  const onAskChatBot = useCallback(
     (selection: DocSelectionResult) => {
-      if (!isTextAnchor(selection.anchor)) return;
+      // Unique Android quotes and native selections carry text anchors.
+      // Ambiguous marquee quotes keep their region rather than guessing words.
       const excerpt = (selection.excerpt || selection.text).trim();
       if (!excerpt) return;
       const requestId = freshFootnoteRequestId();
@@ -8951,13 +8969,13 @@ export const Workspace = memo(function Workspace({
         createdAt: Date.now(),
         pending: requestId,
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
-        ...footnoteThemeSeed(existing.length),
+        ...footnoteThemeSeed(existing),
         ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
         ...(selection.text.trim() ? { blockText: selection.text } : {}),
       });
       heldFootnoteAsksRef.current = [
         ...heldFootnoteAsksRef.current.filter((ask) => ask.requestId !== requestId),
-        { requestId, footnoteId },
+        { requestId, footnoteId, answerMode: loadChatBotAnswerMode() },
       ];
       flushSync(() => setAnnotateFootnotes(next));
       // The save posts the ask only when the stored record contains this pending mark.
@@ -9147,7 +9165,7 @@ export const Workspace = memo(function Workspace({
         excerpt: selection.excerpt,
         createdAt: Date.now(),
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
-        ...footnoteThemeSeed(current.length),
+        ...footnoteThemeSeed(current),
         ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
         ...(selection.text.trim() ? { blockText: selection.text } : {}),
       }),
@@ -10073,6 +10091,61 @@ export const Workspace = memo(function Workspace({
     [agentMessages, groupedCoachThreads],
   );
   const footnoteNumbers = useMemo(() => numberFootnotes(annotateFootnotes), [annotateFootnotes]);
+  const footnoteThemes = useMemo(() => footnoteDisplayThemes(annotateFootnotes.map(mark => ({
+    ...mark, number: footnoteNumbers.get(mark.id),
+  }))), [annotateFootnotes, footnoteNumbers]);
+  const [miniNotes, setMiniNotes] = useState<MiniNoteRef[]>([]);
+  const miniPlacementDocId = annotateDocId ?? (tab.kind === "annotate" ? tab.docId : null);
+  const [miniNoteGeometry, setMiniNoteGeometry] = useState(() => ({
+    docId: miniPlacementDocId, placements: loadMiniNotePlacements(miniPlacementDocId),
+  }));
+  const miniNotePlacements: MiniNotePlacements = miniNoteGeometry.docId === miniPlacementDocId
+    ? miniNoteGeometry.placements : loadMiniNotePlacements(miniPlacementDocId);
+  const miniNoteEntries = useMemo(() => miniNotes.flatMap(ref => {
+    const footnote = annotateFootnotes.find(mark => mark.id === ref.footnoteId);
+    const note = footnote?.notes?.find(note => note.id === ref.noteId);
+    const theme = footnoteThemes.get(ref.footnoteId);
+    return footnote && note && theme ? [{ ...ref, footnote, note, theme,
+      number: footnoteNumbers.get(footnote.id), noteNumber: footnote.notes!.indexOf(note) + 1 }] : [];
+  }), [miniNotes, annotateFootnotes, footnoteThemes, footnoteNumbers]);
+  const miniNoteBounds = useCallback(() => {
+    const wrap = [...document.querySelectorAll<HTMLElement>(".lc-canvas-wrap")]
+      .find(node => node.dataset.lcTab === tab.id);
+    return wrap?.getBoundingClientRect() ?? new DOMRect(0, 38, window.innerWidth, window.innerHeight - 38);
+  }, [tab.id]);
+  useEffect(() => {
+    if (!active || !annotateDocId || !annotateSource || boardPreparing || canvasLoading) return;
+    const restore = () => {
+      const ref = takeMiniNoteRestore(annotateDocId);
+      if (!ref) return;
+      const mark = annotateFootnotesRef.current.find(mark => mark.id === ref.footnoteId);
+      if (!mark?.notes?.some(note => note.id === ref.noteId)) {
+        setNotice("This note is no longer in its footnote.");
+        return;
+      }
+      const current = miniNotes.filter(ref => annotateFootnotesRef.current.some(mark => mark.id === ref.footnoteId && mark.notes?.some(note => note.id === ref.noteId)));
+      const next = openMiniNote(current, ref);
+      setMiniNotes(next);
+      if (!next.some(note => note.footnoteId === ref.footnoteId && note.noteId === ref.noteId)) {
+        openFootnoteOverview(ref.footnoteId, null);
+        setNotice("Three mini notes are open. Close one, then tap this note's picture-in-picture button.");
+      }
+    };
+    restore();
+    window.addEventListener(MINI_NOTE_RESTORE_EVENT, restore);
+    return () => window.removeEventListener(MINI_NOTE_RESTORE_EVENT, restore);
+  }, [active, annotateDocId, annotateSource, boardPreparing, canvasLoading, miniNotes, openFootnoteOverview, setNotice]);
+  const openFullFootnoteNote = useCallback(async (ref: MiniNoteRef) => {
+    try {
+      const saved = await saveAnnotateSession({ throwOnError: true });
+      if (!saved) throw new Error("Save the document before opening a note tab.");
+      const mark = saved.footnotes?.find(mark => mark.id === ref.footnoteId);
+      const noteIndex = mark?.notes?.findIndex(note => note.id === ref.noteId) ?? -1;
+      if (!mark || noteIndex < 0) throw new Error("This note is no longer in its footnote.");
+      const number = numberFootnotes(saved.footnotes ?? []).get(ref.footnoteId);
+      openWorkspace(footnoteNoteTab({ docId: saved.id, ...ref }, `Note ${number ?? ""}.${noteIndex + 1}`));
+    } catch (cause) { setError(messageOf(cause)); }
+  }, [saveAnnotateSession, openWorkspace, setError]);
 
   const openCoachFootnoteThread = useCallback(
     (rootId: string) => {
@@ -11381,7 +11454,7 @@ export const Workspace = memo(function Workspace({
                   onAskAgent={(selection, rect, context) => captureDocSelection(selection, rect, true, context)}
                   onCopy={onDocCopy}
                   onSearch={onDocSearch}
-                  onAskGrokBot={onAskGrokBot}
+                  onAskChatBot={onAskChatBot}
                   onMark={highlighting ? onDocMark : undefined}
                   onOpenFootnote={onOpenFootnote}
                   onRemoveFootnote={onRemoveFootnote}
@@ -11744,7 +11817,7 @@ export const Workspace = memo(function Workspace({
         scope={artifactPicker.messageId ? "message" : artifactPicker.footnoteId ? "footnote" : "catalog"}
         footnoteChoices={annotateFootnotes.map(note => ({
           id: note.id, title: note.title ?? "", number: footnoteNumbers.get(note.id),
-          color: note.color, palette: note.palette, selected: attachedFootnoteIds.includes(note.id),
+          color: footnoteThemes.get(note.id)?.color ?? note.color, palette: footnoteThemes.get(note.id)?.palette ?? note.palette, selected: attachedFootnoteIds.includes(note.id),
         }))}
         onToggleFootnote={id => setAttachedFootnoteIds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id])}
         onAttach={attachArtifactHere} onOpen={openArtifactPreview} onClose={() => setArtifactPicker(null)} />}</DialogPresence>
@@ -11781,8 +11854,8 @@ export const Workspace = memo(function Workspace({
                   id: mark.id,
                   number: footnoteNumbers.get(mark.id),
                   title: mark.title,
-                  color: mark.color,
-                  palette: mark.palette,
+                  color: footnoteThemes.get(mark.id)?.color ?? mark.color,
+                  palette: footnoteThemes.get(mark.id)?.palette ?? mark.palette,
                 },
               ];
             })}
@@ -11795,8 +11868,8 @@ export const Workspace = memo(function Workspace({
               id: mark.id,
               number: footnoteNumbers.get(mark.id),
               title: mark.title,
-              color: mark.color,
-              palette: mark.palette,
+              color: footnoteThemes.get(mark.id)?.color ?? mark.color,
+              palette: footnoteThemes.get(mark.id)?.palette ?? mark.palette,
             }))}
             onRemoveAttached={(id) =>
               setAttachedFootnoteIds((current) => current.filter((entry) => entry !== id))
@@ -11864,6 +11937,14 @@ export const Workspace = memo(function Workspace({
             onRemoveWorkspaceLink={removeWorkspaceLink}
             footnote={openFootnote}
             number={footnoteNumbers.get(openFootnote.id)}
+            displayTheme={footnoteThemes.get(openFootnote.id)}
+            miniNoteCount={miniNoteEntries.length}
+            openMiniNoteIds={miniNoteEntries.filter(entry => entry.footnoteId === openFootnote.id).map(entry => entry.noteId)}
+            onOpenMiniNote={noteId => setMiniNotes(current => openMiniNote(
+              current.filter(ref => annotateFootnotes.some(mark => mark.id === ref.footnoteId && mark.notes?.some(note => note.id === ref.noteId))),
+              { footnoteId: openFootnote.id, noteId },
+            ))}
+            onOpenFullNote={noteId => { void openFullFootnoteNote({ footnoteId: openFootnote.id, noteId }); }}
             threadMessages={footnoteThreadMessages}
             availableThreads={groupThreads(agentMessages.filter(message => !message.deletedAt)).rootMessages
               .filter(message => message.role === "user" || agentMessages.some(reply => reply.replyTo?.id === message.id && !reply.deletedAt))
@@ -11912,7 +11993,17 @@ export const Workspace = memo(function Workspace({
             }}
           />
         )}
-
+        <FootnoteMiniNotes entries={miniNoteEntries} getBounds={miniNoteBounds}
+          placements={miniNotePlacements}
+          onPlacementChange={(key, rect) => setMiniNoteGeometry(current => {
+            const placements = { ...(current.docId === miniPlacementDocId
+              ? current.placements : loadMiniNotePlacements(miniPlacementDocId)), [key]: rect };
+            saveMiniNotePlacements(miniPlacementDocId, placements);
+            return { docId: miniPlacementDocId, placements };
+          })}
+          onClose={ref => setMiniNotes(current => current.filter(entry => entry.footnoteId !== ref.footnoteId || entry.noteId !== ref.noteId))}
+          onOpenFullNote={ref => { void openFullFootnoteNote(ref); }}
+          onOpenExternal={url => { void openExternalUrl(url).catch(cause => setError(messageOf(cause))); }} />
       <DialogPresence>{figurePrompt && (
         <ConfirmDialog
           title="Include this note's images?"

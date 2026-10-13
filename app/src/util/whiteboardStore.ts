@@ -10,7 +10,7 @@ import type { ArtifactCatalogEdit } from "./artifactCatalogEdits";
 import { artifactCatalogFields, type ArtifactCatalog } from "./padArtifacts";
 import { getCachedBookMetadata, mutateLocalBook, type LocalBookEdit } from "./localBookStore";
 
-export const WHITEBOARD_LIBRARY_LIMIT = 50;
+export const WHITEBOARD_LIBRARY_LIMIT = 250;
 export const WHITEBOARD_PAGE_LIMIT = 10;
 export const PAD_TRASH_TTL_MS = 3 * 24 * 60 * 60 * 1000;
 

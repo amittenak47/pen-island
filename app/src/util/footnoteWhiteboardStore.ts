@@ -1,7 +1,7 @@
 /**
  * Footnote-owned scratch boards — pointers on the mark, scene in contentStore.
  *
- * Not the whiteboard library: these keys never count toward the 50-notebook
+ * Not the whiteboard library: these keys never count toward the 250-notebook
  * cap, never call `saveWhiteboardNotebook`, and die with the annotation set.
  */
 

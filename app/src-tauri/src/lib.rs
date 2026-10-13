@@ -197,6 +197,7 @@ pub fn run() {
         voice_stop,
         voice_cancel,
         voice_cleanup,
+        voice_transcribe,
         get_system_insets,
         live_webview_create,
         live_webview_place,
@@ -470,7 +471,7 @@ fn transcribe_recorded_clip(app: tauri::AppHandle, path: String, session_id: Str
 ///
 /// True on Android whenever the dictation plugin is registered. A recognizer
 /// is only required for the `android` engine; [`voice_start`] reports that
-/// case. False off Android.
+/// case. Desktop captures clips in the WebView and transcribes them here.
 #[tauri::command]
 async fn voice_available(#[allow(unused_variables)] app: tauri::AppHandle) -> bool {
     #[cfg(target_os = "android")]
@@ -480,7 +481,7 @@ async fn voice_available(#[allow(unused_variables)] app: tauri::AppHandle) -> bo
     }
     #[cfg(not(target_os = "android"))]
     {
-        false
+        true
     }
 }
 
@@ -493,7 +494,7 @@ async fn voice_available(#[allow(unused_variables)] app: tauri::AppHandle) -> bo
 /// Async so the wait on the microphone permission dialog runs off the main
 /// thread rather than holding every other command behind it.
 ///
-/// An error off Android: nothing there can listen.
+/// Desktop validates the configured engine before the WebView requests the mic.
 #[tauri::command]
 async fn voice_start(
     #[allow(unused_variables)] app: tauri::AppHandle,
@@ -526,7 +527,11 @@ async fn voice_start(
     }
     #[cfg(not(target_os = "android"))]
     {
-        Err("Voice dictation is only available on Android".into())
+        if voice_engine(&app) == "android" {
+            return Err("Android dictation is available on the tablet. Choose Whisper on your PC or a cloud engine in Settings → LLM → Voice dictation for desktop dictation.".into());
+        }
+        set_voice_mode(&app, &session_id, VoiceMode::Record);
+        Ok(())
     }
 }
 
@@ -615,7 +620,7 @@ async fn voice_stop(
 }
 
 /// Drop the open session without a transcript. Live audio is discarded; a
-/// clip is deleted. Success off Android, and when nothing is open.
+/// clip is deleted. Desktop also retires sessions whose transcription is pending.
 #[tauri::command]
 async fn voice_cancel(
     #[allow(unused_variables)] app: tauri::AppHandle,
@@ -648,8 +653,46 @@ async fn voice_cancel(
     }
     #[cfg(not(target_os = "android"))]
     {
+        clear_voice_session(&app, &session_id);
         Ok(())
     }
+}
+
+/// Desktop WebView records bounded PCM WAV; the existing provider handles it.
+#[tauri::command]
+async fn voice_transcribe(app: tauri::AppHandle, session_id: String, audio_base64: String) -> Result<(), String> {
+    use base64::Engine;
+    if !matches!(take_voice_mode(&app, &session_id), Some(VoiceMode::Record)) {
+        return Err("Dictation recording was cancelled or already stopped".into());
+    }
+    emit_voice(&app, &session_id, serde_json::json!({"type":"processing"}));
+    let worker_app = app.clone();
+    let worker_id = session_id.clone();
+    let result = tauri::async_runtime::spawn_blocking(move || -> Result<(), String> {
+        const MAX_WAV_BYTES: usize = 44 + 16_000 * 2 * 15 * 60;
+        if audio_base64.len() > MAX_WAV_BYTES.div_ceil(3) * 4 {
+            return Err("Recording exceeds the 15-minute limit".into());
+        }
+        let bytes = base64::engine::general_purpose::STANDARD.decode(audio_base64).map_err(|_| "Dictation audio could not be decoded")?;
+        if bytes.len() > MAX_WAV_BYTES || bytes.len() < 44 || &bytes[..4] != b"RIFF" || &bytes[8..12] != b"WAVE" {
+            return Err("Invalid dictation WAV clip".into());
+        }
+        // A cancelled permission/start/stop must never send audio.
+        if !worker_app.state::<VoiceSession>().0.lock().unwrap_or_else(|err| err.into_inner()).contains_key(&worker_id) { return Ok(()); }
+        if bytes.len() == 44 { return Ok(()); }
+        let state = worker_app.try_state::<harness::serve::Shared>().ok_or("Voice settings are unavailable")?;
+        let cfg = state.cfg_snapshot();
+        let text = harness::voice::transcribe(&cfg, harness::voice::Clip { bytes, filename: "dictation.wav".into(), mime: "audio/wav".into() }).map_err(|err| err.to_string())?;
+        if !text.is_empty() { emit_voice(&worker_app, &worker_id, serde_json::json!({"type":"final","text":text})); }
+        Ok(())
+    }).await.map_err(|err| err.to_string()).and_then(|result| result);
+    if let Err(message) = result {
+        emit_voice(&app, &session_id, serde_json::json!({"type":"error","code":"transcription","message":message}));
+    }
+    emit_voice(&app, &session_id, serde_json::json!({"type":"state","listening":false}));
+    emit_voice(&app, &session_id, serde_json::json!({"type":"end"}));
+    clear_voice_session(&app, &session_id);
+    Ok(())
 }
 
 /// Tidy dictated text with the configured LLM. Missing harness state returns

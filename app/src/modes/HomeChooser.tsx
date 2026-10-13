@@ -12,13 +12,15 @@
  * wallpaper that fades in all at once.
  */
 
-import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type MutableRefObject, type ReactNode } from "react";
 import { motion, useReducedMotion } from "motion/react";
 
 import { FEATURE_LEETCODE } from "../featureFlags";
 import { LIBRARY_HOLD_MS } from "../util/gesture";
 import { ANNOTATE_LIBRARY_EVENT } from "../util/annotateStore";
 import { WHITEBOARD_LIBRARY_EVENT } from "../util/whiteboardStore";
+import { createWhiteboardTracer, type WhiteboardTracer } from "./whiteboardTracer";
+import { createPracticeBraces, type PracticeBraces } from "./practiceBraces";
 import { RECENT_WORKSPACES_EVENT, forgetRecentWorkspace, loadRecentWorkspaces, recentWorkspaceKey, visibleRecentWorkspaces } from "../util/recentWorkspaces";
 import type { TabRecord, TabState } from "../util/tabs";
 import "./homeChooser.css";
@@ -61,59 +63,51 @@ interface HomeMode {
 type IconScene = "rest" | "in" | "out";
 
 const HOVER_SCENES = new Set(["practice", "whiteboard", "annotate"]);
-const LEAVE_MS: Record<string, number> = { practice: 1500, whiteboard: 980, annotate: 400 };
-/** First pose of `lc-home-nib-write` — stick-figure head, still on a blank page. */
-const NIB_WRITE_START = "translate(38.54%, 56.67%) rotate(-8deg)";
-const NIB_PARK = "translate(67.5%, 46.67%) rotate(18deg)";
-const NIB_APPROACH_MS = 560;
-
-function whiteboardNib(card: HTMLElement | null): SVGElement | null {
-  const el = card?.querySelector(".lc-home-nib-arm");
-  return el instanceof SVGElement ? el : null;
-}
-
-function clearNibInline(arm: SVGElement | null) {
-  if (!arm) return;
-  arm.style.animation = "";
-  arm.style.transition = "";
-  arm.style.transform = "";
-}
-
-function freezeWhiteboardNib(card: HTMLElement | null) {
-  const arm = whiteboardNib(card);
-  if (!arm || window.matchMedia("(prefers-reduced-motion: reduce)").matches) return false;
-  const computed = getComputedStyle(arm).transform;
-  arm.style.transition = "none";
-  arm.style.animation = "none";
-  arm.style.transform = computed === "none" ? NIB_PARK : computed;
-  return true;
-}
-
-function approachWhiteboardNib(card: HTMLElement | null) {
-  const arm = whiteboardNib(card);
-  if (!arm) return;
-  arm.style.animation = "";
-  arm.getBoundingClientRect();
-  arm.style.transition = `transform ${NIB_APPROACH_MS}ms cubic-bezier(0.22, 0.68, 0.28, 1)`;
-  arm.style.transform = NIB_WRITE_START;
-}
+// Whiteboard has no fixed leave time: its tracer returns to rest when the
+// pencil has erased the page, redrawn the resting sketch and parked.
+const LEAVE_MS: Record<string, number> = { practice: 1500, annotate: 360 };
 
 /** Same folded page for Whiteboard and Annotate so the icons read as one size. */
-const PAGE_PATH = "M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z";
-const PAGE_FOLD = "M15 2v6h6";
+/** A flat sheet: no folded corner, so nothing is drawn across a dog-ear. */
+const PAGE_PATH = "M6 2h12a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z";
 
-const WEB_NET_ROUTES = [
-  "M6 28C14 8 38 8 46 28",
-  "M6 24C14 44 38 44 46 24",
-  "M-4 10C16 6 36 20 56 44",
-  "M56 8C36 18 14 28 -6 44",
-  "M24 18C12 6 0 -6 -10 -14",
-  "M30 16C42 4 54 -6 64 -14",
-  "M20 34C8 46 -4 56 -12 64",
-  "M34 34C48 46 60 56 68 64",
-  "M16 22C4 18 -8 8 -16 0",
-  "M36 30C48 36 60 48 68 58",
-];
+/** Effects use the live tile bounds; the central glyph keeps its own square viewBox. */
+function useLiveFrame() {
+  const ref = useRef<SVGSVGElement>(null);
+  const [size, setSize] = useState({ width: 52, height: 52 });
+  useLayoutEffect(() => {
+    const root = ref.current;
+    if (!root) return;
+    const measure = () => {
+      const box = root.getBoundingClientRect();
+      if (box.width <= 0 || box.height <= 0) return;
+      const width = Math.round(box.width), height = Math.round(box.height);
+      setSize(previous => previous.width === width && previous.height === height ? previous : { width, height });
+    };
+    measure();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(root);
+    return () => observer.disconnect();
+  }, []);
+  return { ref, ...size };
+}
+
+function webNetRoutes(width: number, height: number): string[] {
+  const x = width / 2, y = height / 2;
+  return [
+    `M0 ${y}C${x * .6} 0 ${x * 1.4} 0 ${width} ${y}`,
+    `M0 ${y}C${x * .6} ${height} ${x * 1.4} ${height} ${width} ${y}`,
+    `M0 0C${x * .7} ${y * .2} ${x * 1.3} ${y * 1.8} ${width} ${height}`,
+    `M${width} 0C${x * 1.3} ${y * .2} ${x * .7} ${y * 1.8} 0 ${height}`,
+    `M${x - 12} ${y - 10}C${x * .6} ${y * .5} ${x * .2} 0 0 0`,
+    `M${x + 12} ${y - 10}C${x * 1.4} ${y * .5} ${x * 1.8} 0 ${width} 0`,
+    `M${x - 12} ${y + 10}C${x * .6} ${y * 1.5} ${x * .2} ${height} 0 ${height}`,
+    `M${x + 12} ${y + 10}C${x * 1.4} ${y * 1.5} ${x * 1.8} ${height} ${width} ${height}`,
+    `M${x - 14} ${y}C${x * .6} ${y * .7} ${x * .2} ${y * .4} 0 ${y * .4}`,
+    `M${x + 14} ${y}C${x * 1.4} ${y * 1.3} ${x * 1.8} ${y * 1.6} ${width} ${y * 1.6}`,
+  ];
+}
 
 /**
  * Columns for the middle tier, where cards are still full but two abreast.
@@ -156,33 +150,91 @@ function typeLine(text: string): ReactNode {
   );
 }
 
+/** Four-line, PEP 8-formatted snippets; each line fits the icon's 20 columns. */
+const PRACTICE_SNIPPETS: readonly (readonly string[])[] = [
+  ["def two_sum(a, t):", "    seen = {}", "    for i, x in a:", "        seen[x] = i"],
+  ["def is_even(n):", "    if n % 2:", "        return False", "    return True"],
+  ["def bfs(g, s):", "    q = deque([s])", "    seen = {s}", "    return seen"],
+  ["def last(xs):", "    if not xs:", "        return None", "    return xs[-1]"],
+  ["def clamp(x):", "    x = max(x, 0)", "    x = min(x, 9)", "    return x"],
+  ["def rev(s):", "    r = s[::-1]", "    print(r)", "    return r"],
+  ["def count(xs, v):", "    n = 0", "    for x in xs:", "        n += x == v"],
+];
+
+function randomSnippet(avoid: number[]): number {
+  const choices = PRACTICE_SNIPPETS.map((_, i) => i).filter(i => !avoid.includes(i));
+  return choices[Math.floor(Math.random() * choices.length)] ?? 0;
+}
+
 function PracticeLive() {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [slots, setSlots] = useState(() => {
+    const a = randomSnippet([]);
+    return { a, b: randomSnippet([a]) };
+  });
+  useEffect(() => {
+    const code = ref.current;
+    const card = code?.closest(".lc-home-card");
+    if (!code || !card) return;
+    // Every hover starts on slot A; give it a fresh snippet before typing begins.
+    let visible: "a" | "b" = "a";
+    const enter = () => {
+      visible = "a";
+      setSlots(current => ({ ...current, a: randomSnippet([current.a, current.b]) }));
+    };
+    // Each 8s clear hands the page to the other slot, which is empty at that
+    // moment. Swap a new snippet into it, never repeating the one just shown.
+    const iteration = (event: AnimationEvent) => {
+      if (event.animationName !== "lc-home-code-clear" || !(event.target as Element).classList.contains("lc-home-fn-a")) return;
+      const next = visible === "a" ? "b" : "a";
+      setSlots(current => ({ ...current, [next]: randomSnippet([current.a, current.b]) }));
+      visible = next;
+    };
+    card.addEventListener("mouseenter", enter);
+    code.addEventListener("animationiteration", iteration);
+    return () => {
+      card.removeEventListener("mouseenter", enter);
+      code.removeEventListener("animationiteration", iteration);
+    };
+  }, []);
+  const lines = (index: number) => PRACTICE_SNIPPETS[index]!.map((text, i) => <Fragment key={i}>{typeLine(text)}</Fragment>);
   return (
-    <span className="lc-home-live lc-home-live-code">
-      <span className="lc-home-fn lc-home-fn-a">
-        {typeLine("fn two_sum(a,t){")}
-        {typeLine("  m.insert(x,i)")}
-        {typeLine("  Ok([j,i])")}
-        {typeLine("}")}
-      </span>
-      <span className="lc-home-fn lc-home-fn-b">
-        {typeLine("fn reverse(h) {")}
-        {typeLine("  p.next = h")}
-        {typeLine("  h = n;")}
-        {typeLine("}")}
-      </span>
+    <span ref={ref} className="lc-home-live lc-home-live-code">
+      <span className="lc-home-fn lc-home-fn-a">{lines(slots.a)}</span>
+      <span className="lc-home-fn lc-home-fn-b">{lines(slots.b)}</span>
     </span>
   );
 }
 
+/** Earth keeps a round outline while longitude lines turn around its tilted axis. */
+function BrowseGlyph() {
+  return (
+    <Glyph className="lc-home-earth">
+      <ellipse className="lc-home-earth-orbit" cx="12" cy="12" rx="11" ry="3.6" />
+      <circle className="lc-home-earth-glow" cx="12" cy="12" r="9.2" fill="currentColor" stroke="none" />
+      <circle className="lc-home-earth-outline" cx="12" cy="12" r="9.5" />
+      <g className="lc-home-earth-tilt" transform="rotate(23.4 12 12)">
+        <path className="lc-home-earth-equator" d="M2.5 12h19" />
+        {[0, 1, 2].map(index => (
+          <path key={index} className="lc-home-earth-meridian" d="M12 2.5a9.5 9.5 0 0 1 0 19"
+            style={{ animationDelay: `${-index * 14 / 3}s` }} />
+        ))}
+      </g>
+      <circle className="lc-home-earth-orbiter" cx="12" cy="12" r=".65" fill="currentColor" stroke="none" />
+    </Glyph>
+  );
+}
+
 function BrowseLive() {
+  const { ref, width, height } = useLiveFrame();
+  const routes = webNetRoutes(width, height);
   return (
     <span className="lc-home-live">
-      <svg viewBox="0 0 52 52" className="lc-home-live-svg" aria-hidden="true">
-        {WEB_NET_ROUTES.slice(0, 4).map((d, i) => (
+      <svg ref={ref} viewBox={`0 0 ${width} ${height}`} className="lc-home-live-svg" aria-hidden="true">
+        {routes.slice(0, 4).map((d, i) => (
           <path key={`mesh-${i}`} className="lc-home-net-mesh" d={d} />
         ))}
-        {WEB_NET_ROUTES.map((d, i) => (
+        {routes.map((d, i) => (
           <path
             key={`flow-${i}`}
             className={`lc-home-net-flow lc-home-net-flow-${i + 1}`}
@@ -190,32 +242,50 @@ function BrowseLive() {
             pathLength={100}
           />
         ))}
+        <g className="lc-home-net-boost">
+          {routes.map((d, i) => (
+            <path key={`stream-${i}`} className="lc-home-net-stream" d={d} pathLength={100}
+              style={{ animationDuration: `${2.1 + (i % 4) * .18}s`, animationDelay: `${-i * .27}s` }} />
+          ))}
+          {routes.map((d, i) => (
+            <path key={`burst-${i}`} className="lc-home-net-burst" d={d} pathLength={100}
+              style={{ animationDuration: `${.46 + (i % 5) * .085}s`, animationDelay: `${-i * .11}s` }} />
+          ))}
+        </g>
       </svg>
     </span>
   );
 }
 
 function ExploreLive() {
-  const svgRef = useRef<SVGSVGElement>(null);
+  const { ref: svgRef, width, height } = useLiveFrame();
   useEffect(() => {
     const root = svgRef.current;
     if (!root) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const motionPreference = window.matchMedia("(prefers-reduced-motion: reduce)");
+    if (motionPreference.matches) return;
+    const card = root.closest<HTMLButtonElement>(".lc-home-card");
 
     const NS = "http://www.w3.org/2000/svg";
-    const W = 52;
-    const H = 52;
+    const W = width;
+    const H = height;
+    const speed = Math.max(1, Math.min(W, H) / 52);
     const pad = 5;
     const layer = document.createElementNS(NS, "g");
     layer.setAttribute("class", "lc-home-graph");
     root.appendChild(layer);
 
     type GraphNode = {
+      id: number;
       x: number;
       y: number;
       vx: number;
       vy: number;
+      group: number | null;
       exiting: boolean;
+      /** Radius with no links, and the radius currently drawn. */
+      base: number;
+      r: number;
       el: SVGCircleElement;
     };
     type GraphEdge = {
@@ -223,17 +293,28 @@ function ExploreLive() {
       b: GraphNode;
       born: number;
       life: number;
+      retiringAt: number | null;
+      retiringDraw: number;
+      /** Draw-in and retract times; hover links snap in and out faster. */
+      drawMs: number;
+      retractMs: number;
       el: SVGLineElement;
     };
+    type PendingLink = { a: GraphNode; b: GraphNode };
 
     const nodes: GraphNode[] = [];
     const edges: GraphEdge[] = [];
+    const pendingLinks: PendingLink[] = [];
+    let retiringLinks: GraphEdge[] = [];
     const rand = (a: number, b: number) => a + Math.random() * (b - a);
+    let nextNodeId = 0;
+    let nextGroupId = 0;
 
-    function spawnNode(fromEdge: boolean): GraphNode {
+    function spawnNode(fromEdge: boolean, inside = false): GraphNode {
       const el = document.createElementNS(NS, "circle");
       el.setAttribute("class", "lc-home-graph-node");
-      el.setAttribute("r", String(rand(0.85, 1.35)));
+      const base = rand(1.5, 2.1);
+      el.setAttribute("r", base.toFixed(2));
       el.setAttribute("fill", "currentColor");
       el.setAttribute("stroke", "none");
       layer.appendChild(el);
@@ -243,7 +324,12 @@ function ExploreLive() {
       let y = rand(pad, H - pad);
       let vx = rand(-8, 8);
       let vy = rand(-8, 8);
-      if (side === 0) {
+      // Hover fills the interior directly (fading in), so the extra density
+      // sits among the existing nodes instead of arriving only from the rim.
+      if (inside) {
+        // Hover fills the interior directly (fading in), so the extra density
+        // sits among the existing nodes instead of arriving only from the rim.
+      } else if (side === 0) {
         x = fromEdge ? -3 : rand(pad, W - pad);
         y = fromEdge ? rand(pad, H - pad) : rand(pad, rim);
         vx = fromEdge ? rand(10, 18) : rand(-10, 10);
@@ -264,36 +350,88 @@ function ExploreLive() {
         vx = fromEdge ? rand(-6, 6) : -rand(2, 10);
         vy = fromEdge ? -rand(10, 18) : rand(-10, 10);
       }
-      const node: GraphNode = { x, y, vx, vy, exiting: false, el };
+      const id = ++nextNodeId;
+      el.setAttribute("data-node-id", String(id));
+      const node: GraphNode = { id, x, y, vx: vx * speed, vy: vy * speed, group: null, exiting: false, base, r: base, el };
       nodes.push(node);
       return node;
     }
 
-    for (let i = 0; i < 6; i++) spawnNode(false);
+    // Counts follow the tile's area: a small, cramped tile (narrow window or
+    // phone) gets slightly fewer vertices, and so fewer links, than a roomy one.
+    const nodeCount = Math.min(18, Math.max(4, Math.round(W * H / 4000)));
+    const MAX_NODES = 40;
+    const MAX_EDGES = 96;
+    const boostedNodeCount = Math.min(35, Math.max(8, Math.round(nodeCount * 2.25)));
+    const side = Math.min(W, H);
+    // Typical gap between hover vertices. Wide, short tiles space vertices by
+    // area, not by their short side, so link reach follows this spacing.
+    const spacing = Math.sqrt(W * H / boostedNodeCount);
+    const maxLink = Math.max(side * .6, spacing * 2.2);
+    for (let i = 0; i < nodeCount; i++) spawnNode(false);
 
-    let last = performance.now();
-    let nextEdge = last + 280;
-    let nextExit = last + 1600;
-    let nextBreak = last + 2200;
+    // RAF follows the screen's refresh cadence. Advance by elapsed visible time,
+    // not a frame count, so 60/120/144 Hz keep the same animation speed.
+    let last: number | null = null;
+    let elapsed = 0;
+    let nextEdge = 280;
+    let nextExit = 3200;
+    let nextBreak = 2200;
+    let nextLink = 0;
+    let nextUnlink = 0;
+    let nextNode = 0;
+    let boost = 0;
+    let wasBoosted = false;
     let raf = 0;
+    let disposed = false;
 
-    function breakEdge(edge: GraphEdge) {
+    function removeEdge(edge: GraphEdge) {
       edge.el.remove();
       const i = edges.indexOf(edge);
       if (i >= 0) edges.splice(i, 1);
+    }
+
+    function retireEdge(edge: GraphEdge, now: number) {
+      if (edge.retiringAt != null || !edges.includes(edge)) return;
+      edge.retiringAt = now;
+      edge.retiringDraw = Math.min(1, Math.max(0, (now - edge.born) / edge.drawMs));
     }
 
     function linked(a: GraphNode, b: GraphNode) {
       return edges.some((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
     }
 
+    function connect(a: GraphNode, b: GraphNode, now: number, boosted: boolean) {
+      const limit = boosted ? Math.min(MAX_EDGES, nodes.length * 3) : nodeCount + 3;
+      if (edges.length >= limit || a === b || a.exiting || b.exiting || linked(a, b)) return;
+      if (a.group !== b.group) return;
+      // Boosted links stay local; vertices that drifted apart while queued don't link.
+      if (boosted && Math.hypot(a.x - b.x, a.y - b.y) > maxLink) return;
+      const el = document.createElementNS(NS, "line");
+      el.setAttribute("class", "lc-home-graph-edge");
+      el.setAttribute("data-node-a", String(a.id));
+      el.setAttribute("data-node-b", String(b.id));
+      el.setAttribute("stroke", "currentColor");
+      el.setAttribute("stroke-width", "0.9");
+      el.setAttribute("stroke-linecap", "round");
+      el.setAttribute("fill", "none");
+      el.setAttribute("opacity", "0");
+      el.setAttribute("pathLength", "1");
+      el.setAttribute("stroke-dasharray", "1");
+      el.setAttribute("stroke-dashoffset", "1");
+      layer.insertBefore(el, layer.firstChild);
+      edges.push({ a, b, born: now, life: boosted ? rand(4200, 6600) : rand(1400, 2600),
+        retiringAt: null, retiringDraw: 0, drawMs: boosted ? 150 : 280, retractMs: boosted ? 220 : 380, el });
+    }
+
     function addEdge(now: number) {
-      if (edges.length >= 7 || nodes.length < 2) return;
-      const a = nodes[Math.floor(Math.random() * nodes.length)]!;
+      const available = nodes.filter(n => !n.exiting);
+      if (edges.length >= nodeCount + 3 || available.length < 2) return;
+      const a = available[Math.floor(Math.random() * available.length)]!;
       let best: GraphNode | undefined;
-      let bestD = 30;
-      for (const b of nodes) {
-        if (b === a || linked(a, b)) continue;
+      let bestD = Math.max(30, Math.min(W, H) * .9);
+      for (const b of available) {
+        if (b === a || a.group !== b.group || linked(a, b)) continue;
         const d = Math.hypot(a.x - b.x, a.y - b.y);
         if (d < bestD) {
           bestD = d;
@@ -301,42 +439,165 @@ function ExploreLive() {
         }
       }
       if (!best) return;
-      const el = document.createElementNS(NS, "line");
-      el.setAttribute("class", "lc-home-graph-edge");
-      el.setAttribute("stroke", "currentColor");
-      el.setAttribute("stroke-width", "0.9");
-      el.setAttribute("stroke-linecap", "round");
-      el.setAttribute("fill", "none");
-      el.setAttribute("opacity", "0");
-      layer.insertBefore(el, layer.firstChild);
-      edges.push({ a, b: best, born: now, life: rand(1200, 2600), el });
+      connect(a, best, now, false);
     }
 
-    function tick(now: number) {
-      const dt = Math.min(0.05, (now - last) / 1000);
-      last = now;
+    function queueCluster(now: number) {
+      const available = nodes.filter(n => !n.exiting);
+      if (available.length < 3 || pendingLinks.length > 24) return;
+      // Each neighbourhood gets its own reach: some are tight with short links,
+      // others a little looser, but none spans the whole tile.
+      const reach = Math.max(side * rand(.3, .55), spacing * rand(1.2, 2));
+      const near = (from: GraphNode) => (n: GraphNode) => Math.hypot(n.x - from.x, n.y - from.y) <= reach;
+      // A neighbourhood grows one link at a time: a chain, then a triangle,
+      // then nearby vertices. Its remaining links arrive on later frames.
+      const degree = (n: GraphNode) => edges.reduce((total, e) => total + Number(e.a === n || e.b === n), 0) +
+        pendingLinks.reduce((total, e) => total + Number(e.a === n || e.b === n), 0);
+      const ungrouped = available.filter(n => n.group == null);
+      let group: GraphNode[];
+      if (ungrouped.length >= 3) {
+        const anchor = ungrouped[Math.floor(Math.random() * ungrouped.length)]!;
+        const neighbours = ungrouped.filter(n => n !== anchor && near(anchor)(n));
+        if (neighbours.length < 2) return;
+        const size = Math.min(neighbours.length + 1, Math.floor(rand(3, 6)));
+        group = [anchor, ...neighbours.sort((a, b) =>
+          Math.hypot(a.x - anchor.x, a.y - anchor.y) - Math.hypot(b.x - anchor.x, b.y - anchor.y)).slice(0, size - 1)];
+        const id = ++nextGroupId;
+        for (const n of group) n.group = id;
+      } else {
+        const grouped = available.filter(n => n.group != null &&
+          available.filter(candidate => candidate.group === n.group).length + ungrouped.length >= 3);
+        if (!grouped.length) return;
+        const anchor = grouped.reduce((best, n) => degree(n) < degree(best) ? n : best);
+        group = grouped.filter(n => n.group === anchor.group);
+        const joining = ungrouped.filter(near(anchor)).sort((a, b) =>
+          Math.hypot(a.x - anchor.x, a.y - anchor.y) - Math.hypot(b.x - anchor.x, b.y - anchor.y)).slice(0, Math.max(0, 5 - group.length));
+        for (const n of joining) n.group = anchor.group;
+        group.push(...joining);
+        // Too few vertices within reach to make a triangle this time.
+        if (group.length < 3) return;
+        group.sort((a, b) => degree(a) - degree(b));
+      }
+      // Cohorts keep distinct identities, so hover cannot join the whole tile
+      // into one permanent component. Existing quiet links detach gradually.
+      let boundary = 0;
+      for (const edge of edges) {
+        if (edge.a.group !== edge.b.group) retireEdge(edge, now + Math.min(420, boundary++ * 70));
+      }
+      const queue = (a: GraphNode, b: GraphNode) => {
+        if (pendingLinks.length >= 40 || linked(a, b) || pendingLinks.some(e =>
+          (e.a === a && e.b === b) || (e.a === b && e.b === a))) return;
+        pendingLinks.push({ a, b });
+      };
+      queue(group[0]!, group[1]!); queue(group[1]!, group[2]!); queue(group[2]!, group[0]!);
+      for (let i = 3; i < group.length; i++) {
+        queue(group[i - 1]!, group[i]!); queue(group[i]!, group[0]!);
+        if (i >= 3) queue(group[i]!, group[i - 2]!);
+      }
+    }
+
+    function departNodes(group: GraphNode[], now: number) {
+      const centre = group.reduce((point, n) => ({ x: point.x + n.x / group.length, y: point.y + n.y / group.length }), { x: 0, y: 0 });
+      const distances = [centre.x, W - centre.x, centre.y, H - centre.y];
+      const side = distances.indexOf(Math.min(...distances));
+      const velocity = rand(13, 19) * speed;
+      for (const n of group) {
+        n.exiting = true;
+        n.vx = (side === 0 ? -velocity : side === 1 ? velocity : rand(-3, 3) * speed);
+        n.vy = (side === 2 ? -velocity : side === 3 ? velocity : rand(-3, 3) * speed);
+      }
+      // The connected group travels together. Its boundary links retract in
+      // sequence while its internal links keep following the drifting vertices.
+      let boundary = 0;
+      for (const edge of edges) {
+        if (group.includes(edge.a) !== group.includes(edge.b)) retireEdge(edge, now + Math.min(420, boundary++ * 70));
+      }
+    }
+
+    function departComponent(now: number) {
+      const available = nodes.filter(n => !n.exiting);
+      if (available.length < 3) return;
+      const seed = available[Math.floor(Math.random() * available.length)]!;
+      const group = [seed], queue = [seed];
+      while (queue.length && group.length < 5) {
+        const current = queue.shift()!;
+        for (const edge of edges) {
+          if (edge.retiringAt != null) continue;
+          const neighbour = edge.a === current ? edge.b : edge.b === current ? edge.a : null;
+          if (neighbour && !neighbour.exiting && !group.includes(neighbour)) {
+            group.push(neighbour); queue.push(neighbour);
+            if (group.length === 5) break;
+          }
+        }
+      }
+      departNodes(group, now);
+    }
+
+    function tick(timestamp: number) {
+      raf = 0;
+      if (disposed || document.hidden || motionPreference.matches) return;
+      const dt = last == null ? 0 : Math.max(0, Math.min(0.05, (timestamp - last) / 1000));
+      last = timestamp;
+      elapsed += dt * 1000;
+      const now = elapsed;
+      const boosted = card?.dataset.boosted === "true";
+      const boostTarget = boosted ? 1 : 0, decay = Math.exp(-dt * 7);
+      boost = boostTarget + (boost - boostTarget) * decay;
+      // Hover changes the links, not how fast the vertices drift.
+      const movementTime = dt;
+      const targetNodes = boosted ? boostedNodeCount : nodeCount;
+      if (boosted !== wasBoosted) {
+        if (boosted) {
+          nextEdge = now; nextLink = now + 90; retiringLinks = [];
+        } else {
+          pendingLinks.length = 0;
+          retiringLinks = edges.filter(e => e.retiringAt == null).slice(nodeCount + 3);
+          nextUnlink = now + 120;
+        }
+        wasBoosted = boosted;
+      }
+      if (now >= nextNode) {
+        const present = nodes.filter(n => !n.exiting).length;
+        if (nodes.length < MAX_NODES && present < targetNodes) spawnNode(true, boosted && Math.random() < .6);
+        if (present > targetNodes) {
+          // Shed a few at a time so a dense hover graph settles in a few seconds.
+          const extra = [...nodes].reverse().filter(n => !n.exiting).slice(0, Math.ceil((present - targetNodes) / 8));
+          for (const n of extra) departNodes([n], now);
+        }
+        nextNode = now + (boosted ? 60 : 250);
+      }
 
       if (now >= nextEdge) {
-        addEdge(now);
-        nextEdge = now + rand(320, 860);
+        if (boosted) queueCluster(now); else addEdge(now);
+        nextEdge = now + (boosted ? rand(240, 460) : rand(320, 860));
+      }
+      if (boosted && now >= nextLink && pendingLinks.length) {
+        const link = pendingLinks.shift()!;
+        connect(link.a, link.b, now, true);
+        nextLink = now + rand(45, 80);
+      }
+      if (!boosted && now >= nextUnlink && retiringLinks.length) {
+        retireEdge(retiringLinks.shift()!, now);
+        // Still one at a time, but paced so even a dense graph unlinks in ~1.2s.
+        nextUnlink = now + Math.max(25, Math.min(130, 1200 / (retiringLinks.length + 1)));
       }
       if (now >= nextBreak && edges.length) {
-        breakEdge(edges[Math.floor(Math.random() * edges.length)]!);
-        nextBreak = now + rand(900, 1800);
+        const alive = edges.filter(e => e.retiringAt == null);
+        if (alive.length) retireEdge(alive[Math.floor(Math.random() * alive.length)]!, now);
+        nextBreak = now + (boosted ? rand(620, 1100) : rand(900, 1800));
       }
       if (now >= nextExit && nodes.length) {
-        const n = nodes[Math.floor(Math.random() * nodes.length)]!;
-        n.exiting = true;
-        n.vx *= 2.2;
-        n.vy *= 2.2;
-        if (Math.abs(n.vx) < 9) n.vx = (n.vx < 0 ? -1 : 1) * rand(11, 18);
-        if (Math.abs(n.vy) < 9) n.vy = (n.vy < 0 ? -1 : 1) * rand(9, 16);
-        nextExit = now + rand(1400, 2600);
+        if (boosted) departComponent(now);
+        else {
+          const available = nodes.filter(n => !n.exiting);
+          if (available.length) departNodes([available[Math.floor(Math.random() * available.length)]!], now);
+        }
+        nextExit = now + (boosted ? rand(2600, 4000) : rand(1800, 3200));
       }
 
       for (const n of nodes) {
-        n.x += n.vx * dt;
-        n.y += n.vy * dt;
+        n.x += n.vx * movementTime;
+        n.y += n.vy * movementTime;
         if (!n.exiting) {
           if (n.x < pad || n.x > W - pad) n.vx *= -1;
           if (n.y < pad || n.y > H - pad) n.vy *= -1;
@@ -345,9 +606,9 @@ function ExploreLive() {
           n.vx += rand(-5, 5) * dt;
           n.vy += rand(-5, 5) * dt;
           const sp = Math.hypot(n.vx, n.vy);
-          if (sp > 15) {
-            n.vx *= 15 / sp;
-            n.vy *= 15 / sp;
+          if (sp > 15 * speed) {
+            n.vx *= 15 * speed / sp;
+            n.vy *= 15 * speed / sp;
           }
           if (sp < 3.2) {
             n.vx *= 1.5;
@@ -364,43 +625,76 @@ function ExploreLive() {
         if (n.x < -7 || n.x > W + 7 || n.y < -7 || n.y > H + 7) {
           for (let j = edges.length - 1; j >= 0; j--) {
             const e = edges[j]!;
-            if (e.a === n || e.b === n) breakEdge(e);
+            if (e.a === n || e.b === n) removeEdge(e);
           }
           n.el.remove();
           nodes.splice(i, 1);
-          spawnNode(true);
+          if (nodes.length < MAX_NODES && nodes.filter(candidate => !candidate.exiting).length < targetNodes) spawnNode(true);
         }
       }
 
       for (let i = edges.length - 1; i >= 0; i--) {
         const e = edges[i]!;
         const age = now - e.born;
-        if (age > e.life) {
-          breakEdge(e);
+        // Links that stretch as their vertices drift apart break, sooner on hover.
+        if (age > e.life || (age > 700 && Math.hypot(e.a.x - e.b.x, e.a.y - e.b.y) > (boosted ? maxLink * 1.2 : Math.max(38, side * 1.1)))) {
+          retireEdge(e, now);
+        }
+        if (e.retiringAt != null && now >= e.retiringAt + e.retractMs) {
+          removeEdge(e);
           continue;
         }
-        const fadeIn = Math.min(1, age / 160);
-        const fadeOut = Math.min(1, (e.life - age) / 200);
+        const retiring = e.retiringAt != null && now >= e.retiringAt;
+        const draw = retiring ? e.retiringDraw * Math.max(0, 1 - (now - e.retiringAt!) / e.retractMs) : Math.min(1, age / e.drawMs);
         e.el.setAttribute("x1", e.a.x.toFixed(2));
         e.el.setAttribute("y1", e.a.y.toFixed(2));
         e.el.setAttribute("x2", e.b.x.toFixed(2));
         e.el.setAttribute("y2", e.b.y.toFixed(2));
-        e.el.setAttribute("opacity", (0.78 * Math.min(fadeIn, fadeOut)).toFixed(3));
+        e.el.setAttribute("stroke-dashoffset", (1 - draw).toFixed(3));
+        e.el.setAttribute("opacity", ((0.78 + boost * .2) * draw).toFixed(3));
+      }
+
+      // Better-connected vertices are bigger: each live link adds to the radius,
+      // and sizes ease toward their target as links form and break.
+      const degree = new Map<GraphNode, number>();
+      for (const e of edges) {
+        if (e.retiringAt != null && now >= e.retiringAt) continue;
+        degree.set(e.a, (degree.get(e.a) ?? 0) + 1);
+        degree.set(e.b, (degree.get(e.b) ?? 0) + 1);
+      }
+      const ease = 1 - Math.exp(-dt * 8);
+      for (const n of nodes) {
+        const target = n.base + Math.min(2.6, 0.6 * (degree.get(n) ?? 0));
+        if (Math.abs(target - n.r) < 0.005) continue;
+        n.r += (target - n.r) * ease;
+        n.el.setAttribute("r", n.r.toFixed(2));
       }
 
       raf = requestAnimationFrame(tick);
     }
 
-    raf = requestAnimationFrame(tick);
+    function visibilityChanged() {
+      cancelAnimationFrame(raf);
+      raf = 0;
+      // Preserve the graph but don't age edges or move nodes across a pause.
+      last = null;
+      if (!document.hidden && !disposed && !motionPreference.matches) raf = requestAnimationFrame(tick);
+    }
+    document.addEventListener("visibilitychange", visibilityChanged);
+    motionPreference.addEventListener("change", visibilityChanged);
+    visibilityChanged();
     return () => {
+      disposed = true;
+      document.removeEventListener("visibilitychange", visibilityChanged);
+      motionPreference.removeEventListener("change", visibilityChanged);
       cancelAnimationFrame(raf);
       layer.remove();
     };
-  }, []);
+  }, [width, height]);
 
   return (
     <span className="lc-home-live">
-      <svg ref={svgRef} viewBox="0 0 52 52" className="lc-home-live-svg" aria-hidden="true" />
+      <svg ref={svgRef} viewBox={`0 0 ${width} ${height}`} className="lc-home-live-svg" aria-hidden="true" />
     </span>
   );
 }
@@ -419,6 +713,13 @@ export function HomeChooser({
 }: HomeChooserProps) {
   const [recent, setRecent] = useState<TabRecord[]>([]);
   const [recentsOpen, setRecentsOpen] = useState(loadRecentsOpen);
+  const [pageVisible, setPageVisible] = useState(() => !document.hidden);
+  useEffect(() => {
+    const refresh = () => setPageVisible(!document.hidden);
+    document.addEventListener("visibilitychange", refresh);
+    refresh();
+    return () => document.removeEventListener("visibilitychange", refresh);
+  }, []);
   // Hold a recent item to edit the list: items shake and show an x that only
   // takes them off Recently opened.
   const [editing, setEditing] = useState(false);
@@ -487,84 +788,48 @@ export function HomeChooser({
             <clipPath id="lc-home-ann-clip" clipPathUnits="userSpaceOnUse">
               <path d={PAGE_PATH} />
             </clipPath>
+            {/* Everything on the near side of the fold line x + y = 42. The line
+                slides toward the middle as the corner curls, so the folded corner
+                is removed from the sheet itself rather than covered. */}
+            <clipPath id="lc-home-ann-peel-clip" clipPathUnits="userSpaceOnUse">
+              <path className="lc-home-ann-peel" d="M-10-10H34V8L8 34H-10z" />
+            </clipPath>
           </defs>
           <path d={PAGE_PATH} />
-          <path d={PAGE_FOLD} />
-          <g clipPath="url(#lc-home-ann-clip)">
-            <path
-              className="lc-home-mark lc-home-mark-a-hl"
-              d="M6.6 11.3h9.2"
-              stroke="#eab308"
-              strokeWidth="2.35"
-              pathLength={1}
-            />
-            <path className="lc-home-rule lc-home-rule-1" d="M6.6 9.3h10.4" pathLength={1} />
-            <path className="lc-home-rule lc-home-rule-2" d="M6.6 11.3h9.2" pathLength={1} />
-            <path className="lc-home-rule lc-home-rule-3" d="M6.6 13.3h10.4" pathLength={1} />
-            <path className="lc-home-rule lc-home-rule-4" d="M6.6 15.3h8.6" pathLength={1} />
-            <path className="lc-home-rule lc-home-rule-5" d="M6.6 17.3h10.4" pathLength={1} />
-            <path className="lc-home-rule lc-home-rule-6" d="M6.6 19.3h7.4" pathLength={1} />
-            <path
-              className="lc-home-mark lc-home-mark-a-ul"
-              d="M6.6 13.95h8.1"
-              stroke="#3b82f6"
-              strokeWidth="1.05"
-              pathLength={1}
-            />
-            <rect
-              className="lc-home-box lc-home-box-a"
-              x="14.4"
-              y="8.35"
-              width="3.2"
-              height="2.15"
-              rx="0.35"
-              fill="#fbbf24"
-              stroke="none"
-            />
-            <rect
-              className="lc-home-box lc-home-box-a2"
-              x="7"
-              y="16.15"
-              width="2.9"
-              height="2"
-              rx="0.35"
-              fill="#60a5fa"
-              stroke="none"
-            />
-            <path
-              className="lc-home-mark lc-home-mark-b-ul"
-              d="M6.6 11.95h7.6"
-              stroke="#22c55e"
-              strokeWidth="1.05"
-              pathLength={1}
-            />
-            <path
-              className="lc-home-mark lc-home-mark-b-strike"
-              d="M6.8 17.3h7.8"
-              stroke="#f43f5e"
-              strokeWidth="1.05"
-              pathLength={1}
-            />
-            <rect
-              className="lc-home-box lc-home-box-b"
-              x="14.6"
-              y="14.35"
-              width="3.1"
-              height="2.1"
-              rx="0.35"
-              fill="#f9a8d4"
-              stroke="none"
-            />
-            <rect
-              className="lc-home-box lc-home-box-b2"
-              x="7.1"
-              y="8.4"
-              width="2.8"
-              height="1.95"
-              rx="0.35"
-              fill="#c4b5fd"
-              stroke="none"
-            />
+          {/* The next page waits underneath and only shows while the top sheet
+              curls and turns away over its left edge. */}
+          <g className="lc-home-ann-under" clipPath="url(#lc-home-ann-clip)">
+            <path d="M6.6 9.3h10.4M6.6 11.3h9.2M6.6 13.3h10.4M6.6 15.3h8.6M6.6 17.3h10.4M6.6 19.3h7.4" />
+          </g>
+          {/* The top sheet turns; inside it the text scrolls, carrying the
+              first marks with it. The second marks sit on the scrolled rows. */}
+          <g className="lc-home-ann-page">
+            <g clipPath="url(#lc-home-ann-peel-clip)">
+            <path className="lc-home-ann-sheet" d={PAGE_PATH} />
+            <g clipPath="url(#lc-home-ann-clip)">
+              <g className="lc-home-ann-scroll">
+                <path className="lc-home-mark lc-home-mark-a-hl" d="M6.6 11.3h9.2" stroke="#eab308" strokeWidth="2.35" pathLength={1} />
+                <path className="lc-home-rule" d="M6.6 9.3h10.4" />
+                <path className="lc-home-rule" d="M6.6 11.3h9.2" />
+                <path className="lc-home-rule" d="M6.6 13.3h10.4" />
+                <path className="lc-home-rule" d="M6.6 15.3h8.6" />
+                <path className="lc-home-rule" d="M6.6 17.3h10.4" />
+                <path className="lc-home-rule" d="M6.6 19.3h7.4" />
+                <path className="lc-home-rule" d="M6.6 21.3h9.6" />
+                <path className="lc-home-rule" d="M6.6 23.3h10.4" />
+                <path className="lc-home-rule" d="M6.6 25.3h6.8" />
+                <path className="lc-home-mark lc-home-mark-a-ul" d="M6.6 13.95h8.1" stroke="#3b82f6" strokeWidth="1.05" pathLength={1} />
+                <rect className="lc-home-box lc-home-box-a" x="14.4" y="8.35" width="3.2" height="2.15" rx="0.35" fill="#fbbf24" stroke="none" />
+                <rect className="lc-home-box lc-home-box-a2" x="7" y="16.15" width="2.9" height="2" rx="0.35" fill="#60a5fa" stroke="none" />
+              </g>
+              <path className="lc-home-mark lc-home-mark-b-ul" d="M6.6 11.95h7.6" stroke="#22c55e" strokeWidth="1.05" pathLength={1} />
+              <path className="lc-home-mark lc-home-mark-b-strike" d="M6.8 17.3h7.8" stroke="#f43f5e" strokeWidth="1.05" pathLength={1} />
+              <rect className="lc-home-box lc-home-box-b" x="14.6" y="14.35" width="3.1" height="2.1" rx="0.35" fill="#f9a8d4" stroke="none" />
+              <rect className="lc-home-box lc-home-box-b2" x="7.1" y="8.4" width="2.8" height="1.95" rx="0.35" fill="#c4b5fd" stroke="none" />
+            </g>
+            </g>
+            {/* The lifted corner: the flap is the corner reflected over its fold. */}
+            <path className="lc-home-ann-curl" d="M20 16.5 14.5 22V16.5z" />
           </g>
         </Glyph>
       ),
@@ -582,10 +847,23 @@ export function HomeChooser({
             </clipPath>
           </defs>
           <path d={PAGE_PATH} />
-          <path d={PAGE_FOLD} />
           <g clipPath="url(#lc-home-wb-clip)">
+            {/* Resting sketches, in rotation: each leave draws the next one.
+                The blank page has no strokes; the pencil just parks. */}
             <g className="lc-home-wb-rest">
-              <path d="M6.5 15c2-7 4-7 6 0s4 7 6-2M6.5 19h10m1.5 0 1 1 1.5-1.5"/>
+              <g className="lc-home-wb-sketch" data-sketch="diagram">
+                <path className="lc-home-trace" d="M6.5 6.5h4v3.5h-4z" pathLength={1} />
+                <path className="lc-home-trace" d="M10.5 8.25h4" pathLength={1} />
+                <path className="lc-home-trace" d="M13.1 6.9l1.4 1.35-1.4 1.35" pathLength={1} />
+                <path className="lc-home-trace" d="M16.5 6.35a1.9 1.9 0 1 1 0 3.8a1.9 1.9 0 1 1 0-3.8" pathLength={1} />
+                <path className="lc-home-trace" d="M8.5 10v4.5h8" pathLength={1} />
+              </g>
+              <g className="lc-home-wb-sketch" data-sketch="note">
+                <path className="lc-home-trace" d="M6.5 8c1-.8 2 .8 3 0s2 .8 3 0 2 .8 3 0 1.5.6 2.5 0" pathLength={1} />
+                <path className="lc-home-trace" d="M6.5 12c1-.8 2 .8 3 0s2 .8 3 0 2 .8 3 0" pathLength={1} />
+                <path className="lc-home-trace" d="M6.5 16c1-.8 2 .8 3 0s2 .8 3 0" pathLength={1} />
+              </g>
+              <g className="lc-home-wb-sketch" data-sketch="blank" />
             </g>
             <g className="lc-home-wb-scroll">
               <g className="lc-home-wb-draw-a">
@@ -626,13 +904,7 @@ export function HomeChooser({
       blurb: "Open a page, then write straight onto the snapshot.",
       wip: true,
       live: <BrowseLive />,
-      icon: (
-        <Glyph>
-          <circle cx="12" cy="12" r="9.5" />
-          <path d="M2.5 12h19" />
-          <path d="M12 2.5a14.5 14.5 0 0 1 3.8 9.5 14.5 14.5 0 0 1-3.8 9.5 14.5 14.5 0 0 1-3.8-9.5A14.5 14.5 0 0 1 12 2.5z" />
-        </Glyph>
-      ),
+      icon: <BrowseGlyph />,
       onOpen: onBrowse,
     },
     {
@@ -659,7 +931,7 @@ export function HomeChooser({
   ];
 
   return (
-    <nav className="lc-home-chooser lc-home-redesign" aria-label="Choose a workspace" data-home-active={active} data-covered={covered || undefined} data-recents={recent.length === 0 ? "none" : recentsOpen ? "open" : "collapsed"}>
+    <nav className="lc-home-chooser lc-home-redesign" aria-label="Choose a workspace" data-home-active={active} data-page-visible={pageVisible} data-covered={covered || undefined} data-recents={recent.length === 0 ? "none" : recentsOpen ? "open" : "collapsed"}>
       {recent.length > 0 && <section ref={recentsRef} className="lc-home-recents" aria-labelledby="lc-home-recents-title" data-editing={editing || undefined}>
         <div className="lc-home-recents-head">
           <h2 id="lc-home-recents-title" className="lc-home-section-title lc-home-recents-heading">
@@ -785,27 +1057,38 @@ function homeTileMotion(visible: boolean, reduced: boolean, delay: number, inter
 function HomeCard({ mode, busy, active, delay }: { mode: HomeMode; busy: boolean; active: boolean; delay: number }) {
   const reduced = useReducedMotion();
   const [scene, setScene] = useState<IconScene>("rest");
-  const sceneRef = useRef<IconScene>(scene);
-  sceneRef.current = scene;
   const cardRef = useRef<HTMLButtonElement>(null);
   const leaveTimer = useRef(0);
-  const approachTimer = useRef(0);
-  const approaching = useRef(false);
+  const tracer = useRef<WhiteboardTracer | null>(null);
+  const braces = useRef<PracticeBraces | null>(null);
+  /** When the braces finish opening, so a leave knows whether code was typed. */
+  const codeStartsAt = useRef(0);
   const hoverable = HOVER_SCENES.has(mode.id);
-  useEffect(() => () => {
-    window.clearTimeout(leaveTimer.current);
-    window.clearTimeout(approachTimer.current);
-  }, []);
+  const boostable = mode.id === "browse" || mode.id === "explore";
+  const [pointerOver, setPointerOver] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [pressed, setPressed] = useState(false);
+  const previousScene = useRef(scene);
+  useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
+  useEffect(() => {
+    if (mode.id !== "whiteboard" || !cardRef.current) return;
+    tracer.current = createWhiteboardTracer(cardRef.current);
+    return () => { tracer.current?.dispose(); tracer.current = null; };
+  }, [mode.id]);
+  useEffect(() => {
+    if (mode.id !== "practice" || !cardRef.current) return;
+    braces.current = createPracticeBraces(cardRef.current);
+    return () => { braces.current?.release(); braces.current = null; };
+  }, [mode.id]);
   useLayoutEffect(() => {
-    if (scene !== "in" || !approaching.current) return;
-    approachWhiteboardNib(cardRef.current);
-    window.clearTimeout(approachTimer.current);
-    approachTimer.current = window.setTimeout(() => {
-      approaching.current = false;
-      clearNibInline(whiteboardNib(cardRef.current));
-    }, NIB_APPROACH_MS + 40);
-    return () => window.clearTimeout(approachTimer.current);
-  }, [scene]);
+    if (mode.id === "practice" && scene === "in" && previousScene.current === "out") {
+      // A rapid re-entry starts typing into the newly opened brackets, instead
+      // of reviving the fully written block frozen during its deletion scene.
+      const code = cardRef.current?.querySelector<HTMLElement>(".lc-home-live-code");
+      for (const animation of code?.getAnimations?.({ subtree: true }) ?? []) animation.currentTime = 0;
+    }
+    previousScene.current = scene;
+  }, [mode.id, scene]);
   return (
     <motion.span className="lc-home-cell" data-mode={mode.id} data-tier={HOME_TIER[mode.id] ?? 3}
       {...homeTileMotion(active, !!reduced, delay, !busy, HOME_TIER[mode.id] === 2 ? 1.012 : 1.035)}>
@@ -815,22 +1098,43 @@ function HomeCard({ mode, busy, active, delay }: { mode: HomeMode; busy: boolean
         className="lc-home-card"
         data-mode={mode.id}
         data-scene={hoverable ? scene : undefined}
+        data-boosted={boostable ? active && !busy && (pointerOver || focused || pressed) : undefined}
         aria-label={`${mode.kicker} — ${mode.blurb}${mode.wip ? " (work in progress)" : ""}`}
         disabled={busy}
         onClick={mode.onOpen}
+        onPointerEnter={boostable ? e => { if (e.pointerType !== "touch") setPointerOver(true); } : undefined}
+        onPointerLeave={boostable ? () => { setPointerOver(false); setPressed(false); } : undefined}
+        onPointerDown={boostable ? () => setPressed(true) : undefined}
+        onPointerUp={boostable ? () => setPressed(false) : undefined}
+        onPointerCancel={boostable ? () => setPressed(false) : undefined}
+        onFocus={boostable ? () => setFocused(true) : undefined}
+        onBlur={boostable ? () => setFocused(false) : undefined}
         onMouseEnter={hoverable ? () => {
           window.clearTimeout(leaveTimer.current);
-          if (mode.id === "whiteboard" && sceneRef.current === "rest") {
-            approaching.current = freezeWhiteboardNib(cardRef.current);
+          tracer.current?.enter();
+          if (braces.current && cardRef.current) {
+            // Typing starts the moment the braces finish opening from wherever they were.
+            const ms = braces.current.open();
+            cardRef.current.style.setProperty("--lc-home-code-start", `${ms}ms`);
+            codeStartsAt.current = performance.now() + ms;
           }
           setScene("in");
         } : undefined}
         onMouseLeave={hoverable ? () => {
-          approaching.current = false;
-          window.clearTimeout(approachTimer.current);
-          clearNibInline(whiteboardNib(cardRef.current));
           setScene("out");
           window.clearTimeout(leaveTimer.current);
+          if (tracer.current) {
+            tracer.current.leave(() => setScene("rest"));
+            return;
+          }
+          if (braces.current) {
+            const ms = braces.current.close(performance.now() >= codeStartsAt.current);
+            leaveTimer.current = window.setTimeout(() => {
+              braces.current?.release();
+              setScene("rest");
+            }, ms + 60);
+            return;
+          }
           leaveTimer.current = window.setTimeout(
             () => setScene("rest"),
             LEAVE_MS[mode.id] ?? 400,
@@ -838,6 +1142,7 @@ function HomeCard({ mode, busy, active, delay }: { mode: HomeMode; busy: boolean
         } : undefined}
       >
         {mode.wip ? <span className="lc-home-wip">(WIP)</span> : null}
+        <span className="lc-home-card-sweep" aria-hidden />
         <span className="lc-home-card-icon" aria-hidden>
           {active && mode.live}
           {mode.icon}

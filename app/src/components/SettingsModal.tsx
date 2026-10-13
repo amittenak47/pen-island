@@ -19,6 +19,7 @@ import type {
   ProviderConfig,
   VoiceConfig,
 } from "../api/types";
+import { CHATBOT_CLIENTS, loadChatBotClient, saveChatBotClient, loadChatBotAnswerMode, saveChatBotAnswerMode, type ChatBotClient, type ChatBotAnswerMode } from "../util/chatBotClient";
 import { DEFAULT_COACH_FLAGS, DEFAULT_VOICE_CONFIG } from "../api/types";
 import { shouldDismissBackdrop } from "../util/backdropDismiss";
 import { DialogFrame } from "./DialogFrame";
@@ -907,6 +908,10 @@ export function SettingsModal({
     window.addEventListener(PAD_HUB_EVENT, onHub);
     return () => window.removeEventListener(PAD_HUB_EVENT, onHub);
   }, [open, refreshDevices]);
+  const [chatBotClient, setChatBotClient] = useState<ChatBotClient>(loadChatBotClient);
+  const [baselineChatBotClient, setBaselineChatBotClient] = useState<ChatBotClient>(loadChatBotClient);
+  const [chatBotAnswerMode, setChatBotAnswerMode] = useState<ChatBotAnswerMode>(loadChatBotAnswerMode);
+  const [baselineChatBotAnswerMode, setBaselineChatBotAnswerMode] = useState<ChatBotAnswerMode>(loadChatBotAnswerMode);
   const [hubUrl, setHubUrl] = useState("");
   const [hubToken, setHubToken] = useState("");
   const [baselineHubUrl, setBaselineHubUrl] = useState("");
@@ -1197,6 +1202,12 @@ export function SettingsModal({
     setBaselinePrefs(prefs);
     // Saved only: the desktop that *is* the hub runs on a loopback it never
     // typed, and showing that here would read as "connected to some other PC".
+    const savedChatBot = loadChatBotClient();
+    setChatBotClient(savedChatBot);
+    setBaselineChatBotClient(savedChatBot);
+    const savedAnswerMode = loadChatBotAnswerMode();
+    setChatBotAnswerMode(savedAnswerMode);
+    setBaselineChatBotAnswerMode(savedAnswerMode);
     const hub = loadSavedPadHub();
     setHubUrl(hub?.url ?? "");
     setHubToken(hub?.token ?? "");
@@ -1320,7 +1331,7 @@ export function SettingsModal({
     keysDirty ||
     hubUrl.trim() !== baselineHubUrl ||
     hubToken.trim() !== baselineHubToken ||
-    debugLog !== baselineDebugLog;
+    debugLog !== baselineDebugLog || chatBotClient !== baselineChatBotClient || chatBotAnswerMode !== baselineChatBotAnswerMode;
 
   const changeCount = countSettingsChanges(draftPrefs, baselinePrefs)
     + countSettingsChanges({...draft, coach: {...DEFAULT_COACH_FLAGS, ...draft.coach}}, {...baselineConfig, coach: {...DEFAULT_COACH_FLAGS, ...baselineConfig.coach}})
@@ -1328,7 +1339,7 @@ export function SettingsModal({
     + Number(Boolean(groqKeyDraft.trim()) || clearGroqKey)
     + Number(Boolean(deepgramKeyDraft.trim()) || clearDeepgramKey)
     + Number(hubUrl.trim() !== baselineHubUrl) + Number(hubToken.trim() !== baselineHubToken)
-    + Number(debugLog !== baselineDebugLog);
+    + Number(debugLog !== baselineDebugLog) + Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode);
   const prefGroups: Record<string, (keyof DevicePrefs)[]> = {
     writing: ["handedness", "chromeWake", "chromeWakeTint", "captureMode", "captureDestination", "captureFolder", "captureCountdown", "inkMatchDisplay", "pressureClip", "inkSmoothing", "inkSmoothingMode", "inkSpeed", "inkSpeedBlotBlend", "inkGrain", "inkSpeedFade", "inkBoldness", "eraserPartial"],
     "ink-tools": ["tapOk", "colorWheelOnToolbar", "palettePrefs"],
@@ -1356,6 +1367,7 @@ export function SettingsModal({
   changes.storage = (changes.storage ?? 0) + Number(hubUrl.trim() !== baselineHubUrl) + Number(hubToken.trim() !== baselineHubToken);
   changes.diagnostics = (changes.diagnostics ?? 0) + Number(debugLog !== baselineDebugLog);
   changes.llm = (changes.llm ?? 0) + Number(Boolean(openaiKeyDraft.trim()) || clearOpenaiKey) + Number(Boolean(groqKeyDraft.trim()) || clearGroqKey);
+  changes.chatbot = Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode);
   changes.voice = (changes.voice ?? 0) + Number(Boolean(deepgramKeyDraft.trim()) || clearDeepgramKey);
   const resetGroup = (id: string) => {
     if (saving) return;
@@ -1363,6 +1375,7 @@ export function SettingsModal({
     const coachFields = id === "ui" ? sharedUiFlags : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
     setDraft(prev => ({...prev, ...select(baselineConfig, configGroups[id] ?? []),
       coach: {...DEFAULT_COACH_FLAGS, ...prev.coach, ...select({...DEFAULT_COACH_FLAGS, ...baselineConfig.coach}, coachFields)}}));
+    if (id === "chatbot") { setChatBotClient(baselineChatBotClient); setChatBotAnswerMode(baselineChatBotAnswerMode); }
     if (id === "storage") { setHubUrl(baselineHubUrl); setHubToken(baselineHubToken); }
     if (id === "diagnostics") setDebugLog(baselineDebugLog);
     if (id === "llm") { setOpenaiKeyDraft(""); setGroqKeyDraft(""); setClearOpenaiKey(false); setClearGroqKey(false); }
@@ -1379,6 +1392,7 @@ export function SettingsModal({
     diagnostics: [inkPerfOverlay && "Frames", inkPerfBar && "Load bar", pdfFlickHud && "Flick preview", hubSyncWindowPill && "Sync pill", debugLog && "Debug log"].filter(Boolean).join(" · ") || "Off", paths: draft.workspace_dir,
     datasets: `${datasets.length} datasets`, tests: draft.stop_on_first_failure ? "Stop at first failure" : "Run all cases",
     llm: `${draft.default_provider} / ${draft[draft.default_provider as keyof Pick<LcConfig,"local"|"ollama"|"openai"|"groq">]?.model || "No model selected"}`,
+    chatbot: chatBotAnswerMode === "llm" ? "Desktop's configured LLM" : CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.label ?? "Other assistant",
     voice: `${voice.engine === "android" ? voiceLabel : `${voiceLabel} · ${voiceClipModel(voice)}`}${voice.cleanup !== "off" ? ` · tidy: ${voice.cleanup}` : ""}`,
     ...Object.fromEntries(COACH_FLAG_GROUPS.map(group=>[group.id, `${group.flags.filter(([key])=>(draft.coach ?? DEFAULT_COACH_FLAGS)[key]).length} of ${group.flags.length} on`])),
   };
@@ -1477,6 +1491,14 @@ export function SettingsModal({
         window.dispatchEvent(new CustomEvent(HUB_AUTOSYNC_EVENT));
         window.dispatchEvent(new CustomEvent(CHROME_WAKE_EVENT));
         window.dispatchEvent(new CustomEvent(PDF_READING_EVENT));
+      }
+      if (chatBotClient !== baselineChatBotClient) {
+        saveChatBotClient(chatBotClient);
+        setBaselineChatBotClient(chatBotClient);
+      }
+      if (chatBotAnswerMode !== baselineChatBotAnswerMode) {
+        saveChatBotAnswerMode(chatBotAnswerMode);
+        setBaselineChatBotAnswerMode(chatBotAnswerMode);
       }
       if (debugLog !== baselineDebugLog) {
         setDebugLogEnabled(debugLog);
@@ -3283,9 +3305,37 @@ export function SettingsModal({
               </div>
               </div>
 </SettingsFold>
+              <SettingsFold id="chatbot" title="ChatBot">
+                <div className="lc-setting-row">
+                  <p className="lc-settings-hint">Select text and choose Ask ChatBot to add a footnote. Choose who answers it. Keep Pen Island running on the PC; it delivers the answer and sync carries it to your other devices.</p>
+                  <label><span>Answer with</span>
+                    <select aria-label="ChatBot answer mode" value={chatBotAnswerMode} onChange={event => setChatBotAnswerMode(event.target.value as ChatBotAnswerMode)}>
+                      <option value="bot">External bot (MCP)</option>
+                      <option value="llm">Configured LLM</option>
+                    </select>
+                  </label>
+                  {chatBotAnswerMode === "llm" ? <p className="lc-settings-hint">The desktop hub answers automatically with its default LLM from Settings → LLM. A local model needs its server running; a cloud model needs its API key. An external bot subscription does not supply an API key.</p> : <>
+                  <label><span>Assistant setup</span>
+                    <select aria-label="ChatBot assistant" value={chatBotClient} onChange={event => setChatBotClient(event.target.value as ChatBotClient)}>
+                      {CHATBOT_CLIENTS.map(client => <option key={client.id} value={client.id}>{client.label}</option>)}
+                    </select>
+                  </label>
+                  <p className="lc-settings-hint">{CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.help}</p>
+                  <p className="lc-settings-hint">This choice saves your setup guide. Connect the assistant in its own app; all connected assistants share the footnote inbox.</p>
+                  <label><span>Local MCP command (on the PC)</span><input readOnly value="lc mcp" /></label>
+                  <label><span>Private HTTP adapter (optional)</span><input readOnly value="lc mcp --listen 127.0.0.1:7879 --auth-token-file path-to-token.txt" /></label>
+                  <p className="lc-settings-hint">The adapter provides http://127.0.0.1:7879/mcp for a tunnel and exposes only footnote requests and answers. Use a separate random token file (32–256 characters) and set the assistant&apos;s Authorization header to Bearer followed by that token. The local command reads the hub token from your config.</p>
+                  {chatBotClient === "dots" && <>
+                    <p className="lc-settings-hint">For OpenAI Dots, connect a custom MCP plugin using Secure MCP Tunnel. A tunnel needs a Platform tunnel ID, a runtime API key, and association with your ChatGPT workspace. A ChatGPT subscription alone does not configure this connection.</p>
+                    <a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noreferrer">OpenAI connection guide</a>
+                  </>}
+                  {chatBotClient === "grok" && <a href="https://docs.x.ai/grok-bot/team-bots" target="_blank" rel="noreferrer">Grok Bot connection guide</a>}
+                  </>}
+                </div>
+              </SettingsFold>
               <SettingsFold id="voice" title="Voice dictation">
               <div className="lc-setting-row">
-                <p className="lc-settings-hint">Choose what the microphone in the Android agent composer uses. Android dictation types as you speak. Whisper and the cloud services record a clip and transcribe it when you stop. Whisper on your PC needs a running speech server; selecting it does not install or start one.</p>
+                <p className="lc-settings-hint">Choose what the microphone in the agent composer uses. Desktop supports Whisper and cloud clip transcription; Android dictation uses the tablet's built-in recognizer. Android dictation types as you speak. Whisper and the cloud services record a clip and transcribe it when you stop. Whisper on your PC needs a running speech server; selecting it does not install or start one.</p>
                 <div className="lc-settings-subhead">Engine</div>
                 <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Dictation engine">
                   {VOICE_ENGINES.map((engine) => (

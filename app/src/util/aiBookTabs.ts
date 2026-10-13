@@ -1,11 +1,11 @@
-/** Layout for AI footnotes: 50% on the page, 50% hanging off the right edge. */
+/** ChatBot bookmarks hang halfway off the left edge, opposite the footnote controls. */
 
 export const AI_TAB_WIDTH = 28;
 export const AI_TAB_HEIGHT = 18;
 export const AI_TAB_STACK_GAP = 20;
 
-export function aiBookTabLeft(pageWidth: number, tabWidth = AI_TAB_WIDTH): number {
-  return Math.max(0, pageWidth - tabWidth / 2);
+export function aiBookTabLeft(tabWidth = AI_TAB_WIDTH): number {
+  return -tabWidth / 2;
 }
 
 /**

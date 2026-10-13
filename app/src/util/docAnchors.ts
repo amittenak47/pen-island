@@ -319,6 +319,20 @@ export function anchorFromRange(
   };
 }
 
+/** Recover a text-bearing marquee only when its quote has one exact match. */
+export function anchorFromUniqueQuote(root: Node, exact: string, scope?: string): TextAnchor | null {
+  if (!exact.trim()) return null;
+  const text = textOf(root);
+  const found = findQuote(text, { exact });
+  if (!found) return null;
+  return {
+    kind: "text",
+    ...found,
+    ...(scope ? { scope } : {}),
+    ...quoteFromStream(text, found.start, found.end),
+  };
+}
+
 /**
  * A region anchor from a rectangle in viewport space.
  *

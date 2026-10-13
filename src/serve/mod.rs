@@ -10,6 +10,7 @@
 //! through [`blocking`], which runs it on `tokio`'s blocking pool.
 
 pub mod coach;
+pub mod footnote_answers;
 pub mod common;
 pub mod routes;
 pub mod board_session;
@@ -82,6 +83,7 @@ pub async fn listen_lan(state: Shared, port: u16) -> Result<()> {
     let listener = TcpListener::bind(("0.0.0.0", port))
         .await
         .with_context(|| format!("cannot bind pad-sync listener on 0.0.0.0:{port}"))?;
+    footnote_answers::resume(None);
     axum::serve(listener, app)
         .await
         .context("pad-sync listener stopped")?;
@@ -310,7 +312,7 @@ async fn require_token(
     }
 }
 
-fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+pub(crate) fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
     if a.len() != b.len() {
         return false;
     }

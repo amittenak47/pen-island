@@ -64,7 +64,7 @@ describe("footnote save baseline", () => {
       openDocId: "doc-1",
       live,
       pristine,
-      mutate: (footnotes) => applyFootnoteResult(footnotes, { id: "fr-1", notes: ["from GrokBot"] }, 50),
+      mutate: (footnotes) => applyFootnoteResult(footnotes, { id: "fr-1", notes: ["from ChatBot"] }, 50),
       publish: (next) => {
         live.current = next;
       },
@@ -84,14 +84,14 @@ describe("footnote save baseline", () => {
     release.release();
     expect(await done).toBe("saved");
 
-    expect(noteTexts(captured)).toEqual(["from GrokBot"]);
+    expect(noteTexts(captured)).toEqual(["from ChatBot"]);
     expect(noteTexts(footnotesPendingSave(live.current, pristine.current))).toEqual([
-      "from GrokBot",
+      "from ChatBot",
       "reader note",
     ]);
   });
 
-  it("keeps a reader note dirty when it lands while a pending GrokBot footnote is saving", async () => {
+  it("keeps a reader note dirty when it lands while a pending ChatBot footnote is saving", async () => {
     const live = { current: [mark({ pending: "fr-a" })] };
     const pristine = { current: "" };
     const held: HeldFootnoteAsk[] = [{ requestId: "fr-a", footnoteId: "fn-1" }];
@@ -202,7 +202,7 @@ describe("footnote save baseline", () => {
     });
 
     const ping = applyFootnotePing(client, {
-      footnote_results: [{ id: "fr-1", doc_id: "doc-1", result: { notes: ["from GrokBot"] } }],
+      footnote_results: [{ id: "fr-1", doc_id: "doc-1", result: { notes: ["from ChatBot"] } }],
     });
     await started.opened;
     live.current = withReaderNote(live.current);
@@ -215,7 +215,7 @@ describe("footnote save baseline", () => {
 
     expect(acks).toEqual([]);
     expect(pristine.current).toBe("before");
-    expect(noteTexts(live.current)).toEqual(["from GrokBot", "reader note"]);
+    expect(noteTexts(live.current)).toEqual(["from ChatBot", "reader note"]);
     expect(footnotesPendingSave(live.current, pristine.current)).not.toBeNull();
   });
 
@@ -227,7 +227,7 @@ describe("footnote save baseline", () => {
       openDocId: "doc-1",
       live,
       pristine,
-      mutate: (footnotes) => applyFootnoteResult(footnotes, { id: "fr-1", notes: ["from GrokBot"] }, 50),
+      mutate: (footnotes) => applyFootnoteResult(footnotes, { id: "fr-1", notes: ["from ChatBot"] }, 50),
       publish: (next) => {
         live.current = next;
       },

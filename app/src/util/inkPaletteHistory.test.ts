@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { paletteDeltaE } from "./paletteMix";
 
 import {
   appendInkPalette,
@@ -6,6 +7,7 @@ import {
   cycleInkPalettePrev,
   COLORHUNT_FALLBACK_CODES,
   footnoteThemeSeed,
+  footnoteDisplayThemes,
   normalizeInkPaletteHistory,
   paletteForMarkIndex,
   paletteFromColorHuntCode,
@@ -115,6 +117,30 @@ describe("per-mark palettes", () => {
     const seed = footnoteThemeSeed(3);
     expect(seed.palette).toEqual(paletteForMarkIndex(3));
     expect(seed.color).toBe(seed.palette[0]);
+  });
+
+  it("avoids colours already used, including after palette wrap and deletion", () => {
+    const marks: Array<{ color: string; palette: string[] }> = [];
+    for (let i = 0; i < 250; i++) {
+      const theme = footnoteThemeSeed(marks);
+      expect(marks.some(mark => mark.color === theme.color)).toBe(false);
+      expect(theme.palette[0]).toBe(theme.color);
+      marks.push(theme);
+    }
+    marks.splice(12, 1);
+    const next = footnoteThemeSeed(marks);
+    expect(marks.some(mark => mark.color === next.color)).toBe(false);
+  });
+
+  it("gives legacy duplicates distinguishable display shades without editing stored marks", () => {
+    const marks = [{ id: "a", number: 1, color: "#a5f1e9" }, { id: "b", number: 2, color: "#a5f1e9" }];
+    const before = JSON.stringify(marks);
+    const themes = footnoteDisplayThemes(marks);
+    expect(themes.get("a")!.color).toBe("#a5f1e9");
+    expect(themes.get("b")!.color).not.toBe(themes.get("a")!.color);
+    expect(paletteDeltaE(themes.get("a")!.color, themes.get("b")!.color)).toBeGreaterThanOrEqual(6);
+    expect(JSON.stringify(marks)).toBe(before);
+    expect([...footnoteDisplayThemes([...marks].reverse()).entries()]).toEqual([...themes.entries()]);
   });
 
   it("steps the ColorHunt set without sharing a wheel", () => {

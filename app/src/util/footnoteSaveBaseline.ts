@@ -1,5 +1,5 @@
 /**
- * What an annotate save treats as clean, and which held GrokBot asks that
+ * What an annotate save treats as clean, and which held ChatBot asks that
  * save is allowed to send.
  *
  * The live footnote list can change while the write is in flight. The
@@ -37,6 +37,7 @@ export function footnotesPendingSave(
 export type HeldFootnoteAsk = {
   requestId: string;
   footnoteId: string;
+  answerMode?: "bot" | "llm";
 };
 
 export function partitionHeldAsks(

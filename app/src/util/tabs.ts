@@ -92,6 +92,13 @@ export interface FootnoteBoardRef {
   wbId: string;
 }
 
+/** A view of a note still owned and saved by its document's footnote. */
+export interface FootnoteNoteRef {
+  docId: string;
+  footnoteId: string;
+  noteId: string;
+}
+
 export interface WhiteboardTab extends TabBase {
   kind: "whiteboard";
   /** Null until the autosave has written the notebook once. */
@@ -105,6 +112,7 @@ export interface WhiteboardTab extends TabBase {
 
 export interface AnnotateTab extends TabBase {
   kind: "annotate";
+  footnoteNote?: FootnoteNoteRef;
   docId: string | null;
   /** Content hash — the annotate store's real key, stable before an id exists. */
   hash: string | null;
@@ -298,6 +306,14 @@ export function isFootnoteBoardTab(
   );
 }
 
+export function isFootnoteNoteTab(
+  tab: TabRecord,
+): tab is AnnotateTab & { footnoteNote: FootnoteNoteRef } {
+  return tab.kind === "annotate" && Boolean(
+    tab.footnoteNote?.docId && tab.footnoteNote.footnoteId && tab.footnoteNote.noteId,
+  );
+}
+
 export function initialTabState(at = 0): TabState {
   return { tabs: [homeTab(at)], activeId: HOME_TAB_ID, groups: [] };
 }
@@ -458,7 +474,14 @@ export function sameEntity(a: TabRecord, b: TabRecord): boolean {
     case "explore":
       // There is only ever one, so any two explore records are the same one.
       return true;
-    case "annotate":
+    case "annotate": {
+      const other = b as AnnotateTab;
+      if (a.footnoteNote || other.footnoteNote) {
+        return Boolean(a.footnoteNote && other.footnoteNote &&
+          a.footnoteNote.docId === other.footnoteNote.docId &&
+          a.footnoteNote.footnoteId === other.footnoteNote.footnoteId &&
+          a.footnoteNote.noteId === other.footnoteNote.noteId);
+      }
       /*
        * The annotation set, not the file it was drawn over.
        *
@@ -470,7 +493,8 @@ export function sameEntity(a: TabRecord, b: TabRecord): boolean {
        * Null matches nothing: a record mid-open has no set yet, and must not
        * collapse onto an unrelated document that is in the same state.
        */
-      return a.docId !== null && a.docId === (b as AnnotateTab).docId;
+      return a.docId !== null && a.docId === other.docId;
+    }
     case "web":
       return false;
   }

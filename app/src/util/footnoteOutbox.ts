@@ -13,13 +13,13 @@ function legacy(key: string, originals: [string, string | null][]): unknown[] {
   originals.push([key, raw]);
   if (!raw) return [];
   const value = JSON.parse(raw);
-  if (!Array.isArray(value)) throw new Error("The old GrokBot queue could not be read. Its data was retained.");
+  if (!Array.isArray(value)) throw new Error("The old ChatBot queue could not be read. Its data was retained.");
   return value;
 }
 
 async function withOutbox<T>(work: (db: IDBDatabase) => Promise<T>): Promise<T> {
   const db = await new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof indexedDB === "undefined") { reject(new Error("GrokBot requests need device storage. The request has not been sent.")); return; }
+    if (typeof indexedDB === "undefined") { reject(new Error("ChatBot requests need device storage. The request has not been sent.")); return; }
     const request = indexedDB.open(NAME, 1);
     let blocked = false;
     request.onupgradeneeded = () => {
@@ -28,7 +28,7 @@ async function withOutbox<T>(work: (db: IDBDatabase) => Promise<T>): Promise<T> 
     };
     request.onsuccess = () => { if (blocked) request.result.close(); else resolve(request.result); };
     request.onerror = () => reject(request.error);
-    request.onblocked = () => { blocked = true; reject(new Error("Another window is holding the GrokBot queue open. Close it and retry.")); };
+    request.onblocked = () => { blocked = true; reject(new Error("Another window is holding the ChatBot queue open. Close it and retry.")); };
   });
   db.onversionchange = () => db.close();
   try {
@@ -43,12 +43,12 @@ async function withOutbox<T>(work: (db: IDBDatabase) => Promise<T>): Promise<T> 
             const rows = new Map<string, FootnoteOutboxRow>();
             for (const value of legacy(LEGACY_FOOTNOTE_AWAITING, originals)) {
               const row = value as Partial<FootnoteOutboxRow>;
-              if (typeof row?.id !== "string" || !row.id || typeof row.docId !== "string") throw new Error("The old GrokBot queue has an unreadable entry. Its data was retained.");
+              if (typeof row?.id !== "string" || !row.id || typeof row.docId !== "string") throw new Error("The old ChatBot queue has an unreadable entry. Its data was retained.");
               rows.set(row.id, { id: row.id, docId: row.docId });
             }
             for (const value of legacy(LEGACY_FOOTNOTE_QUEUE, originals)) {
               const row = value as FootnoteRequestDto;
-              if (typeof row?.id !== "string" || !row.id || typeof row.doc_id !== "string") throw new Error("The old GrokBot queue has an unreadable entry. Its data was retained.");
+              if (typeof row?.id !== "string" || !row.id || typeof row.doc_id !== "string") throw new Error("The old ChatBot queue has an unreadable entry. Its data was retained.");
               rows.set(row.id, { id: row.id, docId: row.doc_id, request: row });
             }
             let order = 0;

@@ -135,10 +135,10 @@ fn restore_request(index: u32, gone: &BookState) -> CommitRequest {
 }
 
 #[test]
-fn annotate_cap_allows_two_hundred_books_and_preserves_updates_at_capacity() {
+fn annotate_cap_allows_two_hundred_fifty_books_and_preserves_updates_at_capacity() {
     let f = Fixture::new();
-    assert_eq!(ANNOTATE_LIVE_CAP, 200);
-    for index in 0..199 {
+    assert_eq!(ANNOTATE_LIVE_CAP, 250);
+    for index in 0..249 {
         let input: AnnotatePad =
             serde_json::from_value(record("annotate", &format!("document-{index}"))).unwrap();
         assert!(matches!(
@@ -146,28 +146,28 @@ fn annotate_cap_allows_two_hundred_books_and_preserves_updates_at_capacity() {
             PutOutcome::Written(_)
         ));
     }
-    create(&f, 1, "annotate", "document-199");
-    assert_eq!(live_count(&f.conn, "annotate").unwrap(), 200);
+    create(&f, 1, "annotate", "document-249");
+    assert_eq!(live_count(&f.conn, "annotate").unwrap(), 250);
 
-    let existing = f.book("annotate", "document-199");
+    let existing = f.book("annotate", "document-249");
     let extra: AnnotatePad = serde_json::from_value(record("annotate", "extra")).unwrap();
     assert!(matches!(
         put_annotate_with_clock(&f.conn, &extra, &TestClock(10_000)).unwrap(),
-        PutOutcome::LiveCap { kind: "annotate", limit: 200 }
+        PutOutcome::LiveCap { kind: "annotate", limit: 250 }
     ));
     let error = f.commit(&request(2, "annotate", "extra")).unwrap_err();
     assert_eq!(error.status, 403);
     assert_eq!(error.body["status"], "full");
-    assert_eq!(error.body["limit"], 200);
+    assert_eq!(error.body["limit"], 250);
     assert_eq!(f.book("annotate", "extra").state, "absent");
-    assert_eq!(f.book("annotate", "document-199").book_rev, existing.book_rev);
+    assert_eq!(f.book("annotate", "document-249").book_rev, existing.book_rev);
 
-    let mut update = request(3, "annotate", "document-199");
+    let mut update = request(3, "annotate", "document-249");
     update.record.as_mut().unwrap().base_rev = existing.record_rev;
     update.record.as_mut().unwrap().value["source"] = json!("# Updated at capacity");
     f.commit(&update).unwrap();
     assert_eq!(
-        f.book("annotate", "document-199").record.unwrap()["source"],
+        f.book("annotate", "document-249").record.unwrap()["source"],
         "# Updated at capacity"
     );
 
@@ -175,7 +175,7 @@ fn annotate_cap_allows_two_hundred_books_and_preserves_updates_at_capacity() {
     f.commit(&delete_request(4, "annotate", "document-0", removed.book_rev, 1))
         .unwrap();
     create(&f, 5, "annotate", "extra");
-    assert_eq!(live_count(&f.conn, "annotate").unwrap(), 200);
+    assert_eq!(live_count(&f.conn, "annotate").unwrap(), 250);
     assert_eq!(f.book("annotate", "document-0").state, "gone");
 }
 

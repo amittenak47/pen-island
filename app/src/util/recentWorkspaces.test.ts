@@ -11,6 +11,12 @@ beforeEach(()=>{
 });
 afterEach(()=>vi.unstubAllGlobals());
 const pdf=(id='pdf',extra:Partial<AnnotateTab>={}):AnnotateTab=>({id,kind:'annotate',title:'Algorithms.pdf',docType:'pdf',docId:null,hash:'pdf-hash',source:null,indexed:'indexing',dirty:true,lastActive:1,...extra});
+it('keeps a full footnote note from replacing its parent in Recently opened',()=>{
+  const parent=pdf('scratch',{title:'scratch.md',docType:'markdown',docId:'scratch-book'});
+  rememberRecentWorkspace(parent);
+  rememberRecentWorkspace({...parent,id:'full-note',title:'Note 1.1',footnoteNote:{docId:'scratch-book',footnoteId:'f1',noteId:'n1'}});
+  expect(loadRecentWorkspaces()).toMatchObject([{id:'scratch',title:'scratch.md'}]);
+});
 it('retains visited work after its tab closes and excludes every currently open item',()=>{
   const doc=pdf();let state=tabsReducer(initialTabState(),{type:'open',tab:doc,at:10});
   rememberRecentWorkspace(state.tabs[1]);

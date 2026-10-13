@@ -3,13 +3,13 @@ import { describe, expect, it } from "vitest";
 import { AI_TAB_WIDTH, aiBookTabLeft, stackAiTabTops } from "./aiBookTabs";
 
 describe("aiBookTabLeft", () => {
-  it("hangs half the tab off the right edge", () => {
-    expect(aiBookTabLeft(400, 28)).toBe(400 - 14);
-    expect(aiBookTabLeft(400)).toBe(400 - AI_TAB_WIDTH / 2);
+  it("hangs half the bookmark outside the left edge", () => {
+    expect(aiBookTabLeft()).toBe(-14);
+    expect(aiBookTabLeft(AI_TAB_WIDTH)).toBe(-AI_TAB_WIDTH / 2);
   });
 
-  it("does not go negative on a narrow page", () => {
-    expect(aiBookTabLeft(10, 28)).toBe(0);
+  it("keeps half of a custom-width bookmark on the page", () => {
+    expect(aiBookTabLeft(40)).toBe(-20);
   });
 });
 

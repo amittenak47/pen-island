@@ -112,3 +112,39 @@ it("still arms a hold left alone", () => {
     vi.useRealTimers();
   }
 });
+
+it("offers ChatBot for an Android quote marquee with a durable text anchor", async () => {
+  vi.useFakeTimers();
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 Android");
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+  const originalHitTest = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+  const ask = vi.fn();
+  const pointer = (type: string, x: number, y: number) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "touch" } });
+    return event;
+  };
+  try {
+    act(() => root.render(<DocSelectionLayer footnotes={footnotes} onAskChatBot={ask}><p data-doc-scope="p1">Selected words for a question</p></DocSelectionLayer>));
+    const text = host.querySelector("p")!;
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => text });
+    act(() => text.dispatchEvent(pointer("pointerdown", 40, 60)));
+    act(() => { vi.advanceTimersByTime(400); });
+    act(() => text.dispatchEvent(pointer("pointermove", 160, 80)));
+    act(() => text.dispatchEvent(pointer("pointerup", 160, 80)));
+    const confirm = document.querySelector<HTMLButtonElement>('[aria-label="Use this selection"]');
+    expect(confirm).toBeTruthy();
+    await act(async () => confirm!.click());
+    const action = document.querySelector<HTMLButtonElement>('[aria-label="Ask ChatBot"]');
+    expect(action).toBeTruthy();
+    await act(async () => action!.click());
+    expect(ask).toHaveBeenCalledTimes(1);
+    expect(ask.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+      anchor: expect.objectContaining({ kind: "text", exact: "Selected words for a question", scope: "p1" }), text: "Selected words for a question",
+    }));
+  } finally {
+    if (originalHitTest) Object.defineProperty(document, "elementFromPoint", originalHitTest);
+    else Reflect.deleteProperty(document, "elementFromPoint");
+    vi.useRealTimers();
+  }
+});
