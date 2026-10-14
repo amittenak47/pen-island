@@ -43,7 +43,8 @@ pub use atomic_pads::{
 };
 pub use annotation_jobs::{
     ack_annotation_job_items, annotation_job_items, cancel_annotation_job, create_annotation_job,
-    finish_annotation_job, list_annotation_jobs, read_annotation_pages, submit_annotation_page,
+    finish_annotation_job, list_annotation_jobs, read_annotation_pages, read_annotation_reference,
+    submit_annotation_page,
 };
 pub use footnotes::{
     ack_footnote_request, create_footnote_request, footnote_results, get_footnote_request,

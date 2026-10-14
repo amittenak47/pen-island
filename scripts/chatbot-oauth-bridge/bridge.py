@@ -38,7 +38,8 @@ BIND_HOST, BIND_PORT = "127.0.0.1", 7880
 BACKEND_URL = "http://127.0.0.1:7879/mcp"
 TOOLS = frozenset({
     "list_footnote_requests", "get_footnote_request", "submit_footnote",
-    "list_annotation_jobs", "get_annotation_pages", "submit_page_annotations", "finish_annotation_job",
+    "list_annotation_jobs", "get_annotation_pages", "get_annotation_reference",
+    "submit_page_annotations", "finish_annotation_job",
 })
 # Keep in step with WORKFLOW and INSTRUCTIONS in src/mcp.rs: the bridge sends
 # these when an assistant connects, before any call reaches `lc mcp`.
@@ -51,15 +52,28 @@ WORKFLOW = (
     "page range (a chapter) to be annotated: call list_annotation_jobs, read each job's "
     "pages a few at a time with get_annotation_pages, call submit_page_annotations once per "
     "page with the footnotes worth adding (each quoting the exact words it is about), then "
-    "finish_annotation_job. If you can run scheduled or repeating tasks, offer to check for "
-    "new requests and jobs every few minutes."
+    "finish_annotation_job. When a job lists references (the chapter's problems, a "
+    "solved-homework file), read them first with get_annotation_reference, and aim the "
+    "footnotes at what those problems need. If you can run scheduled or repeating tasks, "
+    "offer to check for new requests and jobs every few minutes."
 )
-INSTRUCTIONS = (
-    f"{WORKFLOW}\n\nHow to write each footnote: Explain the selected words in the context "
-    "of the surrounding text, for a reader who is in the middle of this document. 1-3 short "
-    "markdown notes; lead with the direct explanation; add links only to sources you are "
-    "confident exist. If the request has a prompt, follow it."
+FOOTNOTE_GUIDE = (
+    "Explain the selected words in the context of the surrounding text, for a reader who is "
+    "in the middle of this document. Write 2-4 markdown notes of a few sentences each: first "
+    "the idea in plain words, then a small example or the intuition behind it, then a common "
+    "mistake when there is one. Add links only to sources you are confident exist. If the "
+    "request has a prompt, follow it."
 )
+JOB_GUIDE = (
+    "Write for a student who will solve this chapter's problems. Pick the passages those "
+    "problems depend on: definitions, the key steps of an algorithm, proof ideas, and traps. "
+    "Use problems to name the exercises or homework questions a passage helps with, by their "
+    "numbers in the references. Use question for one short question that makes the reader "
+    "curious to keep reading, tied to a problem when you can; do not give its answer away. "
+    "Use looking_ahead to hint at what this passage sets up later in the chapter, without "
+    "spoiling it. Highlight the key term; underline the phrase a problem hinges on."
+)
+INSTRUCTIONS = f"{WORKFLOW}\n\nHow to write each footnote: {FOOTNOTE_GUIDE}"
 
 
 class SetupError(ValueError):
@@ -196,12 +210,18 @@ class FootnoteLink(BaseModel):
 class PageAnnotation(BaseModel):
     model_config = ConfigDict(extra="forbid")
     quote: str = Field(description="Exact words from the page that this footnote is about.")
-    notes: Annotated[list[str], Field(min_length=1, max_length=8)]
+    notes: Annotated[list[str], Field(min_length=1, max_length=5, description="Markdown, a few sentences each.")]
     title: Annotated[str, Field(max_length=120)] | None = None
     color: Annotated[int, Field(ge=1, le=8)] | None = None
     links: list[FootnoteLink] | None = None
     marks: list["FootnoteMark"] | None = None
     workspace_links: list[str] | None = None
+    problems: Annotated[list[str], Field(max_length=8)] | None = Field(
+        default=None, description='Exercises or homework questions this passage helps with, e.g. "Exercise 3.4".')
+    question: Annotated[str, Field(max_length=1000)] | None = Field(
+        default=None, description="One curiosity question that makes the reader want to read on.")
+    looking_ahead: Annotated[str, Field(max_length=1000)] | None = Field(
+        default=None, description="A hint at what this sets up later in the chapter, without spoiling it.")
 
 
 class FootnoteMark(BaseModel):
@@ -307,7 +327,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     @bridge.tool(name="get_annotation_pages", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def get_annotation_pages(job_id: str, from_page: int | None = None, to_page: int | None = None) -> ToolResult:
-        """Read up to five pages of an annotation job, with its focus, per-page limit, palette and library items."""
+        """Read up to five pages of an annotation job, with its focus, per-page limit, palette, library items and references (read those with get_annotation_reference)."""
         arguments: dict[str, Any] = {"job_id": job_id}
         if from_page is not None:
             arguments["from_page"] = from_page
@@ -315,7 +335,21 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
             arguments["to_page"] = to_page
         return await relay("get_annotation_pages", arguments)
 
+    @bridge.tool(name="get_annotation_reference", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def get_annotation_reference(job_id: str, index: int, offset: int | None = None) -> ToolResult:
+        """Read one of a job's references (the chapter's problem pages, a solved-homework file or notes). Long ones come in parts: pass next_offset as offset to continue."""
+        arguments: dict[str, Any] = {"job_id": job_id, "index": index}
+        if offset is not None:
+            arguments["offset"] = offset
+        return await relay("get_annotation_reference", arguments)
+
     @bridge.tool(name="submit_page_annotations", output_schema=None,
+                 description=(
+                     "Add footnotes to one page of an annotation job: only passages worth explaining, "
+                     "at most per_page. Each quotes the exact words it is about (copied from that page's "
+                     f"text); the reader's app places it there. {FOOTNOTE_GUIDE} {JOB_GUIDE}"
+                 ),
                  annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
     async def submit_page_annotations(
         job_id: str, page: int, annotations: Annotated[list[PageAnnotation], Field(min_length=1, max_length=8)],

@@ -94,6 +94,55 @@
   font-weight: 400;
 }
 
+.lc-chatbot-pages-subhint {
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.4;
+  color: var(--muted);
+}
+
+.lc-chatbot-pages-files {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  max-height: 112px;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+
+.lc-chatbot-pages-files::-webkit-scrollbar {
+  display: none;
+}
+
+.lc-chatbot-pages-files .lc-footnote-chip {
+  display: inline-flex;
+  align-items: center;
+  height: auto;
+  min-height: 0;
+  padding: 4px 9px;
+  border: 1px solid var(--chrome-edge);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink);
+  cursor: pointer;
+}
+
+.lc-chatbot-pages-files .lc-footnote-chip-label {
+  max-width: 16em;
+  font-weight: 500;
+}
+
+.lc-chatbot-pages-files .lc-footnote-chip.is-picked {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+}
+
+.lc-chatbot-pages-files .lc-footnote-chip:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .lc-chatbot-pages-density {
   display: grid;
   grid-template-columns: repeat(3, 1fr);

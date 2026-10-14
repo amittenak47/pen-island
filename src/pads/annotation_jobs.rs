@@ -21,6 +21,12 @@ pub const MAX_PAGES: usize = 40;
 pub const PAGES_PER_READ: i64 = 5;
 const PAGE_TEXT_CAP: usize = 12_000;
 const DELIVERY_CAP: i64 = 100;
+/// Reference material per job: a chapter's problem pages, a homework file.
+pub const MAX_REFERENCES: usize = 4;
+const REFERENCE_CAP: usize = 150_000;
+const REFERENCES_TOTAL_CAP: usize = 300_000;
+/// Characters of a reference handed over per read.
+pub const REFERENCE_CHUNK: usize = 15_000;
 
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
@@ -64,6 +70,16 @@ pub struct JobPage {
     pub text: String,
 }
 
+/// Material the footnotes should serve: "exercises" (the chapter's problem
+/// pages), "homework" (a solved-problems file) or "notes".
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct JobReference {
+    pub title: String,
+    #[serde(default)]
+    pub kind: String,
+    pub text: String,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct NewJob {
     pub id: String,
@@ -81,6 +97,8 @@ pub struct NewJob {
     pub palette: Vec<String>,
     #[serde(default)]
     pub workspace_items: Vec<WorkspaceItem>,
+    #[serde(default)]
+    pub references: Vec<JobReference>,
 }
 
 /// One footnote as an assistant describes it for a page.
@@ -101,6 +119,38 @@ pub struct Annotation {
     pub marks: Vec<FootnoteMark>,
     #[serde(default)]
     pub workspace_links: Vec<String>,
+    /// Problems this passage helps with ("Exercise 3.4", "HW 2(b)").
+    #[serde(default)]
+    pub problems: Vec<String>,
+    /// A hint at what this sets up later in the chapter, without spoiling it.
+    #[serde(default)]
+    pub looking_ahead: Option<String>,
+    /// One curiosity question that makes the reader want to read on.
+    #[serde(default)]
+    pub question: Option<String>,
+}
+
+impl Annotation {
+    /// The notes as the reader sees them: the assistant's own, then the
+    /// problems, the question and the look ahead, each as a labelled note.
+    fn reader_notes(&self) -> Result<Vec<String>, String> {
+        let mut notes = self.notes.clone();
+        let problems: Vec<&str> = self.problems.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
+        if problems.len() > 8 || problems.iter().any(|p| p.chars().count() > 80) {
+            return Err("problems must have at most 8 entries of at most 80 characters".into());
+        }
+        if !problems.is_empty() {
+            notes.push(format!("**Helps with:** {}", problems.join(", ")));
+        }
+        for (label, text) in [("Think about it", &self.question), ("Looking ahead", &self.looking_ahead)] {
+            let Some(text) = text.as_deref().map(str::trim).filter(|t| !t.is_empty()) else { continue };
+            if text.chars().count() > 1000 {
+                return Err(format!("{} must be at most 1000 characters", label.to_lowercase()));
+            }
+            notes.push(format!("**{label}:** {text}"));
+        }
+        Ok(notes)
+    }
 }
 
 /// What the device receives: the quote and a checked footnote result.
@@ -171,6 +221,23 @@ fn validate_job(job: &NewJob) -> Result<(), FootnoteFail> {
     if job.focus.chars().count() > 1000 {
         return Err(invalid("focus must be at most 1000 characters"));
     }
+    if job.references.len() > MAX_REFERENCES {
+        return Err(invalid(format!("references must have at most {MAX_REFERENCES} entries")));
+    }
+    let mut total = 0;
+    for reference in &job.references {
+        let chars = reference.text.chars().count();
+        total += chars;
+        if reference.title.trim().is_empty() || reference.title.chars().count() > 300 || reference.kind.chars().count() > 20 {
+            return Err(invalid("each reference needs a title of at most 300 characters"));
+        }
+        if reference.text.trim().is_empty() || chars > REFERENCE_CAP {
+            return Err(invalid(format!("each reference needs 1..={REFERENCE_CAP} characters of text")));
+        }
+    }
+    if total > REFERENCES_TOTAL_CAP {
+        return Err(invalid(format!("references may hold at most {REFERENCES_TOTAL_CAP} characters in all")));
+    }
     footnotes::validate_extras(&FootnoteExtras {
         palette: job.palette.clone(),
         workspace_items: job.workspace_items.clone(),
@@ -189,8 +256,8 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
         if exists.is_none() {
             conn.execute(
                 "INSERT INTO annotation_jobs (id, device_id, doc_id, doc_name, doc_kind, focus, per_page,
-                    pages, palette, workspace_items, status, summary, created_at, finished_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', NULL, ?11, NULL)",
+                    pages, palette, workspace_items, status, summary, created_at, finished_at, refs)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', NULL, ?11, NULL, ?12)",
                 params![
                     job.id,
                     job.device_id,
@@ -203,6 +270,7 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
                     serde_json::to_string(&job.palette)?,
                     serde_json::to_string(&job.workspace_items)?,
                     now,
+                    serde_json::to_string(&job.references)?,
                 ],
             )?;
         }
@@ -221,6 +289,7 @@ struct JobRow {
     pages: Vec<JobPage>,
     palette: Vec<String>,
     workspace_items: Vec<WorkspaceItem>,
+    references: Vec<JobReference>,
     status: String,
     summary: Option<String>,
     created_at: i64,
@@ -230,7 +299,7 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
     let raw = conn
         .query_row(
             "SELECT id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette,
-                    workspace_items, status, summary, created_at
+                    workspace_items, status, summary, created_at, refs
              FROM annotation_jobs WHERE id = ?1",
             params![id],
             |row| {
@@ -239,12 +308,12 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
                     row.get::<_, String>(3)?, row.get::<_, String>(4)?, row.get::<_, String>(5)?,
                     row.get::<_, u8>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?, row.get::<_, String>(10)?, row.get::<_, Option<String>>(11)?,
-                    row.get::<_, i64>(12)?,
+                    row.get::<_, i64>(12)?, row.get::<_, String>(13)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette, items, status, summary, created_at)) = raw else {
+    let Some((id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette, items, status, summary, created_at, refs)) = raw else {
         return Ok(None);
     };
     Ok(Some(JobRow {
@@ -258,6 +327,7 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
         pages: serde_json::from_str(&pages)?,
         palette: serde_json::from_str(&palette).unwrap_or_default(),
         workspace_items: serde_json::from_str(&items).unwrap_or_default(),
+        references: serde_json::from_str(&refs).unwrap_or_default(),
         status,
         summary,
         created_at,
@@ -331,10 +401,37 @@ pub fn read_pages(conn: &Connection, id: &str, from: i64, to: i64) -> Result<Val
         "per_page": job.per_page,
         "palette": job.palette,
         "workspace_items": job.workspace_items,
+        "references": job.references.iter().enumerate().map(|(index, reference)| json!({
+            "index": index,
+            "title": reference.title,
+            "kind": reference.kind,
+            "chars": reference.text.chars().count(),
+        })).collect::<Vec<_>>(),
         "all_pages": all,
         "pages_done": done,
         "pages": pages.iter().map(|page| json!({ "page": page.page, "text": page.text })).collect::<Vec<_>>(),
         "next_from": job.pages.iter().map(|page| page.page).filter(|page| *page > last).min(),
+    }))
+}
+
+/// Part of one reference, `REFERENCE_CHUNK` characters from `offset`.
+pub fn read_reference(conn: &Connection, id: &str, index: usize, offset: usize) -> Result<Value, FootnoteFail> {
+    let job = job_row(conn, id)?.ok_or(FootnoteFail::NotFound)?;
+    let Some(reference) = job.references.get(index) else {
+        return Err(invalid(format!("this job has {} reference(s); index {index} is not one", job.references.len())));
+    };
+    let chars = reference.text.chars().count();
+    let text: String = reference.text.chars().skip(offset).take(REFERENCE_CHUNK).collect();
+    let end = offset + text.chars().count();
+    Ok(json!({
+        "job_id": job.id,
+        "index": index,
+        "title": reference.title,
+        "kind": reference.kind,
+        "chars": chars,
+        "offset": offset,
+        "text": text,
+        "next_offset": if end < chars { Some(end) } else { None },
     }))
 }
 
@@ -384,8 +481,11 @@ pub fn submit_page(
                 workspace_items: job.workspace_items.clone(),
                 doc_kind: job.doc_kind.clone(),
             };
+            let notes = annotation
+                .reader_notes()
+                .map_err(|message| invalid(format!("page {page}, \"{quote}\": {message}")))?;
             let submission = FootnoteSubmission {
-                notes: annotation.notes.clone(),
+                notes,
                 links: annotation.links.clone(),
                 title: annotation.title.clone(),
                 color: annotation.color,
@@ -499,6 +599,7 @@ mod tests {
             ],
             palette: vec!["#60a5fa".into(), "#f472b6".into(), "#facc15".into(), "#34d399".into()],
             workspace_items: vec![WorkspaceItem { id: "whiteboard:wb-1".into(), kind: "whiteboard".into(), title: "Graph notes".into() }],
+            references: vec![JobReference { title: "Exercises, pages 104-110".into(), kind: "exercises".into(), text: "3.1. Perform a depth-first search on the following graph.".into() }],
         }
     }
 
@@ -571,6 +672,38 @@ mod tests {
     }
 
     #[test]
+    fn references_are_read_in_parts_and_answers_name_the_problems() {
+        let (_dir, conn) = open();
+        let mut long = job("aj-8");
+        long.references.push(JobReference { title: "dpv_ch3 homework.md".into(), kind: "homework".into(), text: "x".repeat(REFERENCE_CHUNK + 10) });
+        create_job(&conn, long, 1).unwrap();
+        let read = read_pages(&conn, "aj-8", 91, 91).unwrap();
+        assert_eq!(read["references"][1]["kind"], "homework");
+        let first = read_reference(&conn, "aj-8", 1, 0).unwrap();
+        assert_eq!(first["text"].as_str().unwrap().len(), REFERENCE_CHUNK);
+        let rest = read_reference(&conn, "aj-8", 1, first["next_offset"].as_u64().unwrap() as usize).unwrap();
+        assert_eq!(rest["text"].as_str().unwrap().len(), 10);
+        assert!(rest["next_offset"].is_null());
+        assert!(matches!(read_reference(&conn, "aj-8", 5, 0), Err(FootnoteFail::Invalid(_))));
+
+        let annotation = Annotation {
+            problems: vec!["Exercise 3.1".into()],
+            question: Some("What would DFS miss without the chalk?".into()),
+            looking_ahead: Some("Pre and post numbers come next.".into()),
+            ..note("Depth-first search")
+        };
+        submit_page(&conn, "aj-8", 91, &[annotation], 2).unwrap();
+        let items = items_for_device(&conn, "tablet").unwrap();
+        let notes: Vec<&str> = items[0]["result"]["notes"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
+        assert_eq!(notes, [
+            "A note.",
+            "**Helps with:** Exercise 3.1",
+            "**Think about it:** What would DFS miss without the chalk?",
+            "**Looking ahead:** Pre and post numbers come next.",
+        ]);
+    }
+
+    #[test]
     fn jobs_are_validated_when_they_are_made() {
         let (_dir, conn) = open();
         let mut too_many = job("aj-4");
@@ -579,7 +712,9 @@ mod tests {
         empty_page.pages[0].text = "  ".into();
         let mut density = job("aj-6");
         density.per_page = 9;
-        for (name, bad) in [("pages", too_many), ("empty", empty_page), ("density", density)] {
+        let mut refs = job("aj-9");
+        refs.references = (0..5).map(|i| JobReference { title: format!("r{i}"), kind: "notes".into(), text: "x".into() }).collect();
+        for (name, bad) in [("pages", too_many), ("empty", empty_page), ("density", density), ("references", refs)] {
             assert!(matches!(create_job(&conn, bad, 1), Err(FootnoteFail::Invalid(_))), "{name}");
         }
         // Creating the same job twice is a no-op, so a retried request is safe.

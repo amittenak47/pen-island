@@ -750,6 +750,14 @@ export interface NewAnnotationJobDto {
   pages: AnnotationJobPageDto[];
   palette: string[];
   workspace_items: FootnoteWorkspaceItemDto[];
+  /** The chapter's problem pages, a homework file: what the footnotes should serve. */
+  references?: AnnotationJobReferenceDto[];
+}
+
+export interface AnnotationJobReferenceDto {
+  title: string;
+  kind: "exercises" | "homework" | "notes";
+  text: string;
 }
 
 export interface AnnotationJobDto {

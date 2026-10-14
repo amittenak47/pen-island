@@ -13,7 +13,7 @@ use crate::pads::footnotes::{self, FootnoteLink, FootnoteSubmission};
 
 /// How the inbox works, sent to every assistant when it connects. Assistants
 /// only act when prompted or scheduled, so this asks them to offer the watch.
-pub const WORKFLOW: &str = "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a document and asks for a footnote; each request waits here until an assistant answers it. To answer: call list_footnote_requests, then for each request call get_footnote_request and submit_footnote. Only answer requests listed here, and never invent request ids. If the inbox is empty, say so. The reader may also ask for a whole page range (a chapter) to be annotated: call list_annotation_jobs, read each job's pages a few at a time with get_annotation_pages, call submit_page_annotations once per page with the footnotes worth adding (each quoting the exact words it is about), then finish_annotation_job. If you can run scheduled or repeating tasks, offer to check for new requests and jobs every few minutes.";
+pub const WORKFLOW: &str = "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a document and asks for a footnote; each request waits here until an assistant answers it. To answer: call list_footnote_requests, then for each request call get_footnote_request and submit_footnote. Only answer requests listed here, and never invent request ids. If the inbox is empty, say so. The reader may also ask for a whole page range (a chapter) to be annotated: call list_annotation_jobs, read each job's pages a few at a time with get_annotation_pages, call submit_page_annotations once per page with the footnotes worth adding (each quoting the exact words it is about), then finish_annotation_job. When a job lists references (the chapter's problems, a solved-homework file), read them first with get_annotation_reference, and aim the footnotes at what those problems need. If you can run scheduled or repeating tasks, offer to check for new requests and jobs every few minutes.";
 
 /// Ready-made prompts: (name, title, description, text sent as the user's message).
 pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
@@ -31,7 +31,10 @@ pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
-pub const INSTRUCTIONS: &str = "Explain the selected words in the context of the surrounding text, for a reader who is in the middle of this document. 1-3 short markdown notes; lead with the direct explanation; add links only to sources you are confident exist. If the request has a prompt, follow it.";
+pub const INSTRUCTIONS: &str = "Explain the selected words in the context of the surrounding text, for a reader who is in the middle of this document. Write 2-4 markdown notes of a few sentences each: first the idea in plain words, then a small example or the intuition behind it, then a common mistake when there is one. Add links only to sources you are confident exist. If the request has a prompt, follow it.";
+
+/// How to write a page-range job's footnotes, on top of [`INSTRUCTIONS`].
+pub const JOB_INSTRUCTIONS: &str = "Write for a student who will solve this chapter's problems. Pick the passages those problems depend on: definitions, the key steps of an algorithm, proof ideas, and traps. Use problems to name the exercises or homework questions a passage helps with, by their numbers in the references. Use question for one short question that makes the reader curious to keep reading, tied to a problem when you can; do not give its answer away. Use looking_ahead to hint at what this passage sets up later in the chapter, without spoiling it. Highlight the key term; underline the phrase a problem hinges on.";
 
 const SUPPORTED_PROTOCOLS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
 const FALLBACK_PROTOCOL: &str = "2025-06-18";
@@ -373,7 +376,7 @@ fn tool_list() -> Vec<Value> {
         json!({
             "name": "get_annotation_pages",
             "annotations": { "readOnlyHint": true, "openWorldHint": false },
-            "description": "Read up to five pages of an annotation job, plus its focus, per_page limit, palette (colors by slot, 1 = first) and workspace_items (library items you may link). next_from says where to continue; pages_done lists pages already annotated.",
+            "description": "Read up to five pages of an annotation job, plus its focus, per_page limit, palette (colors by slot, 1 = first), workspace_items (library items you may link) and references (the chapter's problems or a homework file; read them with get_annotation_reference). next_from says where to continue; pages_done lists pages already annotated.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -386,9 +389,24 @@ fn tool_list() -> Vec<Value> {
             },
         }),
         json!({
+            "name": "get_annotation_reference",
+            "annotations": { "readOnlyHint": true, "openWorldHint": false },
+            "description": "Read one of an annotation job's references (index from get_annotation_pages): the chapter's problem pages, a solved-homework file or notes. Long ones come in parts; pass next_offset as offset to continue.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "job_id": { "type": "string" },
+                    "index": { "type": "integer", "minimum": 0 },
+                    "offset": { "type": "integer", "minimum": 0 },
+                },
+                "required": ["job_id", "index"],
+                "additionalProperties": false,
+            },
+        }),
+        json!({
             "name": "submit_page_annotations",
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false },
-            "description": format!("Add footnotes to one page of an annotation job: only passages worth explaining, at most per_page. Each footnote quotes the exact words it is about (copied from that page's text), and the reader's app places it there. Nothing of the reader's is changed. {INSTRUCTIONS}"),
+            "description": format!("Add footnotes to one page of an annotation job: only passages worth explaining, at most per_page. Each footnote quotes the exact words it is about (copied from that page's text), and the reader's app places it there. Nothing of the reader's is changed. {INSTRUCTIONS} {JOB_INSTRUCTIONS}"),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -402,9 +420,12 @@ fn tool_list() -> Vec<Value> {
                             "type": "object",
                             "properties": {
                                 "quote": { "type": "string", "description": "Exact words from the page that this footnote is about (a phrase or sentence)." },
-                                "notes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 8 },
+                                "notes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 5, "description": "Markdown, a few sentences each." },
                                 "title": { "type": "string", "maxLength": 120 },
                                 "color": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Palette slot." },
+                                "problems": { "type": "array", "items": { "type": "string" }, "maxItems": 8, "description": "Exercises or homework questions this passage helps with, e.g. \"Exercise 3.4\"." },
+                                "question": { "type": "string", "maxLength": 1000, "description": "One curiosity question that makes the reader want to read on." },
+                                "looking_ahead": { "type": "string", "maxLength": 1000, "description": "A hint at what this sets up later in the chapter, without spoiling it." },
                                 "links": {
                                     "type": "array",
                                     "items": {
@@ -465,6 +486,12 @@ fn call_tool(hub: &dyn FootnoteHub, params: &Value) -> Value {
             let from = arguments.get("from_page").and_then(Value::as_i64).unwrap_or(1).max(1);
             let to = arguments.get("to_page").and_then(Value::as_i64).unwrap_or(from + 4).max(from);
             hub.call("GET", &format!("/annotation-jobs/{id}/pages?from={from}&to={to}"), None)
+        }),
+        "get_annotation_reference" => job_id(&arguments).and_then(|id| {
+            let index = arguments.get("index").and_then(Value::as_u64)
+                .ok_or_else(|| "index must be a reference index from get_annotation_pages".to_string())?;
+            let offset = arguments.get("offset").and_then(Value::as_u64).unwrap_or(0);
+            hub.call("GET", &format!("/annotation-jobs/{id}/references/{index}?offset={offset}"), None)
         }),
         "submit_page_annotations" => job_id(&arguments).and_then(|id| {
             let page = arguments.get("page").and_then(Value::as_i64).filter(|page| *page >= 1)
@@ -750,7 +777,7 @@ mod tests {
     fn annotation_job_tools_reach_the_hub_routes() {
         let hub = fake();
         let names: Vec<String> = tool_list().iter().map(|tool| tool["name"].as_str().unwrap().to_string()).collect();
-        for name in ["list_annotation_jobs", "get_annotation_pages", "submit_page_annotations", "finish_annotation_job"] {
+        for name in ["list_annotation_jobs", "get_annotation_pages", "get_annotation_reference", "submit_page_annotations", "finish_annotation_job"] {
             assert!(names.iter().any(|candidate| candidate == name), "{name}");
         }
         let call = |id: i64, name: &str, arguments: Value| dispatch(&hub, &request(id, "tools/call", json!({ "name": name, "arguments": arguments }))).unwrap();
@@ -758,17 +785,19 @@ mod tests {
         call(2, "get_annotation_pages", json!({ "job_id": "aj-1", "from_page": 91 }));
         call(3, "submit_page_annotations", json!({ "job_id": "aj-1", "page": 91, "annotations": [{ "quote": "graph", "notes": ["n"] }] }));
         call(4, "finish_annotation_job", json!({ "job_id": "aj-1", "summary": "Done." }));
+        call(7, "get_annotation_reference", json!({ "job_id": "aj-1", "index": 1, "offset": 15000 }));
         let calls = hub.calls.lock().unwrap().clone();
         assert_eq!(calls[0].1, "/annotation-jobs");
         assert_eq!(calls[1].1, "/annotation-jobs/aj-1/pages?from=91&to=95");
         assert_eq!(calls[2].1, "/annotation-jobs/aj-1/pages/91");
         assert_eq!(calls[2].2.as_ref().unwrap()["annotations"][0]["quote"], "graph");
         assert_eq!(calls[3].2.as_ref().unwrap()["summary"], "Done.");
+        assert_eq!(calls[4].1, "/annotation-jobs/aj-1/references/1?offset=15000");
         let bad = call(5, "submit_page_annotations", json!({ "job_id": "../x", "page": 1, "annotations": [] }));
         assert_eq!(bad["result"]["isError"], true);
         let bad = call(6, "submit_page_annotations", json!({ "job_id": "aj-1", "annotations": [] }));
         assert_eq!(bad["result"]["isError"], true);
-        assert_eq!(hub.calls.lock().unwrap().len(), 4);
+        assert_eq!(hub.calls.lock().unwrap().len(), 5);
     }
 
     #[test]
@@ -837,7 +866,7 @@ mod tests {
             .collect();
         assert_eq!(names, [
             "list_footnote_requests", "get_footnote_request", "submit_footnote",
-            "list_annotation_jobs", "get_annotation_pages", "submit_page_annotations", "finish_annotation_job",
+            "list_annotation_jobs", "get_annotation_pages", "get_annotation_reference", "submit_page_annotations", "finish_annotation_job",
         ]);
         let description = listed["result"]["tools"][2]["description"].as_str().unwrap();
         assert!(description.contains(INSTRUCTIONS));

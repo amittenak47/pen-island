@@ -227,6 +227,7 @@ pub fn router(state: Shared) -> Router {
         .route("/pads/edges/:id/tombstone", post(routes::tombstone_edge))
         .route("/annotation-jobs", post(routes::create_annotation_job).get(routes::list_annotation_jobs))
         .route("/annotation-jobs/:id/pages", get(routes::read_annotation_pages))
+        .route("/annotation-jobs/:id/references/:index", get(routes::read_annotation_reference))
         .route("/annotation-jobs/:id/pages/:page", post(routes::submit_annotation_page))
         .route("/annotation-jobs/:id/finish", post(routes::finish_annotation_job))
         .route("/annotation-jobs/:id/cancel", post(routes::cancel_annotation_job))

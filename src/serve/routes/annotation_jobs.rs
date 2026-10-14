@@ -68,6 +68,24 @@ pub async fn read_annotation_pages(
 }
 
 #[derive(Debug, Deserialize)]
+pub struct ReferenceQuery {
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+/// Part of a job's reference (problem pages, a homework file), from `offset`.
+pub async fn read_annotation_reference(
+    UrlPath((id, index)): UrlPath<(String, usize)>,
+    Query(query): Query<ReferenceQuery>,
+) -> Result<Json<Value>, AppError> {
+    let offset = query.offset.unwrap_or(0);
+    let value = blocking(move || annotation_jobs::read_reference(&conn()?, &id, index, offset).map_err(into_anyhow))
+        .await
+        .map_err(map_store_error)?;
+    Ok(Json(value))
+}
+
+#[derive(Debug, Deserialize)]
 pub struct PageBody {
     pub annotations: Vec<Annotation>,
 }

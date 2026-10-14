@@ -9,7 +9,7 @@
  * whole run can be undone.
  */
 
-import type { AnnotationJobItemDto, LcClient, NewAnnotationJobDto } from "../api/client";
+import type { AnnotationJobItemDto, AnnotationJobReferenceDto, LcClient, NewAnnotationJobDto } from "../api/client";
 import { excerptOf } from "./docAnchors";
 import { addFootnote, freshFootnoteId, type DocFootnote } from "./docFootnotes";
 import { applyFootnoteResult, linkAnswerWorkspaceItems, writeFootnotes } from "./footnoteRequests";
@@ -126,6 +126,33 @@ export async function pdfPagesForJob(hash: string, from: number, to: number): Pr
     else skipped.push(page);
   }
   return { pages, skipped };
+}
+
+/** Most characters of one reference the hub takes. */
+export const REFERENCE_CHARS = 150_000;
+
+/**
+ * What a run's footnotes should serve: the chapter's problem pages (read from
+ * the open PDF) and homework or notes files from the library (their text).
+ */
+export async function jobReferences(input: {
+  hash: string;
+  problems?: { from: number; to: number } | null;
+  files?: readonly { docId: string; title: string }[];
+}): Promise<AnnotationJobReferenceDto[]> {
+  const out: AnnotationJobReferenceDto[] = [];
+  if (input.problems) {
+    const { from, to } = input.problems;
+    const { pages } = await pdfPagesForJob(input.hash, from, to);
+    const text = pages.map((page) => `[Page ${page.page}]\n${page.text}`).join("\n\n").slice(0, REFERENCE_CHARS);
+    if (text) out.push({ title: `Problems, pages ${from}–${to}`, kind: "exercises", text });
+  }
+  for (const file of input.files ?? []) {
+    const doc = await getAnnotateDoc(file.docId).catch(() => null);
+    const text = doc?.source?.trim().slice(0, REFERENCE_CHARS);
+    if (text) out.push({ title: file.title, kind: "homework", text });
+  }
+  return out;
 }
 
 /** Same place on the page, whoever made it. */

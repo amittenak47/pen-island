@@ -13,10 +13,12 @@ import type { AnnotationJobDto, FootnoteWorkspaceItemDto, LcClient } from "../ap
 import {
   ANNOTATION_JOBS_EVENT,
   forgetAnnotationJob,
+  jobReferences,
   pdfPagesForJob,
   rememberAnnotationJob,
   undoAnnotationJob,
 } from "../util/annotationJobs";
+import { getAnnotateDocMeta } from "../util/annotateStore";
 import { loadDeviceId } from "../util/devicePrefs";
 import "./chatBotPages.css";
 
@@ -27,6 +29,44 @@ const DENSITY = [
 ] as const;
 
 export const MAX_JOB_PAGES = 40;
+/** Homework or notes files one run may be read against. */
+export const MAX_REFERENCE_FILES = 3;
+
+interface SavedReferences { problemFrom: string; problemTo: string; files: string[] }
+
+const referencesKey = (docId: string) => `whiteboard.chatBotPages.refs.v1:${docId}`;
+
+/** The problem pages and files last used on this document, so the next chapter starts from them. */
+function loadReferences(docId: string): SavedReferences {
+  try {
+    const raw = JSON.parse(localStorage.getItem(referencesKey(docId)) ?? "null");
+    if (raw && typeof raw === "object") {
+      return {
+        problemFrom: typeof raw.problemFrom === "string" ? raw.problemFrom : "",
+        problemTo: typeof raw.problemTo === "string" ? raw.problemTo : "",
+        files: Array.isArray(raw.files) ? raw.files.filter((id: unknown): id is string => typeof id === "string") : [],
+      };
+    }
+  } catch { /* fall through */ }
+  return { problemFrom: "", problemTo: "", files: [] };
+}
+
+function saveReferences(docId: string, value: SavedReferences): void {
+  try { localStorage.setItem(referencesKey(docId), JSON.stringify(value)); } catch { /* a convenience only */ }
+}
+
+/** Library items with text an assistant can read: markdown and code files. */
+function textFiles(items: readonly FootnoteWorkspaceItemDto[], docId: string): { docId: string; title: string }[] {
+  const out: { docId: string; title: string }[] = [];
+  for (const item of items) {
+    if (item.kind !== "annotate") continue;
+    const id = item.id.slice("annotate:".length);
+    if (id === docId) continue;
+    const type = getAnnotateDocMeta(id)?.docType;
+    if (type === "markdown" || type === "code") out.push({ docId: id, title: item.title });
+  }
+  return out;
+}
 
 export interface ChatBotPagesDialogProps {
   client: LcClient;
@@ -60,6 +100,11 @@ export function ChatBotPagesDialog({
   const [message, setMessage] = useState<string | null>(null);
   const [jobs, setJobs] = useState<AnnotationJobDto[]>([]);
   const firstRef = useRef<HTMLInputElement | null>(null);
+  const [saved] = useState(() => loadReferences(docId));
+  const [problemFrom, setProblemFrom] = useState(saved.problemFrom);
+  const [problemTo, setProblemTo] = useState(saved.problemTo);
+  const files = textFiles(workspaceItems, docId);
+  const [picked, setPicked] = useState<string[]>(() => saved.files.filter((id) => files.some((file) => file.docId === id)));
 
   const refresh = useCallback(async () => {
     setJobs(await client.annotationJobs(docId).catch(() => []));
@@ -89,8 +134,25 @@ export function ChatBotPagesDialog({
         ? `Up to ${MAX_JOB_PAGES} pages at a time.`
         : null;
 
+  const problemRange = (() => {
+    const a = problemFrom.trim(), b = problemTo.trim();
+    if (!a && !b) return { range: null, error: null };
+    const lo = Number(a), hi = Number(b || a);
+    if (!Number.isInteger(lo) || !Number.isInteger(hi) || lo < 1 || hi < lo) {
+      return { range: null, error: "Choose the first and last page of the problems." };
+    }
+    if (pageCount > 0 && hi > pageCount) return { range: null, error: `This document has ${pageCount} pages.` };
+    if (hi - lo + 1 > MAX_JOB_PAGES) return { range: null, error: `Up to ${MAX_JOB_PAGES} pages of problems.` };
+    return { range: { from: lo, to: hi }, error: null };
+  })();
+
+  const togglePicked = (id: string) => setPicked((current) =>
+    current.includes(id)
+      ? current.filter((entry) => entry !== id)
+      : current.length >= MAX_REFERENCE_FILES ? current : [...current, id]);
+
   const start = async () => {
-    if (rangeError || busy) return;
+    if (rangeError || problemRange.error || busy) return;
     setBusy(true);
     setMessage(null);
     try {
@@ -99,6 +161,12 @@ export function ChatBotPagesDialog({
         setMessage("These pages have no text to read. Scanned pages can't be annotated yet.");
         return;
       }
+      const references = await jobReferences({
+        hash,
+        problems: problemRange.range,
+        files: files.filter((file) => picked.includes(file.docId)),
+      });
+      saveReferences(docId, { problemFrom, problemTo, files: picked });
       const id = `aj-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
       await client.createAnnotationJob({
         id,
@@ -111,6 +179,7 @@ export function ChatBotPagesDialog({
         pages,
         palette: [...palette],
         workspace_items: [...workspaceItems],
+        ...(references.length ? { references } : {}),
       });
       rememberAnnotationJob(id, docId);
       setMessage(
@@ -171,6 +240,47 @@ export function ChatBotPagesDialog({
         </label>
 
         <div className="lc-chatbot-pages-field">
+          <span>Help with problems (optional)</span>
+          <small className="lc-chatbot-pages-subhint">
+            ChatBot aims the footnotes at what these problems need, names the problem each passage
+            helps with, and asks questions that lead into them.
+          </small>
+          <div className="lc-chatbot-pages-row">
+            <label>
+              <span>Problem pages from</span>
+              <input type="number" inputMode="numeric" min={1} max={pageCount || undefined} placeholder="e.g. 104"
+                value={problemFrom} onChange={(event) => setProblemFrom(event.target.value)} />
+            </label>
+            <label>
+              <span>to</span>
+              <input type="number" inputMode="numeric" min={1} max={pageCount || undefined} placeholder="e.g. 110"
+                value={problemTo} onChange={(event) => setProblemTo(event.target.value)} />
+            </label>
+          </div>
+          {problemRange.error ? <p className="lc-chatbot-pages-error">{problemRange.error}</p> : null}
+          {files.length > 0 ? (
+            <>
+              <small className="lc-chatbot-pages-subhint">
+                Homework or notes files (up to {MAX_REFERENCE_FILES}):
+              </small>
+              <div className="lc-chatbot-pages-files" role="group" aria-label="Homework or notes files">
+                {files.map((file) => {
+                  const on = picked.includes(file.docId);
+                  return (
+                    <button key={file.docId} type="button" aria-pressed={on}
+                      className={`lc-footnote-chip${on ? " is-picked" : ""}`}
+                      disabled={!on && picked.length >= MAX_REFERENCE_FILES}
+                      onClick={() => togglePicked(file.docId)}>
+                      <span className="lc-footnote-chip-label">{file.title}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
+        </div>
+
+        <div className="lc-chatbot-pages-field">
           <span>How much</span>
           <div className="lc-chatbot-pages-density" role="radiogroup" aria-label="How many footnotes">
             {DENSITY.map((option) => (
@@ -191,7 +301,7 @@ export function ChatBotPagesDialog({
 
         <div className="lc-chatbot-pages-actions">
           <button type="button" className="lc-secondary" onClick={onClose}>Close</button>
-          <button type="button" className="lc-primary" disabled={Boolean(rangeError) || busy} onClick={() => void start()}>
+          <button type="button" className="lc-primary" disabled={Boolean(rangeError || problemRange.error) || busy} onClick={() => void start()}>
             {busy ? "Sending…" : `Start (${Math.max(0, count)} page${count === 1 ? "" : "s"})`}
           </button>
         </div>

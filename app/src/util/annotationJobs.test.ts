@@ -18,7 +18,9 @@ vi.mock("../modes/pdfOpenDocs", () => ({
 
 const store = vi.hoisted(() => ({ footnotes: [] as unknown[] }));
 vi.mock("./annotateStore", () => ({
-  getAnnotateDoc: async (id: string) => ({ id, name: "Algorithms", hash: "h-algo", docType: "pdf", footnotes: store.footnotes }),
+  getAnnotateDoc: async (id: string) => id === "hw"
+    ? { id, name: "dpv_ch3.md", hash: "h-hw", docType: "markdown", source: "# 3.1 Run DFS on the graph." }
+    : { id, name: "Algorithms", hash: "h-algo", docType: "pdf", footnotes: store.footnotes },
   saveAnnotateDoc: async () => {},
   mutateAnnotateFootnotes: async (_id: string, mutate: (footnotes: unknown[]) => unknown[]) => {
     store.footnotes = [...mutate(store.footnotes)];
@@ -32,7 +34,7 @@ vi.mock("./noteLinks", async (importOriginal) => ({
   putEdge: async (edge: unknown) => { edges.push(edge); },
 }));
 
-import { findLoosely, footnoteFromItem, placeAnnotationJobItems, undoAnnotationJob } from "./annotationJobs";
+import { findLoosely, footnoteFromItem, jobReferences, placeAnnotationJobItems, undoAnnotationJob } from "./annotationJobs";
 
 const PALETTE = ["#60a5fa", "#f472b6", "#facc15", "#34d399"];
 
@@ -121,6 +123,13 @@ describe("page-range footnotes", () => {
     expect(await placeAnnotationJobItems(c)).toEqual({ placed: 0, unplaced: 0, waiting: 1 });
     expect(acked).toEqual([]);
     expect(store.footnotes).toHaveLength(0);
+  });
+
+  it("gathers the problem pages and homework files a run is read against", async () => {
+    const refs = await jobReferences({ hash: "h-algo", problems: { from: 104, to: 105 }, files: [{ docId: "hw", title: "dpv_ch3.md" }] });
+    expect(refs.map((ref) => [ref.kind, ref.title])).toEqual([["exercises", "Problems, pages 104–105"], ["homework", "dpv_ch3.md"]]);
+    expect(refs[0]!.text).toContain("[Page 104]");
+    expect(refs[1]!.text).toContain("Run DFS");
   });
 
   it("undo removes only the run's footnotes", async () => {

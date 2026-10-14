@@ -200,6 +200,8 @@ pub fn open(path: &Path) -> Result<Connection> {
     atomic_sync::migrate(&conn)?;
     snapshot_copies::migrate(&conn)?;
     annotation_jobs::migrate(&conn)?;
+    // Problem pages and homework files a page-range job is read against.
+    ensure_column(&conn, "annotation_jobs", "refs", "TEXT NOT NULL DEFAULT '[]'")?;
     atomic_sync::sweep(&conn)?;
     Ok(())
     })?;
