@@ -99,7 +99,7 @@ pub async fn submit_annotation_page(
 ) -> Result<Json<Value>, AppError> {
     let body: PageBody = serde_json::from_value(body).map_err(|err| {
         AppError::bad_request(anyhow::anyhow!(
-            "annotations must be objects with quote, notes and optional title, color, links, marks and workspace_links: {err}"
+            "annotations must be objects with quote, notes or fields (problems, question and looking_ahead are now fields such as Helps with), and optional title, color, links, marks and workspace_links: {err}"
         ))
     })?;
     let now = now_ms();
