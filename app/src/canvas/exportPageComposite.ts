@@ -29,7 +29,7 @@ export function resolveExportPaperColor(
   return viewBackground;
 }
 
-function intersectBounds(a: SceneBounds, b: SceneBounds): SceneBounds | null {
+export function intersectBounds(a: SceneBounds, b: SceneBounds): SceneBounds | null {
   const minX = Math.max(a.minX, b.minX);
   const minY = Math.max(a.minY, b.minY);
   const maxX = Math.min(a.maxX, b.maxX);

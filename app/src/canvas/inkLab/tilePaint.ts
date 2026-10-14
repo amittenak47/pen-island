@@ -108,7 +108,7 @@ function boundsOverlap(a: SceneBounds, b: SceneBounds): boolean {
   return a.minX < b.maxX && a.maxX > b.minX && a.minY < b.maxY && a.maxY > b.minY;
 }
 
-function intersectBounds(a: SceneBounds, b: SceneBounds): SceneBounds | null {
+export function intersectBounds(a: SceneBounds, b: SceneBounds): SceneBounds | null {
   const box = {
     minX: Math.max(a.minX, b.minX),
     minY: Math.max(a.minY, b.minY),

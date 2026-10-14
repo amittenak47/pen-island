@@ -52,7 +52,7 @@ const COARSE_MOMENTUM_BOOST = 1.75;
 
 type Slot = number | null;
 
-function clamp(value: number, min: number, max: number): number {
+export function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
