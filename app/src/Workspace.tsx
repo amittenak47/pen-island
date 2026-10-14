@@ -4005,10 +4005,23 @@ export const Workspace = memo(function Workspace({
     [hereNode, refreshHereEdges],
   );
 
+  /** Edges unlinked from the footnote panel, kept so its Undo can link them again. */
+  const unlinkedEdgesRef = useRef(new Map<string, Edge>());
   const removeWorkspaceLink = useCallback(
     (id: string) => {
+      const edge = hereEdges.find((entry) => entry.id === id);
+      if (edge) unlinkedEdgesRef.current.set(id, edge);
       // The edge, never the thing on the other end of it.
       void deleteEdge(id).then(refreshHereEdges);
+    },
+    [hereEdges, refreshHereEdges],
+  );
+  const restoreWorkspaceLink = useCallback(
+    (id: string) => {
+      const edge = unlinkedEdgesRef.current.get(id);
+      if (!edge) return;
+      // Made now, so it outranks its own tombstone on every device.
+      void putEdge({ ...edge, createdAt: Date.now() }).then(refreshHereEdges);
     },
     [refreshHereEdges],
   );
@@ -11971,6 +11984,7 @@ export const Workspace = memo(function Workspace({
               openLinkedNode(sameNode(edge.from, here) ? edge.to : edge.from);
             }}
             onRemoveWorkspaceLink={removeWorkspaceLink}
+            onRestoreWorkspaceLink={restoreWorkspaceLink}
             footnote={openFootnote}
             number={footnoteNumbers.get(openFootnote.id)}
             displayTheme={footnoteThemes.get(openFootnote.id)}

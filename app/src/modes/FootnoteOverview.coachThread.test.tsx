@@ -48,8 +48,12 @@ describe("FootnoteOverview threads", () => {
   it("allows linking an existing conversation without altering its messages", () => {
     const change = vi.fn();
     const {root} = mount(undefined, {onChange: change, availableThreads: [{rootId: "other", title: "Other thread"}]});
-    const select = document.querySelector<HTMLSelectElement>('[aria-label="Link an existing thread"]')!;
-    act(() => { select.value = "other"; select.dispatchEvent(new Event("change", {bubbles: true})); });
+    const trigger = document.querySelector<HTMLButtonElement>(".lc-footnote-thread-trigger")!;
+    act(() => trigger.click());
+    const option = Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="Link an existing thread"] button'))
+      .find(button => button.textContent?.includes("Other thread"))!;
+    act(() => option.click());
+    expect(document.querySelector('[aria-label="Link an existing thread"]')).toBeNull();
     expect(change).toHaveBeenCalledWith(expect.objectContaining({threads: [MARK.threads![0], expect.objectContaining({rootId: "other"})]}));
     expect(document.querySelector('[aria-label="Forget thread"]')).toBeNull();
     const unlink = document.querySelector<HTMLButtonElement>('[aria-label*="Tap to open, hold to unlink"]')!;

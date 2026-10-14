@@ -19325,7 +19325,7 @@ button.lc-row-selected:hover:not(:disabled) {
   position: fixed;
   width: min(260px, 86vw);
   max-width: min(260px, min(280px, calc(var(--lc-vvw, 100vw) - 32px)));
-  max-height: min(70vh, calc(var(--lc-vvh, 100vh) - 32px), 420px);
+  max-height: min(78vh, calc(var(--lc-vvh, 100vh) - 32px), 600px);
   display: flex;
   flex-direction: column;
   gap: 5px;
@@ -19753,7 +19753,7 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 .lc-footnote-overview-scroll-list.is-scrolling {
-  max-height: 4.5rem;
+  max-height: 150px;
   overflow-y: auto;
 }
 
@@ -19799,23 +19799,26 @@ button.lc-row-selected:hover:not(:disabled) {
 /*
  * A short list is a list, not a scroller.
  *
- * These used to keep a permanent track so adding a row could not pop a gutter
- * in and shove the ✕ — but Windows Chromium paints ↑↓ steppers on a track it
- * decides is wide enough, and a card with one link came up wearing two arrow
- * tips. `is-scrolling` arrives with the third row, which is also the first row
- * `max-height` would cut off; the gutter is reserved either way.
+ * A long one scrolls with no scrollbar at all: a track here took width from
+ * the rows, and Windows Chromium painted ↑↓ steppers on it. The row cut off
+ * at the bottom says there is more; a drag on any row scrolls (see
+ * HoldButton), so a flick can't turn into a hold that removes the row.
  */
 .lc-footnote-overview-link-list {
   overflow: hidden;
-  /* The gutter the 8px pane below would take, held open — rows keep their
-     width when the third one turns the list into a scroller. */
-  padding-right: 8px;
 }
 
 .lc-footnote-overview-link-list.is-scrolling {
-  max-height: 72px;
+  max-height: 150px;
   overflow-y: auto;
-  padding-right: 0;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.lc-footnote-overview-link-list.is-scrolling::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 .lc-doc-sheet-marks .lc-agent-scope-option,
@@ -22233,6 +22236,148 @@ html[data-corners="rounded"] {
 
 .lc-footnote-panel-reset:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--bad, #dc2626) 55%, var(--chrome-edge, transparent));
+}
+
+/* "Link existing thread" — chips, like the agent panel's footnote picker. */
+.lc-footnote-thread-picker {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.lc-footnote-thread-picker .lc-footnote-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 0;
+  height: auto;
+  padding: 3px 7px 3px 3px;
+  border: 1px solid var(--line, var(--chrome-edge));
+  border-radius: 6px;
+  background: transparent;
+  color: var(--lc-fn-ink, var(--ink));
+  cursor: pointer;
+  text-align: left;
+}
+
+.lc-footnote-thread-trigger {
+  border-style: dashed !important;
+}
+
+.lc-footnote-thread-picker .lc-footnote-chip:hover,
+.lc-footnote-thread-trigger.is-active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, var(--panel));
+}
+
+.lc-footnote-thread-picker .lc-footnote-chip-label {
+  max-width: 14em;
+}
+
+.lc-footnote-thread-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.lc-footnote-thread-badge svg {
+  width: 11px;
+  height: 11px;
+}
+
+.lc-footnote-thread-menu {
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  width: 100%;
+  max-height: 150px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding: 4px;
+  background: var(--overlay-bg, var(--panel));
+  border: 1px solid var(--chrome-edge, var(--line));
+  border-radius: 10px;
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  scrollbar-width: none;
+  transform-origin: top left;
+  animation: lc-doc-pop 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.lc-footnote-thread-menu::-webkit-scrollbar {
+  display: none;
+}
+
+.lc-footnote-thread-menu .lc-footnote-chip {
+  width: 100%;
+}
+
+.lc-footnote-thread-menu .lc-footnote-chip-label {
+  max-width: none;
+}
+
+/* Reset with a mini Undo (left) and Redo (right) tucked under it. */
+.lc-footnote-panel-history {
+  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 3px;
+  min-width: 52px;
+}
+
+.lc-footnote-panel-history .lc-footnote-panel-reset {
+  margin-left: 0;
+}
+
+.lc-footnote-panel-undo-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 4px;
+}
+
+.lc-footnote-panel-undo-row .lc-footnote-panel-mini {
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  min-width: 0;
+  height: 17px;
+  min-height: 0;
+  padding: 0;
+  border: 1px solid var(--chrome-edge, var(--border, rgb(127 127 127 / 30%)));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface, var(--panel)) 96%, transparent);
+  color: var(--lc-fn-ink, var(--ink));
+  cursor: pointer;
+  transition: border-color 120ms ease, transform 120ms ease, opacity 120ms ease;
+}
+
+.lc-footnote-panel-mini svg {
+  width: 11px;
+  height: 11px;
+}
+
+.lc-footnote-panel-mini.is-redo svg {
+  transform: scaleX(-1);
+}
+
+.lc-footnote-panel-mini:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--accent, #0d9488) 60%, var(--chrome-edge, transparent));
+}
+
+.lc-footnote-panel-mini:active:not(:disabled) {
+  transform: scale(0.92);
+}
+
+.lc-footnote-panel-mini:disabled {
+  opacity: 0.35;
+  cursor: default;
 }
 
 .lc-footnote-panel-reset .lc-hold-reveal-fill {

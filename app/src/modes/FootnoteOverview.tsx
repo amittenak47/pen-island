@@ -44,6 +44,7 @@ import {
   viewportBoxesOverlap,
 } from "./sheetAnchor";
 import { HOLD_SENSITIVE_MS } from "../util/gesture";
+import { useFootnoteHistory } from "./footnoteHistory";
 import { pickPhotos } from "../util/photoAttach";
 import { NOTE_IMAGE_LIMIT } from "../util/docFootnotes";
 export interface FootnoteOverviewProps {
@@ -99,6 +100,8 @@ export interface FootnoteOverviewProps {
   onAddWorkspaceLink?: () => void;
   onOpenWorkspaceLink?: (edgeId: string) => void;
   onRemoveWorkspaceLink?: (edgeId: string) => void;
+  /** Link an unlinked workspace link again (the panel's Undo). */
+  onRestoreWorkspaceLink?: (edgeId: string) => void;
   /** Open a footnote-owned scratch board on this annotate tab. */
   onOpenWhiteboard?: (id: string) => void;
   /** The owner persists the new scene before publishing its pointer. */
@@ -293,7 +296,7 @@ function applyViewportSize(node: HTMLElement, task: Task | null, compact = false
   } else if (compact) {
     node.style.maxHeight = `${Math.min(132, maxH)}px`;
   } else {
-    node.style.maxHeight = `${Math.min(Math.round(height * 0.7), maxH, 420)}px`;
+    node.style.maxHeight = `${Math.min(Math.round(height * 0.78), maxH, 600)}px`;
   }
 }
 
@@ -406,6 +409,7 @@ export function FootnoteOverview({
   onAddWorkspaceLink,
   onOpenWorkspaceLink,
   onRemoveWorkspaceLink,
+  onRestoreWorkspaceLink,
   onOpenWhiteboard,
   onCreateWhiteboard,
   onDeleteWhiteboard,
@@ -455,6 +459,12 @@ export function FootnoteOverview({
   const [copied, setCopied] = useState(false);
   const footnoteRef = useRef(footnote);
   footnoteRef.current = footnote;
+  const history = useFootnoteHistory({
+    footnote,
+    onChange,
+    onRemoveLink: onRemoveWorkspaceLink,
+    onRestoreLink: onRestoreWorkspaceLink,
+  });
 
   const persistMarkPalette = (nextPalette: string[], nextColor: string) => {
     const current = footnoteRef.current;
@@ -1032,16 +1042,30 @@ export function FootnoteOverview({
                     wheelZIndex={240}
                   />
                 </div>
-                {hasPanelContent && !readOnly && (
-                  <HoldButton
-                    label="Reset"
-                    className="lc-footnote-panel-reset"
-                    ariaLabel="Hold to reset: removes this footnote's notes, links, chats and underlines"
-                    dataTip="Hold to remove notes, links, chats and underlines"
-                    onConfirm={clearPanelContent}
-                  >
-                    <strong>Reset</strong>
-                  </HoldButton>
+                {!readOnly && (
+                  <div className="lc-footnote-panel-history">
+                    {hasPanelContent && (
+                      <HoldButton
+                        label="Reset"
+                        className="lc-footnote-panel-reset"
+                        ariaLabel="Hold to reset: removes this footnote's notes, links, chats and underlines"
+                        dataTip="Hold to remove notes, links, chats and underlines"
+                        onConfirm={clearPanelContent}
+                      >
+                        <strong>Reset</strong>
+                      </HoldButton>
+                    )}
+                    <div className="lc-footnote-panel-undo-row">
+                      <button type="button" className="lc-footnote-panel-mini" aria-label="Undo" data-tip="Undo"
+                        disabled={!history.canUndo} onClick={history.undo}>
+                        <HistoryArrow />
+                      </button>
+                      <button type="button" className="lc-footnote-panel-mini is-redo" aria-label="Redo" data-tip="Redo"
+                        disabled={!history.canRedo} onClick={history.redo}>
+                        <HistoryArrow />
+                      </button>
+                    </div>
+                  </div>
                 )}
               </header>
               {subMarks.length > 0 && (
@@ -1141,7 +1165,7 @@ export function FootnoteOverview({
                             // Holding removes the *link*, never the thing it
                             // points at — the notebook on the other end is not
                             // this card's to delete.
-                            onConfirm={() => onRemoveWorkspaceLink?.(link.edgeId)}
+                            onConfirm={() => history.removeLink(link.edgeId)}
                           >
                             <strong className="lc-footnote-overview-entry-text">{link.title}</strong>
                             <span className="lc-muted">{link.kindLabel}</span>
@@ -1240,14 +1264,10 @@ export function FootnoteOverview({
               )}
               <HubSection title="Threads">
                 {!readOnly && availableThreads.some(thread => !threads.some(link => link.rootId === thread.rootId)) &&
-                  <select aria-label="Link an existing thread" value="" onChange={event => {
-                    const thread = availableThreads.find(entry => entry.rootId === event.target.value);
-                    if (thread) onChange({...footnote,threads:[...threads,{...thread,createdAt:Date.now()}]});
-                  }}>
-                    <option value="">+ Link existing thread</option>
-                    {availableThreads.filter(thread => !threads.some(link => link.rootId === thread.rootId)).map(thread =>
-                      <option key={thread.rootId} value={thread.rootId}>{thread.title}</option>)}
-                  </select>}
+                  <ThreadLinkPicker
+                    threads={availableThreads.filter(thread => !threads.some(link => link.rootId === thread.rootId))}
+                    onPick={thread => onChange({...footnote,threads:[...threads,{...thread,createdAt:Date.now()}]})}
+                  />}
                 {threads.length > 0 && (
                   <ul className={listClass(threads.length)}>
                     {threads.map((thread) => (
@@ -1302,13 +1322,76 @@ export function FootnoteOverview({
   );
 }
 /**
- * A hub list only becomes a scroller once it has a third row.
- *
- * Two rows always fit inside `max-height`, so turning the pane on for them
- * bought nothing and cost a scrollbar — which Windows Chromium decorates with
- * ↑↓ stepper tips however hard the stylesheet asks it not to.
+ * "Link existing thread": a chip that opens the saved conversations as chips,
+ * the same look as the agent panel's footnote picker.
  */
-const SCROLL_AT = 3;
+function ThreadLinkPicker({ threads, onPick }: {
+  threads: readonly { rootId: string; title: string }[];
+  onPick: (thread: { rootId: string; title: string }) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const outside = (event: PointerEvent) => {
+      if (!(event.target instanceof Node) || !wrapRef.current?.contains(event.target)) setOpen(false);
+    };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    window.addEventListener("pointerdown", outside, true);
+    window.addEventListener("keydown", key);
+    return () => {
+      window.removeEventListener("pointerdown", outside, true);
+      window.removeEventListener("keydown", key);
+    };
+  }, [open]);
+  return (
+    <div className="lc-footnote-thread-picker" ref={wrapRef}>
+      <button type="button" className={`lc-footnote-chip lc-footnote-thread-trigger${open ? " is-active" : ""}`}
+        aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}>
+        <ThreadBubble />
+        <span className="lc-footnote-chip-label">Link existing thread</span>
+      </button>
+      {open && (
+        <div className="lc-footnote-thread-menu" role="menu" aria-label="Link an existing thread">
+          {threads.map(thread => (
+            <button key={thread.rootId} type="button" role="menuitem" className="lc-footnote-chip"
+              onClick={() => { onPick(thread); setOpen(false); }}>
+              <ThreadBubble />
+              <span className="lc-footnote-chip-label">{thread.title}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ThreadBubble() {
+  return (
+    <span className="lc-fn-badge lc-footnote-thread-badge" aria-hidden>
+      <svg viewBox="0 0 16 16" focusable="false">
+        <path d="M3 4.5A1.5 1.5 0 0 1 4.5 3h7A1.5 1.5 0 0 1 13 4.5v4A1.5 1.5 0 0 1 11.5 10H7l-3 2.5V10h0A1 1 0 0 1 3 9z"
+          fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      </svg>
+    </span>
+  );
+}
+
+/** A small curved arrow; Redo mirrors it. */
+function HistoryArrow() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden focusable="false">
+      <path d="M5.5 4 2.5 7l3 3" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="M3 7h6.5a3.5 3.5 0 0 1 0 7H7" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/**
+ * A hub list only becomes a scroller once it has more rows than `max-height`
+ * always fits; shorter lists stay plain lists.
+ */
+const SCROLL_AT = 5;
 
 function listClass(count: number): string {
   return count >= SCROLL_AT
