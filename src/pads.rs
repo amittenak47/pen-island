@@ -1697,16 +1697,27 @@ pub fn list_edges(conn: &Connection, since: i64) -> Result<Vec<EdgeRow>> {
 /// is nothing to resolve. Deleting is the only real event, and `gone` already
 /// models that - without consulting it, a device still holding a deleted edge
 /// would put it back on its next push, forever.
+///
+/// An edge *made* after its tombstone is a new decision, not a stale copy:
+/// the reader linked the same two things again, or undid the unlink. Ids are
+/// derived from the two ends, so without this the second link could never
+/// leave the device that drew it.
 pub fn put_edge(conn: &Connection, row: &EdgeRow, now: i64) -> Result<ApplyAck> {
     if row.id.trim().is_empty() {
         anyhow::bail!("edge needs an id");
     }
     let gone = edge_gone_seq(conn, &row.id)?;
     if gone > 0 {
-        return Ok(ApplyAck {
-            applied: false,
-            seq: gone,
-        });
+        if row.created_at <= gone {
+            return Ok(ApplyAck {
+                applied: false,
+                seq: gone,
+            });
+        }
+        conn.execute(
+            "DELETE FROM gone WHERE kind = 'edge' AND id = ?1",
+            params![row.id],
+        )?;
     }
     conn.execute(
         "INSERT INTO edges (id, from_type, from_id, to_type, to_id, edge_kind,
@@ -2982,6 +2993,21 @@ mod tests {
         assert!(!ack.applied);
         assert!(list_edges(&conn, 0).unwrap().is_empty());
         assert_eq!(list_gone_edges(&conn, 0).unwrap(), vec!["e1".to_string()]);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn an_edge_made_after_its_tombstone_comes_back() {
+        // Linking the same two things again (or undoing the unlink) mints the
+        // same id; it is newer than the delete, so it wins.
+        let path = tmp();
+        let conn = open(&path).unwrap();
+        put_edge(&conn, &edge("e1", "a1"), 10).unwrap();
+        delete_edge(&conn, "e1", 20).unwrap();
+        let relinked = EdgeRow { created_at: 25, ..edge("e1", "a1") };
+        assert!(put_edge(&conn, &relinked, 30).unwrap().applied);
+        assert_eq!(list_edges(&conn, 0).unwrap().len(), 1);
+        assert!(list_gone_edges(&conn, 0).unwrap().is_empty());
         let _ = std::fs::remove_file(path);
     }
 

@@ -16,7 +16,7 @@
  * only event that needs a rule, and `gone` already models it.
  */
 
-import type { EdgeRowDto, InkPageDigestDto, InkPageDto, LcClient } from "../api/client";
+import type { EdgeRowDto, InkPageDigestDto, InkPageDto, LcClient, PadGoneDto } from "../api/client";
 import { b64ToBytes, bytesToB64 } from "../api/nativeHttp";
 import {
   annotateDocKey,
@@ -67,6 +67,7 @@ import {
 } from "../templates/whiteboard";
 import {
   deleteEdge,
+  edgeCreatedAt,
   edgeIsGone,
   listEdges,
   listGoneEdgeIds,
@@ -1591,19 +1592,30 @@ export async function syncEdges(
   client: LcClient,
   incoming: EdgeRowDto[],
   goneIds: string[],
+  /** When each tombstone was written, from the ping's `gone` rows. */
+  goneRows: readonly PadGoneDto[] = [],
 ): Promise<void> {
   if (!loadPadHub()) return;
+  const goneAt = new Map(goneRows.filter((row) => row.kind === "edge").map((row) => [row.id, row.gone_at]));
   // A tombstone the hub reports has to land here, or this device offers the
-  // edge back on its next push.
+  // edge back on its next push — unless the edge here was made after it (linked
+  // again, or an undone unlink), which the push below hands the hub to revive.
+  const revived = new Set<string>();
   for (const id of goneIds) {
+    const at = goneAt.get(id);
+    const made = at === undefined ? null : await edgeCreatedAt(id);
+    if (made !== null && at !== undefined && made > at) {
+      revived.add(id);
+      continue;
+    }
     await deleteEdge(id);
   }
-  const goneSet = new Set(goneIds);
+  const goneSet = new Set(goneIds.filter((id) => !revived.has(id)));
   for (const row of incoming) {
     if (goneSet.has(row.id)) continue;
     const edge = edgeFromDto(row);
     if (!edge) continue;
-    if (await edgeIsGone(edge.id)) continue;
+    if (await edgeIsGone(edge.id, edge.createdAt)) continue;
     await putEdge(edge);
   }
   // And the other half: a delete that never leaves this device is one the hub

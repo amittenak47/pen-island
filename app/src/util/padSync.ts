@@ -1238,7 +1238,7 @@ async function applyPadSyncPingBody(
       noteInkConflicts(conflicts);
       for (const row of conflicts) conflictedPads.add(`${row.kind}:${row.key.split("/fn/")[0]}`);
     }
-    await syncEdges(client, ping.edges ?? [], ping.gone_edges ?? []);
+    await syncEdges(client, ping.edges ?? [], ping.gone_edges ?? [], ping.gone ?? []);
   }
   // Required transfers must finish before metadata can cause an open page to reload.
   for (const row of ping.annotate) {

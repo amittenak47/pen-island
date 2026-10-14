@@ -183,12 +183,28 @@ function isGoneRow(value: unknown): value is { id: string; goneAt: number } {
   return typeof row.id === "string" && typeof row.goneAt === "number";
 }
 
-export async function edgeIsGone(id: string): Promise<boolean> {
+/**
+ * Whether `id` is tombstoned here. With `createdAt`, an edge made after the
+ * delete (the same two things linked again, or an undone unlink) is not gone:
+ * ids come from the two ends, so it would otherwise never come back.
+ */
+export async function edgeIsGone(id: string, createdAt?: number): Promise<boolean> {
   try {
     const row = await run<unknown>(STORE_LINKS, "readonly", (store) => store.get(id));
-    return isGoneRow(row);
+    if (!isGoneRow(row)) return false;
+    return typeof createdAt !== "number" || createdAt <= row.goneAt;
   } catch {
     return false;
+  }
+}
+
+/** When the live edge `id` was made here, or null when there is none. */
+export async function edgeCreatedAt(id: string): Promise<number | null> {
+  try {
+    const row = await run<unknown>(STORE_LINKS, "readonly", (store) => store.get(id));
+    return isEdge(row) && typeof row.createdAt === "number" ? row.createdAt : null;
+  } catch {
+    return null;
   }
 }
 

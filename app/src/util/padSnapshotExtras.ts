@@ -152,6 +152,6 @@ export async function applyPadSnapshotExtras(
   else await restorePadSnapshotLocally({ kind, id: key }, snap);
   // Links are supplemental: restore their union after the book transaction.
   for (const edge of parseSnapshotEdges(snap.edges)) {
-    if (!await edgeIsGone(edge.id)) await putEdge(edge);
+    if (!await edgeIsGone(edge.id, edge.createdAt)) await putEdge(edge);
   }
 }

@@ -159,7 +159,7 @@ async function executePass(client: LcClient, options: BookPassOptions): Promise<
       display: bookDisplay(error, present.get(identity(error))), status: "failed", committed: false,
       error: unreadableHubError(error.error) ?? new BookSyncError("invalid", error.error.message) });
     result.notices.push(...await syncBookBackups(client, signal, options.timeoutMs));
-    try { await boundedBookRequest(() => syncEdges(client, ping.edges ?? [], ping.gone_edges ?? []), signal, options.timeoutMs); }
+    try { await boundedBookRequest(() => syncEdges(client, ping.edges ?? [], ping.gone_edges ?? [], ping.gone ?? []), signal, options.timeoutMs); }
     catch (cause) { if (signal.aborted) throw new HubSyncCancelled(); result.notices.push({ kind: "links", cause }); }
     return result;
   } catch (cause) {
