@@ -2226,7 +2226,7 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
                   baked.bakeOptions.smoothing,
                 );
                 const previewBounds = inkOpBounds(committed);
-                committed.points = finalOp.points;
+                bookRef.current.updatePoints(committed, finalOp.points);
                 const finalBounds = inkOpBounds(committed);
                 tilesRef.current?.invalidateBounds(
                   {

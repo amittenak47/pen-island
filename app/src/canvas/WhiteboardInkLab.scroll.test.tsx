@@ -11,6 +11,9 @@ import type { InkDrawOp, ViewportTransform } from "./rasterInk";
 import { layoutPdfPages, pdfStackFrames } from "../modes/PdfDocument";
 import { remapInkBetweenPdfLayouts } from "../modes/pdfInkSpread";
 import { decodeInkOps } from "./inkCodec";
+import * as bakeClient from "./inkLab/bakeClient";
+import { bakeSpine } from "./inkLab/bake";
+import { contentBottomInFrame } from "../templates/drawPageGrowth";
 
 vi.mock("../util/cameraBusy", () => ({ yieldToInput: () => Promise.resolve() }));
 vi.mock("./inkTileStore", () => ({
@@ -570,4 +573,35 @@ it("keeps a jumped page hidden when an earlier camera's unfinished tiles arrive"
   await frames(80); await Promise.all([first, second]);
   expect(surface().style.visibility).toBe("");
   expect(alpha(100, 380)).toBeGreaterThan(0);
+});
+
+it("remeasures draw growth when the deferred lift bake replaces stroke geometry", async () => {
+  let finishBake: (() => void) | undefined;
+  const bake = vi.spyOn(bakeClient, "bakeSpineOffThread").mockImplementationOnce((points, options) =>
+    new Promise(resolve => { finishBake = () => resolve(bakeSpine(points, options)); }));
+  await ready([], "pen");
+  await act(async () => root.render(<WhiteboardInkLab ref={ref} enabled tool="pen"
+    strokeWidth={3} inkColor="#ff0000" pressureClip={1} pressureSensitive={false}
+    smoothing={1} smoothingMode="lift" getViewport={() => view} />));
+  const event = (type: string, x: number, y: number) => {
+    const e = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
+    Object.defineProperties(e, { pointerId: { value: 1 }, pointerType: { value: "pen" }, pressure: { value: .5 } });
+    surface().dispatchEvent(e);
+  };
+  await act(async () => {
+    event("pointerdown", 50, 70);
+    for (const [x, y] of [[70, 120], [90, 190], [110, 110], [140, 60], [170, 120]]) {
+      event("pointermove", x, y);
+      await vi.advanceTimersByTimeAsync(17);
+    }
+    event("pointerup", 170, 120);
+  });
+  expect(bake).toHaveBeenCalledOnce();
+  const frame = { x: 0, y: 0, width: 400, height: 240 };
+  const before = ref.current!.getDrawContentBottom(frame, 0);
+  expect(before).toBe(contentBottomInFrame([], ref.current!.getOps(), frame, 0, false));
+  await act(async () => finishBake!());
+  const after = contentBottomInFrame([], ref.current!.getOps(), frame, 0, false);
+  expect(after).not.toBe(before);
+  expect(ref.current!.getDrawContentBottom(frame, 0)).toBe(after);
 });

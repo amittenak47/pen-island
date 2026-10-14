@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { InkPageBook } from "./inkPageCache";
+import { contentBottomInFrame } from "../templates/drawPageGrowth";
 import { INK_LRU_RADIUS, SPANNING_PAGE_ID, type PageFrame } from "./inkPageIndex";
 import { decodeInkOps, encodeInkOps, lazyEncodedInk, packEncodedInk, summarizeEncodedInk } from "./inkCodec";
 import { NO_PRESSURE, inkOpsBounds, type InkDrawOp, type InkEraseOp } from "./rasterInk";
@@ -533,5 +534,75 @@ describe("frame-scoped growth cache", () => {
     expect(book.drawContentBottom(frame, 0)).toBe(0);
     book.undoOnce();
     expect(book.drawContentBottom(frame, 0)).toBe(41);
+  });
+});
+
+describe("growth measurement equivalence", () => {
+  const frame = { x: 0, y: 0, width: 100, height: 1500 };
+  const check = (book: InkPageBook, box = frame, header = 0) => {
+    const expected = contentBottomInFrame([], book.assembleOps(), box, header, false);
+    expect(book.drawContentBottom(box, header)).toBe(expected);
+    expect(book.drawContentBottom(box, header)).toBe(expected);
+  };
+
+  it("matches the old history measurement through ink edits, sync and layout changes", () => {
+    const book = new InkPageBook();
+    const layout = frames(20);
+    book.setFrames(layout);
+    check(book);
+    book.commit(stroke(40)); check(book);
+    book.commit(stroke(80)); check(book);
+    book.undoOnce(); check(book);
+    book.redoOnce(); check(book);
+    const erase: InkEraseOp = { kind: "erase", radius: 6, points: [{ x: 15, y: 80, pressure: .5 }] };
+    expect(book.strokeErase(erase)).not.toBeNull(); check(book);
+    book.undoOnce(); check(book);
+    book.redoOnce(); check(book);
+    book.commit(stroke(60, { points: [{ x: 15, y: 30, pressure: .5 }, { x: 15, y: 90, pressure: .5 }] }));
+    check(book);
+    expect(book.partialErase({ ...erase, radius: 15, points: [{ x: 15, y: 90, pressure: .5 }] })).not.toBeNull();
+    check(book);
+    book.undoOnce(); check(book);
+    book.redoOnce(); check(book);
+    book.ingestEncodedPages(new Map([[20, encodeInkOps([stroke(layout[19]!.minY + 40)])]]));
+    expect(book.hot.has(20)).toBe(false); check(book);
+    book.setVisiblePage(20); check(book);
+    book.setVisiblePage(1); check(book);
+    book.seedCold([[20, encodeInkOps([stroke(layout[19]!.minY + 70)])]]); check(book);
+    book.clear(); check(book);
+    book.undoOnce(); check(book);
+    book.redoOnce(); check(book);
+    book.replaceAll([stroke(40), stroke(160)], { frames: layout }); check(book);
+    // Page deletion removes its ink; reorder rebins the retained strokes.
+    book.replaceAll(book.assembleOps().filter(op => op.points[0]!.y < 100), { preserveIds: true });
+    check(book);
+    book.setFrames(layout.map((f, i) => ({ ...f, pageId: layout.length - i }))); check(book);
+    book.ingestEncodedPages(new Map([[1, encodeInkOps([stroke(90)])]])); check(book);
+    for (const box of [{ ...frame, x: 11 }, { ...frame, y: 85 }, { ...frame, width: 9 }, { ...frame, height: 1 }]) {
+      check(book, box);
+      check(book, box, 50);
+    }
+    check(book);
+  });
+
+  it("invalidates hot measurements and hydrated bytes after a deferred geometry update", () => {
+    const book = new InkPageBook();
+    book.setFrames(frames(20));
+    book.ingestEncodedPages(new Map([[1, encodeInkOps([stroke(40)])]]));
+    expect(book.drawContentBottom(frame, 0)).toBe(41);
+    const beforeBounds = book.inkBounds()!;
+    const revision = book.revision();
+    const op = book.hot.get(1)![0]!;
+    book.updatePoints(op, stroke(80).points);
+    expect(book.revision()).toBe(revision);
+    expect(book.dirty.has(1)).toBe(true);
+    expect(book.drawContentBottom(frame, 0)).toBe(81);
+    expect(book.inkBounds()!.maxY).toBeGreaterThan(beforeBounds.maxY);
+    book.setVisiblePage(20);
+    expect(book.hot.has(1)).toBe(false);
+    expect(book.drawContentBottom(frame, 0)).toBe(81);
+    book.setVisiblePage(1);
+    expect(book.drawContentBottom(frame, 0)).toBe(81);
+    check(book);
   });
 });

@@ -489,6 +489,14 @@ export class InkPageBook {
     return stamped;
   }
 
+  /** Finish a deferred bake without changing its undo identity or history cursor. */
+  updatePoints(op: InkOp, points: InkOp["points"]): void {
+    op.points = points;
+    for (const [pageId, list] of this.hot) {
+      if (list.includes(op)) this.markDirty(pageId);
+    }
+  }
+
   /**
    * Stroke-eraser: drop whole draw ops the rub touched. Searches the hot set
    * (what the writer can see). Returns the kept paint list, or null if nothing
