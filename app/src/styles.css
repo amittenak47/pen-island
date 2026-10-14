@@ -20068,8 +20068,10 @@ button.lc-row-selected:hover:not(:disabled) {
   background: var(--lc-fn-wash, color-mix(in srgb, var(--lc-fn-light) 42%, var(--overlay-bg, var(--panel))));
   border-color: color-mix(in srgb, var(--lc-fn-color) 72%, var(--lc-fn-deep));
   color: var(--lc-fn-ink, var(--lc-fn-deep, var(--ink)));
+  /* Neutral and tucked under the card, so no tinted halo outlines it. */
   box-shadow:
-    0 8px 28px color-mix(in srgb, var(--lc-fn-deep) 32%, transparent),
+    0 1px 2px rgb(0 0 0 / 10%),
+    0 14px 30px -16px rgb(0 0 0 / 30%),
     inset 0 2px 0 0 var(--lc-fn-color);
 }
 
@@ -22115,7 +22117,7 @@ html[data-corners="rounded"] {
   border: 1px solid color-mix(in srgb, var(--lc-fn-color) 72%, var(--lc-fn-deep));
   background: var(--lc-fn-wash, var(--panel));
   color: var(--lc-fn-ink, var(--ink));
-  box-shadow: 0 8px 28px color-mix(in srgb, var(--lc-fn-deep) 32%, transparent), inset 0 2px 0 var(--lc-fn-color);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%), 0 14px 30px -16px rgb(0 0 0 / 30%), inset 0 2px 0 var(--lc-fn-color);
 }
 .lc-footnote-note-body {
   position: relative;
@@ -22485,4 +22487,9 @@ html[data-corners="rounded"] {
 /* The footnote panel follows the reader's corner choice, like its controls. */
 .lc-doc-sheet.lc-footnote-overview {
   border-radius: var(--lc-r-block);
+}
+
+/* The footnote panel's shadow, before a palette is applied: square and soft. */
+.lc-doc-sheet.lc-footnote-overview:not([style*="--lc-fn-color"]) {
+  box-shadow: 0 1px 2px rgb(0 0 0 / 10%), 0 14px 30px -16px rgb(0 0 0 / 30%);
 }
