@@ -1,9 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { NO_PRESSURE, type InkDrawOp, type InkOp } from "../canvas/rasterInk";
 import { conflictPdfFrames } from "../components/conflictDocumentLayout";
 import type { PdfPageSize } from "../modes/pdfPageSizeCache";
-import { convertPdfInkOps, inferPdfInkLayout } from "./pdfInkLayout";
+import { convertPdfInkOps, inferPdfInkLayout, localizeHubInkDto, sourcePdfInkLayout } from "./pdfInkLayout";
+import { decodeInkOps, encodeInkOps, packEncodedInk, unpackEncodedInk } from "../canvas/inkCodec";
+import { b64ToBytes, bytesToB64 } from "../api/nativeHttp";
+import { bytesFromMaybeGzip } from "./gzip";
+import { locatePdfInkPoint } from "../modes/pdfInkSpread";
+import { desktopLayout, mixedPdfSizes, pdfPoint, pdfSizes, pdfStroke, storedPdfOps, tabletLayout } from "./testPdfInk";
 
 const sizes: PdfPageSize[] = Array.from({ length: 40 }, (_, i) => ({ pageNumber: i + 1, width: 531, height: 666 }));
 const tablet = { w: 642, spread: false };
@@ -75,5 +80,111 @@ describe("inferPdfInkLayout", () => {
   it("prefers the hint when it already fits", () => {
     const pages = [8].map((pageId) => ({ pageId, ops: [strokeOn(pageId, desktop)] }));
     expect(inferPdfInkLayout(pages, sizes, [desktop, tablet])).toEqual(desktop);
+  });
+});
+
+describe("PDF device layout regression", () => {
+  it.each(["left", "right"] as const)("places tablet sheet 45's %s half on desktop sheet 45 on arrival", async (half) => {
+    const op = pdfStroke(pdfSizes, tabletLayout, 45, half);
+    // Raw tablet Y belongs to a much later desktop sheet, which was the bug.
+    const frames = conflictPdfFrames(pdfSizes, desktopLayout.w, false);
+    expect(locatePdfInkPoint(op.points[0].x, op.points[0].y, frames, 0, 760)?.pageId).toBeGreaterThan(100);
+    const dto = { kind: "annotate" as const, key: `arrival-${half}`, page_id: 45, updated_at: 123,
+      gz: bytesToB64(packEncodedInk({ ...encodeInkOps([op]), layout: tabletLayout })) };
+    const moved = await localizeHubInkDto(null, dto, { sizes: pdfSizes, layout: desktopLayout });
+    const ink = unpackEncodedInk(await bytesFromMaybeGzip(b64ToBytes(moved.gz)))!;
+    expect(ink.layout).toEqual(desktopLayout);
+    expect(moved).toMatchObject({ localized: true, page_id: 45, updated_at: 123 });
+    const [draw] = decodeInkOps(ink);
+    expect(draw.id).toBe(op.id);
+    draw.points.forEach((point, i) => {
+      const expected = pdfStroke(pdfSizes, desktopLayout, 45, half).points[i];
+      expect(point.x).toBeCloseTo(expected.x, 1);
+      expect(point.y).toBeCloseTo(expected.y, 1);
+    });
+  });
+
+  it("repeats twelve stored tablet/desktop round trips without drift, lost ids or duplicates", () => {
+    const original = storedPdfOps([pdfStroke(pdfSizes, tabletLayout, 45, "left", 101), pdfStroke(pdfSizes, tabletLayout, 45, "right", 102)]);
+    let ops = original;
+    let firstRoundTrip: InkOp[] | undefined;
+    for (let trip = 0; trip < 12; trip++) {
+      ops = storedPdfOps(convertPdfInkOps(ops, tabletLayout, desktopLayout, pdfSizes));
+      ops = storedPdfOps(convertPdfInkOps(ops, desktopLayout, tabletLayout, pdfSizes));
+      expect(ops.map(op => op.id)).toEqual([101, 102]);
+      expect(ops.map(op => op.seq)).toEqual([101, 102]);
+      ops.forEach((op, i) => op.points.forEach((point, j) => {
+        expect(Math.abs(point.x - original[i].points[j].x)).toBeLessThanOrEqual(.15);
+        expect(Math.abs(point.y - original[i].points[j].y)).toBeLessThanOrEqual(.15);
+      }));
+      if (firstRoundTrip) expect(ops.map(op => op.points)).toEqual(firstRoundTrip.map(op => op.points));
+      else firstRoundTrip = ops;
+      ops.forEach(op => expect((op as InkDrawOp).baseWidth).toBeCloseTo(4, 12));
+    }
+  });
+
+  const layouts = [642, 760, 913].flatMap(w => [false, true].map(spread => ({ w, spread })));
+  it.each(layouts.flatMap(from => layouts.map(to => ({ from, to }))))("maps mixed sheets from $from to $to", ({ from, to }) => {
+    for (const size of mixedPdfSizes) for (const half of ["left", "right"] as const) {
+      const op = pdfStroke(mixedPdfSizes, from, size.pageNumber, half);
+      const [moved] = convertPdfInkOps([op], from, to, mixedPdfSizes);
+      expect(moved.id).toBe(op.id);
+      moved.points.forEach((point, i) => {
+        const expected = pdfStroke(mixedPdfSizes, to, size.pageNumber, half).points[i];
+        expect(point.x).toBeCloseTo(expected.x, 7);
+        expect(point.y).toBeCloseTo(expected.y, 7);
+      });
+    }
+  });
+
+  it.each([null, 642])("infers untagged split ink with hub width %s and lends that layout to spanning ink", async (hint) => {
+    const docId = `legacy-span-${hint}`;
+    const ctx = { sizes: pdfSizes, layout: desktopLayout };
+    const op = pdfStroke(pdfSizes, tabletLayout, 45, "left");
+    const encoded = encodeInkOps([op]);
+    const found = await sourcePdfInkLayout(docId, encoded, 45, [op], ctx, hint);
+    const point = convertPdfInkOps([op], found, ctx.layout, ctx.sizes)[0].points[0];
+    expect(locatePdfInkPoint(point.x, point.y, conflictPdfFrames(pdfSizes, 760, false), 0, 760)?.pageId).toBe(45);
+    if (hint) expect(found).toEqual(tabletLayout);
+    const spanning = { ...op, points: [pdfPoint(pdfSizes, tabletLayout, 45, "left", .3, .8), pdfPoint(pdfSizes, tabletLayout, 46, "left", .3, .2)] };
+    expect(await sourcePdfInkLayout(docId, encodeInkOps([spanning]), 0, [spanning], ctx, hint)).toEqual(found);
+    const moved = convertPdfInkOps([spanning], found, ctx.layout, ctx.sizes);
+    // Changing split mode cuts a cross-sheet stroke into separate pieces.
+    expect(moved).toHaveLength(2);
+    expect(moved.map(op => op.points.length)).toEqual([1, 1]);
+    expect(moved.flatMap(op => op.points).map(p => locatePdfInkPoint(p.x, p.y, conflictPdfFrames(pdfSizes, 760, false), 0, 760)?.pageId)).toEqual([45, 46]);
+  });
+
+  it.each(["left", "right"] as const)("keeps %s margin ink outside the sheet through a stored round trip", half => {
+    const nx = half === "left" ? -.08 : 1.08;
+    const op = { ...pdfStroke(pdfSizes, tabletLayout, 1, half), points: [pdfPoint(pdfSizes, tabletLayout, 1, half, nx, -.003)] };
+    const [moved] = convertPdfInkOps([op], tabletLayout, desktopLayout, pdfSizes);
+    const expected = pdfPoint(pdfSizes, desktopLayout, 1, half, nx, -.003);
+    expect(moved.points[0].x).toBeCloseTo(expected.x, 7);
+    expect(moved.points[0].y).toBeCloseTo(expected.y, 7);
+    const [back] = storedPdfOps(convertPdfInkOps(storedPdfOps([moved]), desktopLayout, tabletLayout, pdfSizes));
+    expect(back.points[0].x).toBeCloseTo(op.points[0].x, 7);
+    expect(back.points[0].y).toBeCloseTo(op.points[0].y, 7);
+  });
+
+  it("does not reuse frames from another PDF with the same first sheet and page count", () => {
+    const other = mixedPdfSizes.map(size => ({ ...size, height: size.pageNumber === 2 ? 1600 : size.height }));
+    for (const book of [mixedPdfSizes, other, mixedPdfSizes]) {
+      const op = pdfStroke(book, tabletLayout, 4, "right");
+      const [moved] = convertPdfInkOps([op], tabletLayout, desktopLayout, book);
+      const expected = pdfStroke(book, desktopLayout, 4, "right");
+      expect(moved.points[0].y).toBeCloseTo(expected.points[0].y, 7);
+    }
+  });
+
+  it("reuses frames without reading every sheet's size for each shard", () => {
+    const readSize = vi.fn();
+    const sizes = mixedPdfSizes.map(size => ({ ...size, get width() { readSize(); return size.width; } }));
+    const op = pdfStroke(mixedPdfSizes, tabletLayout, 4, "right");
+    const first = convertPdfInkOps([op], tabletLayout, desktopLayout, sizes);
+    expect(readSize).toHaveBeenCalled();
+    readSize.mockClear();
+    expect(convertPdfInkOps([op], tabletLayout, desktopLayout, sizes)).toEqual(first);
+    expect(readSize).not.toHaveBeenCalled();
   });
 });

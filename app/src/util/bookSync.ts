@@ -8,7 +8,7 @@ import { newBookToken, withBookSync } from "./bookCoordinator";
 import { ensureBookReadyForAtomicSync, mutateLocalBook, LocalBookConflictError } from "./localBookStore";
 import { type BookIdentity, type SyncState } from "./syncState";
 import { encodedFromRecord, type InkPageRecord } from "./inkPageStore";
-import { packEncodedInk, encodeInkOps } from "../canvas/inkCodec";
+import { packEncodedInk, encodeInkOps, unpackEncodedInk } from "../canvas/inkCodec";
 import { recordHash, hashBytes, canonicalJson, validateInk } from "./syncContent";
 import { gzipBytes } from "./gzip";
 import { localizeHubInkDto, pdfInkContextFromRecord, tagOutgoingPdfInk } from "./pdfInkLayout";
@@ -145,7 +145,7 @@ async function prepareLocalPages(capture: BookCapture): Promise<Map<string, Loca
   }
   return pages;
 }
-async function acquirePage(client: LcClient, capture: BookCapture, remote: BookStateDto, page: BookPageStateDto, options: BookSyncOptions, signal: AbortSignal): Promise<PreparedBookPage> {
+async function acquirePage(client: LcClient, capture: BookCapture, remote: BookStateDto, page: BookPageStateDto, options: BookSyncOptions, signal: AbortSignal, beforeLegacySpanning?: () => Promise<void>): Promise<PreparedBookPage> {
   const docKey = localPageKey(capture, page.key);
   const dto = await boundedBookRequest(() => client.getInkPage(capture.kind as "annotate" | "whiteboard", page.key, page.page_id,
     { bookRev: remote.book_rev, pageRev: page.rev }, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
@@ -156,15 +156,18 @@ async function acquirePage(client: LcClient, capture: BookCapture, remote: BookS
   try {
     const validated = await validateInk(b64ToBytes(dto.gz));
     if (validated.wireHash !== page.hash || dto.rev !== page.rev) throw new Error("Pinned handwriting identity does not match");
+    stop(signal);
     const ctx = capture.kind === "annotate" ? pdfInkContextFromRecord(capture.record) : null;
+    if (ctx && page.key === capture.id && page.page_id === 0 && !unpackEncodedInk(validated.packed)?.layout) await beforeLegacySpanning?.();
     const remoteBoard = remote.record?.board as { appState?: { pdfWidth?: number } } | undefined;
     const localized = await boundedBookRequest(() => localizeHubInkDto(client, dto, ctx, remoteBoard?.appState?.pdfWidth ?? null), signal, options.timeoutMs);
     const checked = await validateInk(b64ToBytes(localized.gz));
+    stop(signal);
     return { remote: page, localHash: checked.wireHash, row: { v: 1, docKey, pageId: page.page_id,
       gz: b64ToBytes(localized.gz), dirty: false, updatedAt: dto.updated_at,
       ...(capture.kind === "annotate" && (remote.record?.doc_type ?? capture.metadata?.docType) === "pdf" && page.key === capture.id && !localized.localized ? { layoutPending: true } : {}) } };
   } catch (cause) {
-    if (cause instanceof LcApiError && cause.status === 409) throw cause;
+    if (cause instanceof HubSyncCancelled || cause instanceof LcApiError && cause.status === 409) throw cause;
     throw new BookSyncError("hub_page", "Hub handwriting cannot be read", [{ key: page.key, pageId: page.page_id }], cause);
   }
 }
@@ -229,7 +232,12 @@ async function applyChoices(client: LcClient, conflict: BookConflict, resolution
         if (capture.kind !== "annotate" || page.key === capture.id || remote.state !== "live" || children?.[child]) throw new BookSyncError("invalid", "A retained hub page has no local alternative");
         const encoded = await encodedFromRecord(server.row);
         row = { ...server.row, gz: undefined, inkC: { ...encodeInkOps([]), ...(encoded?.layout ? { layout: encoded.layout } : {}) } };
-      } else row = mine.row;
+      } else {
+        // Keep the prepared PDF tag with the chosen local coordinates too.
+        const ctx = capture.kind === "annotate" && page.key === capture.id && !mine.row.layoutPending
+          ? pdfInkContextFromRecord(capture.record) : null;
+        row = ctx ? { ...mine.row, inkC: undefined, gz: b64ToBytes(mine.gz), sum: undefined } : mine.row;
+      }
     } else if (choice === "none" || choice === "merged") {
       const serverInk = await encodedFromRecord(server.row), localInk = mine ? await encodedFromRecord(mine.row) : encodeInkOps([]);
       if (!serverInk || !localInk) throw new BookSyncError("hub_page", "A conflict page cannot be decoded", [{ key: page.key, pageId: page.page_id }]);
@@ -388,10 +396,23 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           const page = { key, page_id: row.pageId, rev: 0, hash };
           virtual.set(pageIdentity(key, row.pageId), { remote: page, row, localHash: hash });
         }
-        const load = async (page: BookPageStateDto) => {
+        const pageController = new AbortController();
+        const acquiring = new Map<string, Promise<PreparedBookPage>>();
+        const load = async (page: BookPageStateDto): Promise<PreparedBookPage> => {
+          stop(pageController.signal);
           const identity = pageIdentity(page.key, page.page_id), cached = acquired.get(identity) ?? (page.rev === 0 ? virtual.get(identity) : undefined);
           if (cached) return cached;
-          const value = await acquirePage(client, capture, remote, page, options, signal); acquired.set(identity, value); return value;
+          let pending = acquiring.get(identity);
+          if (!pending) {
+            pending = acquirePage(client, capture, remote, page, options, pageController.signal, async () => {
+              // Only untagged page 0 needs siblings; sheets cannot recurse here.
+              for (const sheet of remotePages.values()) if (sheet.key === page.key && sheet.page_id > 0) await load(sheet);
+            }).then(value => {
+              stop(pageController.signal); acquired.set(identity, value); return value;
+            }).finally(() => { acquiring.delete(identity); });
+            acquiring.set(identity, pending);
+          }
+          return pending;
         };
         const remotePages = new Map(vector(remote).map(page => [pageIdentity(page.key, page.page_id), page]));
         for (const [identity, value] of virtual) if (!remotePages.has(identity)) remotePages.set(identity, value.remote);
@@ -409,6 +430,9 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           }
           if (dependencyConflicts.size) recordClass = "conflict";
         }
+        const cancelPages = () => pageController.abort();
+        if (signal.aborted) cancelPages();
+        signal.addEventListener("abort", cancelPages, { once: true });
         try {
           for (const [identity, page] of virtual) if (remotePages.get(identity)!.rev !== 0) {
             const shard = await load(remotePages.get(identity)!);
@@ -610,6 +634,9 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
             continue;
           }
           throw cause;
+        } finally {
+          signal.removeEventListener("abort", cancelPages);
+          cancelPages();
         }
       }
     }, signal);

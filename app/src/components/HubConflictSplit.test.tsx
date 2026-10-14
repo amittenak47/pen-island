@@ -14,6 +14,14 @@ const roots = new Set<ReturnType<typeof createRoot>>();
 
 beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true); });
 
+afterEach(async () => {
+  await act(async () => { roots.forEach(root => root.unmount()); });
+  roots.clear();
+  document.body.textContent = "";
+  resetPdfThumbs();
+  vi.unstubAllGlobals();
+});
+
 function annotateBody(name: string, updated: number, notes: unknown[]): AnnotatePadDto {
   return {
     id: "pad-1",
@@ -148,13 +156,6 @@ describe("HubConflictSplit", () => {
     expect(onResolve).toHaveBeenCalledWith(expect.objectContaining({ pick: "server" }));
     act(() => root.unmount());
   });
-  afterEach(() => {
-    act(() => { roots.forEach(root => root.unmount()); });
-    roots.clear();
-    document.body.textContent = "";
-    resetPdfThumbs();
-  });
-
   it("renders Local left and the other device right from the stash", () => {
     const { onResolve } = mount();
     const panes = document.querySelectorAll<HTMLElement>(".lc-hub-conflict-pane");
@@ -925,6 +926,7 @@ describe("what the panes are asked to draw", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
+    roots.add(root);
     act(() =>
       root.render(
         <Split conflict={conflict} onResolve={vi.fn()} fetchPreviewInk={extra.fetchPreviewInk} />,
@@ -1335,6 +1337,7 @@ describe("HubConflictSplit cancel", () => {
     const host = document.createElement("div");
     document.body.append(host);
     const root = createRoot(host);
+    roots.add(root);
     const onResolve = vi.fn();
     const onCancel = vi.fn();
     act(() => root.render(<HubConflictSplit conflict={CONFLICT} onResolve={onResolve} onCancel={onCancel} />));

@@ -1222,7 +1222,7 @@ export async function localizePendingPdfInk(docId: string, client?: LcClient | n
       if (!encoded) continue;
       const ops = decodeInkOps(encoded);
       const from = await sourcePdfInkLayout(docId, encoded, row.pageId, ops, ctx, await hubPdfWidth(client, docId));
-      gz = await gzipBytes(packEncodedInk(encodeInkOps(convertPdfInkOps(ops, from, ctx.layout, ctx.sizes))));
+      gz = await gzipBytes(packEncodedInk({ ...encodeInkOps(convertPdfInkOps(ops, from, ctx.layout, ctx.sizes)), layout: ctx.layout }));
     }
     const next: InkPageRecord = { ...row, gz, inkC: undefined, sum: undefined };
     const previousHash = await wireInkHash((await gzOf(row))!);

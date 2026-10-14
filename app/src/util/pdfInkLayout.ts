@@ -80,14 +80,16 @@ export function pdfInkContextFromRecord(record: Record<string, unknown> | null):
   return { layout: { w, spread: Boolean(spread) }, sizes };
 }
 
-const framesCache = new Map<string, ReturnType<typeof conflictPdfFrames>>();
+const framesCache = new WeakMap<readonly PdfPageSize[], Map<string, ReturnType<typeof conflictPdfFrames>>>();
 function framesFor(sizes: readonly PdfPageSize[], layout: PdfInkLayout) {
-  const key = `${sizes.length}:${sizes[0]?.width}:${sizes[0]?.height}:${layout.w}:${layout.spread}`;
-  let frames = framesCache.get(key);
+  let layouts = framesCache.get(sizes);
+  if (!layouts) { layouts = new Map(); framesCache.set(sizes, layouts); }
+  const key = `${layout.w}:${layout.spread}`;
+  let frames = layouts.get(key);
   if (!frames) {
     frames = conflictPdfFrames(sizes, layout.w, layout.spread);
-    if (framesCache.size > 64) framesCache.clear();
-    framesCache.set(key, frames);
+    if (layouts.size > 64) layouts.clear();
+    layouts.set(key, frames);
   }
   return frames;
 }

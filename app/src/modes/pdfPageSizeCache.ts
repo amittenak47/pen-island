@@ -25,6 +25,10 @@ const INDEX_KEY = "whiteboard.pdfSizes.v1";
 /** Books remembered. Each entry is a few dozen bytes for a typical file. */
 export const PDF_SIZE_CACHE_DOCS = 40;
 
+// Sync asks for the same geometry per shard. Keep its array identity stable
+// so frame caches can reuse it, checking the stored runs for external changes.
+const decodedSizes = new Map<string, { raw: string; sizes: PdfPageSize[] }>();
+
 type Run = [count: number, width: number, height: number];
 
 export function encodePageSizes(sizes: readonly PdfPageSize[]): Run[] {
@@ -66,15 +70,8 @@ function readIndex(): string[] {
 
 /** The sizes for this file, when every page was measured before. */
 export function loadPdfPageSizes(hash: string | null | undefined, numPages: number): PdfPageSize[] | null {
-  if (!hash) return null;
-  try {
-    const raw = localStorage.getItem(PREFIX + hash);
-    if (!raw) return null;
-    const sizes = decodePageSizes(JSON.parse(raw));
-    return sizes && sizes.length === numPages ? sizes : null;
-  } catch {
-    return null;
-  }
+  const sizes = cachedPdfPageSizes(hash);
+  return sizes && sizes.length === numPages ? sizes : null;
 }
 
 /** The sizes cached for this file, however many pages it has. */
@@ -82,8 +79,16 @@ export function cachedPdfPageSizes(hash: string | null | undefined): PdfPageSize
   if (!hash) return null;
   try {
     const raw = localStorage.getItem(PREFIX + hash);
-    return raw ? decodePageSizes(JSON.parse(raw)) : null;
+    const cached = decodedSizes.get(hash);
+    if (raw && cached?.raw === raw) return cached.sizes;
+    decodedSizes.delete(hash);
+    const sizes = raw ? decodePageSizes(JSON.parse(raw)) : null;
+    if (!raw || !sizes) return null;
+    if (decodedSizes.size >= PDF_SIZE_CACHE_DOCS) decodedSizes.delete(decodedSizes.keys().next().value!);
+    decodedSizes.set(hash, { raw, sizes });
+    return sizes;
   } catch {
+    decodedSizes.delete(hash);
     return null;
   }
 }
@@ -93,7 +98,10 @@ export function savePdfPageSizes(hash: string | null | undefined, sizes: readonl
   try {
     setStorageItem(PREFIX + hash, JSON.stringify(encodePageSizes(sizes)));
     const index = [hash, ...readIndex().filter((item) => item !== hash)];
-    for (const gone of index.slice(PDF_SIZE_CACHE_DOCS)) localStorage.removeItem(PREFIX + gone);
+    for (const gone of index.slice(PDF_SIZE_CACHE_DOCS)) {
+      localStorage.removeItem(PREFIX + gone);
+      decodedSizes.delete(gone);
+    }
     setStorageItem(INDEX_KEY, JSON.stringify(index.slice(0, PDF_SIZE_CACHE_DOCS)));
   } catch {
     /* quota — the next open measures again */
