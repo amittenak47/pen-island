@@ -7,10 +7,12 @@ const mocks = vi.hoisted(() => ({ instances: [] as Array<{
   postMessage: ReturnType<typeof vi.fn>;
   terminate: ReturnType<typeof vi.fn>;
   onerror: ((event: ErrorEvent) => void) | null;
+  onmessageerror: ((event: MessageEvent) => void) | null;
 }> }));
 vi.mock("./tileRaster.worker.ts?worker", () => ({ default: class {
   onmessage = null;
   onerror = null;
+  onmessageerror = null;
   postMessage = vi.fn();
   terminate = vi.fn();
   constructor() { mocks.instances.push(this); }
@@ -90,4 +92,70 @@ it("closes a bitmap whose caller was released after worker termination", async (
   const close = vi.fn();
   reply({ close } as unknown as ImageBitmap);
   expect(close).toHaveBeenCalledOnce();
+});
+
+it("terminates an unresponsive shared worker before releasing either pane", async () => {
+  const a = await send([]), b = await send([]);
+  const worker = mocks.instances[0]!;
+  const resolved = vi.fn(() => expect(worker.terminate).toHaveBeenCalledOnce());
+  void a.result.then(resolved); void b.result.then(resolved);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(worker.terminate).toHaveBeenCalledOnce();
+  expect(resolved).toHaveBeenCalledTimes(2);
+  expect(await a.result).toBeNull();
+  expect(await b.result).toBeNull();
+  expect(vi.getTimerCount()).toBe(0);
+  const close = vi.fn();
+  reply({ close } as unknown as ImageBitmap);
+  expect(close).toHaveBeenCalledOnce();
+});
+
+it("releases both panes after an unreadable worker response", async () => {
+  const a = await send([]), b = await send([]);
+  const worker = mocks.instances[0]!;
+  expect(worker.onmessageerror).toBeTypeOf("function");
+  worker.onmessageerror!({} as MessageEvent);
+  expect(worker.terminate).toHaveBeenCalledOnce();
+  expect(await a.result).toBeNull();
+  expect(await b.result).toBeNull();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("does not post a second pane's request to a worker that failed during the same turn", async () => {
+  const { result } = await send([]); reply(); await result;
+  const worker = mocks.instances[0]!;
+  const posts = worker.postMessage.mock.calls.length;
+  worker.postMessage.mockImplementationOnce(() => { throw new Error("Worker failed"); });
+  const resolved = vi.fn();
+  const a = rasterInkTileOffThread(job([])), b = rasterInkTileOffThread(job([]));
+  void a.then(resolved); void b.then(resolved);
+  await vi.dynamicImportSettled();
+  expect(worker.terminate).toHaveBeenCalledOnce();
+  expect(worker.postMessage).toHaveBeenCalledTimes(posts + 1);
+  expect(resolved).toHaveBeenCalledTimes(2);
+  expect(await a).toBeNull();
+  expect(await b).toBeNull();
+});
+
+it("releases a closed pane's waiter without terminating the other pane's worker", async () => {
+  const controller = new AbortController();
+  const remove = vi.spyOn(controller.signal, "removeEventListener");
+  const result = rasterInkTileOffThread({ ...job([]), signal: controller.signal });
+  const resolved = vi.fn();
+  void result.then(resolved);
+  await vi.dynamicImportSettled();
+  const other = await send([]);
+  controller.abort();
+  await vi.dynamicImportSettled();
+  expect(resolved).toHaveBeenCalledWith(null);
+  expect(remove).toHaveBeenCalledWith("abort", expect.any(Function));
+  expect(mocks.instances[0]!.terminate).not.toHaveBeenCalled();
+  const closed = mocks.instances[0]!.postMessage.mock.calls
+    .map(([msg]) => msg as InkTileRasterRequest).find(msg => msg.type === "render")!;
+  const close = vi.fn();
+  mocks.instances[0]!.onmessage!({ data: { id: (closed as { id: number }).id,
+    bitmap: { close }, renderMs: 0, sdfMs: 0 } } as unknown as MessageEvent<InkTileRasterResponse>);
+  expect(close).toHaveBeenCalledOnce();
+  reply(); await other.result;
+  expect(vi.getTimerCount()).toBe(0);
 });

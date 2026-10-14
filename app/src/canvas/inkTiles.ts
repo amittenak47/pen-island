@@ -405,6 +405,7 @@ export class InkTileCache {
   private inflight = new Set<string>();
   private workerGeneration = 0;
   private workerOps: readonly InkOp[] | null = null;
+  private workerAbort: AbortController | null = null;
   private persistDirty = false;
   private persistQueue = new Map<string, Tile>();
   private persistTimer: ReturnType<typeof setTimeout> | null = null;
@@ -997,6 +998,7 @@ export class InkTileCache {
     }
     this.inflight.add(key);
     const generation = this.workerGeneration;
+    const signal = (this.workerAbort ??= new AbortController()).signal;
     // The client uses identity to decide whether to send history. Appends and
     // geometry edits must get a fresh snapshot, even if this.ops was mutated.
     const ops = this.paintOpsSnapshot();
@@ -1010,6 +1012,7 @@ export class InkTileCache {
           tx: next.tx,
           ty: next.ty,
           tilePx: this.tilePx,
+          signal,
         }),
       )
       .then((bitmap) => {
@@ -1052,6 +1055,8 @@ export class InkTileCache {
 
   private invalidateWorkerHistory(): void {
     this.workerGeneration += 1;
+    this.workerAbort?.abort();
+    this.workerAbort = null;
     this.workerOps = null;
     this.inflight.clear();
     this.sig = "";

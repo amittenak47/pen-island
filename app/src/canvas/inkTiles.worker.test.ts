@@ -201,3 +201,106 @@ it("requests visible paper before overscan and preserves every final pixel", asy
   expect(remote.cache.covered).toBe(true);
   expect(remote.localPaint).not.toHaveBeenCalled();
 });
+
+it("paints both panes after terminating an unresponsive shared worker", async () => {
+  const a = makeCache(), b = makeCache();
+  const small = { ...view, width: 100, height: 100 };
+  const canvasA = createCanvas(100, 100), canvasB = createCanvas(100, 100);
+  const ctxA = canvasA.getContext("2d"), ctxB = canvasB.getContext("2d");
+  a.cache.setOps([line(10, 30, 90, 30)]);
+  b.cache.setOps([line(10, 70, 90, 70)]);
+  a.cache.draw(ctxA as unknown as CanvasRenderingContext2D, small, 1);
+  b.cache.draw(ctxB as unknown as CanvasRenderingContext2D, small, 1);
+  await tick(a.schedule); await tick(b.schedule);
+  const worker = fake.workers[0]!;
+  a.localPaint.mockImplementation((w, h) => {
+    expect(worker.terminate).toHaveBeenCalledOnce();
+    return createCanvas(w, h) as unknown as HTMLCanvasElement;
+  });
+  b.localPaint.mockImplementation(a.localPaint.getMockImplementation()!);
+  await vi.advanceTimersByTimeAsync(120_000);
+  expect(worker.terminate).toHaveBeenCalledOnce();
+  expect(vi.getTimerCount()).toBe(0);
+  a.cache.draw(ctxA as unknown as CanvasRenderingContext2D, small, 1);
+  b.cache.draw(ctxB as unknown as CanvasRenderingContext2D, small, 1);
+  expect(a.cache.covered).toBe(true); expect(b.cache.covered).toBe(true);
+  expect(ctxA.getImageData(50, 30, 1, 1).data[3]).toBeGreaterThan(0);
+  expect(ctxB.getImageData(50, 70, 1, 1).data[3]).toBeGreaterThan(0);
+  expect(a.localPaint).toHaveBeenCalledOnce(); expect(b.localPaint).toHaveBeenCalledOnce();
+  expect(renders()).toHaveLength(2);
+  for (const msg of renders()) expect(finish(msg).close).toHaveBeenCalledOnce();
+});
+
+it("releases a closing pane's request while the other pane completes its tile", async () => {
+  const a = makeCache(), b = makeCache();
+  const small = { ...view, width: 100, height: 100 };
+  const ctx = createCanvas(100, 100).getContext("2d") as unknown as CanvasRenderingContext2D;
+  for (const { cache } of [a, b]) {
+    cache.setOps([line(10, 40, 90, 40)]); cache.draw(ctx, small, 1);
+  }
+  await tick(a.schedule); await tick(b.schedule);
+  expect(vi.getTimerCount()).toBe(2);
+  a.cache.dispose();
+  await vi.dynamicImportSettled();
+  expect(vi.getTimerCount()).toBe(1);
+  expect(fake.workers[0]!.terminate).not.toHaveBeenCalled();
+  expect(finish(renders()[0]!).close).toHaveBeenCalledOnce();
+  finish(renders()[1]!); await vi.dynamicImportSettled();
+  b.cache.draw(ctx, small, 1);
+  expect(b.cache.covered).toBe(true); expect(a.cache.size).toBe(0);
+  expect(a.localPaint).not.toHaveBeenCalled(); expect(b.localPaint).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("does not dispatch a pane's tile after it closes during the client import", async () => {
+  const { cache, schedule, localPaint } = makeCache();
+  const ctx = createCanvas(100, 100).getContext("2d") as unknown as CanvasRenderingContext2D;
+  cache.setOps([line(10, 40, 90, 40)]);
+  cache.draw(ctx, { ...view, width: 100, height: 100 }, 1);
+  schedule.shift()!();
+  cache.dispose();
+  await vi.dynamicImportSettled();
+  expect(fake.workers).toHaveLength(0);
+  expect(localPaint).not.toHaveBeenCalled();
+  expect(vi.getTimerCount()).toBe(0);
+});
+
+it("prioritizes each split pane's visible paper while preserving both complete bitmaps", async () => {
+  const panes = [makeCache(), makeCache()];
+  const canvases = [createCanvas(256, 512), createCanvas(256, 512)];
+  const paper = [{ ...view, scrollY: -128, height: 128 }, { ...view, scrollY: -384, height: 128 }];
+  const expected = canvases.map((_, i) => {
+    const canvas = createCanvas(256, 512);
+    const local = makeCache(false);
+    const ops = denseHistory().map(op => op.kind === "draw" ? { ...op, color: i ? "#008040" : op.color } : op);
+    const clip = { minX: 128, minY: 17, maxX: 243, maxY: 493 };
+    local.cache.setOps(ops); local.cache.setClip(clip);
+    local.cache.draw(canvas.getContext("2d") as unknown as CanvasRenderingContext2D, view, 1);
+    panes[i]!.cache.setOps(ops); panes[i]!.cache.setClip(clip);
+    panes[i]!.cache.draw(canvases[i]!.getContext("2d") as unknown as CanvasRenderingContext2D, view, 1, paper[i]);
+    return canvas.getContext("2d").getImageData(0, 0, 256, 512).data;
+  });
+  let done = 0;
+  for (let step = 0; step < 100; step++) {
+    for (const pane of panes) await tick(pane.schedule);
+    for (const msg of renders().slice(done)) { finish(msg); done++; }
+    await vi.dynamicImportSettled();
+    if (panes.every(pane => pane.cache.settled)) break;
+  }
+  expect(fake.workers).toHaveLength(1);
+  const histories = fake.workers[0]!.postMessage.mock.calls.map(([msg]) => msg as InkTileRasterRequest)
+    .filter((msg): msg is Extract<InkTileRasterRequest, { type: "ops" }> => msg.type === "ops");
+  expect(histories).toHaveLength(2);
+  panes.forEach((pane, i) => {
+    expect(pane.cache.settled).toBe(true);
+    const requests = renders().filter(msg => msg.historyId === histories[i]!.historyId);
+    expect([requests[0]!.tx, requests[0]!.ty]).toEqual([1, i ? 3 : 1]);
+    expect(requests).toHaveLength(8);
+    pane.cache.draw(canvases[i]!.getContext("2d") as unknown as CanvasRenderingContext2D, view, 1, paper[i]);
+    const pixels = canvases[i]!.getContext("2d").getImageData(0, 0, 256, 512).data;
+    expect(pixels.every((v, j) => v === expected[i]![j])).toBe(true);
+    expect(pane.cache.covered).toBe(true);
+    expect(pane.localPaint).not.toHaveBeenCalled();
+  });
+  expect(vi.getTimerCount()).toBe(0);
+});

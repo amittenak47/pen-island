@@ -9,6 +9,8 @@ type Pending = {
 let worker: Worker | null | undefined;
 let starting: Promise<Worker | null> | null = null;
 let nextId = 1;
+// Give dense tiles time to finish, but a lost response must not block paper forever.
+const WORKER_TIMEOUT_MS = 120_000;
 const pending = new Map<number, Pending>();
 // Two recently used histories avoid cloning a dense book on every tile when
 // two panes alternate. Weak keys do not retain closed notebooks on the UI side.
@@ -41,11 +43,16 @@ async function startWorker(): Promise<Worker | null> {
     const next = new InkTileRasterWorker();
     next.onmessage = (event: MessageEvent<InkTileRasterResponse>) => {
       const request = pending.get(event.data.id);
-      if (!request) { event.data.bitmap?.close(); return; }
+      if (worker !== next || !request) { event.data.bitmap?.close(); return; }
       noteInkTileRaster(event.data.renderMs, event.data.sdfMs);
       request.resolve(event.data.bitmap);
     };
-    next.onerror = (event) => failWorker(event.error ?? new Error(event.message));
+    next.onerror = (event) => {
+      if (worker === next) failWorker(event.error ?? new Error(event.message));
+    };
+    next.onmessageerror = () => {
+      if (worker === next) failWorker(new Error("Unreadable ink tile response"));
+    };
     worker = next;
   } catch {
     worker = null;
@@ -60,14 +67,17 @@ export type InkTileRasterJob = {
   tx: number;
   ty: number;
   tilePx?: number;
+  /** Only abort discarded history: the worker may still finish its old tile. */
+  signal?: AbortSignal;
 };
 
-/** Raster one scene tile off the UI thread. Null means caller should paint locally. */
+/** Null permits local fallback unless the caller abandoned this generation via signal. */
 export async function rasterInkTileOffThread(
   job: InkTileRasterJob,
 ): Promise<ImageBitmap | null> {
+  if (job.signal?.aborted) return null;
   const target = await getWorker();
-  if (!target) return null;
+  if (!target || target !== worker || job.signal?.aborted) return null;
   const clipKey = JSON.stringify(job.clip);
   let history = histories.get(job.ops);
   if (!history || history.clip !== clipKey || history.tilePx !== job.tilePx) {
@@ -90,12 +100,23 @@ export async function rasterInkTileOffThread(
   if (resident.size > 2) resident.delete(resident.values().next().value!);
   const id = nextId++;
   return new Promise<ImageBitmap | null>((resolve) => {
+    const signal = job.signal;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const abort = () => finish(null);
     const finish = (bitmap: ImageBitmap | null) => {
       if (!pending.has(id)) return;
       pending.delete(id);
+      if (timer !== undefined) clearTimeout(timer);
+      signal?.removeEventListener("abort", abort);
       resolve(bitmap);
     };
     pending.set(id, { resolve: finish });
+    signal?.addEventListener("abort", abort, { once: true });
+    timer = setTimeout(() => {
+      // End shared ownership before either pane can replay locally.
+      if (worker === target) failWorker(new Error("Ink tile worker stopped responding"));
+      else finish(null);
+    }, WORKER_TIMEOUT_MS);
     const payload: InkTileRasterRequest = {
       type: "render",
       historyId: history.id,
@@ -104,9 +125,8 @@ export async function rasterInkTileOffThread(
       tx: job.tx,
       ty: job.ty,
     };
-    // A slow tile still belongs to the worker. Keep waiting: a timeout would
-    // replay it on the UI thread while this job (and other panes) keeps going.
-    // Worker failure terminates it before releasing all pending callers.
+    // A slow tile still belongs to the worker. Only failure/termination permits
+    // fallback; abort releases a discarded generation without stopping other panes.
     try { target.postMessage(payload); }
     catch (error) { failWorker(error); }
   }).catch(() => null);
