@@ -2,7 +2,7 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AnnotationJobDto, AssistantRunnerStatus, LcClient, NewAnnotationJobDto } from "../api/client";
+import type { AnnotationJobDto, AssistantRunnerStatus, LcClient, NewAnnotationJobDto, ReadingStyleDto } from "../api/client";
 import { saveChatBotAnswerMode } from "../util/chatBotClient";
 import type { DocFootnote } from "../util/docFootnotes";
 import { loadSelectionRuns, rememberSelectionRun, type ChatBotRun } from "../util/chatBotHistory";
@@ -358,6 +358,49 @@ describe("ChatBot history", () => {
     expect(popup().textContent).not.toContain("Other run");
     await act(async () => { pageButtons[1]!.click(); });
     expect(onJumpToPage).toHaveBeenCalledWith(8); expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it("shows a page run's stored preset after the sheet's choice changes", async () => {
+    fixture.jobs = [job({ reading: { kind: "story", preset: "Reading companion", fields: ["Context"], fill: "best" } }) as AnnotationJobDto];
+    await mount(); await openHistory();
+    expect(popup().textContent).toContain("Story · Reading companion");
+    await act(async () => { host.querySelector<HTMLElement>(".lc-chatbot-run-scrim")!.click(); });
+    await click("Article"); await click("Argument"); await openHistory();
+    expect(popup().textContent).toContain("Story · Reading companion");
+    expect(popup().textContent).not.toContain("Article · Argument");
+  });
+
+  it("remembers a selection request's custom style and keeps it when the sheet changes", async () => {
+    const onSelectionRequest = vi.fn(async (_settings: SelectionRequestSettings) => ({ id: "fr-reading", page: 7 }));
+    await mount({ selection, onSelectionRequest });
+    await click("Custom"); await click("Idea"); await click("Start");
+    expect(loadSelectionRuns("algorithms")[0]!.reading).toEqual(onSelectionRequest.mock.calls[0]![0].reading);
+    await click("Article"); await click("Free-form");
+    await act(async () => root!.unmount()); host.remove(); await mount();
+    await openHistory();
+    expect(popup().textContent).toContain("Textbook · Custom");
+    expect(popup().textContent).not.toContain("Article · Free-form");
+  });
+
+  it.each([
+    { reading: { kind: "article" as const }, label: "Article · Free-form" },
+    { reading: { kind: "textbook" as const, fields: ["Idea"], fill: "best" as const }, label: "Textbook · Custom" },
+  ])("labels historical styles as $label", async ({ label, reading }) => {
+    fixture.jobs = [job({ reading }) as AnnotationJobDto]; await mount(); await openHistory();
+    expect(popup().textContent).toContain(label);
+  });
+
+  it.each([
+    { request_type: "pages" as const, reading: undefined },
+    { request_type: "pages" as const, reading: {} as ReadingStyleDto },
+    { request_type: "selection" as const, reading: undefined },
+    { request_type: "selection" as const, reading: {} as ReadingStyleDto },
+  ])("opens old $request_type runs without a recorded style ($reading)", async (patch) => {
+    const run = job(patch);
+    if (run.request_type === "selection") rememberSelectionRun("algorithms", run);
+    else fixture.jobs = [run as AnnotationJobDto];
+    await mount(); await openHistory();
+    expect(popup().textContent).toContain("Reading style not recorded");
   });
 
   it("cancels an open page run from its popup", async () => {

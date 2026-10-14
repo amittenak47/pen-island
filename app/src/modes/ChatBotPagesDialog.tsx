@@ -49,6 +49,12 @@ function statusLabel(job: ChatBotRun): string { return job.status === "open" ? "
 function runLabel(job: ChatBotRun, status = statusLabel(job)): string {
   return `${requestLabel(job)} · ${pageLabel(job.page_from, job.page_to)} · ${job.footnotes} footnote${job.footnotes === 1 ? "" : "s"} · ${status}`;
 }
+function readingLabel(job: ChatBotRun): string {
+  const style = job.reading;
+  const kind = READING_KINDS.find((entry) => entry.kind === style?.kind)?.label;
+  if (!kind) return "Reading style not recorded";
+  return `${kind} · ${style?.fields?.length ? style.preset?.trim() || "Custom" : "Free-form"}`;
+}
 function rangeError(from: number, to: number, pageCount: number, limit = MAX_JOB_PAGES): string | null {
   if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) return "Choose a valid page range.";
   if (pageCount > 0 && to > pageCount) return `This document has ${pageCount} pages.`;
@@ -176,7 +182,7 @@ export function ChatBotPagesDialog({
       if (selectedRequest === "selection" && onSelectionRequest) {
         const sent = await onSelectionRequest({ focus: focus.trim(), perPage, references, reading: readingStyle });
         rememberSelectionRun(docId, { id: sent.id, doc_id: docId, doc_name: docName, request_type: "selection",
-          answer_mode: answerMode,
+          answer_mode: answerMode, ...(readingStyle ? { reading: readingStyle } : {}),
           page_from: sent.page, page_to: sent.page, focus: focus.trim(), per_page: perPage,
           pages_total: 1, pages_done: 0, footnotes: 1, status: "open", created_at: Date.now(),
           references: references.map(({ title, kind }) => ({ title, kind })) });
@@ -343,6 +349,7 @@ export function ChatBotPagesDialog({
             shape="blocky" ariaLabel="Run details" onClose={() => setActiveId(null)}>
             <div className="lc-settings-body lc-dialog-body lc-scroll-pane">
               <p className="lc-settings-hint">{pageLabel(active.page_from, active.page_to)} · {DENSITY.find((entry) => entry.perPage === active.per_page)?.label ?? active.per_page} · {statusFor(active)}</p>
+              <p className="lc-settings-hint">{readingLabel(active)}</p>
               <p className="lc-settings-hint">Focus: {active.focus || "None"}</p>
               {active.references?.length ? <><div className="lc-settings-subhead">Attachments</div><ul className="lc-chatbot-run-list">{active.references.map((reference, index) => <li key={index}>{reference.title}</li>)}</ul></> : null}
               {active.summary ? <p className="lc-settings-hint">{active.summary}</p> : null}

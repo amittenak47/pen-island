@@ -780,6 +780,7 @@ export interface AnnotationJobDto {
   status: "open" | "done" | "cancelled";
   created_at: number;
   summary?: string;
+  reading?: ReadingStyleDto;
   /** Only attachment labels are included in history, never their text. */
   references?: Pick<AnnotationJobReferenceDto, "title" | "kind">[];
 }

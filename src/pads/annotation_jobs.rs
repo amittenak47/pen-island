@@ -165,6 +165,8 @@ pub struct JobSummary {
     pub created_at: i64,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reading: Option<super::reading::ReadingStyle>,
 }
 
 fn invalid(message: impl Into<String>) -> FootnoteFail {
@@ -388,6 +390,7 @@ fn summary_of(conn: &Connection, id: &str) -> Result<Option<JobSummary>, Footnot
         status: job.status,
         created_at: job.created_at,
         summary: job.summary,
+        reading: (!job.reading.is_empty()).then_some(job.reading),
     }))
 }
 
@@ -653,6 +656,30 @@ mod tests {
             references: vec![JobReference { title: "Exercises, pages 104-110".into(), kind: "exercises".into(), text: "3.1. Perform a depth-first search on the following graph.".into() }],
             reading: Default::default(),
         }
+    }
+
+    #[test]
+    fn summaries_carry_stored_reading_and_omit_it_when_empty() {
+        use super::super::reading::ReadingStyle;
+        let (_dir, conn) = open();
+        let mut body = job("aj-read-summary");
+        let reading = ReadingStyle {
+            kind: "story".into(),
+            fields: vec!["Context".into()],
+            fill: "best".into(),
+            preset: "Reading companion".into(),
+        };
+        body.reading = reading.clone();
+        let created = create_job(&conn, body, 1).unwrap();
+        assert_eq!(created.reading.as_ref(), Some(&reading));
+        let stored = list_for_doc(&conn, "tablet", "algo").unwrap().remove(0);
+        assert_eq!(stored.reading.as_ref(), Some(&reading));
+        assert_eq!(serde_json::to_value(stored).unwrap()["reading"], serde_json::to_value(reading).unwrap());
+        create_job(&conn, job("aj-empty-summary"), 2).unwrap();
+        let empty = list_for_doc(&conn, "tablet", "algo").unwrap().into_iter()
+            .find(|entry| entry.id == "aj-empty-summary").unwrap();
+        assert!(empty.reading.is_none());
+        assert!(serde_json::to_value(empty).unwrap().get("reading").is_none());
     }
 
     #[test]

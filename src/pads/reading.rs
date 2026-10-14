@@ -23,9 +23,11 @@ pub const HELPS_WITH: &str = "Helps with";
 /// What the fields any kind of text can use mean, told to the assistant
 /// when a preset includes them.
 const SHARED_FIELDS: &[(&str, &str)] = &[
-    (HELPS_WITH, "Helps with names the attached tasks this passage prepares the reader for (exercises, \
-        homework, essay prompts, discussion questions) by their numbers or titles in the attachments, \
-        never their answers; leave it out when nothing attached is a task."),
+    (HELPS_WITH, "Use Helps with only when this specific passage materially prepares the reader for an \
+        identifiable attached task (an exercise, homework, an essay prompt, a discussion question). Name \
+        it by its number or title, never its answer. Leave it out for a merely general or thematic link, \
+        even when tasks are attached. It is optional even under all fields, with no quota; repeat it \
+        wherever each passage materially prepares for a task."),
     ("Think about it", "Think about it asks one short question that makes the reader curious to keep \
         reading, without giving its answer away."),
     ("Looking ahead", "Looking ahead hints at what the passage sets up, drawn only from the pages you were \
@@ -136,15 +138,17 @@ impl ReadingStyle {
         let shape = if self.fields.is_empty() {
             "Write free-form markdown notes of a few sentences each, each opening with a short bold label of \
              two to four words and a colon that names its specific idea (for example **A cold first meeting:**, \
-             never a generic heading like **Why it matters:**). When something attached is a task (an \
-             exercise, homework, an essay prompt, a discussion question) this passage prepares for, a note \
-             labelled **Helps with:** may name it by its number or title, never its answer."
+             never a generic heading like **Why it matters:**). Use an optional **Helps with:** note only \
+             when this specific passage materially prepares the reader for an identifiable attached task \
+             (an exercise, homework, an essay prompt, a discussion question). Name it by its number or \
+             title, never its answer. Leave it out for a merely general or thematic link, even when tasks \
+             are attached. There is no quota; repeat it wherever each passage materially prepares for a task."
                 .to_string()
         } else {
             let labels = self.fields.join(", ");
             let fill = if self.fill == "all" {
                 "Fill every one of these fields for each footnote, a sentence or two each, without padding \
-                 (Helps with only when something attached is a task)."
+                 (Helps with stays optional; use it only when this passage materially prepares for a task)."
             } else {
                 "Use only the fields that have something specific and worthwhile to say about this passage, \
                  usually two or three; leave the others out."
@@ -241,7 +245,7 @@ mod tests {
             preset: String::new(),
         };
         let guide = style.guide();
-        assert!(guide.contains("never their answers"));
+        assert!(guide.contains("never its answer"));
         assert!(guide.contains("without giving its answer away"));
         assert!(!guide.contains("Looking ahead hints"));
         let idea = field("Idea", "Finishing order, not discovery order, is what topological sort reads off.");
@@ -254,7 +258,16 @@ mod tests {
         // Other fields still have to be filled.
         assert!(style.fold_fields(&[field(HELPS_WITH, "Exercise 3.4")], "DFS").unwrap_err().contains("missing: Idea, Think about it"));
         // Free-form notes may name tasks too.
-        assert!(ReadingStyle { kind: "story".into(), ..Default::default() }.guide().contains("**Helps with:**"));
+        let free = ReadingStyle { kind: "story".into(), ..Default::default() }.guide();
+        assert!(free.contains("**Helps with:**"));
+        assert!(guide.contains("optional even under all fields"));
+        for guide in [guide, free] {
+            assert!(guide.contains("this specific passage materially prepares"));
+            assert!(guide.contains("identifiable attached task"));
+            assert!(guide.contains("number or title, never its answer"));
+            assert!(guide.contains("Leave it out for a merely general or thematic link, even when tasks are attached"));
+            assert!(guide.contains("no quota; repeat it wherever each passage materially prepares for a task"));
+        }
     }
 
     #[test]
