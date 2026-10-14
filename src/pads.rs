@@ -17,6 +17,7 @@ use crate::config::config_dir;
 mod artifacts;
 pub mod artifact_assets;
 pub mod footnotes;
+pub mod annotation_jobs;
 pub mod sync_content;
 pub mod atomic_sync;
 pub mod snapshot_copies;
@@ -198,6 +199,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     revisions::migrate(&conn)?;
     atomic_sync::migrate(&conn)?;
     snapshot_copies::migrate(&conn)?;
+    annotation_jobs::migrate(&conn)?;
     atomic_sync::sweep(&conn)?;
     Ok(())
     })?;

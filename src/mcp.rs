@@ -13,7 +13,7 @@ use crate::pads::footnotes::{self, FootnoteLink, FootnoteSubmission};
 
 /// How the inbox works, sent to every assistant when it connects. Assistants
 /// only act when prompted or scheduled, so this asks them to offer the watch.
-pub const WORKFLOW: &str = "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a document and asks for a footnote; each request waits here until an assistant answers it. To answer: call list_footnote_requests, then for each request call get_footnote_request and submit_footnote. Only answer requests listed here, and never invent request ids. If the inbox is empty, say so. If you can run scheduled or repeating tasks, offer to check the inbox every few minutes and answer new requests as they arrive.";
+pub const WORKFLOW: &str = "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a document and asks for a footnote; each request waits here until an assistant answers it. To answer: call list_footnote_requests, then for each request call get_footnote_request and submit_footnote. Only answer requests listed here, and never invent request ids. If the inbox is empty, say so. The reader may also ask for a whole page range (a chapter) to be annotated: call list_annotation_jobs, read each job's pages a few at a time with get_annotation_pages, call submit_page_annotations once per page with the footnotes worth adding (each quoting the exact words it is about), then finish_annotation_job. If you can run scheduled or repeating tasks, offer to check for new requests and jobs every few minutes.";
 
 /// Ready-made prompts: (name, title, description, text sent as the user's message).
 pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
@@ -21,13 +21,13 @@ pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
         "answer_footnotes",
         "Answer my footnote requests",
         "Answer every pending footnote request once.",
-        "Answer my pending Pen Island footnote requests: list them, read each one, and submit a footnote for each. Then tell me how many you answered.",
+        "Answer my pending Pen Island footnote requests and annotation jobs: list them, read each one, and submit footnotes for each. Then tell me how many you answered.",
     ),
     (
         "watch_footnotes",
         "Keep answering footnote requests",
         "Answer pending requests now, then keep checking for new ones.",
-        "Answer my pending Pen Island footnote requests now, then keep checking every few minutes and answer new ones as they arrive. If you can't run scheduled or repeating tasks, tell me so, and just answer the current ones.",
+        "Answer my pending Pen Island footnote requests and annotation jobs now, then keep checking every few minutes and answer new ones as they arrive. If you can't run scheduled or repeating tasks, tell me so, and just answer the current ones.",
     ),
 ];
 
@@ -40,6 +40,8 @@ pub trait FootnoteHub {
     fn list_pending(&self) -> Result<Value, String>;
     fn get(&self, id: &str) -> Result<Value, String>;
     fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String>;
+    /// Any other hub route (annotation jobs), relative to the hub base.
+    fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String>;
 }
 
 pub struct HttpFootnoteHub {
@@ -97,6 +99,18 @@ impl FootnoteHub for HttpFootnoteHub {
 
     fn get(&self, id: &str) -> Result<Value, String> {
         self.send(self.client.get(format!("{}/footnote-requests/{id}", self.base)))
+    }
+
+    fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+        let url = format!("{}{path}", self.base);
+        let builder = match method {
+            "GET" => self.client.get(url),
+            _ => self.client.post(url),
+        };
+        self.send(match body {
+            Some(body) => builder.json(&body),
+            None => builder,
+        })
     }
 
     fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String> {
@@ -350,6 +364,89 @@ fn tool_list() -> Vec<Value> {
                 "additionalProperties": false,
             },
         }),
+        json!({
+            "name": "list_annotation_jobs",
+            "annotations": { "readOnlyHint": true, "openWorldHint": false },
+            "description": "List page ranges (such as a chapter) the reader wants annotated, oldest first: id, doc_name, page_from, page_to, focus, per_page (most footnotes per page), pages_done.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+        }),
+        json!({
+            "name": "get_annotation_pages",
+            "annotations": { "readOnlyHint": true, "openWorldHint": false },
+            "description": "Read up to five pages of an annotation job, plus its focus, per_page limit, palette (colors by slot, 1 = first) and workspace_items (library items you may link). next_from says where to continue; pages_done lists pages already annotated.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "job_id": { "type": "string" },
+                    "from_page": { "type": "integer", "minimum": 1 },
+                    "to_page": { "type": "integer", "minimum": 1 },
+                },
+                "required": ["job_id"],
+                "additionalProperties": false,
+            },
+        }),
+        json!({
+            "name": "submit_page_annotations",
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false },
+            "description": format!("Add footnotes to one page of an annotation job: only passages worth explaining, at most per_page. Each footnote quotes the exact words it is about (copied from that page's text), and the reader's app places it there. Nothing of the reader's is changed. {INSTRUCTIONS}"),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "job_id": { "type": "string" },
+                    "page": { "type": "integer", "minimum": 1 },
+                    "annotations": {
+                        "type": "array",
+                        "minItems": 1,
+                        "maxItems": 8,
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "quote": { "type": "string", "description": "Exact words from the page that this footnote is about (a phrase or sentence)." },
+                                "notes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 8 },
+                                "title": { "type": "string", "maxLength": 120 },
+                                "color": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Palette slot." },
+                                "links": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": { "title": { "type": "string" }, "url": { "type": "string" } },
+                                        "required": ["url"],
+                                    },
+                                },
+                                "marks": {
+                                    "type": "array",
+                                    "description": "Highlight or underline key words inside the quote.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "kind": { "type": "string", "enum": ["highlight", "underline"] },
+                                            "quote": { "type": "string", "description": "Exact words inside this footnote's quote." },
+                                            "color": { "type": "integer", "minimum": 1, "maximum": 8 },
+                                        },
+                                        "required": ["kind", "quote"],
+                                    },
+                                },
+                                "workspace_links": { "type": "array", "items": { "type": "string" }, "description": "Ids from workspace_items." },
+                            },
+                            "required": ["quote", "notes"],
+                        },
+                    },
+                },
+                "required": ["job_id", "page", "annotations"],
+                "additionalProperties": false,
+            },
+        }),
+        json!({
+            "name": "finish_annotation_job",
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false },
+            "description": "Mark an annotation job finished once every page has been considered, with a one-or-two sentence summary for the reader.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "job_id": { "type": "string" }, "summary": { "type": "string" } },
+                "required": ["job_id"],
+                "additionalProperties": false,
+            },
+        }),
     ]
 }
 
@@ -363,11 +460,35 @@ fn call_tool(hub: &dyn FootnoteHub, params: &Value) -> Value {
             _ => Err("id must be a request id from list_footnote_requests".into()),
         },
         "submit_footnote" => submit_tool(hub, &arguments),
+        "list_annotation_jobs" => hub.call("GET", "/annotation-jobs", None),
+        "get_annotation_pages" => job_id(&arguments).and_then(|id| {
+            let from = arguments.get("from_page").and_then(Value::as_i64).unwrap_or(1).max(1);
+            let to = arguments.get("to_page").and_then(Value::as_i64).unwrap_or(from + 4).max(from);
+            hub.call("GET", &format!("/annotation-jobs/{id}/pages?from={from}&to={to}"), None)
+        }),
+        "submit_page_annotations" => job_id(&arguments).and_then(|id| {
+            let page = arguments.get("page").and_then(Value::as_i64).filter(|page| *page >= 1)
+                .ok_or_else(|| "page must be a page number from get_annotation_pages".to_string())?;
+            let annotations = arguments.get("annotations").filter(|value| value.is_array())
+                .ok_or_else(|| "annotations must be an array".to_string())?;
+            hub.call("POST", &format!("/annotation-jobs/{id}/pages/{page}"), Some(json!({ "annotations": annotations })))
+        }),
+        "finish_annotation_job" => job_id(&arguments).and_then(|id| {
+            let summary = arguments.get("summary").and_then(Value::as_str).unwrap_or("");
+            hub.call("POST", &format!("/annotation-jobs/{id}/finish"), Some(json!({ "summary": summary })))
+        }),
         _ => Err(format!("unknown tool {name}")),
     };
     match outcome {
         Ok(value) => tool_text(&serde_json::to_string(&value).unwrap_or_else(|_| "null".into()), false),
         Err(message) => tool_text(&message, true),
+    }
+}
+
+fn job_id(arguments: &Value) -> Result<String, String> {
+    match arguments.get("job_id").and_then(Value::as_str) {
+        Some(id) if footnotes::valid_id(id) => Ok(id.to_string()),
+        _ => Err("job_id must be an id from list_annotation_jobs".into()),
     }
 }
 
@@ -448,6 +569,7 @@ mod tests {
         full: Mutex<Value>,
         submits: Mutex<Vec<(String, Vec<String>)>>,
         rich: Mutex<Vec<FootnoteSubmission>>,
+        calls: Mutex<Vec<(String, String, Option<Value>)>>,
         fail_submit: Mutex<Option<String>>,
     }
 
@@ -462,6 +584,10 @@ mod tests {
             } else {
                 Err("unknown footnote request".into())
             }
+        }
+        fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+            self.calls.lock().unwrap().push((method.to_string(), path.to_string(), body));
+            Ok(json!({ "ok": true }))
         }
         fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String> {
             if let Some(message) = self.fail_submit.lock().unwrap().clone() {
@@ -498,6 +624,7 @@ mod tests {
             })),
             submits: Mutex::new(Vec::new()),
             rich: Mutex::new(Vec::new()),
+            calls: Mutex::new(Vec::new()),
             fail_submit: Mutex::new(None),
         }
     }
@@ -620,6 +747,31 @@ mod tests {
     }
 
     #[test]
+    fn annotation_job_tools_reach_the_hub_routes() {
+        let hub = fake();
+        let names: Vec<String> = tool_list().iter().map(|tool| tool["name"].as_str().unwrap().to_string()).collect();
+        for name in ["list_annotation_jobs", "get_annotation_pages", "submit_page_annotations", "finish_annotation_job"] {
+            assert!(names.iter().any(|candidate| candidate == name), "{name}");
+        }
+        let call = |id: i64, name: &str, arguments: Value| dispatch(&hub, &request(id, "tools/call", json!({ "name": name, "arguments": arguments }))).unwrap();
+        call(1, "list_annotation_jobs", json!({}));
+        call(2, "get_annotation_pages", json!({ "job_id": "aj-1", "from_page": 91 }));
+        call(3, "submit_page_annotations", json!({ "job_id": "aj-1", "page": 91, "annotations": [{ "quote": "graph", "notes": ["n"] }] }));
+        call(4, "finish_annotation_job", json!({ "job_id": "aj-1", "summary": "Done." }));
+        let calls = hub.calls.lock().unwrap().clone();
+        assert_eq!(calls[0].1, "/annotation-jobs");
+        assert_eq!(calls[1].1, "/annotation-jobs/aj-1/pages?from=91&to=95");
+        assert_eq!(calls[2].1, "/annotation-jobs/aj-1/pages/91");
+        assert_eq!(calls[2].2.as_ref().unwrap()["annotations"][0]["quote"], "graph");
+        assert_eq!(calls[3].2.as_ref().unwrap()["summary"], "Done.");
+        let bad = call(5, "submit_page_annotations", json!({ "job_id": "../x", "page": 1, "annotations": [] }));
+        assert_eq!(bad["result"]["isError"], true);
+        let bad = call(6, "submit_page_annotations", json!({ "job_id": "aj-1", "annotations": [] }));
+        assert_eq!(bad["result"]["isError"], true);
+        assert_eq!(hub.calls.lock().unwrap().len(), 4);
+    }
+
+    #[test]
     fn lists_and_serves_the_ready_made_prompts() {
         let hub = fake();
         let listed = dispatch(&hub, &request(1, "prompts/list", json!({}))).unwrap();
@@ -672,7 +824,7 @@ mod tests {
     }
 
     #[test]
-    fn ping_and_tools_list_name_the_three_tools() {
+    fn ping_and_tools_list_name_the_footnote_and_job_tools() {
         let hub = fake();
         let ping = dispatch(&hub, &request(1, "ping", json!({}))).unwrap();
         assert_eq!(ping["result"], json!({}));
@@ -683,7 +835,10 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["list_footnote_requests", "get_footnote_request", "submit_footnote"]);
+        assert_eq!(names, [
+            "list_footnote_requests", "get_footnote_request", "submit_footnote",
+            "list_annotation_jobs", "get_annotation_pages", "submit_page_annotations", "finish_annotation_job",
+        ]);
         let description = listed["result"]["tools"][2]["description"].as_str().unwrap();
         assert!(description.contains(INSTRUCTIONS));
     }

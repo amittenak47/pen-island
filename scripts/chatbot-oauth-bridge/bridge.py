@@ -36,7 +36,10 @@ PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CONFIG = PROJECT_ROOT / ".tmp-current-grok-oauth-config.json"
 BIND_HOST, BIND_PORT = "127.0.0.1", 7880
 BACKEND_URL = "http://127.0.0.1:7879/mcp"
-TOOLS = frozenset({"list_footnote_requests", "get_footnote_request", "submit_footnote"})
+TOOLS = frozenset({
+    "list_footnote_requests", "get_footnote_request", "submit_footnote",
+    "list_annotation_jobs", "get_annotation_pages", "submit_page_annotations", "finish_annotation_job",
+})
 # Keep in step with WORKFLOW and INSTRUCTIONS in src/mcp.rs: the bridge sends
 # these when an assistant connects, before any call reaches `lc mcp`.
 WORKFLOW = (
@@ -44,9 +47,12 @@ WORKFLOW = (
     "in a document and asks for a footnote; each request waits here until an assistant "
     "answers it. To answer: call list_footnote_requests, then for each request call "
     "get_footnote_request and submit_footnote. Only answer requests listed here, and never "
-    "invent request ids. If the inbox is empty, say so. If you can run scheduled or "
-    "repeating tasks, offer to check the inbox every few minutes and answer new requests "
-    "as they arrive."
+    "invent request ids. If the inbox is empty, say so. The reader may also ask for a whole "
+    "page range (a chapter) to be annotated: call list_annotation_jobs, read each job's "
+    "pages a few at a time with get_annotation_pages, call submit_page_annotations once per "
+    "page with the footnotes worth adding (each quoting the exact words it is about), then "
+    "finish_annotation_job. If you can run scheduled or repeating tasks, offer to check for "
+    "new requests and jobs every few minutes."
 )
 INSTRUCTIONS = (
     f"{WORKFLOW}\n\nHow to write each footnote: Explain the selected words in the context "
@@ -187,6 +193,17 @@ class FootnoteLink(BaseModel):
     title: str | None = None
 
 
+class PageAnnotation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    quote: str = Field(description="Exact words from the page that this footnote is about.")
+    notes: Annotated[list[str], Field(min_length=1, max_length=8)]
+    title: Annotated[str, Field(max_length=120)] | None = None
+    color: Annotated[int, Field(ge=1, le=8)] | None = None
+    links: list[FootnoteLink] | None = None
+    marks: list["FootnoteMark"] | None = None
+    workspace_links: list[str] | None = None
+
+
 class FootnoteMark(BaseModel):
     model_config = ConfigDict(extra="forbid")
     kind: Literal["highlight", "underline"]
@@ -280,6 +297,40 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
         if workspace_links:
             arguments["workspace_links"] = workspace_links
         return await relay("submit_footnote", arguments)
+
+    @bridge.tool(name="list_annotation_jobs", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def list_annotation_jobs() -> ToolResult:
+        """List page ranges (such as a chapter) the reader wants annotated, oldest first."""
+        return await relay("list_annotation_jobs", {})
+
+    @bridge.tool(name="get_annotation_pages", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def get_annotation_pages(job_id: str, from_page: int | None = None, to_page: int | None = None) -> ToolResult:
+        """Read up to five pages of an annotation job, with its focus, per-page limit, palette and library items."""
+        arguments: dict[str, Any] = {"job_id": job_id}
+        if from_page is not None:
+            arguments["from_page"] = from_page
+        if to_page is not None:
+            arguments["to_page"] = to_page
+        return await relay("get_annotation_pages", arguments)
+
+    @bridge.tool(name="submit_page_annotations", output_schema=None,
+                 annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+    async def submit_page_annotations(
+        job_id: str, page: int, annotations: Annotated[list[PageAnnotation], Field(min_length=1, max_length=8)],
+    ) -> ToolResult:
+        """Add footnotes to one page: each quotes the exact words it is about; the reader's app places it there."""
+        return await relay("submit_page_annotations", {
+            "job_id": job_id, "page": page,
+            "annotations": [annotation.model_dump(exclude_none=True) for annotation in annotations],
+        })
+
+    @bridge.tool(name="finish_annotation_job", output_schema=None,
+                 annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+    async def finish_annotation_job(job_id: str, summary: str = "") -> ToolResult:
+        """Mark an annotation job finished, with a short summary for the reader."""
+        return await relay("finish_annotation_job", {"job_id": job_id, "summary": summary})
 
     return bridge
 

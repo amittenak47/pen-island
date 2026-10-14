@@ -193,7 +193,7 @@ fn parse_rich(body: &Value) -> Result<footnotes::FootnoteSubmission, AppError> {
     })
 }
 
-fn into_anyhow(err: FootnoteFail) -> anyhow::Error {
+pub(super) fn into_anyhow(err: FootnoteFail) -> anyhow::Error {
     match err {
         FootnoteFail::Invalid(message) => anyhow::anyhow!("invalid:{message}"),
         FootnoteFail::NotFound => anyhow::anyhow!("missing:unknown footnote request"),
@@ -202,7 +202,7 @@ fn into_anyhow(err: FootnoteFail) -> anyhow::Error {
     }
 }
 
-fn map_store_error(err: AppError) -> AppError {
+pub(super) fn map_store_error(err: AppError) -> AppError {
     let message = err.message();
     if let Some(text) = message.strip_prefix("invalid:") {
         return AppError::bad_request(anyhow::anyhow!(text.to_string()));
@@ -216,7 +216,7 @@ fn map_store_error(err: AppError) -> AppError {
     err
 }
 
-fn now_ms() -> i64 {
+pub(super) fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)

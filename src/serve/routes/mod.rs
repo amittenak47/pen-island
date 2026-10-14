@@ -13,6 +13,7 @@ mod docs;
 mod doc_bytes;
 mod pads;
 mod footnotes;
+mod annotation_jobs;
 mod atomic_pads;
 mod practice;
 mod workspace;
@@ -39,6 +40,10 @@ pub use atomic_pads::{
     get_book_state, check_book_head, stage_ink_page, list_staged_ink,
     commit_pad, get_pad_commit, put_snapshot_copy, list_snapshot_copies,
     get_snapshot_copy,
+};
+pub use annotation_jobs::{
+    ack_annotation_job_items, annotation_job_items, cancel_annotation_job, create_annotation_job,
+    finish_annotation_job, list_annotation_jobs, read_annotation_pages, submit_annotation_page,
 };
 pub use footnotes::{
     ack_footnote_request, create_footnote_request, footnote_results, get_footnote_request,
