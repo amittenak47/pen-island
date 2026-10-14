@@ -35,6 +35,7 @@ import {
 import { isHostBoundOp, inkOpsBounds, unionSceneBounds, type InkEraseOp, type InkOp, type SceneBounds } from "./rasterInk";
 import { opsAfterPartialErase, opsAfterStrokeErase, opsWithErasesBaked } from "./strokeEraser";
 import { dedupeInkOps } from "./inkOpsDedupe";
+import { contentBottomInFrame, type SceneAABB } from "../templates/drawPageGrowth";
 
 /** Ops on a stored page, without unpacking one that came with its summary. */
 function encodedOpCount(encoded: EncodedInk): number {
@@ -274,6 +275,11 @@ export class InkPageBook {
     }
     out.sort((a, b) => (a.seq ?? 0) - (b.seq ?? 0));
     return out;
+  }
+
+  /** Draw growth measures point positions, without nib padding or a bottom clip. */
+  drawContentBottom(frame: SceneAABB, headerBand: number): number {
+    return contentBottomInFrame([], this.assembleOps(), frame, headerBand, false);
   }
 
   /** Layout and camera fits must not decode the entire saved notebook. */
