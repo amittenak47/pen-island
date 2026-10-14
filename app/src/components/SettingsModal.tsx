@@ -3404,14 +3404,17 @@ export function SettingsModal({
                   </label>
                   <p className="lc-settings-hint">{CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.help}</p>
                   <p className="lc-settings-hint">Connect the assistant in its own app. Every connected assistant sees the same list of requests.</p>
-                  {runnerConfig ? <SettingsChoices className="lc-settings-choice">
-                    <button type="button" role="switch" aria-checked={runnerConfig.allow_bots}
-                      className={runnerConfig.allow_bots ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
-                      onClick={() => setRunnerConfig({ ...runnerConfig, allow_bots: !runnerConfig.allow_bots })}>
+                  {/* Shown greyed out while the PC is out of reach, so it can be found. */}
+                  <SettingsChoices className="lc-settings-choice">
+                    <button type="button" role="switch" aria-checked={Boolean(runnerConfig?.allow_bots)} disabled={!runnerConfig}
+                      className={runnerConfig?.allow_bots ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                      onClick={() => runnerConfig && setRunnerConfig({ ...runnerConfig, allow_bots: !runnerConfig.allow_bots })}>
                       <strong>Let it hand the writing to an app on this PC</strong>
-                      <span className="lc-muted">Ask your assistant to “use Codex”, and Codex or Claude Code writes the footnotes with your subscription.</span>
+                      <span className="lc-muted">{runnerConfig
+                        ? "Ask your assistant to “use Codex”, and Codex or Claude Code writes the footnotes with your subscription."
+                        : "Open Pen Island on your PC to change this. It is saved there."}</span>
                     </button>
-                  </SettingsChoices> : null}
+                  </SettingsChoices>
                   {runnerConfig?.allow_bots ? renderRunnerFields(runnerConfig) : null}
                   {runnerStatus && runnerConfig?.allow_bots ? <p className="lc-settings-hint" role="status">{assistantRunnerMessage(runnerStatus)}</p> : null}
                   <details className="lc-settings-advanced">
