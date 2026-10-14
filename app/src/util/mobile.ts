@@ -18,6 +18,7 @@ import { isAndroidDevice } from "./androidDevice";
 /** Phone-narrow desktop windows. Handhelds ignore this and always use the sheet. */
 export const MOBILE_MEDIA_QUERY = "(max-width: 900px)";
 
+// Layout includes iOS and touch-enabled Macintosh UAs, unlike Android-only picker/transport checks.
 export function isHandheldDevice(
   userAgent?: string,
   maxTouchPoints?: number,

@@ -8,6 +8,8 @@
  * inside the source. Escaped `<pre><code>` is the paper.
  */
 
+import { escapeHtml } from "../util/escapeHtml";
+export { escapeHtml } from "../util/escapeHtml";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { PREPARING_HTML, shouldReportDocumentHeight } from "./AnnotateDocument";
@@ -30,15 +32,6 @@ export interface CodeDocumentProps {
 }
 
 /** Escape text so it is safe inside an HTML text node / attribute-free body. */
-export function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#39;");
-}
-
 /**
  * Source → a single escaped `<pre><code>` block.
  *

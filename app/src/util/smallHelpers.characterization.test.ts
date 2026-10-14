@@ -1,19 +1,17 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { escapeHtml as codeEscape } from "../modes/CodeDocument";
-import { escapeHtml as mathEscape } from "../modes/mdMath";
+import { escapeHtml as codeEscape } from "./escapeHtml";
+import { escapeHtml as mathEscape } from "./escapeHtml";
 import { escapeHtml as readerEscape } from "./webReader";
-import appSource from "../App.tsx?raw";
-import radialSource from "../canvas/ColorRadial.tsx?raw";
-import morphSource from "../components/MorphBar.tsx?raw";
-import exploreSource from "../modes/ExploreWorkspace.tsx?raw";
+import { prefersReducedMotion as appMotion } from "./reducedMotion";
+import { prefersReducedMotion as radialMotion } from "./reducedMotion";
+import { prefersReducedMotion as morphMotion } from "./reducedMotion";
+import { prefersReducedMotion as exploreMotion } from "./reducedMotion";
 import workspaceSource from "../Workspace.tsx?raw";
 
 function motionCopy(source: string): () => boolean {
   const body = source.match(/function prefersReducedMotion\(\): boolean \{([\s\S]*?)\n\}/)![1];
   return new Function(body) as () => boolean;
 }
-const appMotion = motionCopy(appSource), radialMotion = motionCopy(radialSource);
-const morphMotion = motionCopy(morphSource), exploreMotion = motionCopy(exploreSource);
 const workspaceMotion = motionCopy(workspaceSource);
 afterEach(() => vi.unstubAllGlobals());
 

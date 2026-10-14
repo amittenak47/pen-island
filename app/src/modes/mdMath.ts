@@ -1,3 +1,4 @@
+import { escapeHtml } from "../util/escapeHtml";
 import katex from "katex";
 import type { MarkedExtension } from "marked";
 
@@ -8,12 +9,6 @@ function renderMath(tex: string, displayMode: boolean): string {
     output: "html",
     trust: false,
   });
-}
-
-export function escapeHtml(text: string): string {
-  return text.replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;",
-  })[char]!);
 }
 
 /** Dollars mode from mdmath, implemented as tokens so code stays literal. */

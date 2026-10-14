@@ -1,3 +1,4 @@
+import { prefersReducedMotion } from "./util/reducedMotion";
 import { DialogPresence } from "./components/DialogMotion";
 /**
  * The app shell: the part that outlives any one workspace.
@@ -149,11 +150,6 @@ function liveLimitForDevice(): number {
 const LLM_ONLINE_POLL_MS = 20_000;
 const LLM_OFFLINE_POLL_MS = 60_000;
 const LLM_OFFLINE_POLL_MAX_MS = 120_000;
-
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || !window.matchMedia) return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-}
 
 function doneHoldMs(): number {
   return prefersReducedMotion() ? 0 : BOOT_DONE_HOLD_MS;

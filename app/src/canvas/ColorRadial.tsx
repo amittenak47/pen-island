@@ -12,6 +12,7 @@
  * popping.
  */
 
+import { prefersReducedMotion } from "../util/reducedMotion";
 import {
   useCallback,
   useEffect,
@@ -157,11 +158,6 @@ function angleInWedge(angle: number, start: number, end: number): boolean {
   let x = a;
   if (x < s) x += Math.PI * 2;
   return x >= s && x <= e;
-}
-
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || !window.matchMedia) return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 /**

@@ -54,6 +54,7 @@ function inTauriShell(): boolean {
  * name, and a guard that forgets to ask is how a `new Webview` reaches code
  * that cannot serve it.
  */
+// A transport requires a shell and nonempty UA; deviceRole can classify Android without either.
 export function liveWebviewTransport(
   userAgent?: string,
   hasShell?: boolean,

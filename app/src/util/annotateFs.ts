@@ -48,6 +48,7 @@ export const DOCUMENT_ACCEPT = [
 ].join(",");
 
 /** `accept` actually handed to the file input. */
+// Picker MIME policy needs an Android word match, independent of native-shell or handheld layout.
 export function documentPickerAccept(userAgent?: string): string {
   const ua =
     userAgent ?? (typeof navigator === "undefined" ? "" : navigator.userAgent);

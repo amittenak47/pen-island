@@ -77,6 +77,7 @@ export function loadDeviceId(): string {
   return id;
 }
 
+// Device roles use an Android substring and shell identity; handheld layout also includes iOS.
 export function deviceRole(): DeviceRole {
   if (typeof navigator === "undefined") return "browser";
   const ua = navigator.userAgent || "";

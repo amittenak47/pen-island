@@ -20,6 +20,7 @@
  * explicit button on it.
  */
 
+import { prefersReducedMotion } from "../util/reducedMotion";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -114,11 +115,6 @@ const KIND_SHORT: Record<NodeType, string> = {
 /** Quiet dots stay small; a well-linked node reads larger. */
 function nodeDiameter(links: number): number {
   return Math.round(11 + Math.min(15, Math.sqrt(Math.max(0, links)) * 4.5));
-}
-
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || !window.matchMedia) return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 /*

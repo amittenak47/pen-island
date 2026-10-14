@@ -6,6 +6,7 @@
  * Zero animation library — CSS transition + ResizeObserver.
  */
 
+import { prefersReducedMotion } from "../util/reducedMotion";
 import {
   Children,
   isValidElement,
@@ -38,11 +39,6 @@ export interface MorphBarProps extends HTMLAttributes<HTMLDivElement> {
    */
   animateOnMount?: boolean;
   children: ReactNode;
-}
-
-function prefersReducedMotion(): boolean {
-  if (typeof window === "undefined" || !window.matchMedia) return false;
-  return window.matchMedia("(prefers-reduced-motion: reduce)").matches;
 }
 
 /**
