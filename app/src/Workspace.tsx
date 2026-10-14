@@ -489,6 +489,16 @@ import { selectionCaptureFailure, type SelectionActionContext, type SelectionAct
 import { freezeCoachAsk, askImages, selectionImageForModel, documentContextRequested, type CoachAskPayload } from "./modes/coachAskPayload";
 import { CoachSendCoordinator } from "./modes/coachSendCoordinator";
 import { saveCoachRequest, requireCoachRequest } from "./modes/coachRequestStore";
+
+/** How a workspace link came about, in words; a link the reader picked needs none. */
+const EDGE_ORIGIN: Partial<Record<string, string>> = {
+  wiki: "linked in the text",
+  "footnote-thread": "from a chat",
+  "footnote-url": "from a link",
+  ink: "drawn link",
+  chatbot: "added by ChatBot",
+};
+
 type Mode = "review" | "ambient";
 
 /** One coach composer send, prepared and waiting in the FIFO queue. */
@@ -3793,7 +3803,7 @@ export const Workspace = memo(function Workspace({
       return {
         edgeId: edge.id,
         title: other.title ?? other.id,
-        kindLabel: `${groupLabel(other.type)} · ${edge.kind}`,
+        kindLabel: [groupLabel(other.type), EDGE_ORIGIN[edge.kind]].filter(Boolean).join(" · "),
       };
     });
   }, [hereEdges, hereNode]);

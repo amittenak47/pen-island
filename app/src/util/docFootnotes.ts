@@ -408,6 +408,35 @@ export function freshSubMarkId(existing: readonly DocFootnoteSubMark[], now = Da
 }
 
 /**
+ * A short title for a note or thread row, and the words after it.
+ *
+ * A row is for finding things, so it leads with a few words rather than an
+ * excerpt: a heading or bold label the text starts with ("**Helps with:**"),
+ * otherwise its first sentence, cut to `maxWords`. Markdown marks are dropped.
+ */
+export function summaryTitle(text: string, maxWords = 8): { title: string; detail: string } {
+  const plain = (value: string) => value
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/(\*\*|__|\*|`)(?=\S)([^]*?\S)\1/g, "$2")
+    .replace(/^#+\s+/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  const source = text.trim();
+  const label = /^(?:#+\s+([^\n]+)|\*\*([^*\n]{1,60}?):?\*\*:?)\s*/.exec(source);
+  if (label) {
+    const title = plain(label[1] ?? label[2] ?? "").replace(/:$/, "");
+    if (title) return { title, detail: plain(source.slice(label[0].length)) };
+  }
+  const flat = plain(source);
+  if (!flat) return { title: "", detail: "" };
+  const sentence = /^(.+?[.?!])(\s|$)/.exec(flat)?.[1] ?? flat;
+  const words = sentence.split(" ");
+  if (words.length <= maxWords) return { title: sentence, detail: flat.slice(sentence.length).trim() };
+  const kept = words.slice(0, maxWords).join(" ");
+  return { title: `${kept}…`, detail: `…${flat.slice(kept.length).trim()}` };
+}
+
+/**
  * A one-line label for a saved thread, from what the reader asked.
  *
  * First line only, and short: the list is meant to be scanned, and a row that

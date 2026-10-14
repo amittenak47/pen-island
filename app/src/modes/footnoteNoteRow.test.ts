@@ -17,3 +17,16 @@ describe("note rows", () => {
     expect(noteIsAi(note, { kind: "note" })).toBe(false);
   });
 });
+
+describe("row titles", () => {
+  it("lead with a label, a heading or the first sentence, never a long excerpt", async () => {
+    const { summaryTitle } = await import("../util/docFootnotes");
+    expect(summaryTitle("**Helps with:** Exercise 3.1, Exercise 3.2")).toEqual({ title: "Helps with", detail: "Exercise 3.1, Exercise 3.2" });
+    expect(summaryTitle("## Tree edges\nEdges DFS walked.")).toEqual({ title: "Tree edges", detail: "Edges DFS walked." });
+    expect(summaryTitle("DFS backs up at dead ends. Then it tries the next edge.")).toEqual({ title: "DFS backs up at dead ends.", detail: "Then it tries the next edge." });
+    const long = summaryTitle("Think of a single clock ticking through the whole search and every vertex");
+    expect(long.title).toBe("Think of a single clock ticking through the…");
+    expect(long.detail).toBe("…whole search and every vertex");
+    expect(summaryTitle("   ")).toEqual({ title: "", detail: "" });
+  });
+});

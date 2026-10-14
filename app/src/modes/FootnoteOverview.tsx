@@ -46,7 +46,7 @@ import {
 import { HOLD_SENSITIVE_MS } from "../util/gesture";
 import { useFootnoteHistory } from "./footnoteHistory";
 import { pickPhotos } from "../util/photoAttach";
-import { NOTE_IMAGE_LIMIT, noteIsAi } from "../util/docFootnotes";
+import { NOTE_IMAGE_LIMIT, noteIsAi, summaryTitle } from "../util/docFootnotes";
 export interface FootnoteOverviewProps {
   onOpenArtifact?: (ref: ArtifactRef) => void;
   onManageArtifacts?: () => void;
@@ -1190,7 +1190,7 @@ export function FootnoteOverview({
                         {rowsAreReadOnly ? <button type="button" className="lc-agent-scope-option lc-footnote-note-mini"
                           aria-label={`Preview note ${index + 1}`} disabled={!canOpenMini(note.id)}
                           onClick={() => showMini(note.id)}>
-                          {note.text && <strong className="lc-footnote-overview-entry-text">{plainPreview(note.text)}</strong>}
+                          {note.text && <NoteRowText text={note.text} />}
                           <NoteImages images={note.images} />
                         </button> : <HoldButton
                           label={note.text || "Picture"}
@@ -1203,7 +1203,7 @@ export function FootnoteOverview({
                             updateNotes(notes.filter((entry) => entry.id !== note.id))
                           }
                         >
-                          {note.text && <strong className="lc-footnote-overview-entry-text">{plainPreview(note.text)}</strong>}
+                          {note.text && <NoteRowText text={note.text} />}
                           <NoteImages images={note.images} />
                         </HoldButton>}
                         <div className="lc-footnote-note-actions">
@@ -1291,7 +1291,7 @@ export function FootnoteOverview({
                             openTask({ kind: "thread", rootId: thread.rootId });
                           }}
                         >
-                          <strong className="lc-footnote-overview-entry-text">{thread.title}</strong>
+                          <strong className="lc-footnote-overview-entry-text">{summaryTitle(thread.title).title || thread.title}</strong>
                         </HoldButton>
                       </li>
                     ))}
@@ -1379,6 +1379,15 @@ function ThreadBubble() {
       </svg>
     </span>
   );
+}
+
+/** A note row: a short title, then one muted line of what follows. */
+function NoteRowText({ text }: { text: string }) {
+  const { title, detail } = summaryTitle(text);
+  return <>
+    <strong className="lc-footnote-overview-entry-text">{title || plainPreview(text)}</strong>
+    {detail ? <span className="lc-footnote-overview-entry-detail">{detail}</span> : null}
+  </>;
 }
 
 /** A note row shows plain words: markdown emphasis, code ticks and link syntax dropped. */
