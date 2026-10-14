@@ -449,17 +449,58 @@ export function clientRectsToLocal(
     }));
 }
 
-/** Line / block boxes of a range, in the document body's layout coordinates. */
-export function localRects(host: HTMLElement, range: Range): LocalRect[] {
-  return clientRectsToLocal(host, tightClientRects(range, host));
+/**
+ * One box per run of words on a line.
+ *
+ * A PDF text layer is a span per text piece, so a range's client rects come
+ * back as several touching (often overlapping) boxes along one line. Painted
+ * one by one, each gets its own outline and a mark reads as a row of little
+ * closed boxes. Pieces on the same line with no more than a word gap between
+ * them become one box; a wider gap (another column) stays apart.
+ */
+export function mergeLineRuns(rects: readonly LocalRect[]): LocalRect[] {
+  if (rects.length <= 1) return rects.map((rect) => ({ ...rect }));
+  const mid = (rect: LocalRect) => rect.top + rect.height / 2;
+  // Lines first (pieces on one line can differ in top by a pixel or two)…
+  const lines: LocalRect[][] = [];
+  for (const rect of [...rects].sort((a, b) => mid(a) - mid(b))) {
+    const line = lines[lines.length - 1];
+    const first = line?.[0];
+    if (line && first && Math.abs(mid(first) - mid(rect)) <= Math.max(first.height, rect.height) * 0.45) line.push(rect);
+    else lines.push([rect]);
+  }
+  // …then runs along each line, left to right.
+  const out: LocalRect[] = [];
+  for (const line of lines) {
+    let run: LocalRect | null = null;
+    for (const rect of line.sort((a, b) => a.left - b.left)) {
+      const gap = run ? rect.left - (run.left + run.width) : Infinity;
+      if (run && gap <= Math.max(run.height, rect.height) * 1.2) {
+        const left = Math.min(run.left, rect.left);
+        const top = Math.min(run.top, rect.top);
+        const right = Math.max(run.left + run.width, rect.left + rect.width);
+        const bottom = Math.max(run.top + run.height, rect.top + rect.height);
+        Object.assign(run, { left, top, width: right - left, height: bottom - top });
+        continue;
+      }
+      run = { ...rect };
+      out.push(run);
+    }
+  }
+  return out;
 }
 
-/** Drop page-wash bands; keep line / block boxes. */
+/** Line / block boxes of a range, in the document body's layout coordinates. */
+export function localRects(host: HTMLElement, range: Range): LocalRect[] {
+  return mergeLineRuns(clientRectsToLocal(host, tightClientRects(range, host)));
+}
+
+/** Drop page-wash bands; keep line / block boxes, one per run of words. */
 export function tightLocalRects(
   host: HTMLElement,
   rects: readonly LocalRect[],
 ): LocalRect[] {
-  return rects.filter((rect) => !localRectCoversHost(host, rect));
+  return mergeLineRuns(rects.filter((rect) => !localRectCoversHost(host, rect)));
 }
 
 export function localRectCoversHost(

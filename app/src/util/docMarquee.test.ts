@@ -21,6 +21,7 @@ import {
   tightLocalRects,
   unionLocalRects,
   unionRectsIntoBlocks,
+  mergeLineRuns,
   unionRectsIntoLines,
   unionViewportBoxes,
   viewportToLocal,
@@ -860,5 +861,22 @@ describe("unionRectsIntoLines / unionRectsIntoBlocks", () => {
     expect(footnoteVisibleOnViewPages("p6r", [1, 2])).toBe(false);
     expect(footnoteVisibleOnViewPages("chapter.xhtml", [1, 2])).toBe(true);
     expect(footnoteVisibleOnViewPages(undefined, [1, 2])).toBe(true);
+  });
+});
+
+describe("mergeLineRuns", () => {
+  it("joins a line's text pieces into one box and keeps lines and columns apart", () => {
+    const pieces = [
+      { left: 10, top: 100, width: 40, height: 12 },
+      { left: 48, top: 101, width: 30, height: 11 }, // overlaps the first
+      { left: 82, top: 100, width: 20, height: 12 }, // a word gap after it
+      { left: 10, top: 116, width: 50, height: 12 }, // next line
+      { left: 300, top: 100, width: 40, height: 12 }, // the other column
+    ];
+    expect(mergeLineRuns(pieces)).toEqual([
+      { left: 10, top: 100, width: 92, height: 12 },
+      { left: 300, top: 100, width: 40, height: 12 },
+      { left: 10, top: 116, width: 50, height: 12 },
+    ]);
   });
 });
