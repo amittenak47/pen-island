@@ -1177,3 +1177,76 @@ fn unreadable_modern_protocol_results_are_explicit_422() {
         422
     );
 }
+
+#[test]
+fn page_validation_preserves_inventory_and_pinned_responses_across_connections() {
+    let f = Fixture::new();
+    create(&f, 1, "whiteboard", "cache-book");
+    for page in 1..=6 {
+        legacy_restore_page(&f, "whiteboard", "cache-book", page, 100, &format!("cache-page-{page}"), page != 6);
+    }
+    let inventory = list_book_inventory(&f.conn).unwrap();
+    let book = f.book("whiteboard", "cache-book");
+    let reopened = open(&f.dir.path().join("pads.db")).unwrap();
+    for conn in [&f.conn, &reopened] {
+        assert_eq!(list_book_inventory(conn).unwrap(), inventory);
+        assert_eq!(list_ink_digests(conn, 0).unwrap().len(), 6);
+        for page in &book.pages {
+            let pinned = get_conditional_ink(conn, "whiteboard", "cache-book", page.page_id, book.book_rev, page.rev).unwrap().unwrap();
+            let ordinary = get_ink_page(conn, "whiteboard", "cache-book", page.page_id).unwrap().unwrap();
+            assert_eq!(serde_json::to_value(&pinned).unwrap(), serde_json::to_value(&ordinary).unwrap());
+            assert_eq!(pinned.hash.as_ref(), Some(&page.hash));
+            assert_eq!(sync_content::wire_ink_hash(&BASE64.decode(pinned.gz).unwrap()).unwrap(), page.hash);
+        }
+    }
+    legacy_restore_page(&f, "whiteboard", "cache-book", 3, 200, "new cache revision", true);
+    let changed = f.book("whiteboard", "cache-book");
+    assert_ne!(changed.pages[2], book.pages[2]);
+    assert_eq!(get_conditional_ink(&reopened, "whiteboard", "cache-book", 3, book.book_rev, book.pages[2].rev).unwrap().unwrap_err().status, 409);
+    let current = get_conditional_ink(&reopened, "whiteboard", "cache-book", 3, changed.book_rev, changed.pages[2].rev).unwrap().unwrap();
+    assert_eq!(current.hash.as_ref(), Some(&changed.pages[2].hash));
+}
+
+#[test]
+fn page_validation_still_detects_changed_or_corrupt_bytes_at_the_same_revision() {
+    let f = Fixture::new();
+    create(&f, 1, "whiteboard", "cache-corrupt");
+    legacy_restore_page(&f, "whiteboard", "cache-corrupt", 1, 100, "before corruption", true);
+    let before = f.book("whiteboard", "cache-corrupt");
+    let other = open(&f.dir.path().join("pads.db")).unwrap();
+    other.execute("UPDATE ink_pages SET gz=?1 WHERE key='cache-corrupt'", params![b"broken".as_slice()]).unwrap();
+    let inventory = list_book_inventory(&f.conn).unwrap();
+    assert_eq!(inventory[0]["error"]["status"], "unreadable_content");
+    assert_eq!(get_conditional_ink(&f.conn, "whiteboard", "cache-corrupt", 1, before.book_rev, before.pages[0].rev).unwrap().unwrap_err().status, 422);
+    assert!(get_ink_page(&f.conn, "whiteboard", "cache-corrupt", 1).unwrap().unwrap().hash.is_none());
+    other.execute("UPDATE ink_pages SET gz=?1 WHERE key='cache-corrupt'", params![packed("repaired bytes", true)]).unwrap();
+    let repaired = f.book("whiteboard", "cache-corrupt");
+    assert_eq!(repaired.pages[0].rev, before.pages[0].rev);
+    assert_ne!(repaired.pages[0].hash, before.pages[0].hash);
+}
+
+#[test]
+fn page_validation_cache_hits_across_requests_and_revalidates_new_revisions() {
+    let f = Fixture::new();
+    create(&f, 1, "whiteboard", "cache-hits");
+    let label = f.dir.path().to_string_lossy().into_owned();
+    legacy_restore_page(&f, "whiteboard", "cache-hits", 1, 100, &label, true);
+    let misses = ink_validation::validation_misses();
+    let first = f.book("whiteboard", "cache-hits");
+    assert_eq!(ink_validation::validation_misses(), misses + 1);
+    let reopened = open(&f.dir.path().join("pads.db")).unwrap();
+    for conn in [&f.conn, &reopened] {
+        list_book_inventory(conn).unwrap();
+        list_ink_digests(conn, 0).unwrap();
+        get_ink_pages(conn, "whiteboard", "cache-hits").unwrap();
+        let row = get_conditional_ink(conn, "whiteboard", "cache-hits", 1, first.book_rev, first.pages[0].rev).unwrap().unwrap();
+        assert_eq!(row.hash.as_ref(), Some(&first.pages[0].hash));
+    }
+    assert_eq!(ink_validation::validation_misses(), misses + 1);
+    // Even identical bytes at a new legacy revision get a fresh validation.
+    legacy_restore_page(&f, "whiteboard", "cache-hits", 1, 200, &label, true);
+    let next = get_book_state(&reopened, "whiteboard", "cache-hits").unwrap();
+    assert_ne!(next.pages[0].rev, first.pages[0].rev);
+    assert_eq!(next.pages[0].hash, first.pages[0].hash);
+    assert_eq!(ink_validation::validation_misses(), misses + 2);
+}

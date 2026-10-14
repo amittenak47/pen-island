@@ -223,7 +223,7 @@ fn strict_record_json(conn: &Connection, kind: &str, id: &str) -> Result<()> {
     Ok(())
 }
 
-fn owned_pages(conn: &Connection, kind: &str, id: &str) -> Result<Vec<(BookPage, Vec<u8>)>> {
+fn owned_pages(conn: &Connection, kind: &str, id: &str) -> Result<Vec<(BookPage, bool)>> {
     let prefix = format!("{id}{INK_FOOTNOTE_SEP}");
     let mut statement = conn.prepare(
         "SELECT key,page_id,rev,gz FROM ink_pages WHERE kind=?1
@@ -247,20 +247,19 @@ fn owned_pages(conn: &Connection, kind: &str, id: &str) -> Result<Vec<(BookPage,
             key: key.clone(),
             page_id,
         })?;
-        let hash = sync_content::validate_ink(&bytes)
+        let checked = ink_validation::validate_page(rev, &bytes)
             .with_context(|| UnreadableInkPage {
                 key: key.clone(),
                 page_id,
-            })?
-            .wire_hash;
+            })?;
         pages.push((
             BookPage {
                 key,
                 page_id,
                 rev,
-                hash,
+                hash: checked.wire_hash,
             },
-            bytes,
+            checked.is_empty,
         ));
     }
     Ok(pages)
@@ -943,12 +942,12 @@ pub fn commit_pad_with_context(
                     }
                 }
                 let mut dependency_conflicts = Vec::new();
-                for (page, bytes) in owned_pages(conn, "annotate", &request.id)? {
+                for (page, is_empty) in owned_pages(conn, "annotate", &request.id)? {
                     if let Some((_, child)) = page.key.split_once(INK_FOOTNOTE_SEP) {
                         if after.contains(child) {
                             continue;
                         }
-                        if sync_content::validate_ink(&bytes)?.is_empty {
+                        if is_empty {
                             continue;
                         }
                         let replacement = request.pages.iter().find(|candidate| {

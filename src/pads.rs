@@ -20,6 +20,7 @@ pub mod footnotes;
 pub mod annotation_jobs;
 pub mod reading;
 pub mod sync_content;
+mod ink_validation;
 pub mod atomic_sync;
 pub mod snapshot_copies;
 mod revisions;
@@ -1468,7 +1469,7 @@ pub fn list_ink_digests(conn: &Connection, since: i64) -> Result<Vec<InkPageDige
             page_id: row.get(2)?,
             updated_at: row.get(3)?,
             rev: row.get(4)?,
-            hash: sync_content::validate_ink(&row.get::<_,Vec<u8>>(5)?).ok().map(|value| value.wire_hash),
+            hash: ink_validation::validate_page(row.get(4)?, &row.get::<_,Vec<u8>>(5)?).ok().map(|value| value.wire_hash),
         })
     })?;
     let mut out = Vec::new();
@@ -1499,7 +1500,7 @@ pub fn get_ink_pages(conn: &Connection, kind: &str, key: &str) -> Result<Vec<Ink
         let (kind, key, page_id, updated_at, gz, rev) = row?;
         out.push(InkPageRow {
             rev,
-            hash: sync_content::validate_ink(&gz).ok().map(|value| value.wire_hash),
+            hash: ink_validation::validate_page(rev, &gz).ok().map(|value| value.wire_hash),
             kind,
             key,
             page_id,
@@ -1547,7 +1548,7 @@ pub fn get_ink_page(
         .optional()?;
     Ok(row.map(|(kind, key, page_id, updated_at, gz, rev)| InkPageRow {
         rev,
-        hash: sync_content::validate_ink(&gz).ok().map(|value| value.wire_hash),
+        hash: ink_validation::validate_page(rev, &gz).ok().map(|value| value.wire_hash),
         kind,
         key,
         page_id,
