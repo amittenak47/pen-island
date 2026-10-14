@@ -240,6 +240,7 @@ export function applyFootnoteResult(
     added.push({
       id: freshNoteId([...existing, ...added], now),
       text,
+      by: "ai",
       createdAt: now,
       updatedAt: now,
     });

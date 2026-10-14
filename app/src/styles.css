@@ -22034,6 +22034,55 @@ html[data-corners="rounded"] {
   overflow: hidden;
 }
 .lc-footnote-note-actions { display: flex; flex: 0 0 auto; gap: 2px; align-items: center; }
+
+/*
+ * A note in the hub is one box: its text, then its three buttons inside the
+ * same outline. A ChatBot note carries a tinted strip down its left side.
+ */
+.lc-footnote-overview-link-list .lc-footnote-note-row {
+  align-items: stretch;
+  gap: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--chrome-edge) 55%, transparent);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.lc-footnote-overview-link-list .lc-footnote-note-row > .lc-hold-reveal.lc-footnote-overview-entry-hold,
+.lc-footnote-overview-link-list .lc-footnote-note-row > .lc-agent-scope-option {
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.lc-footnote-overview-link-list .lc-footnote-note-row > .lc-footnote-note-actions {
+  padding: 0 3px;
+  border-left: 1px solid color-mix(in srgb, var(--chrome-edge) 70%, transparent);
+}
+
+.lc-footnote-note-ai {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1px;
+  width: 15px;
+  background: color-mix(in srgb, var(--lc-fn-color, var(--accent)) 22%, transparent);
+  border-right: 1px solid color-mix(in srgb, var(--lc-fn-color, var(--accent)) 45%, transparent);
+  color: var(--lc-fn-color, var(--accent));
+  font-weight: 700;
+  line-height: 1;
+}
+
+.lc-footnote-note-ai > span:first-child {
+  font-size: 10px;
+}
+
+.lc-footnote-note-ai > span:last-child {
+  font-size: 7px;
+  letter-spacing: 0.02em;
+}
 .lc-footnote-note-head {
   display: flex;
   justify-content: space-between;
@@ -22141,7 +22190,6 @@ html[data-corners="rounded"] {
 .lc-footnote-note-workspace.is-chatbot-complete .lc-footnote-note-body {
   background-image: radial-gradient(ellipse at 100% 0, color-mix(in srgb, var(--lc-fn-light) 22%, transparent), transparent 58%);
 }
-.lc-footnote-overview.is-chatbot-complete .lc-footnote-note-row::after,
 .lc-footnote-mini-note.is-chatbot-complete .lc-footnote-note-body::after,
 .lc-footnote-note-workspace.is-chatbot-complete .lc-footnote-note-body::after {
   content: "\2726 \00b7 \2727";

@@ -56,8 +56,18 @@ export interface DocFootnoteNote {
    * the reading size. Kept in the footnote itself so they sync with it.
    */
   images?: string[];
+  /**
+   * Who wrote it: an assistant ("ai") or the reader. Notes saved before this
+   * existed have none; on a ChatBot footnote they count as the assistant's.
+   */
+  by?: "ai" | "reader";
   createdAt: number;
   updatedAt: number;
+}
+
+/** Whether a note on `footnote` was written by an assistant. */
+export function noteIsAi(note: DocFootnoteNote, footnote: { kind: string }): boolean {
+  return note.by === "ai" || (note.by === undefined && footnote.kind === "ai");
 }
 
 /** Most pictures one note keeps. */
@@ -587,6 +597,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
             id: candidate.id,
             text: candidate.text,
             ...(images.length > 0 ? { images } : {}),
+            ...(candidate.by === "ai" || candidate.by === "reader" ? { by: candidate.by } : {}),
             createdAt,
             updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : createdAt,
           },

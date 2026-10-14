@@ -46,7 +46,7 @@ import {
 import { HOLD_SENSITIVE_MS } from "../util/gesture";
 import { useFootnoteHistory } from "./footnoteHistory";
 import { pickPhotos } from "../util/photoAttach";
-import { NOTE_IMAGE_LIMIT } from "../util/docFootnotes";
+import { NOTE_IMAGE_LIMIT, noteIsAi } from "../util/docFootnotes";
 export interface FootnoteOverviewProps {
   onOpenArtifact?: (ref: ArtifactRef) => void;
   onManageArtifacts?: () => void;
@@ -727,7 +727,7 @@ export function FootnoteOverview({
     } else {
       updateNotes([
         ...notes,
-        { id: freshNoteId(notes, now), text: body, images: pictures, createdAt: now, updatedAt: now },
+        { id: freshNoteId(notes, now), text: body, images: pictures, by: "reader", createdAt: now, updatedAt: now },
       ]);
     }
     setTask(null);
@@ -1182,11 +1182,17 @@ export function FootnoteOverview({
                 {notes.length > 0 && (
                   <ul className={listClass(notes.length)}>
                     {notes.map((note, index) => (
-                      <li key={note.id} className="lc-footnote-note-row">
+                      <li key={note.id} className={`lc-footnote-note-row${noteIsAi(note, footnote) ? " is-ai" : ""}`}>
+                        {noteIsAi(note, footnote) ? (
+                          <span className="lc-footnote-note-ai" title="Written by ChatBot" aria-label="Written by ChatBot">
+                            <span aria-hidden>✦</span>
+                            <span aria-hidden>AI</span>
+                          </span>
+                        ) : null}
                         {rowsAreReadOnly ? <button type="button" className="lc-agent-scope-option lc-footnote-note-mini"
                           aria-label={`Preview note ${index + 1}`} disabled={!canOpenMini(note.id)}
                           onClick={() => showMini(note.id)}>
-                          {note.text && <strong className="lc-footnote-overview-entry-text">{note.text}</strong>}
+                          {note.text && <strong className="lc-footnote-overview-entry-text">{plainPreview(note.text)}</strong>}
                           <NoteImages images={note.images} />
                         </button> : <HoldButton
                           label={note.text || "Picture"}
@@ -1199,7 +1205,7 @@ export function FootnoteOverview({
                             updateNotes(notes.filter((entry) => entry.id !== note.id))
                           }
                         >
-                          {note.text && <strong className="lc-footnote-overview-entry-text">{note.text}</strong>}
+                          {note.text && <strong className="lc-footnote-overview-entry-text">{plainPreview(note.text)}</strong>}
                           <NoteImages images={note.images} />
                         </HoldButton>}
                         <div className="lc-footnote-note-actions">
@@ -1375,6 +1381,14 @@ function ThreadBubble() {
       </svg>
     </span>
   );
+}
+
+/** A note row shows plain words: markdown emphasis, code ticks and link syntax dropped. */
+export function plainPreview(text: string): string {
+  return text
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/(\*\*|__|\*|`)(?=\S)([^]*?\S)\1/g, "$2")
+    .replace(/^#+\s+/gm, "");
 }
 
 /** A small curved arrow; Redo mirrors it. */

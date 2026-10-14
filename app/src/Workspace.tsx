@@ -6883,6 +6883,7 @@ export const Workspace = memo(function Workspace({
               {
                 id: freshNoteId(next.flatMap((entry) => entry.notes ?? [])),
                 text: note,
+                by: "ai" as const,
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
               },
