@@ -185,6 +185,7 @@ import {
 } from "./util/docFootnotes";
 import { footnoteDisplayThemes, footnoteThemeSeed, normalizePalette } from "./util/inkPaletteHistory";
 import { ChatBotPagesDialog } from "./modes/ChatBotPagesDialog";
+import { usePrimaryPanels } from "./util/primaryPanels";
 import { activeAnnotationJobs, ANNOTATION_JOBS_EVENT } from "./util/annotationJobs";
 import { hashBytesAsync, loadBinaryDocBytesWithRetry, bytesCameFromStore, putDocBytesVerified } from "./util/docBytes";
 import { handOffPickedDoc, takePickedDoc } from "./util/pickedDocHandoff";
@@ -3843,7 +3844,9 @@ export const Workspace = memo(function Workspace({
       kind: target.node.type,
       title: target.node.title ?? target.node.id,
     })), []);
-  const [chatBotPagesOpen, setChatBotPagesOpen] = useState(false);
+  // The ChatBot sheet and the footnote panel never share the screen.
+  const { chatBotOpen: chatBotPagesOpen, openChatBot, setChatBotOpen: setChatBotPagesOpen } =
+    usePrimaryPanels(openFootnoteId, dismissFootnoteOverview);
   const docSelectionRef = useRef<DocSelectionResult | null>(null);
   const [chatBotSelection, setChatBotSelection] = useState<DocSelectionResult | null>(null);
   const onDocSelectionChange = useCallback((selection: DocSelectionResult | null) => {
@@ -11694,7 +11697,7 @@ export const Workspace = memo(function Workspace({
                     onOpen: () => {
                       const selection = docSelectionRef.current;
                       setChatBotSelection(selection?.text.trim() ? selection : null);
-                      setChatBotPagesOpen(true);
+                      openChatBot();
                     },
                     active: activeAnnotationJobs().some((job) => job.docId === annotateDocId),
                   }
