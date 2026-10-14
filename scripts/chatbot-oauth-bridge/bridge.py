@@ -65,13 +65,17 @@ FOOTNOTE_GUIDE = (
     "request has a prompt, follow it."
 )
 JOB_GUIDE = (
-    "Write for a student who will solve this chapter's problems. Pick the passages those "
-    "problems depend on: definitions, the key steps of an algorithm, proof ideas, and traps. "
-    "Use problems to name the exercises or homework questions a passage helps with, by their "
+    "The footnotes sit on the chapter text and prepare the reader for this chapter's "
+    "problems; they never solve them. Pick the passages the problems rely on: definitions, "
+    "the key steps of an algorithm, proof ideas, and traps. Explain the passage itself, and "
+    "show where the problems will lean on it, like a hint or a preview: which idea a "
+    "problem uses, never its answer or the steps of a solution. A solved-homework reference "
+    "is only for seeing which ideas matter; never quote or paraphrase its solutions. Use "
+    "problems to name the exercises or homework questions a passage prepares for, by their "
     "numbers in the references. Use question for one short question that makes the reader "
-    "curious to keep reading, tied to a problem when you can; do not give its answer away. "
-    "Use looking_ahead to hint at what this passage sets up later in the chapter, without "
-    "spoiling it. Highlight the key term; underline the phrase a problem hinges on."
+    "curious to keep reading, tied to a problem when you can, without giving its answer "
+    "away. Use looking_ahead to hint at what this passage sets up later in the chapter, "
+    "without spoiling it. Highlight the key term; underline the phrase a problem hinges on."
 )
 INSTRUCTIONS = f"{WORKFLOW}\n\nHow to write each footnote: {FOOTNOTE_GUIDE}"
 
