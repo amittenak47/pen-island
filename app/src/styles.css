@@ -10552,7 +10552,7 @@ body[data-lc-sash-drag="horizontal"] {
   right: 4px;
   min-width: 28px;
   min-height: 28px;
-  border-radius: 14px;
+  border-radius: var(--lc-r-block);
 }
 
 .lc-board-lined-overlay {
@@ -19419,7 +19419,7 @@ button.lc-row-selected:hover:not(:disabled) {
   height: 24px;
   padding: 0 8px;
   border: 1px solid color-mix(in srgb, var(--border, var(--line)) 80%, transparent);
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   background: color-mix(in srgb, var(--panel, #fff) 92%, transparent);
   color: var(--ink, inherit);
   font-size: 13px;
@@ -19442,7 +19442,7 @@ button.lc-row-selected:hover:not(:disabled) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   border: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
   background: color-mix(in srgb, var(--panel, #fff) 92%, transparent) !important;
   color: var(--ink, inherit) !important;
@@ -19616,7 +19616,7 @@ button.lc-row-selected:hover:not(:disabled) {
   max-height: 22px;
   padding: 0 !important;
   border: 0;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   background: transparent !important;
   color: color-mix(in srgb, var(--lc-fn-deep, var(--muted, #888)) 70%, transparent);
   font-size: 12px;
@@ -19654,7 +19654,7 @@ button.lc-row-selected:hover:not(:disabled) {
   min-height: 20px !important;
   max-height: 20px;
   padding: 0 !important;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   border: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
   background: color-mix(in srgb, var(--panel, #fff) 92%, transparent) !important;
   color: var(--ink, inherit) !important;
@@ -19680,7 +19680,7 @@ button.lc-row-selected:hover:not(:disabled) {
   padding: 0 8px;
   font-size: 10px;
   line-height: 1;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
 }
 
 .lc-footnote-task-title {
@@ -19831,7 +19831,7 @@ button.lc-row-selected:hover:not(:disabled) {
   padding: 3px 6px;
   gap: 0;
   font-size: 11px;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
 }
 
 /*
@@ -19851,7 +19851,7 @@ button.lc-row-selected:hover:not(:disabled) {
   color: inherit;
   background: var(--panel);
   border: 1px solid var(--chrome-edge);
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   padding: 4px 7px;
 }
 
@@ -19933,7 +19933,7 @@ button.lc-row-selected:hover:not(:disabled) {
   height: 16px;
   min-height: 16px !important;
   max-height: 16px;
-  border-radius: 4px;
+  border-radius: var(--lc-r-block);
   font-size: 10px;
 }
 
@@ -20004,7 +20004,7 @@ button.lc-row-selected:hover:not(:disabled) {
   min-width: 0;
   min-height: 24px;
   padding: 2px 6px;
-  border-radius: 5px;
+  border-radius: var(--lc-r-block);
   border: 1px solid var(--chrome-edge);
   background: var(--bg);
   color: var(--ink);
@@ -20035,7 +20035,7 @@ button.lc-row-selected:hover:not(:disabled) {
   max-height: 22px;
   margin-right: auto;
   padding: 0 8px !important;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   border: 1px solid color-mix(in srgb, var(--border, #ccc) 80%, transparent);
   background: color-mix(in srgb, var(--panel, #fff) 92%, transparent) !important;
   color: var(--ink, inherit) !important;
@@ -20104,7 +20104,7 @@ button.lc-row-selected:hover:not(:disabled) {
     var(--lc-fn-color) 18%,
     color-mix(in srgb, var(--lc-fn-mid) 22%, transparent)
   );
-  border-radius: 5px;
+  border-radius: var(--lc-r-block);
   padding: 3px 5px;
   color: var(--lc-fn-ink, var(--lc-fn-deep, var(--ink)));
 }
@@ -20136,7 +20136,7 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-section {
   background: color-mix(in srgb, var(--lc-fn-mid) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--lc-fn-mid) 38%, transparent);
-  border-radius: 8px;
+  border-radius: var(--lc-r-block);
   padding: 4px 6px;
 }
 
@@ -20225,7 +20225,7 @@ button.lc-row-selected:hover:not(:disabled) {
   flex: 1 1 auto;
   min-height: 120px;
   resize: none;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   border: 1px solid var(--chrome-edge);
   background: var(--bg);
   color: var(--ink);
@@ -20256,7 +20256,7 @@ button.lc-row-selected:hover:not(:disabled) {
   padding: 5px;
   gap: 5px;
   border: 1px solid var(--chrome-edge);
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   background: var(--bg);
   overflow-y: auto;
 }
@@ -20268,7 +20268,7 @@ button.lc-row-selected:hover:not(:disabled) {
 
 .lc-footnote-overview-thread .lc-agent-turn {
   padding: 5px 7px;
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   gap: 2px;
   max-width: 100%;
 }
@@ -20298,7 +20298,7 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 .lc-footnote-overview-composer .lc-agent-composer-field {
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
 }
 
 .lc-footnote-overview-composer textarea {
@@ -22044,7 +22044,7 @@ html[data-corners="rounded"] {
   gap: 0;
   overflow: hidden;
   border: 1px solid color-mix(in srgb, var(--chrome-edge) 55%, transparent);
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   background: var(--panel);
 }
 
@@ -22111,7 +22111,7 @@ html[data-corners="rounded"] {
   box-sizing: border-box;
   overflow: hidden;
   pointer-events: auto;
-  border-radius: 8px;
+  border-radius: var(--lc-r-block);
   border: 1px solid color-mix(in srgb, var(--lc-fn-color) 72%, var(--lc-fn-deep));
   background: var(--lc-fn-wash, var(--panel));
   color: var(--lc-fn-ink, var(--ink));
@@ -22270,7 +22270,7 @@ html[data-corners="rounded"] {
   min-height: 26px;
   padding: 2px 10px;
   border: 1px solid var(--chrome-edge, var(--border, rgb(127 127 127 / 30%)));
-  border-radius: 10px;
+  border-radius: var(--lc-r-block);
   background: color-mix(in srgb, var(--surface, var(--panel)) 96%, transparent);
   color: var(--lc-fn-ink, var(--ink));
   font: inherit;
@@ -22302,7 +22302,7 @@ html[data-corners="rounded"] {
   height: auto;
   padding: 3px 7px 3px 3px;
   border: 1px solid var(--line, var(--chrome-edge));
-  border-radius: 6px;
+  border-radius: var(--lc-r-block);
   background: transparent;
   color: var(--lc-fn-ink, var(--ink));
   cursor: pointer;
@@ -22328,7 +22328,7 @@ html[data-corners="rounded"] {
   place-items: center;
   width: 16px;
   height: 16px;
-  border-radius: 4px;
+  border-radius: var(--lc-r-block);
   background: color-mix(in srgb, var(--accent) 18%, transparent);
   color: var(--accent);
 }
@@ -22351,7 +22351,7 @@ html[data-corners="rounded"] {
   padding: 4px;
   background: var(--overlay-bg, var(--panel));
   border: 1px solid var(--chrome-edge, var(--line));
-  border-radius: 10px;
+  border-radius: var(--lc-r-block);
   box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
   scrollbar-width: none;
   transform-origin: top left;
@@ -22399,7 +22399,7 @@ html[data-corners="rounded"] {
   min-height: 0;
   padding: 0;
   border: 1px solid var(--chrome-edge, var(--border, rgb(127 127 127 / 30%)));
-  border-radius: 999px;
+  border-radius: var(--lc-r-block);
   background: color-mix(in srgb, var(--surface, var(--panel)) 96%, transparent);
   color: var(--lc-fn-ink, var(--ink));
   cursor: pointer;
@@ -22480,4 +22480,9 @@ html[data-corners="rounded"] {
   line-height: 1.3;
   color: var(--muted);
   overflow-wrap: anywhere;
+}
+
+/* The footnote panel follows the reader's corner choice, like its controls. */
+.lc-doc-sheet.lc-footnote-overview {
+  border-radius: var(--lc-r-block);
 }
