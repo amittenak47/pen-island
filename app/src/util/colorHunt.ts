@@ -6,6 +6,7 @@
  * browser builds try `fetch` then fall back to the bundled list.
  */
 
+import { loadInvoke, isTauriRuntime } from "../api/nativeHttp";
 import {
   COLORHUNT_FALLBACK_CODES,
   paletteFromColorHuntCode,
@@ -15,25 +16,6 @@ import {
 } from "./inkPaletteHistory";
 import { loadPalettePrefs, normalizePalettePrefs, paletteTagQuery, type PalettePrefs, type PaletteTag } from "./palettePref";
 import { mixInkPalette } from "./paletteMix";
-
-type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-
-function isTauriRuntime(): boolean {
-  if (typeof window === "undefined") return false;
-  return "__TAURI_INTERNALS__" in window || "__TAURI__" in window;
-}
-
-let invokeLoader: Promise<Invoke | null> | null = null;
-
-function loadInvoke(): Promise<Invoke | null> {
-  if (!isTauriRuntime()) return Promise.resolve(null);
-  if (!invokeLoader) {
-    invokeLoader = import("@tauri-apps/api/core")
-      .then((mod) => mod.invoke as Invoke)
-      .catch(() => null);
-  }
-  return invokeLoader;
-}
 
 interface ColorHuntRow {
   code?: string;

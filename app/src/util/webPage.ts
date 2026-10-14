@@ -6,6 +6,7 @@
  * Scripts never re-run in our origin.
  */
 
+import { loadInvoke, isTauriRuntime } from "../api/nativeHttp";
 import DOMPurify from "dompurify";
 
 import { liveWebviewTransport } from "./liveWebviewSupport";
@@ -78,25 +79,6 @@ export interface FetchedWebPage {
    * to be one you could only see in the console.
    */
   note?: string;
-}
-
-type Invoke = <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-
-function isTauriRuntime(): boolean {
-  if (typeof window === "undefined") return false;
-  return "__TAURI_INTERNALS__" in window || "__TAURI__" in window;
-}
-
-let invokeLoader: Promise<Invoke | null> | null = null;
-
-function loadInvoke(): Promise<Invoke | null> {
-  if (!isTauriRuntime()) return Promise.resolve(null);
-  if (!invokeLoader) {
-    invokeLoader = import("@tauri-apps/api/core")
-      .then((mod) => mod.invoke as Invoke)
-      .catch(() => null);
-  }
-  return invokeLoader;
 }
 
 export function titleFromHtml(html: string): string {
