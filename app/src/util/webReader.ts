@@ -164,7 +164,7 @@ export function extractArticle(html: string, url: string): ReadArticle | null {
 }
 
 /** Escape text for insertion into HTML. */
-function escapeHtml(text: string): string {
+export function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
