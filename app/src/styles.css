@@ -22431,3 +22431,14 @@ html[data-corners="rounded"] {
 .lc-footnote-panel-reset .lc-hold-reveal-fill {
   background: linear-gradient(180deg, var(--lc-hold-danger-wash-top) 0%, var(--lc-hold-danger-wash-bottom) 100%);
 }
+
+/* The ChatBot part of Settings scrolls without a visible bar, like the ChatBot sheet. */
+.lc-settings-dialog .lc-settings-body:has(.lc-settings-fold.is-expanded #lc-settings-group-chatbot) {
+  scrollbar-width: none;
+}
+
+.lc-settings-dialog .lc-settings-body:has(.lc-settings-fold.is-expanded #lc-settings-group-chatbot)::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
