@@ -14,6 +14,7 @@ mod doc_bytes;
 mod pads;
 mod footnotes;
 mod annotation_jobs;
+mod assistant_runner;
 mod atomic_pads;
 mod practice;
 mod workspace;
@@ -46,6 +47,7 @@ pub use annotation_jobs::{
     finish_annotation_job, list_annotation_jobs, read_annotation_pages, read_annotation_reference,
     submit_annotation_page,
 };
+pub use assistant_runner::{get_assistant_runner, get_assistant_runner_config, put_assistant_runner_config, test_assistant_runner};
 pub use footnotes::{
     ack_footnote_request, create_footnote_request, footnote_results, get_footnote_request,
     list_footnote_requests, submit_footnote_result,

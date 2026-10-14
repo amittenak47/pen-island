@@ -177,4 +177,18 @@ mod tests {
         assert_eq!(answer.links.len(), 1);
         assert_eq!(answer.links[0].url, "https://example.com/source");
     }
+
+    #[test]
+    fn assistant_and_bot_requests_never_start_the_regular_model_worker() {
+        for answer_mode in ["app", "bot"] {
+            let request: FootnoteRequest = serde_json::from_value(serde_json::json!({
+                "id": "fr-other-mode", "answer_mode": answer_mode, "device_id": "fixture", "doc_id": "scratch",
+                "doc_name": "Scratch.md", "page": 1, "anchor": {}, "excerpt": "A quote", "context": "",
+                "wide_context": "", "page_footnotes": [], "prompt": null, "status": "pending", "created_at": 1
+            })).unwrap();
+            // There is no Tokio runtime here: attempting to spawn a worker would fail.
+            schedule(request);
+            assert!(!RUNNING.get_or_init(Default::default).lock().unwrap().contains("fr-other-mode"));
+        }
+    }
 }

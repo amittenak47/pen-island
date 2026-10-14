@@ -2,7 +2,8 @@
 import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import type { AnnotationJobDto, LcClient, NewAnnotationJobDto } from "../api/client";
+import type { AnnotationJobDto, AssistantRunnerStatus, LcClient, NewAnnotationJobDto } from "../api/client";
+import { saveChatBotAnswerMode } from "../util/chatBotClient";
 import type { DocFootnote } from "../util/docFootnotes";
 import { loadSelectionRuns, rememberSelectionRun, type ChatBotRun } from "../util/chatBotHistory";
 
@@ -10,6 +11,7 @@ const fixture = vi.hoisted(() => ({
   jobs: [] as AnnotationJobDto[],
   sources: {} as Record<string, string>,
   create: vi.fn(), cancel: vi.fn(), undo: vi.fn(),
+  runner: null as AssistantRunnerStatus | null,
 }));
 vi.mock("../modes/pdfOpenDocs", () => ({
   borrowPdfDocument: () => ({
@@ -60,6 +62,7 @@ async function mount(overrides: Partial<ChatBotPagesDialogProps> = {}) {
     client: {
       annotationJobs: async () => fixture.jobs,
       createAnnotationJob: fixture.create, cancelAnnotationJob: fixture.cancel,
+      assistantRunnerStatus: async () => fixture.runner,
     } as unknown as LcClient,
     docId: "algorithms", docName: "Algorithms", hash: "pdf-hash", currentPage: 7, pageCount: 300,
     palette: ["#60a5fa"], workspaceItems: files, onClose: vi.fn(), ...overrides,
@@ -96,6 +99,7 @@ async function openHistory() {
 beforeAll(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; });
 beforeEach(() => {
   localStorage.clear(); fixture.jobs = [];
+  fixture.runner = null;
   fixture.sources = Object.fromEntries(files.map((_, index) => [`file-${index}`, `Text ${index}`]));
   fixture.create.mockReset().mockImplementation(async (_body: NewAnnotationJobDto) => undefined);
   fixture.cancel.mockReset().mockImplementation(async (id: string) => {
@@ -109,6 +113,15 @@ afterEach(async () => {
 });
 
 describe("ChatBot requests", () => {
+  it("sends the selected answer mode on page jobs and explains the single-footnote model limit", async () => {
+    saveChatBotAnswerMode("app"); await mount(); await click("Start");
+    expect(fixture.create.mock.calls[0]![0]).toMatchObject({ answer_mode: "app" });
+    expect(host.textContent).toContain("Your PC starts the assistant automatically");
+    saveChatBotAnswerMode("llm");
+    await act(async () => root!.render(<ChatBotPagesDialog {...props} />));
+    expect(host.textContent).toContain("Your AI model answers single footnotes; page runs need an assistant.");
+    await click("Start"); expect(fixture.create.mock.calls[1]![0]).toMatchObject({ answer_mode: "llm" });
+  });
   it("offers Selection only while nonempty text is selected", async () => {
     const onSelectionRequest = vi.fn(async () => ({ id: "fr-selected", page: 7 }));
     await mount({ onSelectionRequest });
@@ -261,6 +274,23 @@ describe("ChatBot requests", () => {
 });
 
 describe("ChatBot history", () => {
+  it("shows the app runner's progress and failure on its matching page-run row", async () => {
+    fixture.jobs = [job({ status: "open", answer_mode: "app" }) as AnnotationJobDto];
+    fixture.runner = { app: "codex", state: "running", job_id: "aj-history", started_at: 1, finished_at: null };
+    await mount(); expect(host.querySelector(".lc-chatbot-history-row")!.textContent).toContain("Codex is writing…");
+    fixture.runner = { ...fixture.runner, state: "failed", finished_at: 2, error: "private process output" };
+    await act(async () => { window.dispatchEvent(new Event("lc-annotation-jobs")); });
+    expect(host.querySelector(".lc-chatbot-history-row")!.textContent).toContain("Codex couldn't finish. Open Settings → ChatBot → Test.");
+    expect(host.textContent).not.toContain("private process output");
+  });
+  it("keeps an older failed runner from marking a newer app selection as failed", async () => {
+    const run = job({ id: "fr-new-app", request_type: "selection", answer_mode: "app", status: "open", created_at: 100 });
+    rememberSelectionRun("algorithms", run);
+    fixture.runner = { app: "codex", state: "failed", job_id: null, started_at: 50, finished_at: 60 };
+    await mount({ footnotes: [mark("pending-new", 7, "New request", { jobId: run.id, pending: run.id })] });
+    expect(host.querySelector(".lc-chatbot-history-row")!.textContent).toContain("In progress");
+    expect(host.textContent).not.toContain("couldn't finish");
+  });
   it("shows configuration and footnote titles in a popup, and jumps to a listed page", async () => {
     fixture.jobs = [job() as AnnotationJobDto]; const onJumpToPage = vi.fn(); const onClose = vi.fn();
     await mount({ onJumpToPage, onClose, footnotes: [

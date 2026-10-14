@@ -57,6 +57,8 @@ export interface FootnoteOverviewProps {
   onOpenFullNote?: (noteId: string) => void;
   openMiniNoteIds?: readonly string[];
   miniNoteCount?: number;
+  /** A background assistant app's progress or failure for this pending mark. */
+  pendingStatus?: string;
   /** The turns of one saved thread — the card asks per thread, as it opens them. */
   threadMessages: (rootId: string) => AgentChatMessage[];
   availableThreads?: readonly {rootId: string; title: string}[];
@@ -397,6 +399,7 @@ export function FootnoteOverview({
   onOpenFullNote,
   openMiniNoteIds = [],
   miniNoteCount = 0,
+  pendingStatus,
   threadMessages,
   availableThreads = [],
   onClose,
@@ -1173,7 +1176,7 @@ export function FootnoteOverview({
               )}
               {(!rowsAreReadOnly || notes.length > 0 || footnote.pending) && (
               <HubSection title="Notes" onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}>
-                {footnote.pending ? <p className="lc-muted">ChatBot is writing...</p> : null}
+                {footnote.pending ? <p className="lc-muted" role="status">{pendingStatus || "ChatBot is writing..."}</p> : null}
                 {notes.length > 0 && (
                   <ul className={listClass(notes.length)}>
                     {notes.map((note, index) => (

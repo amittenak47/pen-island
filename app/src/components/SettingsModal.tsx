@@ -5,7 +5,7 @@
 
 import { Children, isValidElement, createContext, useCallback, useContext, useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 
-import { checkPadHub, type PadHubCheck } from "../api/client";
+import { checkPadHub, type PadHubCheck, type AssistantRunnerConfig, type AssistantRunnerStatus } from "../api/client";
 import type { DevicePrefsDto, DlcStatus, LcClient } from "../api/client";
 import {dlcProgressLabel, mergeDlcStatus} from "../util/dlcProgress";
 import type {
@@ -19,7 +19,7 @@ import type {
   ProviderConfig,
   VoiceConfig,
 } from "../api/types";
-import { CHATBOT_CLIENTS, loadChatBotClient, saveChatBotClient, loadChatBotAnswerMode, saveChatBotAnswerMode, type ChatBotClient, type ChatBotAnswerMode } from "../util/chatBotClient";
+import { CHATBOT_CLIENTS, assistantRunnerMessage, loadChatBotClient, saveChatBotClient, loadChatBotAnswerMode, saveChatBotAnswerMode, type ChatBotClient, type ChatBotAnswerMode } from "../util/chatBotClient";
 import { DEFAULT_COACH_FLAGS, DEFAULT_VOICE_CONFIG } from "../api/types";
 import { shouldDismissBackdrop } from "../util/backdropDismiss";
 import { DialogFrame } from "./DialogFrame";
@@ -927,6 +927,38 @@ export function SettingsModal({
   const [baselineChatBotClient, setBaselineChatBotClient] = useState<ChatBotClient>(loadChatBotClient);
   const [chatBotAnswerMode, setChatBotAnswerMode] = useState<ChatBotAnswerMode>(loadChatBotAnswerMode);
   const [baselineChatBotAnswerMode, setBaselineChatBotAnswerMode] = useState<ChatBotAnswerMode>(loadChatBotAnswerMode);
+  const [runnerConfig, setRunnerConfig] = useState<AssistantRunnerConfig | null>(null);
+  const [baselineRunnerConfig, setBaselineRunnerConfig] = useState<AssistantRunnerConfig | null>(null);
+  const [runnerStatus, setRunnerStatus] = useState<AssistantRunnerStatus | null>(null);
+  const [runnerError, setRunnerError] = useState<string | null>(null);
+  const [runnerTesting, setRunnerTesting] = useState(false);
+  useEffect(() => {
+    if (!open) return;
+    let current = true;
+    setRunnerConfig(null); setBaselineRunnerConfig(null); setRunnerError(null); setRunnerStatus(null);
+    void (async () => {
+      try {
+        const config = await client.assistantRunnerConfig();
+        if (current) { setRunnerConfig(config); setBaselineRunnerConfig(config); }
+      } catch {
+        if (current) setRunnerError("Connect to your PC to set up the assistant app.");
+      }
+    })();
+    return () => { current = false; };
+  }, [open, client]);
+  useEffect(() => {
+    if (!open || chatBotAnswerMode !== "app") return;
+    let current = true;
+    const refresh = async () => {
+      try {
+        const status = await client.assistantRunnerStatus();
+        if (current) setRunnerStatus(status);
+      } catch { /* Connection guidance already appears with the app settings. */ }
+    };
+    void refresh();
+    const timer = window.setInterval(() => void refresh(), 5000);
+    return () => { current = false; window.clearInterval(timer); };
+  }, [open, client, chatBotAnswerMode]);
   /** The last hand-edited vocabulary, so picking a preset and back to Custom restores it. */
   const [customVocabulary, setCustomVocabulary] = useState("");
   const [hubUrl, setHubUrl] = useState("");
@@ -1348,7 +1380,8 @@ export function SettingsModal({
     keysDirty ||
     hubUrl.trim() !== baselineHubUrl ||
     hubToken.trim() !== baselineHubToken ||
-    debugLog !== baselineDebugLog || chatBotClient !== baselineChatBotClient || chatBotAnswerMode !== baselineChatBotAnswerMode;
+    debugLog !== baselineDebugLog || chatBotClient !== baselineChatBotClient || chatBotAnswerMode !== baselineChatBotAnswerMode ||
+    JSON.stringify(runnerConfig) !== JSON.stringify(baselineRunnerConfig);
 
   const changeCount = countSettingsChanges(draftPrefs, baselinePrefs)
     + countSettingsChanges({...draft, coach: {...DEFAULT_COACH_FLAGS, ...draft.coach}}, {...baselineConfig, coach: {...DEFAULT_COACH_FLAGS, ...baselineConfig.coach}})
@@ -1356,7 +1389,8 @@ export function SettingsModal({
     + Number(Boolean(groqKeyDraft.trim()) || clearGroqKey)
     + Number(Boolean(deepgramKeyDraft.trim()) || clearDeepgramKey)
     + Number(hubUrl.trim() !== baselineHubUrl) + Number(hubToken.trim() !== baselineHubToken)
-    + Number(debugLog !== baselineDebugLog) + Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode);
+    + Number(debugLog !== baselineDebugLog) + Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode)
+    + countSettingsChanges(runnerConfig ?? {}, baselineRunnerConfig ?? {});
   const prefGroups: Record<string, (keyof DevicePrefs)[]> = {
     writing: ["handedness", "chromeWake", "chromeWakeTint", "captureMode", "captureDestination", "captureFolder", "captureCountdown", "inkMatchDisplay", "pressureClip", "inkSmoothing", "inkSmoothingMode", "inkSpeed", "inkSpeedBlotBlend", "inkGrain", "inkSpeedFade", "inkBoldness", "eraserPartial"],
     "ink-tools": ["tapOk", "colorWheelOnToolbar", "palettePrefs"],
@@ -1384,7 +1418,8 @@ export function SettingsModal({
   changes.storage = (changes.storage ?? 0) + Number(hubUrl.trim() !== baselineHubUrl) + Number(hubToken.trim() !== baselineHubToken);
   changes.diagnostics = (changes.diagnostics ?? 0) + Number(debugLog !== baselineDebugLog);
   changes.llm = (changes.llm ?? 0) + Number(Boolean(openaiKeyDraft.trim()) || clearOpenaiKey) + Number(Boolean(groqKeyDraft.trim()) || clearGroqKey);
-  changes.chatbot = Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode);
+  changes.chatbot = Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode)
+    + countSettingsChanges(runnerConfig ?? {}, baselineRunnerConfig ?? {});
   changes.voice = (changes.voice ?? 0) + Number(Boolean(deepgramKeyDraft.trim()) || clearDeepgramKey);
   const resetGroup = (id: string) => {
     if (saving) return;
@@ -1392,7 +1427,7 @@ export function SettingsModal({
     const coachFields = id === "ui" ? sharedUiFlags : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
     setDraft(prev => ({...prev, ...select(baselineConfig, configGroups[id] ?? []),
       coach: {...DEFAULT_COACH_FLAGS, ...prev.coach, ...select({...DEFAULT_COACH_FLAGS, ...baselineConfig.coach}, coachFields)}}));
-    if (id === "chatbot") { setChatBotClient(baselineChatBotClient); setChatBotAnswerMode(baselineChatBotAnswerMode); }
+    if (id === "chatbot") { setChatBotClient(baselineChatBotClient); setChatBotAnswerMode(baselineChatBotAnswerMode); setRunnerConfig(baselineRunnerConfig); }
     if (id === "storage") { setHubUrl(baselineHubUrl); setHubToken(baselineHubToken); }
     if (id === "diagnostics") setDebugLog(baselineDebugLog);
     if (id === "llm") { setOpenaiKeyDraft(""); setGroqKeyDraft(""); setClearOpenaiKey(false); setClearGroqKey(false); }
@@ -1409,7 +1444,8 @@ export function SettingsModal({
     diagnostics: [inkPerfOverlay && "Speed overlay", inkPerfBar && "Speed bar", pdfFlickHud && "Page preview", hubSyncWindowPill && "Sync button", debugLog && "Activity log"].filter(Boolean).join(" · ") || "Off", paths: draft.workspace_dir,
     datasets: `${datasets.length} datasets`, tests: draft.stop_on_first_failure ? "Stop at first failure" : "Run all cases",
     llm: `${PROVIDER_LABELS[draft.default_provider as (typeof PROVIDERS)[number]] ?? draft.default_provider} · ${draft[draft.default_provider as keyof Pick<LcConfig,"local"|"ollama"|"openai"|"groq">]?.model || "No model selected"}`,
-    chatbot: chatBotAnswerMode === "llm" ? "Desktop's configured LLM" : CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.label ?? "Other assistant",
+    chatbot: chatBotAnswerMode === "app" ? runnerConfig?.app === "claude" ? "Claude Code on your PC" : "Codex on your PC"
+      : chatBotAnswerMode === "llm" ? "Your AI model" : CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.label ?? "Other assistant",
     voice: `${voice.engine === "android" ? voiceLabel : `${voiceLabel} · ${voiceClipModel(voice)}`}${voice.cleanup !== "off" ? ` · tidy: ${voice.cleanup}` : ""}`,
     ...Object.fromEntries(COACH_FLAG_GROUPS.map(group=>[group.id, `${group.flags.filter(([key])=>(draft.coach ?? DEFAULT_COACH_FLAGS)[key]).length} of ${group.flags.length} on`])),
   };
@@ -1513,10 +1549,6 @@ export function SettingsModal({
         saveChatBotClient(chatBotClient);
         setBaselineChatBotClient(chatBotClient);
       }
-      if (chatBotAnswerMode !== baselineChatBotAnswerMode) {
-        saveChatBotAnswerMode(chatBotAnswerMode);
-        setBaselineChatBotAnswerMode(chatBotAnswerMode);
-      }
       if (debugLog !== baselineDebugLog) {
         setDebugLogEnabled(debugLog);
         setBaselineDebugLog(debugLog);
@@ -1543,6 +1575,15 @@ export function SettingsModal({
         } else {
           setHubCheck({ kind: "idle" });
         }
+      }
+      if (chatBotAnswerMode === "app" && !runnerConfig) throw new Error("Connect to your PC to set up the assistant app.");
+      if (runnerConfig && JSON.stringify(runnerConfig) !== JSON.stringify(baselineRunnerConfig)) {
+        const saved = await client.putAssistantRunnerConfig(runnerConfig);
+        setRunnerConfig(saved); setBaselineRunnerConfig(saved);
+      }
+      if (chatBotAnswerMode !== baselineChatBotAnswerMode) {
+        saveChatBotAnswerMode(chatBotAnswerMode);
+        setBaselineChatBotAnswerMode(chatBotAnswerMode);
       }
       if (configDirty) {
         const payload: LcConfigPut = { ...draft };
@@ -3318,11 +3359,39 @@ export function SettingsModal({
                   <p className="lc-settings-hint">Select text in a document and tap Ask ChatBot to get an explanation added as a footnote. Keep Pen Island open on your PC so answers can be delivered.</p>
                   <label><span>Answer with</span>
                     <select aria-label="ChatBot answer mode" value={chatBotAnswerMode} onChange={event => setChatBotAnswerMode(event.target.value as ChatBotAnswerMode)}>
-                      <option value="bot">An assistant app</option>
-                      <option value="llm">Your AI model (set up above)</option>
+                      <option value="llm">Your AI model</option>
+                      <option value="bot">An assistant bot</option>
+                      <option value="app">An assistant app on this PC</option>
                     </select>
                   </label>
-                  {chatBotAnswerMode === "llm" ? <p className="lc-settings-hint">Your PC answers automatically with the AI model set up above. A model on your PC must be running; an online model needs its API key.</p> : <>
+                  {chatBotAnswerMode === "llm" ? <p className="lc-settings-hint">A local model or a cloud API key. Quick; fine for single footnotes.</p>
+                    : chatBotAnswerMode === "app" ? <>
+                      <p className="lc-settings-hint">Codex or Claude Code. Runs automatically when you ask for a footnote, using your subscription's limits.</p>
+                      {runnerConfig ? <div className="lc-settings-fields">
+                        <p className="lc-settings-hint">These settings are saved on your PC.</p>
+                        <label><span>App</span><select aria-label="Assistant app" value={runnerConfig.app}
+                          onChange={event => setRunnerConfig({ ...runnerConfig, app: event.target.value as AssistantRunnerConfig["app"] })}>
+                          <option value="codex">Codex</option><option value="claude">Claude Code</option>
+                        </select></label>
+                        <label><span>Model (optional)</span><input aria-label="Assistant app model" value={runnerConfig.model} maxLength={200}
+                          placeholder="Use the app's default" onChange={event => setRunnerConfig({ ...runnerConfig, model: event.target.value })} /></label>
+                        {runnerConfig.app === "codex" ? <label><span>Effort</span><select aria-label="Assistant app effort" value={runnerConfig.effort}
+                          onChange={event => setRunnerConfig({ ...runnerConfig, effort: event.target.value as AssistantRunnerConfig["effort"] })}>
+                          <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+                        </select></label> : null}
+                        <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" disabled={runnerTesting || saving}
+                          onClick={() => {
+                            setRunnerTesting(true); setRunnerError(null);
+                            void client.testAssistantRunner(runnerConfig).then(setRunnerStatus).catch(() => {
+                              setRunnerError("The assistant app couldn't finish its check. Make sure it is installed and signed in on your PC.");
+                            }).finally(() => setRunnerTesting(false));
+                          }}>{runnerTesting ? "Testing…" : "Test"}</button></div>
+                        <p className="lc-settings-hint">Test checks the connection without answering requests.</p>
+                      </div> : null}
+                      {runnerStatus ? <p className="lc-settings-hint" role="status">{assistantRunnerMessage(runnerStatus)}</p> : null}
+                      {runnerError ? <p className="lc-settings-hint" role="alert">{runnerError}</p> : null}
+                    </> : <>
+                  <p className="lc-settings-hint">Grok, Claude and others. You ask it to check, or tell it to check every few minutes.</p>
                   <label><span>Assistant</span>
                     <select aria-label="ChatBot assistant" value={chatBotClient} onChange={event => setChatBotClient(event.target.value as ChatBotClient)}>
                       {CHATBOT_CLIENTS.map(client => <option key={client.id} value={client.id}>{client.label}</option>)}

@@ -15,6 +15,10 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    #[cfg(not(target_os = "android"))]
+    if harness::serve::assistant_runner::serve_mcp_if_requested() {
+        return;
+    }
     let builder = tauri::Builder::default()
         .manage(VoiceSession(std::sync::Mutex::new(std::collections::HashMap::new())))
         // Google Search from a document footnote hands the query to whatever
@@ -173,6 +177,10 @@ pub fn run() {
         lc_routes::lc_cancel_annotation_job,
         lc_routes::lc_annotation_job_items,
         lc_routes::lc_ack_annotation_job_items,
+        lc_routes::lc_assistant_runner_status,
+        lc_routes::lc_assistant_runner_config,
+        lc_routes::lc_put_assistant_runner_config,
+        lc_routes::lc_test_assistant_runner,
         lc_routes::lc_list_devices,
         lc_routes::lc_get_device_prefs,
         lc_routes::lc_put_device_prefs,
@@ -222,8 +230,16 @@ pub fn run() {
         .plugin(tauri_plugin_voicedictation::init());
 
     builder
-        .run(tauri::generate_context!())
-        .expect("error while running Pen Island");
+        .build(tauri::generate_context!())
+        .expect("error while building Pen Island")
+        .run(|_, event| {
+            #[cfg(not(target_os = "android"))]
+            if matches!(event, tauri::RunEvent::Exit) {
+                harness::serve::assistant_runner::shutdown();
+            }
+            #[cfg(target_os = "android")]
+            let _ = event;
+        });
 }
 
 /// Whether on-device handwriting recognition exists on this platform.

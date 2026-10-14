@@ -58,6 +58,7 @@ describe("footnote save baseline", () => {
     const held: HeldFootnoteAsk[] = [{
       requestId: "fr-selection",
       footnoteId: "fn-1",
+      answerMode: "app",
       options: {
         focus: "motivation",
         perPage: 8,
@@ -68,6 +69,7 @@ describe("footnote save baseline", () => {
     expect(failed.send).toEqual([]);
     const retried = completeAnnotateSave({ saved: { id: "doc-1", footnotes }, live: footnotes, pristine, held: failed.keep });
     expect(retried.send[0]?.options).toEqual(held[0]?.options);
+    expect(retried.send[0]?.answerMode).toBe("app");
     expect(retried.keep).toEqual([]);
   });
 

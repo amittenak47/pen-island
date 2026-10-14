@@ -1,6 +1,6 @@
 /** The ChatBot sheet shares Settings' blocks and keeps run details one tap away. */
 import { useCallback, useEffect, useState } from "react";
-import type { AnnotationJobDto, AnnotationJobReferenceDto, FootnoteWorkspaceItemDto, LcClient } from "../api/client";
+import type { AnnotationJobDto, AnnotationJobReferenceDto, AssistantRunnerStatus, FootnoteWorkspaceItemDto, LcClient } from "../api/client";
 import type { DocSelectionResult } from "./DocSelectionLayer";
 import { DialogFrame } from "../components/DialogFrame";
 import { SettingsChoices } from "../components/SettingsChoices";
@@ -11,6 +11,7 @@ import {
 } from "../util/annotationJobs";
 import { getAnnotateDocMeta } from "../util/annotateStore";
 import { loadDeviceId } from "../util/devicePrefs";
+import { assistantRunnerMessage, loadChatBotAnswerMode } from "../util/chatBotClient";
 import type { DocFootnote } from "../util/docFootnotes";
 import { loadSelectionRuns, rememberSelectionRun, updateSelectionRun, type ChatBotRun } from "../util/chatBotHistory";
 import "../components/settingsDialog.css";
@@ -41,8 +42,8 @@ function requestLabel(job: ChatBotRun): string {
   return job.request_type === "selection" ? "Selection" : job.request_type === "page" ? "This page" : "Pages";
 }
 function statusLabel(job: ChatBotRun): string { return job.status === "open" ? "In progress" : job.status === "done" ? "Finished" : "Cancelled"; }
-function runLabel(job: ChatBotRun): string {
-  return `${requestLabel(job)} · ${pageLabel(job.page_from, job.page_to)} · ${job.footnotes} footnote${job.footnotes === 1 ? "" : "s"} · ${statusLabel(job)}`;
+function runLabel(job: ChatBotRun, status = statusLabel(job)): string {
+  return `${requestLabel(job)} · ${pageLabel(job.page_from, job.page_to)} · ${job.footnotes} footnote${job.footnotes === 1 ? "" : "s"} · ${status}`;
 }
 function rangeError(from: number, to: number, pageCount: number, limit = MAX_JOB_PAGES): string | null {
   if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to < from) return "Choose a valid page range.";
@@ -68,6 +69,8 @@ export function ChatBotPagesDialog({
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [jobs, setJobs] = useState<AnnotationJobDto[]>([]);
+  const [runnerStatus, setRunnerStatus] = useState<AssistantRunnerStatus | null>(null);
+  const answerMode = loadChatBotAnswerMode();
   const [selectionRuns, setSelectionRuns] = useState(() => loadSelectionRuns(docId));
   const [activeId, setActiveId] = useState<string | null>(null);
   const [attachments, setAttachments] = useState<ChatBotAttachment[]>(() => loadChatBotAttachments(docId).map((attachment) => {
@@ -89,6 +92,8 @@ export function ChatBotPagesDialog({
   const refresh = useCallback(async () => {
     try { setJobs(await client.annotationJobs(docId)); }
     catch { /* Keep visible history during a brief disconnect. */ }
+    try { setRunnerStatus(await client.assistantRunnerStatus()); }
+    catch { /* Older hubs and a brief disconnect keep the ordinary run status. */ }
   }, [client, docId]);
   useEffect(() => {
     void refresh();
@@ -144,6 +149,7 @@ export function ChatBotPagesDialog({
       if (selectedRequest === "selection" && onSelectionRequest) {
         const sent = await onSelectionRequest({ focus: focus.trim(), perPage, references });
         rememberSelectionRun(docId, { id: sent.id, doc_id: docId, doc_name: docName, request_type: "selection",
+          answer_mode: answerMode,
           page_from: sent.page, page_to: sent.page, focus: focus.trim(), per_page: perPage,
           pages_total: 1, pages_done: 0, footnotes: 1, status: "open", created_at: Date.now(),
           references: references.map(({ title, kind }) => ({ title, kind })) });
@@ -154,7 +160,7 @@ export function ChatBotPagesDialog({
         if (!requestedPages.length) { setMessage("These pages have no readable text."); return; }
         const id = `aj-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
         await client.createAnnotationJob({ id, device_id: loadDeviceId(), doc_id: docId, doc_name: docName,
-          doc_kind: "annotate", request_type: selectedRequest === "page" ? "page" : "pages", focus: focus.trim(), per_page: perPage,
+          doc_kind: "annotate", request_type: selectedRequest === "page" ? "page" : "pages", answer_mode: answerMode, focus: focus.trim(), per_page: perPage,
           pages: requestedPages, palette: [...palette], workspace_items: [...workspaceItems], references });
         rememberAnnotationJob(id, docId);
         setMessage(`Sent to ChatBot.${skipped.length ? ` Skipped ${skipped.length} page${skipped.length === 1 ? "" : "s"} without text.` : ""}`);
@@ -192,6 +198,12 @@ export function ChatBotPagesDialog({
       await refresh();
     } catch { setMessage("Couldn't undo this run."); }
     finally { setBusy(false); }
+  };
+  const statusFor = (run: ChatBotRun) => {
+    const matches = runnerStatus?.job_id === run.id || (run.request_type === "selection" && !runnerStatus?.job_id);
+    if (run.status !== "open" || run.answer_mode !== "app" || !runnerStatus || !matches) return statusLabel(run);
+    if (runnerStatus.state === "failed" && (!runnerStatus.started_at || runnerStatus.started_at < run.created_at)) return statusLabel(run);
+    return runnerStatus.state === "running" || runnerStatus.state === "failed" ? assistantRunnerMessage(runnerStatus) : statusLabel(run);
   };
   return (
     <div className="lc-chatbot-pages-scrim" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
@@ -240,11 +252,13 @@ export function ChatBotPagesDialog({
             {attachments.length ? <p className="lc-settings-hint">{prepared ? sizeLabel(prepared.reduce((total, entry) => total + entry.chars, 0)) : "Reading attachments…"} / {REFERENCES_TOTAL_CHARS.toLocaleString()} total</p> : null}
             {attachmentError ? <p className="lc-chatbot-pages-error" role="alert">{attachmentError}</p> : null}
           </div></section>
-          <p className="lc-settings-hint">Ask your assistant to answer your requests. Footnotes appear as it works.</p>
+          <p className="lc-settings-hint">{answerMode === "app" ? "Your PC starts the assistant automatically. Footnotes appear as it works."
+            : answerMode === "llm" && selectedRequest !== "selection" ? "Your AI model answers single footnotes; page runs need an assistant."
+              : "Ask your assistant to answer your requests. Footnotes appear as it works."}</p>
           <div className="lc-settings-actions-row"><button type="button" className="lc-primary lc-dialog-action" disabled={Boolean(inputError || attachmentError) || prepared === null || busy} onClick={() => void start()}>{busy ? "Sending…" : "Start"}</button></div>
           {message && !active ? <p className="lc-settings-hint" role="status">{message}</p> : null}
           {runs.length ? <section className="lc-settings-fold" aria-label="History"><div className="lc-settings-fold-body lc-settings-fields"><div className="lc-settings-subhead">History</div>
-            <div className="lc-settings-choice">{runs.map((run) => <button key={run.id} type="button" className="lc-settings-choice-option lc-chatbot-history-row" onClick={() => setActiveId(run.id)}>{runLabel(run)}</button>)}</div>
+            <div className="lc-settings-choice">{runs.map((run) => <button key={run.id} type="button" className="lc-settings-choice-option lc-chatbot-history-row" onClick={() => setActiveId(run.id)}>{runLabel(run, statusFor(run))}</button>)}</div>
           </div></section> : null}
         </div>
       </DialogFrame>
@@ -252,7 +266,7 @@ export function ChatBotPagesDialog({
           <DialogFrame className="lc-settings-dialog lc-chatbot-run-popup" titleId="lc-chatbot-run-title" title={requestLabel(active)} subtitle="" icon={CHATBOT_ICON}
             shape="blocky" ariaLabel="Run details" onClose={() => setActiveId(null)}>
             <div className="lc-settings-body lc-dialog-body lc-scroll-pane">
-              <p className="lc-settings-hint">{pageLabel(active.page_from, active.page_to)} · {DENSITY.find((entry) => entry.perPage === active.per_page)?.label ?? active.per_page} · {statusLabel(active)}</p>
+              <p className="lc-settings-hint">{pageLabel(active.page_from, active.page_to)} · {DENSITY.find((entry) => entry.perPage === active.per_page)?.label ?? active.per_page} · {statusFor(active)}</p>
               <p className="lc-settings-hint">Focus: {active.focus || "None"}</p>
               {active.references?.length ? <><div className="lc-settings-subhead">Attachments</div><ul className="lc-chatbot-run-list">{active.references.map((reference, index) => <li key={index}>{reference.title}</li>)}</ul></> : null}
               {active.summary ? <p className="lc-settings-hint">{active.summary}</p> : null}

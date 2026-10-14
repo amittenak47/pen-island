@@ -45,6 +45,60 @@ pub trait FootnoteHub {
     fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String>;
     /// Any other hub route (annotation jobs), relative to the hub base.
     fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String>;
+    fn automatic_inbox(&self) -> bool { false }
+}
+
+/// Automatic runs cannot consume bot-mode requests or another page run.
+pub struct AppFootnoteHub<H> {
+    hub: H,
+    job_id: Option<String>,
+    read_only: bool,
+}
+
+impl<H: FootnoteHub> AppFootnoteHub<H> {
+    pub fn new(hub: H, job_id: Option<String>, read_only: bool) -> Result<Self> {
+        anyhow::ensure!(job_id.as_deref().is_none_or(footnotes::valid_id), "Invalid annotation job id.");
+        Ok(Self { hub, job_id, read_only })
+    }
+
+    fn app_request(&self, id: &str) -> Result<Value, String> {
+        let request = self.hub.get(id)?;
+        if request["answer_mode"] != "app" { return Err("This request is not assigned to the assistant app.".into()); }
+        Ok(request)
+    }
+
+    fn app_job(&self, id: &str) -> Result<(), String> {
+        if self.job_id.as_deref() != Some(id) { return Err("This page run is not assigned to this assistant process.".into()); }
+        let job = self.hub.call("GET", &format!("/annotation-jobs/{id}/pages?from=1&to=1"), None)?;
+        if job["answer_mode"] != "app" { return Err("This page run is not assigned to the assistant app.".into()); }
+        Ok(())
+    }
+}
+
+impl<H: FootnoteHub> FootnoteHub for AppFootnoteHub<H> {
+    fn automatic_inbox(&self) -> bool { true }
+    fn list_pending(&self) -> Result<Value, String> {
+        let rows = self.hub.list_pending()?;
+        Ok(Value::Array(rows.as_array().into_iter().flatten().filter(|row| row["answer_mode"] == "app").cloned().collect()))
+    }
+    fn get(&self, id: &str) -> Result<Value, String> { self.app_request(id) }
+    fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String> {
+        if self.read_only { return Err("This is a read-only connection test.".into()); }
+        self.app_request(id)?;
+        self.hub.submit(id, submission)
+    }
+    fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+        if method == "GET" && path == "/annotation-jobs" {
+            let rows = self.hub.call(method, path, body)?;
+            return Ok(Value::Array(rows.as_array().into_iter().flatten().filter(|row|
+                row["answer_mode"] == "app" && row["id"].as_str() == self.job_id.as_deref()).cloned().collect()));
+        }
+        if self.read_only && method != "GET" { return Err("This is a read-only connection test.".into()); }
+        let id = path.strip_prefix("/annotation-jobs/").and_then(|rest| rest.split('/').next())
+            .filter(|id| footnotes::valid_id(id)).ok_or_else(|| "This route is unavailable to the assistant app.".to_string())?;
+        self.app_job(id)?;
+        self.hub.call(method, path, body)
+    }
 }
 
 pub struct HttpFootnoteHub {
@@ -248,7 +302,11 @@ pub fn dispatch(hub: &dyn FootnoteHub, message: &Value) -> Option<Value> {
     Some(match method {
         "initialize" => result_reply(id, initialize_result(&params)),
         "ping" => result_reply(id, json!({})),
-        "tools/list" => result_reply(id, json!({ "tools": tool_list() })),
+        "tools/list" => {
+            let mut tools = tool_list();
+            if hub.automatic_inbox() { tools.retain(|tool| crate::serve::assistant_runner::MCP_TOOLS.contains(&tool["name"].as_str().unwrap_or(""))); }
+            result_reply(id, json!({ "tools": tools }))
+        },
         "prompts/list" => result_reply(id, json!({ "prompts": prompt_list() })),
         "prompts/get" => match get_prompt(&params) {
             Some(prompt) => result_reply(id, prompt),

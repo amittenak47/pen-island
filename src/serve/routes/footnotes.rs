@@ -27,6 +27,9 @@ pub async fn create_footnote_request(Json(body): Json<Value>) -> Result<Json<foo
     .await
     .map_err(map_store_error)?;
     crate::serve::footnote_answers::schedule(row.clone());
+    if row.answer_mode == footnotes::AnswerMode::App && row.status == "pending" {
+        crate::serve::assistant_runner::schedule(None);
+    }
     Ok(Json(row))
 }
 
@@ -422,6 +425,37 @@ mod footnote_tests {
         footnotes::submit_result(&conn, "fr-llm", &["Saved answer".into()], &[], 40).unwrap();
         assert!(footnotes::list_pending_llm(&conn, None).unwrap().is_empty());
         assert_eq!(footnotes::list_results(&conn, Some("dev-a")).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn assistant_app_requests_round_trip_and_share_the_mcp_inbox_without_model_work() {
+        let (dir, conn) = open();
+        for (id, mode, time) in [
+            ("fr-bot", footnotes::AnswerMode::Bot, 1),
+            ("fr-app", footnotes::AnswerMode::App, 2),
+            ("fr-llm", footnotes::AnswerMode::Llm, 3),
+        ] {
+            let mut body = sample(id, "dev-a");
+            body.answer_mode = mode;
+            let row = footnotes::create_request(&conn, body, time).unwrap();
+            assert_eq!(row.answer_mode, mode);
+            assert_eq!(serde_json::from_value::<footnotes::AnswerMode>(serde_json::to_value(mode).unwrap()).unwrap(), mode);
+        }
+        let inbox = footnotes::list_pending(&conn).unwrap();
+        assert_eq!(inbox.iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["fr-bot", "fr-app"]);
+        assert_eq!(inbox[1].answer_mode, footnotes::AnswerMode::App);
+        assert_eq!(footnotes::list_pending_app(&conn).unwrap().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["fr-app"]);
+        assert_eq!(footnotes::list_pending_llm(&conn, None).unwrap().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["fr-llm"]);
+        drop(conn);
+        let conn = crate::pads::open(&dir.path().join("pads.db")).unwrap();
+        assert_eq!(footnotes::get_request(&conn, "fr-app").unwrap().unwrap().answer_mode, footnotes::AnswerMode::App);
+        let retried = footnotes::create_request(&conn, sample("fr-app", "dev-a"), 9).unwrap();
+        assert_eq!(retried.answer_mode, footnotes::AnswerMode::App);
+        footnotes::submit_result(&conn, "fr-app", &["Automatic explanation".into()], &[], 10).unwrap();
+        assert!(footnotes::list_pending_app(&conn).unwrap().is_empty());
+        assert_eq!(footnotes::list_results(&conn, Some("dev-a")).unwrap()[0].id, "fr-app");
+        footnotes::ack_request(&conn, "fr-app", 11).unwrap();
+        assert!(footnotes::list_results(&conn, Some("dev-a")).unwrap().is_empty());
     }
 
     #[test]

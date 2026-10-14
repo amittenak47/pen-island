@@ -18,10 +18,15 @@ pub enum AnswerMode {
     #[default]
     Bot,
     Llm,
+    App,
 }
 
 impl AnswerMode {
-    fn as_str(self) -> &'static str { match self { Self::Bot => "bot", Self::Llm => "llm" } }
+    pub(crate) fn as_str(self) -> &'static str { match self { Self::Bot => "bot", Self::Llm => "llm", Self::App => "app" } }
+
+    pub(crate) fn from_str(value: &str) -> Self {
+        match value { "llm" => Self::Llm, "app" => Self::App, _ => Self::Bot }
+    }
 }
 
 #[derive(Debug)]
@@ -158,6 +163,8 @@ pub struct FootnoteRequest {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FootnoteRequestSummary {
     pub id: String,
+    #[serde(default)]
+    pub answer_mode: AnswerMode,
     pub doc_name: String,
     pub page: Option<i64>,
     pub excerpt: String,
@@ -470,13 +477,14 @@ pub fn get_request(conn: &Connection, id: &str) -> Result<Option<FootnoteRequest
 
 pub fn list_pending(conn: &Connection) -> Result<Vec<FootnoteRequestSummary>, FootnoteFail> {
     let mut stmt = conn.prepare(
-        "SELECT id, doc_name, page, excerpt, context, prompt, created_at
-         FROM footnote_requests WHERE status = 'pending' AND answer_mode = 'bot'
+        "SELECT id, doc_name, page, excerpt, context, prompt, created_at, answer_mode
+         FROM footnote_requests WHERE status = 'pending' AND answer_mode IN ('bot', 'app')
          ORDER BY created_at ASC, id ASC LIMIT ?1",
     )?;
     let rows = stmt.query_map(params![LIST_CAP], |row| {
         Ok(FootnoteRequestSummary {
             id: row.get(0)?,
+            answer_mode: AnswerMode::from_str(&row.get::<_, String>(7)?),
             doc_name: row.get(1)?,
             page: row.get(2)?,
             excerpt: row.get(3)?,
@@ -493,6 +501,15 @@ pub fn list_pending_llm(conn: &Connection, device: Option<&str>) -> Result<Vec<F
     let mut stmt = conn.prepare("SELECT id FROM footnote_requests WHERE status='pending' AND answer_mode='llm'
         AND (?1 IS NULL OR device_id=?1) ORDER BY created_at, id LIMIT ?2")?;
     let ids = stmt.query_map(params![device, LIST_CAP], |row| row.get::<_, String>(0))?
+        .collect::<Result<Vec<_>, _>>()?;
+    ids.into_iter().map(|id| get_request(conn, &id)?.ok_or(FootnoteFail::NotFound)).collect()
+}
+
+/// Automatic assistant runs never claim requests waiting for a bot or model.
+pub fn list_pending_app(conn: &Connection) -> Result<Vec<FootnoteRequest>, FootnoteFail> {
+    let mut stmt = conn.prepare("SELECT id FROM footnote_requests WHERE status='pending' AND answer_mode='app'
+        ORDER BY created_at, id LIMIT ?1")?;
+    let ids = stmt.query_map(params![LIST_CAP], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     ids.into_iter().map(|id| get_request(conn, &id)?.ok_or(FootnoteFail::NotFound)).collect()
 }
@@ -607,7 +624,7 @@ struct PackedRequest {
 fn map_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PackedRequest> {
     Ok(PackedRequest {
         request: FootnoteRequest {
-            answer_mode: if row.get::<_, String>(16)? == "llm" { AnswerMode::Llm } else { AnswerMode::Bot },
+            answer_mode: AnswerMode::from_str(&row.get::<_, String>(16)?),
             id: row.get(0)?,
             device_id: row.get(1)?,
             doc_id: row.get(2)?,

@@ -5,6 +5,7 @@
 import { b64ToBytes, bytesToB64, loadInvoke, readInvokeResult } from "./nativeHttp";
 import { HUB_MAX_DOCUMENT_BYTES, loadPadHub, type PadHub } from "../util/padHub";
 import { loadDeviceId } from "../util/devicePrefs";
+import type { ChatBotAnswerMode } from "../util/chatBotClient";
 import {
   beginPadHubStatusRequest, isPadHubOffline, PAD_HUB_PROBE_TIMEOUT_MS, reportPadHubStatus,
 } from "../util/padHubStatus";
@@ -715,7 +716,7 @@ export interface FootnotePageNoteDto {
 }
 
 export interface FootnoteRequestDto {
-  answer_mode?: "bot" | "llm";
+  answer_mode?: ChatBotAnswerMode;
   id: string;
   device_id: string;
   doc_id: string;
@@ -745,6 +746,7 @@ export interface NewAnnotationJobDto {
   doc_name: string;
   doc_kind: "annotate" | "web";
   request_type?: "page" | "pages";
+  answer_mode?: ChatBotAnswerMode;
   focus: string;
   /** Most footnotes per page (Light 2, Normal 4, Thorough 8). */
   per_page: number;
@@ -766,6 +768,7 @@ export interface AnnotationJobDto {
   doc_id: string;
   doc_name: string;
   request_type?: "page" | "pages";
+  answer_mode?: ChatBotAnswerMode;
   page_from: number;
   page_to: number;
   focus: string;
@@ -778,6 +781,25 @@ export interface AnnotationJobDto {
   summary?: string;
   /** Only attachment labels are included in history, never their text. */
   references?: Pick<AnnotationJobReferenceDto, "title" | "kind">[];
+}
+
+export interface AssistantRunnerConfig {
+  app: "codex" | "claude";
+  model: string;
+  effort: "low" | "medium" | "high";
+  allow_bots: boolean;
+}
+
+export const DEFAULT_ASSISTANT_RUNNER_CONFIG: AssistantRunnerConfig = { app: "codex", model: "", effort: "high", allow_bots: false };
+
+export interface AssistantRunnerStatus {
+  state: "idle" | "running" | "done" | "failed";
+  app: "codex" | "claude";
+  started_at: number | null;
+  finished_at: number | null;
+  job_id?: string | null;
+  requests_answered?: number | null;
+  error?: string | null;
 }
 
 /** A footnote an assistant described for a page, waiting to be placed. */
@@ -983,6 +1005,22 @@ export class LcClient {
 
   async putConfig(config: LcConfigPut, opts?: { timeoutMs?: number }): Promise<LcConfig> {
     return this.cmd("lc_put_config", { config }, opts?.timeoutMs);
+  }
+
+  async assistantRunnerConfig(): Promise<AssistantRunnerConfig> {
+    return await padInvokeOrHub(() => this.cmd("lc_assistant_runner_config"), "GET", "/assistant-runner/config");
+  }
+
+  async putAssistantRunnerConfig(config: AssistantRunnerConfig): Promise<AssistantRunnerConfig> {
+    return await padInvokeOrHub(() => this.cmd("lc_put_assistant_runner_config", { body: config }), "PUT", "/assistant-runner/config", config);
+  }
+
+  async assistantRunnerStatus(): Promise<AssistantRunnerStatus> {
+    return await padInvokeOrHub(() => this.cmd("lc_assistant_runner_status"), "GET", "/assistant-runner");
+  }
+
+  async testAssistantRunner(config: AssistantRunnerConfig): Promise<AssistantRunnerStatus> {
+    return await padInvokeOrHub(() => this.cmd("lc_test_assistant_runner", { body: config }), "POST", "/assistant-runner/test", config);
   }
 
   async llmStatus(): Promise<LlmStatus> {

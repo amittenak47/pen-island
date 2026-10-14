@@ -118,11 +118,13 @@ describe("rich ChatBot answers", () => {
     ];
     const request = buildFootnoteRequest({
       id: "fr-selection", deviceId: "dev", docId: "doc-1", docName: "Algorithms",
+      answerMode: "app",
       anchor: { kind: "text", start: 0, end: 4, scope: "p91" }, excerpt: "DFS",
       pageText: "DFS explores deep first.", pages: null, viewerPage: 91, footnotes: [], exceptId: "fn-1",
       focus: "  Preview the next chapter's problems.  ", perPage: 8, references,
     });
     expect(request.page).toBe(91);
+    expect(request.answer_mode).toBe("app");
     expect(request.extras).toEqual({
       focus: "Preview the next chapter's problems.", per_page: 8, references,
     });

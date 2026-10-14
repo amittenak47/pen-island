@@ -73,6 +73,7 @@ enum ConfigCmd {
 }
 
 fn main() {
+    if whiteboard::serve::assistant_runner::serve_mcp_if_requested() { return; }
     #[cfg(windows)]
     let _ = colored::control::set_virtual_terminal(true);
 

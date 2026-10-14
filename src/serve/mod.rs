@@ -11,6 +11,7 @@
 
 pub mod coach;
 pub mod footnote_answers;
+pub mod assistant_runner;
 pub mod common;
 pub mod routes;
 pub mod board_session;
@@ -84,6 +85,7 @@ pub async fn listen_lan(state: Shared, port: u16) -> Result<()> {
         .await
         .with_context(|| format!("cannot bind pad-sync listener on 0.0.0.0:{port}"))?;
     footnote_answers::resume(None);
+    assistant_runner::resume();
     axum::serve(listener, app)
         .await
         .context("pad-sync listener stopped")?;
@@ -132,6 +134,9 @@ pub async fn dispatch(
 
 pub fn router(state: Shared) -> Router {
     Router::new()
+        .route("/assistant-runner", get(routes::get_assistant_runner))
+        .route("/assistant-runner/config", get(routes::get_assistant_runner_config).put(routes::put_assistant_runner_config))
+        .route("/assistant-runner/test", post(routes::test_assistant_runner))
         .route("/problems", get(routes::list_problems))
         .route("/datasets", get(routes::list_datasets))
         .route("/tags", get(routes::list_tags))

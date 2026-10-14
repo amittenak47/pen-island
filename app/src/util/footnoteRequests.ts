@@ -8,6 +8,7 @@ import { isTextAnchor } from "./docAnchors";
 import { makeEdge, putEdge, type NodeRef, type NodeType } from "./noteLinks";
 import { readFootnoteOutbox, storeFootnoteRequest, markFootnoteRequestSent, forgetFootnoteRequest } from "./footnoteOutbox";
 import { debugLog } from "./debugLog";
+import type { ChatBotAnswerMode } from "./chatBotClient";
 import type { DocAnchor } from "./docAnchors";
 import { getAnnotateDoc, mutateAnnotateFootnotes } from "./annotateStore";
 import {
@@ -112,7 +113,7 @@ export function pageFootnotesFor(
 }
 
 export function buildFootnoteRequest(input: {
-  answerMode?: "bot" | "llm";
+  answerMode?: ChatBotAnswerMode;
   id: string;
   deviceId: string;
   docId: string;

@@ -9,6 +9,7 @@
 import { footnoteRevision, type DocFootnote } from "./docFootnotes";
 import type { FootnoteWriteResult } from "./footnoteRequests";
 import type { AnnotationJobReferenceDto } from "../api/client";
+import type { ChatBotAnswerMode } from "./chatBotClient";
 
 export function pristineMarksFromSaved(
   saved: { footnotes?: readonly DocFootnote[] | null },
@@ -44,7 +45,7 @@ export type SelectionFootnoteOptions = {
 export type HeldFootnoteAsk = {
   requestId: string;
   footnoteId: string;
-  answerMode?: "bot" | "llm";
+  answerMode?: ChatBotAnswerMode;
   options?: SelectionFootnoteOptions;
 };
 

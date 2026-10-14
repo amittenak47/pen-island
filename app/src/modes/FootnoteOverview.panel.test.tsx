@@ -71,6 +71,10 @@ afterEach(() => {
 });
 
 describe("FootnoteOverview panel", () => {
+  it("shows assistant app failures on pending footnotes", () => {
+    mount({ ...MARK, pending: "fr-app" }, { pendingStatus: "Codex couldn't finish. Open Settings → ChatBot → Test." });
+    expect(document.querySelector('[role="status"]')?.textContent).toBe("Codex couldn't finish. Open Settings → ChatBot → Test.");
+  });
   it("replaces the ✕ with a Reset button in the tools row", () => {
     mount(MARK);
     const toolbar = document.querySelector(".lc-footnote-overview-toolbar")!;

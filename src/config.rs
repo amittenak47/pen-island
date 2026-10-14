@@ -16,6 +16,32 @@ pub struct Config {
     pub serve: ServeConfig,
     pub coach: CoachConfig,
     pub voice: VoiceConfig,
+    pub assistant_app: AssistantAppConfig,
+}
+
+/// The desktop owns these settings; tablets only send the selected answer mode.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(default)]
+pub struct AssistantAppConfig {
+    pub app: String,
+    pub model: String,
+    pub effort: String,
+    pub allow_bots: bool,
+}
+
+impl Default for AssistantAppConfig {
+    fn default() -> Self {
+        Self { app: "codex".into(), model: String::new(), effort: "high".into(), allow_bots: false }
+    }
+}
+
+impl AssistantAppConfig {
+    pub fn validate(&self) -> Result<()> {
+        anyhow::ensure!(matches!(self.app.as_str(), "codex" | "claude"), "Choose Codex or Claude Code.");
+        anyhow::ensure!(matches!(self.effort.as_str(), "low" | "medium" | "high"), "Choose low, medium or high effort.");
+        anyhow::ensure!(self.model.chars().count() <= 200 && !self.model.chars().any(char::is_control), "The model name is too long or contains invalid characters.");
+        Ok(())
+    }
 }
 
 /// Feature flags for the streaming coach loops.

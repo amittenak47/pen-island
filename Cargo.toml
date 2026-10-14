@@ -43,7 +43,7 @@ comfy-table = "7"
 rand = "0.8"
 walkdir = "2"
 axum = { version = "0.7", features = ["ws", "macros"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "signal", "fs", "io-util", "process"] }
 tower = { version = "0.4", features = ["util"] }
 tower-http = { version = "0.5", features = ["cors"] }
 futures-util = "0.3"

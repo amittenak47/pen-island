@@ -203,6 +203,7 @@ pub fn open(path: &Path) -> Result<Connection> {
     // Attachments and the request label shown in the document's history.
     ensure_column(&conn, "annotation_jobs", "refs", "TEXT NOT NULL DEFAULT '[]'")?;
     ensure_column(&conn, "annotation_jobs", "request_type", "TEXT NOT NULL DEFAULT 'pages'")?;
+    ensure_column(&conn, "annotation_jobs", "answer_mode", "TEXT NOT NULL DEFAULT 'bot'")?;
     atomic_sync::sweep(&conn)?;
     Ok(())
     })?;

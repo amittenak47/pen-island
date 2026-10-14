@@ -21,6 +21,9 @@ pub async fn create_annotation_job(Json(body): Json<Value>) -> Result<Json<JobSu
     let row = blocking(move || annotation_jobs::create_job(&conn()?, job, now).map_err(into_anyhow))
         .await
         .map_err(map_store_error)?;
+    if row.answer_mode == crate::pads::footnotes::AnswerMode::App && row.status == "open" {
+        crate::serve::assistant_runner::schedule(Some(&row.id));
+    }
     Ok(Json(row))
 }
 

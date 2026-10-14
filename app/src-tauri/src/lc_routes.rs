@@ -1007,6 +1007,32 @@ pub async fn lc_ack_annotation_job_items(
 }
 
 #[tauri::command]
+pub async fn lc_assistant_runner_status(state: State<'_, Shared>) -> Result<LcResponse, String> {
+    go(state, "GET", "/assistant-runner".into(), None).await
+}
+
+#[tauri::command]
+pub async fn lc_assistant_runner_config(state: State<'_, Shared>) -> Result<LcResponse, String> {
+    go(state, "GET", "/assistant-runner/config".into(), None).await
+}
+
+#[tauri::command]
+pub async fn lc_put_assistant_runner_config(
+    state: State<'_, Shared>,
+    body: serde_json::Value,
+) -> Result<LcResponse, String> {
+    go(state, "PUT", "/assistant-runner/config".into(), Some(body)).await
+}
+
+#[tauri::command]
+pub async fn lc_test_assistant_runner(
+    state: State<'_, Shared>,
+    body: Option<serde_json::Value>,
+) -> Result<LcResponse, String> {
+    go(state, "POST", "/assistant-runner/test".into(), body).await
+}
+
+#[tauri::command]
 pub async fn lc_list_devices(state: State<'_, Shared>) -> Result<LcResponse, String> {
     go(state, "GET", "/devices".into(), None).await
 }

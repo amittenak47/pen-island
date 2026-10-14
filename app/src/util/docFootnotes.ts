@@ -215,6 +215,8 @@ export interface DocFootnote {
    * values are dropped on read — a spinner with no request is a stuck mark.
    */
   pending?: string;
+  /** Who was asked, retained when the reader changes their answer setting. */
+  answerMode?: "bot" | "llm" | "app";
   /**
    * The page-range ChatBot run that created this mark, so the run can be undone
    * as a whole. Absent on every mark the reader made.
@@ -690,6 +692,7 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
         whiteboards: rawWhiteboards,
         artifacts: rawArtifacts,
         pending: rawPending,
+        answerMode: rawAnswerMode,
         jobId: rawJobId,
         ...rest
       } = candidate as DocFootnote & { userNotes?: unknown };
@@ -720,6 +723,7 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
           ? candidate.blockText
           : undefined;
       const subMarks = sanitizeSubMarks(candidate.subMarks);
+      const answerMode = rawAnswerMode === "bot" || rawAnswerMode === "llm" || rawAnswerMode === "app" ? rawAnswerMode : undefined;
       const pending = typeof rawPending === "string" && rawPending.length > 0 ? rawPending : undefined;
       return [
         {
@@ -738,6 +742,7 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
           ...(subMarks ? { subMarks } : {}),
           ...(updatedAt != null ? { updatedAt } : {}),
           ...(pending ? { pending } : {}),
+          ...(answerMode ? { answerMode } : {}),
         ...(jobId ? { jobId } : {}),
         },
       ];
@@ -916,6 +921,7 @@ export function footnoteFieldsRevision(entry: DocFootnote): string {
           )
           .join("\x1f"),
         entry.pending ?? "",
+        entry.answerMode ?? "",
       ].join("\x1e")
   );
 }

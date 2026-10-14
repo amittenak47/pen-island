@@ -683,3 +683,13 @@ describe("markChipLeft", () => {
       .toBe(389);
   });
 });
+
+
+describe("pending answer mode", () => {
+  it("retains the original mode across a document reload", () => {
+    for (const answerMode of ["bot", "llm", "app"] as const) {
+      expect(sanitizeFootnotes([footnote({ pending: "req-1", answerMode })])[0]?.answerMode).toBe(answerMode);
+    }
+    expect(sanitizeFootnotes([{ ...footnote(), answerMode: "unknown" }])[0]).not.toHaveProperty("answerMode");
+  });
+});

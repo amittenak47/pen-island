@@ -153,7 +153,7 @@ it("saves the regular-LLM answer mode and hides external bot setup", async () =>
   expect(select.value).toBe("bot");
   await act(async () => { select.value = "llm"; select.dispatchEvent(new Event("change", { bubbles: true })); });
   expect(fold("ChatBot").querySelector('[aria-label="ChatBot assistant"]')).toBeNull();
-  expect(fold("ChatBot").textContent).toContain("answers automatically with the AI model set up above");
+  expect(fold("ChatBot").textContent).toContain("A local model or a cloud API key. Quick; fine for single footnotes.");
   await act(async () => save().click());
   expect(localStorage.getItem("whiteboard.chatBotAnswerMode.v1")).toBe("llm");
   expect(api.putConfig).not.toHaveBeenCalled();

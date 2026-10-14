@@ -386,6 +386,7 @@ import { isPadHubOffline } from "./util/padHubStatus";
 import { pullMissingHubFiles, waitForPadPushes } from "./util/padSync";
 import { hubReloadAppState, hubReloadDocumentElements } from "./util/boardHubReload";
 import { loadChatBotAnswerMode } from "./util/chatBotClient";
+import { assistantPendingMessage, useAssistantRunnerStatus } from "./util/useAssistantRunnerStatus";
 import {
   applyConflictFootnoteBoards,
   deleteFootnoteWhiteboard,
@@ -919,6 +920,9 @@ export const Workspace = memo(function Workspace({
    * tick — which runs outside React — writes it to the library entry.
    */
   const [annotateFootnotes, setAnnotateFootnotesRaw] = useState<DocFootnote[]>([]);
+  const assistantRunnerStatus = useAssistantRunnerStatus(client,
+    active && annotateFootnotes.some(mark => Boolean(mark.pending) && mark.answerMode === "app"),
+    annotateFootnotes.filter(mark => mark.pending && mark.answerMode === "app").map(mark => mark.pending).join(","));
   /**
    * Every write to the marks goes through here so edits get a timestamp.
    *
@@ -9016,6 +9020,7 @@ export const Workspace = memo(function Workspace({
       const excerpt = (selection.excerpt || selection.text).trim();
       if (!excerpt) throw new Error("Select some text first.");
       const requestId = freshFootnoteRequestId();
+      const answerMode = loadChatBotAnswerMode();
       const existing = annotateFootnotesRef.current;
       const footnoteId = freshFootnoteId(existing);
       const anchor = selection.anchor;
@@ -9026,6 +9031,7 @@ export const Workspace = memo(function Workspace({
         excerpt: excerpt.slice(0, 4000),
         createdAt: Date.now(),
         pending: requestId,
+        answerMode,
         ...(options ? { jobId: requestId } : {}),
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(existing),
@@ -9034,7 +9040,7 @@ export const Workspace = memo(function Workspace({
       });
       heldFootnoteAsksRef.current = [
         ...heldFootnoteAsksRef.current.filter((ask) => ask.requestId !== requestId),
-        { requestId, footnoteId, answerMode: loadChatBotAnswerMode(), ...(options ? { options } : {}) },
+        { requestId, footnoteId, answerMode, ...(options ? { options } : {}) },
       ];
       flushSync(() => setAnnotateFootnotes(next));
       // The save posts the ask only when the stored record contains this pending mark.
@@ -12058,6 +12064,7 @@ export const Workspace = memo(function Workspace({
             onRemoveWorkspaceLink={removeWorkspaceLink}
             onRestoreWorkspaceLink={restoreWorkspaceLink}
             footnote={openFootnote}
+            pendingStatus={assistantPendingMessage(assistantRunnerStatus, openFootnote)}
             number={footnoteNumbers.get(openFootnote.id)}
             displayTheme={footnoteThemes.get(openFootnote.id)}
             miniNoteCount={miniNoteEntries.length}

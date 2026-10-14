@@ -11,7 +11,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 use super::footnotes::{
-    self, FootnoteExtras, FootnoteFail, FootnoteLink, FootnoteMark, FootnoteResult, FootnoteSubmission,
+    self, AnswerMode, FootnoteExtras, FootnoteFail, FootnoteLink, FootnoteMark, FootnoteResult, FootnoteSubmission,
     WorkspaceItem,
 };
 use super::write_transaction;
@@ -87,6 +87,8 @@ pub struct JobReferenceSummary {
 #[derive(Debug, Clone, Deserialize)]
 pub struct NewJob {
     pub id: String,
+    #[serde(default)]
+    pub answer_mode: AnswerMode,
     pub device_id: String,
     pub doc_id: String,
     pub doc_name: String,
@@ -169,6 +171,7 @@ pub struct PlacedAnnotation {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 pub struct JobSummary {
     pub id: String,
+    pub answer_mode: AnswerMode,
     pub doc_id: String,
     pub doc_name: String,
     pub request_type: String,
@@ -273,8 +276,8 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
         if exists.is_none() {
             conn.execute(
                 "INSERT INTO annotation_jobs (id, device_id, doc_id, doc_name, doc_kind, focus, per_page,
-                    pages, palette, workspace_items, status, summary, created_at, finished_at, refs, request_type)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', NULL, ?11, NULL, ?12, ?13)",
+                    pages, palette, workspace_items, status, summary, created_at, finished_at, refs, request_type, answer_mode)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', NULL, ?11, NULL, ?12, ?13, ?14)",
                 params![
                     job.id,
                     job.device_id,
@@ -289,6 +292,7 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
                     now,
                     serde_json::to_string(&job.references)?,
                     if job.request_type.is_empty() { "pages" } else { job.request_type.as_str() },
+                    job.answer_mode.as_str(),
                 ],
             )?;
         }
@@ -298,6 +302,7 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
 
 struct JobRow {
     id: String,
+    answer_mode: AnswerMode,
     device_id: String,
     doc_id: String,
     doc_name: String,
@@ -318,7 +323,7 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
     let raw = conn
         .query_row(
             "SELECT id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette,
-                    workspace_items, status, summary, created_at, refs, request_type
+                    workspace_items, status, summary, created_at, refs, request_type, answer_mode
              FROM annotation_jobs WHERE id = ?1",
             params![id],
             |row| {
@@ -329,15 +334,17 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
                     row.get::<_, String>(9)?, row.get::<_, String>(10)?, row.get::<_, Option<String>>(11)?,
                     row.get::<_, i64>(12)?, row.get::<_, String>(13)?,
                     row.get::<_, String>(14)?,
+                    row.get::<_, String>(15)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette, items, status, summary, created_at, refs, request_type)) = raw else {
+    let Some((id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette, items, status, summary, created_at, refs, request_type, answer_mode)) = raw else {
         return Ok(None);
     };
     Ok(Some(JobRow {
         id,
+        answer_mode: AnswerMode::from_str(&answer_mode),
         device_id,
         doc_id,
         doc_name,
@@ -372,6 +379,7 @@ fn summary_of(conn: &Connection, id: &str) -> Result<Option<JobSummary>, Footnot
         page_to: job.pages.iter().map(|page| page.page).max().unwrap_or(0),
         pages_total: job.pages.len(),
         id: job.id,
+        answer_mode: job.answer_mode,
         doc_id: job.doc_id,
         doc_name: job.doc_name,
         request_type: job.request_type,
@@ -402,6 +410,11 @@ pub fn list_open(conn: &Connection) -> Result<Vec<JobSummary>, FootnoteFail> {
     summaries(conn, "SELECT id FROM annotation_jobs WHERE status = 'open' ORDER BY created_at ASC, id ASC LIMIT 20", &[])
 }
 
+/// Pending page runs reserved for the automatic assistant app.
+pub fn list_open_app(conn: &Connection) -> Result<Vec<JobSummary>, FootnoteFail> {
+    summaries(conn, "SELECT id FROM annotation_jobs WHERE status = 'open' AND answer_mode = 'app' ORDER BY created_at ASC, id ASC LIMIT 20", &[])
+}
+
 /// A device's jobs on one document, newest first, for its progress list.
 pub fn list_for_doc(conn: &Connection, device: &str, doc: &str) -> Result<Vec<JobSummary>, FootnoteFail> {
     summaries(
@@ -421,6 +434,7 @@ pub fn read_pages(conn: &Connection, id: &str, from: i64, to: i64) -> Result<Val
     let all: Vec<i64> = job.pages.iter().map(|page| page.page).collect();
     Ok(json!({
         "id": job.id,
+        "answer_mode": job.answer_mode,
         "doc_name": job.doc_name,
         "request_type": job.request_type,
         "status": job.status,
@@ -615,6 +629,7 @@ mod tests {
     fn job(id: &str) -> NewJob {
         NewJob {
             id: id.into(),
+            answer_mode: AnswerMode::Bot,
             device_id: "tablet".into(),
             doc_id: "algo".into(),
             doc_name: "Algorithms".into(),
@@ -781,6 +796,52 @@ mod tests {
         assert!(matches!(create_job(&conn, single.clone(), 2), Err(FootnoteFail::Invalid(_))));
         single.pages.truncate(1);
         assert_eq!(create_job(&conn, single, 2).unwrap().request_type, "page");
+    }
+
+    #[test]
+    fn jobs_preserve_answer_modes_and_app_progress_uses_the_same_delivery() {
+        let (dir, conn) = open();
+        for (id, answer_mode, time) in [
+            ("aj-bot", AnswerMode::Bot, 1), ("aj-app", AnswerMode::App, 2), ("aj-llm", AnswerMode::Llm, 3),
+        ] {
+            let mut body = job(id);
+            body.answer_mode = answer_mode;
+            assert_eq!(create_job(&conn, body, time).unwrap().answer_mode, answer_mode);
+        }
+        assert_eq!(list_open(&conn).unwrap().len(), 3);
+        assert_eq!(list_open_app(&conn).unwrap().iter().map(|row| row.id.as_str()).collect::<Vec<_>>(), ["aj-app"]);
+        drop(conn);
+        let conn = crate::pads::open(&dir.path().join("pads.db")).unwrap();
+        assert_eq!(read_pages(&conn, "aj-app", 91, 92).unwrap()["answer_mode"], "app");
+        assert_eq!(create_job(&conn, job("aj-app"), 5).unwrap().answer_mode, AnswerMode::App);
+        submit_page(&conn, "aj-app", 91, &[note("Depth-first search")], 6).unwrap();
+        let running = &list_open_app(&conn).unwrap()[0];
+        assert_eq!((running.pages_done, running.footnotes), (1, 1));
+        assert_eq!(items_for_device(&conn, "tablet").unwrap()[0]["job_id"], "aj-app");
+        finish_job(&conn, "aj-app", "Automatic notes", 7).unwrap();
+        assert!(list_open_app(&conn).unwrap().is_empty());
+        let history = list_for_doc(&conn, "tablet", "algo").unwrap();
+        let done = history.iter().find(|row| row.id == "aj-app").unwrap();
+        assert_eq!(done.answer_mode, AnswerMode::App);
+        assert_eq!(done.status, "done");
+        assert_eq!(done.summary.as_deref(), Some("Automatic notes"));
+    }
+
+    #[test]
+    fn old_job_tables_and_requests_without_a_mode_default_to_bot() {
+        let (dir, conn) = open();
+        create_job(&conn, job("aj-old"), 1).unwrap();
+        conn.execute("ALTER TABLE annotation_jobs DROP COLUMN answer_mode", []).unwrap();
+        drop(conn);
+        let conn = crate::pads::open(&dir.path().join("pads.db")).unwrap();
+        assert_eq!(list_for_doc(&conn, "tablet", "algo").unwrap()[0].answer_mode, AnswerMode::Bot);
+        let body: NewJob = serde_json::from_value(json!({
+            "id": "aj-old-client", "device_id": "tablet", "doc_id": "algo", "doc_name": "Algorithms",
+            "per_page": 4, "pages": [{ "page": 1, "text": "A chapter introduction" }]
+        })).unwrap();
+        assert_eq!(body.answer_mode, AnswerMode::Bot);
+        assert_eq!(create_job(&conn, body, 2).unwrap().answer_mode, AnswerMode::Bot);
+        assert!(list_open_app(&conn).unwrap().is_empty());
     }
 
     #[test]
