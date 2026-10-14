@@ -64,7 +64,9 @@ WORKFLOW = (
 FOOTNOTE_GUIDE = (
     "Explain the selected words in the context of the surrounding text, for a reader who is in "
     "the middle of this document. Write markdown notes of a few sentences each, each opening "
-    "with a short bold label of two to four words and a colon (for example **Why it works:**), "
+    "with a short bold label of two to four words and a colon that names this note's specific "
+    "idea (for example **Finish times reverse edges:**, not a generic heading like **Why it "
+    "works:**), "
     "which the reader's app shows as the note's title: first the idea "
     "in plain words, then a small example or the intuition behind it, then a common mistake when "
     "there is one. For a selection, use extras.per_page as the limit on the number of notes when "

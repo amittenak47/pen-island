@@ -37,7 +37,9 @@ describe("item chips", () => {
     expect(chipTitle("**Helps with:** Exercise 3.3(c), Exercise 3.3(d)")).toBe("Helps with 3.3(c), 3.3(d)");
     expect(chipTitle("**Helps with:** Exercise 3.1, Exercise 3.2, Exercise 3.3, Exercise 3.12")).toBe("Helps with 3.1, 3.2, 3.3, 3.12");
     expect(chipTitle("**Helps with:** Exercise 3.1, 3.2, 3.3, 3.12, 3.16(a), HW 2(b)")).toBe("Helps with");
-    expect(chipTitle("**Think about it:** Which tasks could swap places?")).toBe("Think about it");
+    expect(chipTitle("**Think about it:** Which tasks could swap places?")).toBe("Which tasks could swap places?");
+    expect(chipTitle("**Think about it:** Which tasks could exchange places without breaking any precedence constraint?")).toBe("Which tasks could exchange places…?");
+    expect(chipTitle("**Looking ahead:** Pre and post numbers come next.")).toBe("Ahead: Pre and post numbers come next");
     expect(chipTitle("Finish times run opposite to the arrows.")).toBe("Finish times run opposite to the arrows");
     expect(chipTitle("A topological order, which respects every arrow, puts prerequisites first.")).toBe("A topological order");
     expect(chipTitle("Think of a single clock ticking through the whole search")).toBe("Think of a single clock…");

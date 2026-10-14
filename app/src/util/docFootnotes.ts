@@ -451,6 +451,12 @@ export function chipTitle(text: string, maxWords = 5): string {
     const compact = detail.replace(/\bexercises?\s+/gi, "").replace(/\s+/g, " ").trim();
     return compact.length <= 22 ? `${title} ${compact}` : title;
   }
+  // A generic label says nothing about the note: show what it asks or previews.
+  if (detail && /^think about it$/i.test(title)) {
+    const question = chipTitle(detail, maxWords).replace(/\?$/, "");
+    return `${question}?`;
+  }
+  if (detail && /^looking ahead$/i.test(title)) return `Ahead: ${chipTitle(detail, maxWords)}`;
   const words = title.replace(/[.?!…]$/, "").split(" ");
   // A short whole sentence reads better than a clipped one.
   if (words.length <= maxWords + 2) return title.replace(/\.$/, "");
