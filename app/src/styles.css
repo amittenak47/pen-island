@@ -22175,3 +22175,66 @@ html[data-corners="rounded"] {
   color: var(--accent);
   text-underline-offset: 2px;
 }
+
+/* Footnote panel: drag from the grip, the title or the tools row's empty
+   space; resize from the corner. */
+.lc-footnote-panel-grip {
+  display: block;
+  flex: none;
+  width: 36px;
+  height: 4px;
+  margin: -2px auto 1px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--lc-fn-deep, var(--muted, #888)) 45%, transparent);
+  cursor: grab;
+  touch-action: none;
+}
+
+.lc-footnote-panel-grip::before {
+  /* A larger, invisible target than the 4px bar. */
+  content: "";
+  display: block;
+  margin: -8px -12px;
+  height: 20px;
+}
+
+.lc-footnote-overview .lc-footnote-overview-toolbar,
+.lc-footnote-overview .lc-footnote-overview-title-display {
+  touch-action: none;
+}
+
+.lc-footnote-panel-resize {
+  z-index: 2;
+  border-top-left-radius: 6px;
+  cursor: nwse-resize;
+  touch-action: none;
+}
+
+/* Reset sits at the right end of the tools row, styled like Sync / Pull. */
+.lc-footnote-panel-reset {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 26px;
+  padding: 2px 10px;
+  border: 1px solid var(--chrome-edge, var(--border, rgb(127 127 127 / 30%)));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface, var(--panel)) 96%, transparent);
+  color: var(--lc-fn-ink, var(--ink));
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lc-footnote-panel-reset strong {
+  font-weight: 600;
+}
+
+.lc-footnote-panel-reset:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--bad, #dc2626) 55%, var(--chrome-edge, transparent));
+}
+
+.lc-footnote-panel-reset .lc-hold-reveal-fill {
+  background: linear-gradient(180deg, var(--lc-hold-danger-wash-top) 0%, var(--lc-hold-danger-wash-bottom) 100%);
+}

@@ -5,6 +5,7 @@ import {
   useMemo,
   useRef,
   useState,
+  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
@@ -256,6 +257,25 @@ function clampPanel(node: HTMLElement, anchorRect: DOMRect | null | undefined) {
   }
   settle(node, left, top, pane);
 }
+/**
+ * The size the reader last dragged the panel to, kept for the session.
+ *
+ * Position is not kept: the panel should open beside the mark it is about,
+ * which is somewhere else each time. A size is a preference about the panel.
+ */
+let preferredPanelSize: { width: number; height: number } | null = null;
+const PANEL_MIN = { width: 220, height: 160 };
+
+/** Whether a press on `target` may start a panel drag, rather than use a control. */
+function startsPanelDrag(target: EventTarget | null): boolean {
+  if (!(target instanceof Element)) return false;
+  if (target.closest(".lc-footnote-panel-grip")) return true;
+  if (!target.closest(".lc-footnote-overview-toolbar, .lc-footnote-overview-title-display")) return false;
+  return !target.closest(
+    "button:not(.lc-footnote-overview-title-display), input, textarea, select, a, [contenteditable='true'], .lc-footnote-overview-color, .lc-hold-reveal",
+  );
+}
+
 function applyViewportSize(node: HTMLElement, task: Task | null, compact = false, bounds?: DOMRect) {
   const margin = 16;
   const { width, height } = viewport();
@@ -401,6 +421,16 @@ export function FootnoteOverview({
   onActiveSubMarkIdChange,
 }: FootnoteOverviewProps) {
   const panelRef = useRef<HTMLDivElement | null>(null);
+  /** Where the reader dragged the panel; null while it follows its mark. */
+  const userPlace = useRef<{ left: number; top: number } | null>(null);
+  const panelGesture = useRef<{
+    mode: "move" | "resize"; pointerId: number; x: number; y: number;
+    left: number; top: number; width: number; height: number; moved: boolean;
+  } | null>(null);
+  /** Swallow the click that ends a drag started on the title. */
+  const swallowClick = useRef(false);
+  // A different mark opens beside its own words, not where the last one was dragged.
+  useEffect(() => { userPlace.current = null; }, [footnote.id]);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
   const replyRef = useRef<HTMLTextAreaElement | null>(null);
   const [task, setTask] = useState<Task | null>(null);
@@ -548,6 +578,20 @@ export function FootnoteOverview({
     const live = liveFootnoteAnchorRect(footnote.id, anchorRect) ?? anchorRect ?? null;
     const bounds = paneBox(live);
     applyViewportSize(node, task, false, bounds);
+    if (preferredPanelSize && task?.kind !== "thread") {
+      const view = viewport();
+      node.style.maxWidth = "none";
+      node.style.maxHeight = `${Math.round(view.height - 16)}px`;
+      node.style.width = `${Math.min(preferredPanelSize.width, Math.round(view.width - 16))}px`;
+      node.style.height = `${Math.min(preferredPanelSize.height, Math.round(view.height - 16))}px`;
+    }
+    if (userPlace.current) {
+      // Once dragged, the panel stays where the reader put it.
+      const view = viewport();
+      settle(node, userPlace.current.left, userPlace.current.top,
+        new DOMRect(view.originX, view.originY, view.width, view.height));
+      return;
+    }
     if (miniNoteCount > 0 || localMiniNotes.length > 0) {
       node.style.maxHeight = `${Math.max(100, bounds.height * .48 - 16)}px`;
       settle(node, bounds.left + 8, bounds.top + 8, bounds);
@@ -563,6 +607,63 @@ export function FootnoteOverview({
     }
     clampPanel(node, live);
   }, [anchorRect, footnote.id, onClose, task, miniNoteCount, localMiniNotes.length]);
+  const beginPanelGesture = useCallback((event: ReactPointerEvent<HTMLElement>, mode: "move" | "resize") => {
+    const node = panelRef.current;
+    if (!node || event.button > 0) return;
+    if (mode === "move" && !startsPanelDrag(event.target)) return;
+    const box = node.getBoundingClientRect();
+    panelGesture.current = {
+      mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+      left: box.left, top: box.top, width: box.width, height: box.height, moved: false,
+    };
+    if (mode === "resize") {
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
+  }, []);
+  const movePanelGesture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = panelGesture.current;
+    const node = panelRef.current;
+    if (!gesture || !node || gesture.pointerId !== event.pointerId) return;
+    const dx = event.clientX - gesture.x;
+    const dy = event.clientY - gesture.y;
+    if (!gesture.moved) {
+      // A tap on the title still edits it; only a real move starts a drag.
+      if (gesture.mode === "move" && Math.hypot(dx, dy) < 5) return;
+      gesture.moved = true;
+      if (gesture.mode === "move") event.currentTarget.setPointerCapture?.(event.pointerId);
+    }
+    event.preventDefault();
+    const view = viewport();
+    if (gesture.mode === "move") {
+      userPlace.current = { left: gesture.left + dx, top: gesture.top + dy };
+    } else {
+      preferredPanelSize = {
+        width: Math.max(PANEL_MIN.width, Math.min(gesture.width + dx, view.width - 16)),
+        height: Math.max(PANEL_MIN.height, Math.min(gesture.height + dy, view.height - 16)),
+      };
+      userPlace.current = { left: gesture.left, top: gesture.top };
+    }
+    place();
+  }, [place]);
+  const endPanelGesture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
+    const gesture = panelGesture.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    panelGesture.current = null;
+    if (gesture.moved && gesture.mode === "move") swallowClick.current = true;
+  }, []);
+  const nudgePanelSize = useCallback((dx: number, dy: number) => {
+    const node = panelRef.current;
+    if (!node) return;
+    const box = node.getBoundingClientRect();
+    const view = viewport();
+    preferredPanelSize = {
+      width: Math.max(PANEL_MIN.width, Math.min(box.width + dx, view.width - 16)),
+      height: Math.max(PANEL_MIN.height, Math.min(box.height + dy, view.height - 16)),
+    };
+    userPlace.current = { left: box.left, top: box.top };
+    place();
+  }, [place]);
   useLayoutEffect(() => {
     place();
     const node = panelRef.current;
@@ -741,7 +842,18 @@ export function FootnoteOverview({
           else onClose();
         }}
         style={{ visibility: "hidden", zIndex: 233, ...tint }}
+        onPointerDown={event => beginPanelGesture(event, "move")}
+        onPointerMove={movePanelGesture}
+        onPointerUp={endPanelGesture}
+        onPointerCancel={endPanelGesture}
+        onClickCapture={event => {
+          if (!swallowClick.current) return;
+          swallowClick.current = false;
+          event.preventDefault();
+          event.stopPropagation();
+        }}
       >
+        <span className="lc-footnote-panel-grip" aria-hidden title="Drag to move" />
         <AnimatePresence mode="wait" initial={false}>
           {task?.kind === "note" ? (
             <motion.div
@@ -920,16 +1032,16 @@ export function FootnoteOverview({
                     wheelZIndex={240}
                   />
                 </div>
-                {hasPanelContent && (
-                  <button
-                    type="button"
-                    className="lc-footnote-panel-clear"
-                    aria-label="Clear links, notes, threads, and sub-marks"
-                    title="Clear panel content"
-                    onClick={clearPanelContent}
+                {hasPanelContent && !readOnly && (
+                  <HoldButton
+                    label="Reset"
+                    className="lc-footnote-panel-reset"
+                    ariaLabel="Hold to reset: removes this footnote's notes, links, chats and underlines"
+                    dataTip="Hold to remove notes, links, chats and underlines"
+                    onConfirm={clearPanelContent}
                   >
-                    ✕
-                  </button>
+                    <strong>Reset</strong>
+                  </HoldButton>
                 )}
               </header>
               {subMarks.length > 0 && (
@@ -1165,6 +1277,22 @@ export function FootnoteOverview({
             </motion.div>
           )}
         </AnimatePresence>
+        <button
+          type="button"
+          className="lc-footnote-note-resize lc-footnote-panel-resize"
+          aria-label="Resize footnote panel"
+          title="Drag to resize"
+          onPointerDown={event => beginPanelGesture(event, "resize")}
+          onPointerMove={movePanelGesture}
+          onPointerUp={endPanelGesture}
+          onPointerCancel={endPanelGesture}
+          onKeyDown={event => {
+            const step = ({ ArrowRight: [16, 0], ArrowLeft: [-16, 0], ArrowDown: [0, 16], ArrowUp: [0, -16] } as Record<string, [number, number]>)[event.key];
+            if (!step) return;
+            event.preventDefault();
+            nudgePanelSize(step[0], step[1]);
+          }}
+        ><svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" aria-hidden><path d="M3 10 10 3M7 10l3-3" /></svg></button>
       </motion.div>
       {!onOpenMiniNote && <FootnoteMiniNotes entries={localMiniEntries} getBounds={localMiniBounds}
         onClose={ref => setLocalMiniNotes(current => current.filter(entry => entry.noteId !== ref.noteId))}
