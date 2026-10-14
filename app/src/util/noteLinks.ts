@@ -56,7 +56,9 @@ export type EdgeKind =
   /** Lifted from a footnote's saved URL. The target is the URL itself. */
   | "footnote-url"
   /** Drawn with the Link tool. */
-  | "ink";
+  | "ink"
+  /** Linked by a ChatBot answer to a footnote on this document. */
+  | "chatbot";
 
 export interface Edge {
   id: string;

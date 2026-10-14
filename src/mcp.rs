@@ -9,7 +9,7 @@ use anyhow::{Context, Result};
 use serde_json::{json, Value};
 
 use crate::config::Config;
-use crate::pads::footnotes::{self, FootnoteLink};
+use crate::pads::footnotes::{self, FootnoteLink, FootnoteSubmission};
 
 /// How the inbox works, sent to every assistant when it connects. Assistants
 /// only act when prompted or scheduled, so this asks them to offer the watch.
@@ -39,7 +39,7 @@ const FALLBACK_PROTOCOL: &str = "2025-06-18";
 pub trait FootnoteHub {
     fn list_pending(&self) -> Result<Value, String>;
     fn get(&self, id: &str) -> Result<Value, String>;
-    fn submit(&self, id: &str, notes: Vec<String>, links: Vec<FootnoteLink>) -> Result<Value, String>;
+    fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String>;
 }
 
 pub struct HttpFootnoteHub {
@@ -99,8 +99,8 @@ impl FootnoteHub for HttpFootnoteHub {
         self.send(self.client.get(format!("{}/footnote-requests/{id}", self.base)))
     }
 
-    fn submit(&self, id: &str, notes: Vec<String>, links: Vec<FootnoteLink>) -> Result<Value, String> {
-        let body = json!({ "notes": notes, "links": links });
+    fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String> {
+        let body = serde_json::to_value(submission).map_err(|err| format!("answer could not be encoded: {err}"))?;
         self.send(
             self.client
                 .post(format!("{}/footnote-requests/{id}/result", self.base))
@@ -294,7 +294,7 @@ fn tool_list() -> Vec<Value> {
         json!({
             "name": "get_footnote_request",
             "annotations": { "readOnlyHint": true, "openWorldHint": false },
-            "description": "Fetch one footnote request, including wide_context and page_footnotes (other footnotes already on that page).",
+            "description": "Fetch one footnote request, including wide_context, page_footnotes (other footnotes already on that page) and extras: palette (the mark's colors; refer to them by slot number, 1 = first), mark_text (the exact marked text; quote from it for marks) and workspace_items (the reader's library items you may link by id).",
             "inputSchema": {
                 "type": "object",
                 "properties": { "id": { "type": "string" } },
@@ -305,7 +305,7 @@ fn tool_list() -> Vec<Value> {
         json!({
             "name": "submit_footnote",
             "annotations": { "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false },
-            "description": format!("Store the footnote for a pending request. {INSTRUCTIONS}"),
+            "description": format!("Store the footnote for a pending request. Everything you send is added to the reader's footnote; nothing of theirs is replaced. {INSTRUCTIONS} Optionally give it a short title and a palette color, highlight or underline key words by quoting them exactly from mark_text, and link relevant library items from workspace_items."),
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -313,6 +313,7 @@ fn tool_list() -> Vec<Value> {
                     "notes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 8 },
                     "links": {
                         "type": "array",
+                        "description": "Web pages that help (http or https), up to 8.",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -321,6 +322,28 @@ fn tool_list() -> Vec<Value> {
                             },
                             "required": ["url"],
                         },
+                    },
+                    "title": { "type": "string", "maxLength": 120, "description": "A short label for the footnote. Used only if the reader hasn't titled it." },
+                    "color": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Palette slot for the footnote's color (1 = first color in extras.palette). Used only if the reader hasn't colored it." },
+                    "marks": {
+                        "type": "array",
+                        "maxItems": 12,
+                        "description": "Highlight or underline words inside the marked text.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "kind": { "type": "string", "enum": ["highlight", "underline"] },
+                                "quote": { "type": "string", "description": "Exact words copied from extras.mark_text." },
+                                "color": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Optional palette slot." },
+                            },
+                            "required": ["kind", "quote"],
+                        },
+                    },
+                    "workspace_links": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": { "type": "string" },
+                        "description": "Ids from extras.workspace_items to link, such as a related notebook or document.",
                     },
                 },
                 "required": ["id", "notes"],
@@ -373,8 +396,28 @@ fn submit_tool(hub: &dyn FootnoteHub, arguments: &Value) -> Result<Value, String
     } else if arguments.get("links").is_some() && !arguments.get("links").is_some_and(Value::is_null) {
         return Err("links must be an array".into());
     }
-    let cleaned = footnotes::validate_result(&notes, &links)?;
-    hub.submit(id, cleaned.notes, cleaned.links)
+    let rich = |key: &str| arguments.get(key).filter(|value| !value.is_null()).cloned();
+    let title: Option<String> = rich("title").map(serde_json::from_value).transpose()
+        .map_err(|_| "title must be a string".to_string())?;
+    let color: Option<u8> = rich("color").map(serde_json::from_value).transpose()
+        .map_err(|_| "color must be a palette slot number".to_string())?;
+    let marks: Vec<footnotes::FootnoteMark> = rich("marks").map(serde_json::from_value).transpose()
+        .map_err(|_| "marks must be objects with kind, quote and optional color".to_string())?
+        .unwrap_or_default();
+    let workspace_links: Vec<String> = rich("workspace_links").map(serde_json::from_value).transpose()
+        .map_err(|_| "workspace_links must be an array of ids".to_string())?
+        .unwrap_or_default();
+    let submission = FootnoteSubmission { notes, links, title, color, marks, workspace_links };
+    // Early, context-free checks; the hub checks quotes, slots and ids against the request.
+    let cleaned = footnotes::validate_submission(&submission, None)?;
+    hub.submit(id, &FootnoteSubmission {
+        notes: cleaned.notes,
+        links: cleaned.links,
+        title: cleaned.title,
+        color: cleaned.color,
+        marks: cleaned.marks,
+        workspace_links: submission.workspace_links,
+    })
 }
 
 fn tool_text(text: &str, is_error: bool) -> Value {
@@ -404,6 +447,7 @@ mod tests {
         pending: Value,
         full: Mutex<Value>,
         submits: Mutex<Vec<(String, Vec<String>)>>,
+        rich: Mutex<Vec<FootnoteSubmission>>,
         fail_submit: Mutex<Option<String>>,
     }
 
@@ -419,12 +463,13 @@ mod tests {
                 Err("unknown footnote request".into())
             }
         }
-        fn submit(&self, id: &str, notes: Vec<String>, links: Vec<FootnoteLink>) -> Result<Value, String> {
+        fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String> {
             if let Some(message) = self.fail_submit.lock().unwrap().clone() {
                 return Err(message);
             }
-            assert!(links.is_empty() || links.iter().all(|link| link.url.starts_with("https://")));
-            self.submits.lock().unwrap().push((id.to_string(), notes));
+            assert!(submission.links.is_empty() || submission.links.iter().all(|link| link.url.starts_with("https://")));
+            self.submits.lock().unwrap().push((id.to_string(), submission.notes.clone()));
+            self.rich.lock().unwrap().push(submission.clone());
             Ok(json!({ "ok": true }))
         }
     }
@@ -452,6 +497,7 @@ mod tests {
                 "created_at": 1
             })),
             submits: Mutex::new(Vec::new()),
+            rich: Mutex::new(Vec::new()),
             fail_submit: Mutex::new(None),
         }
     }
@@ -538,6 +584,39 @@ mod tests {
         let instructions = reply["result"]["instructions"].as_str().unwrap();
         assert!(instructions.starts_with(WORKFLOW));
         assert!(instructions.ends_with(INSTRUCTIONS));
+    }
+
+    #[test]
+    fn submit_footnote_forwards_title_color_marks_and_workspace_links() {
+        let hub = fake();
+        let ok = dispatch(&hub, &request(1, "tools/call", json!({
+            "name": "submit_footnote",
+            "arguments": {
+                "id": "fr-1",
+                "notes": ["A lemma is a stepping stone."],
+                "title": " Lemma ",
+                "color": 2,
+                "marks": [{ "kind": "highlight", "quote": "lemma", "color": 1 }],
+                "workspace_links": ["whiteboard:wb-1"],
+            },
+        }))).unwrap();
+        assert_eq!(ok["result"]["isError"], json!(null));
+        let sent = hub.rich.lock().unwrap().last().cloned().unwrap();
+        assert_eq!(sent.title.as_deref(), Some("Lemma"));
+        assert_eq!(sent.color, Some(2));
+        assert_eq!(sent.marks[0].kind, "highlight");
+        assert_eq!(sent.workspace_links, ["whiteboard:wb-1"]);
+
+        for (id, arguments) in [
+            (2, json!({ "id": "fr-1", "notes": ["n"], "marks": [{ "kind": "strike", "quote": "x" }] })),
+            (3, json!({ "id": "fr-1", "notes": ["n"], "color": "blue" })),
+            (4, json!({ "id": "fr-1", "notes": ["n"], "color": 9 })),
+        ] {
+            let bad = dispatch(&hub, &request(id, "tools/call", json!({ "name": "submit_footnote", "arguments": arguments }))).unwrap();
+            assert!(bad.get("error").is_none());
+            assert_eq!(bad["result"]["isError"], true, "{id}");
+        }
+        assert_eq!(hub.rich.lock().unwrap().len(), 1);
     }
 
     #[test]

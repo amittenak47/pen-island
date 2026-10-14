@@ -63,10 +63,12 @@ pub async fn submit_footnote_result(
     Json(body): Json<Value>,
 ) -> Result<Json<Value>, AppError> {
     let (notes, links) = parse_result(&body)?;
+    let rich = parse_rich(&body)?;
+    let submission = footnotes::FootnoteSubmission { notes, links, ..rich };
     let now = now_ms();
     blocking(move || {
         let conn = crate::pads::open(&crate::pads::db_path()?)?;
-        footnotes::submit_result(&conn, &id, &notes, &links, now).map_err(into_anyhow)
+        footnotes::submit_answer(&conn, &id, &submission, now).map_err(into_anyhow)
     })
     .await
     .map_err(map_store_error)?;
@@ -156,6 +158,41 @@ fn parse_result(body: &Value) -> Result<(Vec<String>, Vec<FootnoteLink>), AppErr
     Ok((texts, links))
 }
 
+/// Title, palette color, marks and workspace links; all optional.
+fn parse_rich(body: &Value) -> Result<footnotes::FootnoteSubmission, AppError> {
+    #[derive(serde::Deserialize, Default)]
+    struct Rich {
+        #[serde(default)]
+        title: Option<String>,
+        #[serde(default)]
+        color: Option<u8>,
+        #[serde(default)]
+        marks: Vec<footnotes::FootnoteMark>,
+        #[serde(default)]
+        workspace_links: Vec<String>,
+    }
+    let pick = |key: &str| body.get(key).filter(|value| !value.is_null()).cloned();
+    let rich = Rich {
+        title: pick("title").map(serde_json::from_value).transpose()
+            .map_err(|_| AppError::bad_request(anyhow::anyhow!("title must be a string")))?,
+        color: pick("color").map(serde_json::from_value).transpose()
+            .map_err(|_| AppError::bad_request(anyhow::anyhow!("color must be a palette slot number")))?,
+        marks: pick("marks").map(serde_json::from_value).transpose()
+            .map_err(|_| AppError::bad_request(anyhow::anyhow!("marks must be objects with kind, quote and optional color")))?
+            .unwrap_or_default(),
+        workspace_links: pick("workspace_links").map(serde_json::from_value).transpose()
+            .map_err(|_| AppError::bad_request(anyhow::anyhow!("workspace_links must be an array of ids")))?
+            .unwrap_or_default(),
+    };
+    Ok(footnotes::FootnoteSubmission {
+        title: rich.title,
+        color: rich.color,
+        marks: rich.marks,
+        workspace_links: rich.workspace_links,
+        ..Default::default()
+    })
+}
+
 fn into_anyhow(err: FootnoteFail) -> anyhow::Error {
     match err {
         FootnoteFail::Invalid(message) => anyhow::anyhow!("invalid:{message}"),
@@ -213,7 +250,100 @@ mod footnote_tests {
             wide_context: "a lemma in a wider context".into(),
             page_footnotes: json!([{"excerpt": "other", "notes": ["already"]}]),
             prompt: Some("explain like I'm new".into()),
+            extras: Default::default(),
         }
+    }
+
+    fn rich_sample(id: &str) -> NewFootnoteRequest {
+        let mut body = sample(id, "dev-a");
+        body.extras = footnotes::FootnoteExtras {
+            palette: vec!["#60a5fa".into(), "#f472b6".into(), "#facc15".into(), "#34d399".into()],
+            mark_text: "We now explore  depth-first search\non directed graphs.".into(),
+            workspace_items: vec![footnotes::WorkspaceItem {
+                id: "whiteboard:wb-dfs".into(), kind: "whiteboard".into(), title: "DFS notes".into(),
+            }],
+            doc_kind: "web".into(),
+        };
+        body
+    }
+
+    #[test]
+    fn rich_answers_keep_title_color_marks_and_resolve_workspace_links() {
+        let (_dir, conn) = open();
+        footnotes::create_request(&conn, rich_sample("fr-rich"), 1).unwrap();
+        let request = footnotes::get_request(&conn, "fr-rich").unwrap().unwrap();
+        assert_eq!(request.extras.palette.len(), 4);
+        assert_eq!(request.extras.workspace_items[0].title, "DFS notes");
+        let submission = footnotes::FootnoteSubmission {
+            notes: vec!["Explores as deep as possible before backtracking.".into()],
+            title: Some("  DFS  ".into()),
+            color: Some(3),
+            marks: vec![
+                footnotes::FootnoteMark { kind: "highlight".into(), quote: "Depth-First   Search".into(), color: Some(1) },
+                footnotes::FootnoteMark { kind: "underline".into(), quote: "directed graphs".into(), color: None },
+            ],
+            workspace_links: vec!["whiteboard:wb-dfs".into()],
+            ..Default::default()
+        };
+        footnotes::submit_answer(&conn, "fr-rich", &submission, 2).unwrap();
+        let result = footnotes::get_request(&conn, "fr-rich").unwrap().unwrap().result.unwrap();
+        assert_eq!(result["title"], "DFS");
+        assert_eq!(result["color"], 3);
+        assert_eq!(result["marks"][0]["kind"], "highlight");
+        assert_eq!(result["marks"][1]["quote"], "directed graphs");
+        assert_eq!(result["workspace_links"][0]["title"], "DFS notes");
+        assert_eq!(result["link_from"], "web");
+        // The device gets the same result through its results poll.
+        let delivered = footnotes::list_results(&conn, Some("dev-a")).unwrap();
+        assert_eq!(delivered[0].result["workspace_links"][0]["id"], "whiteboard:wb-dfs");
+    }
+
+    #[test]
+    fn rich_answers_are_checked_against_the_request() {
+        let (_dir, conn) = open();
+        footnotes::create_request(&conn, rich_sample("fr-check"), 1).unwrap();
+        let note = || vec!["A note.".to_string()];
+        let rejected: Vec<(&str, footnotes::FootnoteSubmission)> = vec![
+            ("quote-missing", footnotes::FootnoteSubmission { notes: note(), marks: vec![footnotes::FootnoteMark { kind: "highlight".into(), quote: "breadth-first".into(), color: None }], ..Default::default() }),
+            ("bad-kind", footnotes::FootnoteSubmission { notes: note(), marks: vec![footnotes::FootnoteMark { kind: "strike".into(), quote: "depth-first".into(), color: None }], ..Default::default() }),
+            ("slot-too-high", footnotes::FootnoteSubmission { notes: note(), color: Some(5), ..Default::default() }),
+            ("mark-slot-zero", footnotes::FootnoteSubmission { notes: note(), marks: vec![footnotes::FootnoteMark { kind: "underline".into(), quote: "depth-first".into(), color: Some(0) }], ..Default::default() }),
+            ("unknown-item", footnotes::FootnoteSubmission { notes: note(), workspace_links: vec!["annotate:nope".into()], ..Default::default() }),
+            ("long-title", footnotes::FootnoteSubmission { notes: note(), title: Some("t".repeat(121)), ..Default::default() }),
+        ];
+        for (name, submission) in rejected {
+            let err = footnotes::submit_answer(&conn, "fr-check", &submission, 2).expect_err(name);
+            assert!(matches!(err, FootnoteFail::Invalid(_)), "{name}: {err:?}");
+        }
+        assert_eq!(footnotes::get_request(&conn, "fr-check").unwrap().unwrap().status, "pending");
+    }
+
+    #[test]
+    fn extras_are_validated_when_a_request_is_made() {
+        let (_dir, conn) = open();
+        let mut body = rich_sample("fr-x1");
+        body.extras.palette.push("blue".into());
+        assert!(matches!(footnotes::create_request(&conn, body, 1), Err(FootnoteFail::Invalid(_))));
+        let mut body = rich_sample("fr-x2");
+        body.extras.doc_kind = "whiteboard".into();
+        assert!(matches!(footnotes::create_request(&conn, body, 1), Err(FootnoteFail::Invalid(_))));
+        // Old devices send no extras; requests still work.
+        footnotes::create_request(&conn, sample("fr-x3", "dev-a"), 1).unwrap();
+        assert_eq!(footnotes::get_request(&conn, "fr-x3").unwrap().unwrap().extras, footnotes::FootnoteExtras::default());
+    }
+
+    #[test]
+    fn http_bodies_carry_the_rich_fields() {
+        let rich = parse_rich(&json!({
+            "notes": ["n"], "title": "T", "color": 2,
+            "marks": [{"kind": "underline", "quote": "q"}], "workspace_links": ["a:b"],
+        })).unwrap();
+        assert_eq!(rich.title.as_deref(), Some("T"));
+        assert_eq!(rich.color, Some(2));
+        assert_eq!(rich.marks.len(), 1);
+        assert_eq!(rich.workspace_links, ["a:b"]);
+        assert!(parse_rich(&json!({ "notes": ["n"], "color": "blue" })).is_err());
+        assert!(parse_rich(&json!({ "notes": ["n"], "title": null })).unwrap().title.is_none());
     }
 
     #[test]

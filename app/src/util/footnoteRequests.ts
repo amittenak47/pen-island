@@ -3,15 +3,19 @@
  * and the answer applied back here. The document is only written on the device.
  */
 
-import { LcApiError, type FootnotePingResultDto, type FootnoteRequestDto, type LcClient } from "../api/client";
+import { LcApiError, type FootnoteMarkDto, type FootnotePingResultDto, type FootnoteRequestDto, type FootnoteWorkspaceItemDto, type LcClient } from "../api/client";
+import { isTextAnchor } from "./docAnchors";
+import { makeEdge, putEdge, type NodeRef, type NodeType } from "./noteLinks";
 import { readFootnoteOutbox, storeFootnoteRequest, markFootnoteRequestSent, forgetFootnoteRequest } from "./footnoteOutbox";
 import { debugLog } from "./debugLog";
 import type { DocAnchor } from "./docAnchors";
 import { getAnnotateDoc, mutateAnnotateFootnotes } from "./annotateStore";
 import {
   freshNoteId,
+  freshSubMarkId,
   type DocFootnote,
   type DocFootnoteNote,
+  type DocFootnoteSubMark,
   type DocFootnoteUserLink,
 } from "./docFootnotes";
 
@@ -120,8 +124,27 @@ export function buildFootnoteRequest(input: {
   viewerPage: number | null;
   footnotes: readonly DocFootnote[];
   exceptId: string;
+  /** The mark's own swatches; answers pick colors by slot. */
+  palette?: readonly string[];
+  /** The exact text under the mark; answers quote from it for highlights. */
+  markText?: string;
+  /** Library items an answer may link (most relevant first). */
+  workspaceItems?: readonly FootnoteWorkspaceItemDto[];
+  docKind?: "annotate" | "web";
 }): FootnoteRequestDto {
   const excerpt = input.excerpt.slice(0, 4000);
+  const palette = (input.palette ?? []).filter((color) => /^#[0-9a-fA-F]{6}$/.test(color)).slice(0, 8);
+  const markText = (input.markText ?? "").slice(0, 8000);
+  const workspaceItems = (input.workspaceItems ?? [])
+    .filter((item) => item.id && item.id.length <= 300)
+    .slice(0, 60)
+    .map((item) => ({ id: item.id, kind: item.kind.slice(0, 20), title: item.title.slice(0, 300) }));
+  const extras = {
+    ...(palette.length ? { palette } : {}),
+    ...(markText ? { mark_text: markText } : {}),
+    ...(workspaceItems.length ? { workspace_items: workspaceItems } : {}),
+    ...(input.docKind ? { doc_kind: input.docKind } : {}),
+  };
   const pageText = input.pageText ?? "";
   const scope = input.anchor.scope;
   return {
@@ -137,7 +160,49 @@ export function buildFootnoteRequest(input: {
     wide_context: sliceAround(pageText, excerpt, WIDE_RADIUS).slice(0, 24000),
     page_footnotes: pageFootnotesFor(input.footnotes, scope, input.exceptId),
     prompt: null,
+    ...(Object.keys(extras).length ? { extras } : {}),
   };
+}
+
+/** Collapse whitespace and case so a quote matches the words a reader sees. */
+function looseIndex(text: string, quote: string): { start: number; end: number } | null {
+  const exact = text.indexOf(quote);
+  if (exact >= 0) return { start: exact, end: exact + quote.length };
+  // Map each kept character of the loosened text back to its original offset.
+  const keep: number[] = [];
+  let loose = "";
+  let space = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i]!;
+    if (/\s/.test(ch)) {
+      if (!space && loose.length > 0) { loose += " "; keep.push(i); }
+      space = true;
+      continue;
+    }
+    space = false;
+    loose += ch.toLowerCase();
+    keep.push(i);
+  }
+  const needle = quote.trim().replace(/\s+/g, " ").toLowerCase();
+  if (!needle) return null;
+  const at = loose.indexOf(needle);
+  if (at < 0) return null;
+  return { start: keep[at]!, end: keep[at + needle.length - 1]! + 1 };
+}
+
+/** A palette slot (1-based) on this mark, or undefined when it has no such slot. */
+function slotColor(palette: readonly string[] | undefined, slot: number | undefined): string | undefined {
+  if (!palette || typeof slot !== "number" || !Number.isInteger(slot)) return undefined;
+  return palette[slot - 1];
+}
+
+export interface FootnoteAnswer {
+  id: string;
+  notes?: readonly string[] | null;
+  links?: readonly { title?: string; url?: string }[] | null;
+  title?: string;
+  color?: number;
+  marks?: readonly FootnoteMarkDto[];
 }
 
 /**
@@ -148,7 +213,7 @@ export function buildFootnoteRequest(input: {
  */
 export function applyFootnoteResult(
   footnotes: readonly DocFootnote[],
-  result: { id: string; notes?: readonly string[] | null; links?: readonly { title?: string; url?: string }[] | null },
+  result: FootnoteAnswer,
   now = Date.now(),
 ): DocFootnote[] {
   const index = footnotes.findIndex((entry) => entry.pending === result.id);
@@ -169,14 +234,52 @@ export function applyFootnoteResult(
   }
   const notes = existing.length + added.length > 0 ? [...existing, ...added] : undefined;
   const userLinks = mergeLinks(entry.userLinks, result.links);
+  // Answers only add: title and color fill gaps, never replace the reader's.
+  const title = !entry.title?.trim() && result.title?.trim() ? result.title.trim().slice(0, 120) : undefined;
+  const color = entry.color ? undefined : slotColor(entry.palette, result.color);
+  const subMarks = mergeMarks(entry, result.marks);
   const rest = { ...entry };
   delete rest.pending;
   const next: DocFootnote = {
     ...rest,
     ...(notes ? { notes } : {}),
     ...(userLinks ? { userLinks } : {}),
+    ...(title ? { title } : {}),
+    ...(color ? { color } : {}),
+    ...(subMarks ? { subMarks } : {}),
+    ...(title || color || subMarks ? { updatedAt: now } : {}),
   };
   return footnotes.map((item, at) => (at === index ? next : item));
+}
+
+/**
+ * Underlines/highlights from an answer, placed by finding each quote in the
+ * mark's own text. Only text marks can carry them: a sub-mark is painted at an
+ * offset from the mark's start. Quotes that are not found, or that repeat a
+ * line already marked the same way, are skipped.
+ */
+function mergeMarks(entry: DocFootnote, incoming: readonly FootnoteMarkDto[] | undefined): DocFootnoteSubMark[] | undefined {
+  if (!incoming?.length || !isTextAnchor(entry.anchor)) return undefined;
+  const text = entry.blockText ?? entry.excerpt ?? "";
+  const out: DocFootnoteSubMark[] = [...(entry.subMarks ?? [])];
+  let added = 0;
+  for (const mark of incoming) {
+    if (mark.kind !== "highlight" && mark.kind !== "underline") continue;
+    const at = typeof mark.quote === "string" ? looseIndex(text, mark.quote) : null;
+    if (!at) continue;
+    if (out.some((existing) => existing.kind === mark.kind && existing.start === at.start && existing.end === at.end)) continue;
+    const color = slotColor(entry.palette, mark.color);
+    out.push({
+      id: freshSubMarkId(out),
+      kind: mark.kind,
+      excerpt: text.slice(at.start, at.end),
+      start: at.start,
+      end: at.end,
+      ...(color ? { color } : {}),
+    });
+    added += 1;
+  }
+  return added > 0 ? out : undefined;
 }
 
 function mergeLinks(
@@ -275,7 +378,17 @@ async function flushBody(client: LcClient): Promise<void> {
   }
 }
 
-function answerOf(result: FootnotePingResultDto["result"]): { notes: string[]; links: { title?: string; url: string }[] } | null {
+interface ParsedAnswer {
+  notes: string[];
+  links: { title?: string; url: string }[];
+  title?: string;
+  color?: number;
+  marks: FootnoteMarkDto[];
+  workspaceLinks: FootnoteWorkspaceItemDto[];
+  linkFrom: "annotate" | "web";
+}
+
+function answerOf(result: FootnotePingResultDto["result"]): ParsedAnswer | null {
   if (!result || typeof result !== "object") return null;
   const notes = Array.isArray(result.notes) ? result.notes.filter((note): note is string => typeof note === "string") : null;
   if (!notes) return null;
@@ -287,7 +400,49 @@ function answerOf(result: FootnotePingResultDto["result"]): { notes: string[]; l
         return url ? [{ url, ...(title ? { title } : {}) }] : [];
       })
     : [];
-  return { notes, links };
+  const marks = Array.isArray(result.marks)
+    ? result.marks.filter((mark): mark is FootnoteMarkDto =>
+      Boolean(mark) && (mark.kind === "highlight" || mark.kind === "underline") && typeof mark.quote === "string")
+    : [];
+  const workspaceLinks = Array.isArray(result.workspace_links)
+    ? result.workspace_links.filter((item): item is FootnoteWorkspaceItemDto =>
+      Boolean(item) && typeof item.id === "string" && item.id.includes(":"))
+    : [];
+  return {
+    notes,
+    links,
+    ...(typeof result.title === "string" ? { title: result.title } : {}),
+    ...(typeof result.color === "number" ? { color: result.color } : {}),
+    marks,
+    workspaceLinks,
+    linkFrom: result.link_from === "web" ? "web" : "annotate",
+  };
+}
+
+const LINKABLE: ReadonlySet<NodeType> = new Set(["annotate", "whiteboard", "practice", "web"]);
+
+/** `type:id` from the request's library list back into a link target. */
+function nodeOf(item: FootnoteWorkspaceItemDto): NodeRef | null {
+  const split = item.id.indexOf(":");
+  const type = item.id.slice(0, split) as NodeType;
+  const id = item.id.slice(split + 1);
+  if (!LINKABLE.has(type) || !id) return null;
+  return { type, id, ...(item.title ? { title: item.title } : {}) };
+}
+
+/** Link the asking document to each library item the answer chose. */
+async function linkWorkspaceItems(docId: string, answer: ParsedAnswer): Promise<void> {
+  if (answer.workspaceLinks.length === 0) return;
+  const from: NodeRef = { type: answer.linkFrom, id: docId };
+  for (const item of answer.workspaceLinks) {
+    const to = nodeOf(item);
+    if (!to || (to.type === from.type && to.id === from.id)) continue;
+    try {
+      await putEdge(makeEdge(from, to, "chatbot"));
+    } catch {
+      /* A link is extra; the saved footnote must not fail because of it. */
+    }
+  }
 }
 
 let applyChain: Promise<unknown> = Promise.resolve();
@@ -316,10 +471,20 @@ async function applyAnswersBody(
     const answer = answerOf(row.result);
     if (!answer) continue;
     const outcome = await writeFootnotes(row.doc_id, (footnotes) =>
-      applyFootnoteResult(footnotes, { id: row.id, notes: answer.notes, links: answer.links }),
+      applyFootnoteResult(footnotes, {
+        id: row.id,
+        notes: answer.notes,
+        links: answer.links,
+        ...(answer.title ? { title: answer.title } : {}),
+        ...(answer.color !== undefined ? { color: answer.color } : {}),
+        marks: answer.marks,
+      }),
     );
     if (outcome === "failed") failed.push(row.id);
-    else saved.push(row.id);
+    else {
+      saved.push(row.id);
+      await linkWorkspaceItems(row.doc_id, answer);
+    }
   }
   return { saved, failed };
 }

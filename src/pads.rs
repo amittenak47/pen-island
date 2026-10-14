@@ -192,6 +192,8 @@ pub fn open(path: &Path) -> Result<Connection> {
     CREATE INDEX IF NOT EXISTS idx_footnote_requests_device
         ON footnote_requests(device_id, status, done_at);")?;
     ensure_column(&conn, "footnote_requests", "answer_mode", "TEXT NOT NULL DEFAULT 'bot'")?;
+    // Palette, marked text and library items the answer may refer to.
+    ensure_column(&conn, "footnote_requests", "extras", "TEXT NOT NULL DEFAULT '{}'")?;
     migrate_tombstones_to_gone(&conn)?;
     revisions::migrate(&conn)?;
     atomic_sync::migrate(&conn)?;

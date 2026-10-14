@@ -51,11 +51,75 @@ pub struct FootnoteLink {
     pub url: String,
 }
 
+/// One item from the reader's library the answer may link to.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct WorkspaceItem {
+    pub id: String,
+    #[serde(default)]
+    pub kind: String,
+    #[serde(default)]
+    pub title: String,
+}
+
+/// What the device sends beyond the text: the mark's palette, the exact text
+/// under it, the library items it may link, and the kind of document asking.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FootnoteExtras {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub palette: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub mark_text: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_items: Vec<WorkspaceItem>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub doc_kind: String,
+}
+
+/// An underline or highlight on words inside the marked text.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FootnoteMark {
+    pub kind: String,
+    pub quote: String,
+    /// 1-based slot in the mark's palette.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<u8>,
+}
+
+/// What an assistant submits. Only `notes` is required.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct FootnoteSubmission {
+    #[serde(default)]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub links: Vec<FootnoteLink>,
+    #[serde(default)]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub color: Option<u8>,
+    #[serde(default)]
+    pub marks: Vec<FootnoteMark>,
+    /// Ids from the request's `extras.workspace_items`.
+    #[serde(default)]
+    pub workspace_links: Vec<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FootnoteResult {
     pub notes: Vec<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<FootnoteLink>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color: Option<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub marks: Vec<FootnoteMark>,
+    /// Resolved from the request, so the device needs nothing else to link them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_links: Vec<WorkspaceItem>,
+    /// The asking document's kind ("annotate" or "web"), the link's other end.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub link_from: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -73,6 +137,8 @@ pub struct FootnoteRequest {
     pub wide_context: String,
     pub page_footnotes: Value,
     pub prompt: Option<String>,
+    #[serde(default)]
+    pub extras: FootnoteExtras,
     pub status: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub result: Option<Value>,
@@ -121,6 +187,34 @@ pub struct NewFootnoteRequest {
     pub page_footnotes: Value,
     #[serde(default)]
     pub prompt: Option<String>,
+    #[serde(default)]
+    pub extras: FootnoteExtras,
+}
+
+fn valid_hex(color: &str) -> bool {
+    color.len() == 7 && color.starts_with('#') && color[1..].bytes().all(|b| b.is_ascii_hexdigit())
+}
+
+pub fn validate_extras(extras: &FootnoteExtras) -> Result<(), String> {
+    if extras.palette.len() > 8 || !extras.palette.iter().all(|color| valid_hex(color)) {
+        return Err("extras.palette must be at most 8 #rrggbb colors".into());
+    }
+    if extras.mark_text.chars().count() > 8000 {
+        return Err("extras.mark_text must be at most 8000 characters".into());
+    }
+    if extras.workspace_items.len() > 60 {
+        return Err("extras.workspace_items must have at most 60 entries".into());
+    }
+    for item in &extras.workspace_items {
+        let id = item.id.chars().count();
+        if !(1..=300).contains(&id) || item.kind.chars().count() > 20 || item.title.chars().count() > 300 {
+            return Err("each workspace item needs an id (1..=300 characters), a short kind and a title".into());
+        }
+    }
+    if !matches!(extras.doc_kind.as_str(), "" | "annotate" | "web") {
+        return Err("extras.doc_kind must be annotate or web".into());
+    }
+    Ok(())
 }
 
 pub fn validate_request(body: &NewFootnoteRequest) -> Result<Value, String> {
@@ -149,6 +243,7 @@ pub fn validate_request(body: &NewFootnoteRequest) -> Result<Value, String> {
     if !body.anchor.is_object() {
         return Err("anchor must be a JSON object".into());
     }
+    validate_extras(&body.extras)?;
     let pages = if body.page_footnotes.is_null() {
         Value::Array(Vec::new())
     } else {
@@ -169,6 +264,83 @@ pub fn validate_request(body: &NewFootnoteRequest) -> Result<Value, String> {
 
 /// Trim notes and links. The hub and the MCP server both call this before a result is stored.
 pub fn validate_result(notes: &[String], links: &[FootnoteLink]) -> Result<FootnoteResult, String> {
+    validate_submission(
+        &FootnoteSubmission { notes: notes.to_vec(), links: links.to_vec(), ..Default::default() },
+        None,
+    )
+}
+
+/// Words compared the way a reader would: case and runs of whitespace ignored.
+fn loose(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+}
+
+/// Check a whole answer. With the request's `extras`, also check that quotes,
+/// palette slots and workspace ids refer to things the request actually had.
+pub fn validate_submission(
+    submission: &FootnoteSubmission,
+    extras: Option<&FootnoteExtras>,
+) -> Result<FootnoteResult, String> {
+    let base = validate_notes_and_links(&submission.notes, &submission.links)?;
+    let slots = extras.map(|extras| extras.palette.len()).filter(|count| *count > 0).unwrap_or(8);
+    let slot_ok = |slot: u8| (1..=slots).contains(&(slot as usize));
+    let title = match submission.title.as_deref().map(str::trim) {
+        Some("") | None => None,
+        Some(text) if text.chars().count() > 120 => return Err("title must be at most 120 characters".into()),
+        Some(text) => Some(text.to_string()),
+    };
+    if let Some(slot) = submission.color {
+        if !slot_ok(slot) {
+            return Err(format!("color must be a palette slot from 1 to {slots}"));
+        }
+    }
+    if submission.marks.len() > 12 {
+        return Err("marks must have at most 12 entries".into());
+    }
+    let text = extras.map(|extras| loose(&extras.mark_text)).unwrap_or_default();
+    let mut marks = Vec::with_capacity(submission.marks.len());
+    for mark in &submission.marks {
+        if mark.kind != "highlight" && mark.kind != "underline" {
+            return Err("each mark kind must be highlight or underline".into());
+        }
+        let quote = mark.quote.trim();
+        if !(1..=500).contains(&quote.chars().count()) {
+            return Err("each mark quote must be 1..=500 characters".into());
+        }
+        if !text.is_empty() && !text.contains(&loose(quote)) {
+            return Err(format!("mark quote is not in the marked text: \"{quote}\""));
+        }
+        if let Some(slot) = mark.color {
+            if !slot_ok(slot) {
+                return Err(format!("mark color must be a palette slot from 1 to {slots}"));
+            }
+        }
+        marks.push(FootnoteMark { kind: mark.kind.clone(), quote: quote.to_string(), color: mark.color });
+    }
+    if submission.workspace_links.len() > 8 {
+        return Err("workspace_links must have at most 8 entries".into());
+    }
+    let mut workspace_links = Vec::with_capacity(submission.workspace_links.len());
+    for id in &submission.workspace_links {
+        let id = id.trim();
+        match extras {
+            Some(extras) => match extras.workspace_items.iter().find(|item| item.id == id) {
+                Some(item) => workspace_links.push(item.clone()),
+                None => return Err(format!("workspace link {id:?} is not one of the request's workspace_items")),
+            },
+            None if !id.is_empty() => workspace_links.push(WorkspaceItem { id: id.to_string(), ..Default::default() }),
+            None => return Err("workspace link ids must be non-empty".into()),
+        }
+    }
+    let link_from = if workspace_links.is_empty() {
+        String::new()
+    } else {
+        extras.map(|extras| extras.doc_kind.clone()).filter(|kind| !kind.is_empty()).unwrap_or_else(|| "annotate".into())
+    };
+    Ok(FootnoteResult { title, color: submission.color, marks, workspace_links, link_from, ..base })
+}
+
+fn validate_notes_and_links(notes: &[String], links: &[FootnoteLink]) -> Result<FootnoteResult, String> {
     if !(1..=8).contains(&notes.len()) {
         return Err("notes must have 1..=8 entries".into());
     }
@@ -210,7 +382,7 @@ pub fn validate_result(notes: &[String], links: &[FootnoteLink]) -> Result<Footn
         };
         cleaned_links.push(FootnoteLink { title, url: url.to_string() });
     }
-    Ok(FootnoteResult { notes: cleaned_notes, links: cleaned_links })
+    Ok(FootnoteResult { notes: cleaned_notes, links: cleaned_links, ..Default::default() })
 }
 
 pub fn valid_id(id: &str) -> bool {
@@ -244,8 +416,8 @@ pub fn create_request(
         conn.execute(
             "INSERT INTO footnote_requests (
                 id, device_id, doc_id, doc_name, page, anchor, excerpt, context, wide_context,
-                page_footnotes, prompt, status, result, created_at, done_at, acked_at, answer_mode
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', NULL, ?12, NULL, NULL, ?13)",
+                page_footnotes, prompt, status, result, created_at, done_at, acked_at, answer_mode, extras
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, 'pending', NULL, ?12, NULL, NULL, ?13, ?14)",
             params![
                 body.id,
                 body.device_id,
@@ -260,6 +432,7 @@ pub fn create_request(
                 body.prompt,
                 now,
                 body.answer_mode.as_str(),
+                serde_json::to_string(&body.extras)?,
             ],
         )?;
         get_request(conn, &body.id)?.ok_or(FootnoteFail::NotFound)
@@ -270,7 +443,7 @@ pub fn get_request(conn: &Connection, id: &str) -> Result<Option<FootnoteRequest
     let row = conn
         .query_row(
             "SELECT id, device_id, doc_id, doc_name, page, anchor, excerpt, context, wide_context,
-                    page_footnotes, prompt, status, result, created_at, done_at, acked_at, answer_mode
+                    page_footnotes, prompt, status, result, created_at, done_at, acked_at, answer_mode, extras
              FROM footnote_requests WHERE id = ?1",
             params![id],
             map_request,
@@ -318,9 +491,21 @@ pub fn submit_result(
     links: &[FootnoteLink],
     now: i64,
 ) -> Result<(), FootnoteFail> {
-    let result = validate_result(notes, links).map_err(FootnoteFail::Invalid)?;
-    let stored = serde_json::to_string(&result)?;
+    let submission = FootnoteSubmission { notes: notes.to_vec(), links: links.to_vec(), ..Default::default() };
+    submit_answer(conn, id, &submission, now)
+}
+
+/// Store an answer after checking it against the request it answers.
+pub fn submit_answer(
+    conn: &Connection,
+    id: &str,
+    submission: &FootnoteSubmission,
+    now: i64,
+) -> Result<(), FootnoteFail> {
     transact(conn, || {
+        let extras = get_request(conn, id)?.map(|request| request.extras);
+        let result = validate_submission(submission, extras.as_ref()).map_err(FootnoteFail::Invalid)?;
+        let stored = serde_json::to_string(&result)?;
         let status: Option<String> = conn
             .query_row(
                 "SELECT status FROM footnote_requests WHERE id = ?1",
@@ -403,6 +588,7 @@ struct PackedRequest {
     anchor: String,
     page_footnotes: String,
     result: Option<String>,
+    extras: String,
 }
 
 fn map_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PackedRequest> {
@@ -420,6 +606,7 @@ fn map_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PackedRequest> {
             wide_context: row.get(8)?,
             page_footnotes: Value::Null,
             prompt: row.get(10)?,
+            extras: FootnoteExtras::default(),
             status: row.get(11)?,
             result: None,
             created_at: row.get(13)?,
@@ -429,6 +616,7 @@ fn map_request(row: &rusqlite::Row<'_>) -> rusqlite::Result<PackedRequest> {
         anchor: row.get(5)?,
         page_footnotes: row.get(9)?,
         result: row.get(12)?,
+        extras: row.get(17)?,
     })
 }
 
@@ -437,5 +625,7 @@ fn unpack(packed: PackedRequest) -> Result<FootnoteRequest, FootnoteFail> {
     request.anchor = serde_json::from_str(&packed.anchor)?;
     request.page_footnotes = serde_json::from_str(&packed.page_footnotes)?;
     request.result = packed.result.as_deref().map(serde_json::from_str).transpose()?;
+    // Unreadable extras only lose the optional context, never the request.
+    request.extras = serde_json::from_str(&packed.extras).unwrap_or_default();
     Ok(request)
 }

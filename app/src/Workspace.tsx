@@ -183,7 +183,7 @@ import {
   type DocFootnoteSubMark,
   type DocFootnoteSubMarkKind,
 } from "./util/docFootnotes";
-import { footnoteDisplayThemes, footnoteThemeSeed } from "./util/inkPaletteHistory";
+import { footnoteDisplayThemes, footnoteThemeSeed, normalizePalette } from "./util/inkPaletteHistory";
 import { hashBytesAsync, loadBinaryDocBytesWithRetry, bytesCameFromStore, putDocBytesVerified } from "./util/docBytes";
 import { handOffPickedDoc, takePickedDoc } from "./util/pickedDocHandoff";
 import {
@@ -3820,6 +3820,11 @@ export const Workspace = memo(function Workspace({
     }
     return out;
   }, [hereNode, tabsRef]);
+  // ChatBot requests are queued from callbacks; they read the latest of these.
+  const linkTargetsRef = useRef(linkTargets);
+  linkTargetsRef.current = linkTargets;
+  const hereNodeRef = useRef(hereNode);
+  hereNodeRef.current = hereNode;
 
   /**
    * The marks on this page, positioned for the link overlay.
@@ -8937,6 +8942,18 @@ export const Workspace = memo(function Workspace({
           viewerPage: source.docType === "pdf" ? pdfNavRef.current?.current ?? null : null,
           footnotes,
           exceptId: mark.id,
+          palette: normalizePalette(mark.palette) ?? footnoteDisplayThemes(footnotes).get(mark.id)?.palette,
+          markText: mark.blockText ?? mark.excerpt,
+          // The library an answer may link to, by `type:id`, as the link picker offers it.
+          workspaceItems: linkTargetsRef.current
+            .filter((target) => target.node.type !== "thread" && !target.node.id.startsWith("unresolved:"))
+            .slice(0, 60)
+            .map((target) => ({
+              id: `${target.node.type}:${target.node.id}`,
+              kind: target.node.type,
+              title: target.node.title ?? target.node.id,
+            })),
+          docKind: hereNodeRef.current?.type === "web" ? "web" : "annotate",
         }));
       } catch (cause) {
         // A durable queue failure must leave every unsent ask held for the

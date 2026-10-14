@@ -92,6 +92,7 @@ const EDGE_LABEL: Record<EdgeKind, string> = {
   "footnote-thread": "thread on a mark",
   "footnote-url": "saved URL",
   ink: "drawn link",
+  chatbot: "linked by ChatBot",
 };
 
 const TINT: Record<NodeType, string> = {

@@ -16,7 +16,7 @@ import logging
 from pathlib import Path
 import re
 import sys
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 from urllib.parse import urlsplit
 
 import httpx2
@@ -187,6 +187,13 @@ class FootnoteLink(BaseModel):
     title: str | None = None
 
 
+class FootnoteMark(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    kind: Literal["highlight", "underline"]
+    quote: str = Field(description="Exact words copied from extras.mark_text.")
+    color: Annotated[int, Field(ge=1, le=8)] | None = Field(default=None, description="Optional palette slot.")
+
+
 def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=None) -> FastMCP:
     """The optional arguments are in-process test seams, never CLI options."""
     auth = auth_provider if auth_provider is not None else github_auth(config)
@@ -242,7 +249,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     @bridge.tool(name="get_footnote_request", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def get_footnote_request(id: str) -> ToolResult:
-        """Read one footnote request, including wide context and existing page notes."""
+        """Read one footnote request: wide context, existing page notes, and extras (the mark's palette, its exact text to quote for marks, and library items you may link by id)."""
         return await relay("get_footnote_request", {"id": id})
 
     @bridge.tool(name="submit_footnote", output_schema=None,
@@ -250,12 +257,29 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     async def submit_footnote(
         id: str, notes: Annotated[list[str], Field(min_length=1, max_length=8)],
         links: list[FootnoteLink] | None = None,
+        title: Annotated[str, Field(max_length=120)] | None = None,
+        color: Annotated[int, Field(ge=1, le=8)] | None = None,
+        marks: Annotated[list[FootnoteMark], Field(max_length=12)] | None = None,
+        workspace_links: Annotated[list[str], Field(max_length=8)] | None = None,
     ) -> ToolResult:
-        """Save notes and optional source links for one pending footnote request."""
-        return await relay("submit_footnote", {
+        """Save a footnote for one pending request. Everything is added; nothing of the reader's is replaced.
+
+        Optional: a short title and a palette color slot (used only if the reader hasn't set them),
+        highlights/underlines quoting exact words from extras.mark_text, and workspace_links
+        (ids from extras.workspace_items)."""
+        arguments: dict[str, Any] = {
             "id": id, "notes": notes,
             "links": [link.model_dump(exclude_none=True) for link in links or []],
-        })
+        }
+        if title is not None:
+            arguments["title"] = title
+        if color is not None:
+            arguments["color"] = color
+        if marks:
+            arguments["marks"] = [mark.model_dump(exclude_none=True) for mark in marks]
+        if workspace_links:
+            arguments["workspace_links"] = workspace_links
+        return await relay("submit_footnote", arguments)
 
     return bridge
 

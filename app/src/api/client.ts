@@ -727,6 +727,28 @@ export interface FootnoteRequestDto {
   wide_context: string;
   page_footnotes: FootnotePageNoteDto[];
   prompt: string | null;
+  /** The mark's palette, its exact text, library items it may link, and the doc kind. */
+  extras?: FootnoteExtrasDto;
+}
+
+export interface FootnoteWorkspaceItemDto {
+  id: string;
+  kind: string;
+  title: string;
+}
+
+export interface FootnoteExtrasDto {
+  palette?: string[];
+  mark_text?: string;
+  workspace_items?: FootnoteWorkspaceItemDto[];
+  doc_kind?: "annotate" | "web";
+}
+
+export interface FootnoteMarkDto {
+  kind: "highlight" | "underline";
+  quote: string;
+  /** 1-based slot in the mark's palette. */
+  color?: number;
 }
 
 export interface FootnoteLinkDto {
@@ -737,6 +759,13 @@ export interface FootnoteLinkDto {
 export interface FootnoteResultDto {
   notes: string[];
   links?: FootnoteLinkDto[];
+  title?: string;
+  /** 1-based slot in the mark's palette. */
+  color?: number;
+  marks?: FootnoteMarkDto[];
+  workspace_links?: FootnoteWorkspaceItemDto[];
+  /** Kind of the asking document, the other end of each workspace link. */
+  link_from?: "annotate" | "web";
 }
 
 export interface FootnotePingResultDto {
