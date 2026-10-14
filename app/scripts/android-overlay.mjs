@@ -118,6 +118,44 @@ tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach 
  * @param {string} source raw buildSrc/build.gradle.kts
  * @returns {string}
  */
+/**
+ * Sign debug builds with a named keystore.
+ *
+ * CI writes the shared debug key from a secret and names it in
+ * PEN_ISLAND_DEBUG_KEYSTORE. Leaving it to Gradle's default lookup in
+ * ~/.android did not work on the runners: every CI APK still got a fresh key,
+ * so it could not install over the tablet's copy. Locally the variable is
+ * unset and builds keep Gradle's own debug key.
+ *
+ * @param {string} source raw app/build.gradle.kts
+ * @param {string} keystore absolute path to the keystore
+ */
+export function withDebugSigning(source, keystore) {
+  if (source.includes('create("penIslandDebug")')) return source;
+  // The generated file is CRLF on Windows; keep whatever it uses.
+  const eol = source.includes("\r\n") ? "\r\n" : "\n";
+  const path = keystore.replaceAll("\\", "/").replaceAll('"', '\\"');
+  const config = [
+    "    signingConfigs {",
+    '        create("penIslandDebug") {',
+    `            storeFile = file("${path}")`,
+    '            storePassword = "android"',
+    '            keyAlias = "androiddebugkey"',
+    '            keyPassword = "android"',
+    "        }",
+    "    }",
+    "",
+  ].join(eol);
+  const withConfig = source.replace(/^[ \t]*buildTypes[ \t]*\{/m, (match) => `${config}${match}`);
+  if (withConfig === source) throw new Error("app/build.gradle.kts has no buildTypes block to sign");
+  const signed = withConfig.replace(
+    /getByName\("debug"\)[ \t]*\{[ \t]*\r?\n/,
+    (match) => `${match}            signingConfig = signingConfigs.getByName("penIslandDebug")${eol}`,
+  );
+  if (signed === withConfig) throw new Error("app/build.gradle.kts has no debug build type to sign");
+  return signed;
+}
+
 export function withBuildSrcJvm17(source) {
   if (source.includes("JvmTarget.JVM_17")) return source;
   return `${source.trimEnd()}\n${BUILD_SRC_JVM17}`;
@@ -278,6 +316,18 @@ async function main() {
     if (next !== raw) {
       await writeFile(buildSrcGradle, next);
       console.log("android overlay: buildSrc Kotlin jvmTarget 17");
+    }
+  }
+
+  const debugKeystore = process.env.PEN_ISLAND_DEBUG_KEYSTORE;
+  if (debugKeystore) {
+    if (!existsSync(debugKeystore)) throw new Error(`PEN_ISLAND_DEBUG_KEYSTORE names a missing file: ${debugKeystore}`);
+    const appGradle = join(PROJECT, "app", "build.gradle.kts");
+    const raw = await readFile(appGradle, "utf8");
+    const next = withDebugSigning(raw, debugKeystore);
+    if (next !== raw) {
+      await writeFile(appGradle, next);
+      console.log("android overlay: debug builds signed with PEN_ISLAND_DEBUG_KEYSTORE");
     }
   }
 

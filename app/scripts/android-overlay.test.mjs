@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { withBuildSrcJvm17, withExecOperations, withGradleJavaHome, withNetworkSecurityConfig, isUsableGradleJdk, javaMajorFromRelease } from "./android-overlay.mjs";
+import { withBuildSrcJvm17, withDebugSigning, withExecOperations, withGradleJavaHome, withNetworkSecurityConfig, isUsableGradleJdk, javaMajorFromRelease } from "./android-overlay.mjs";
 
 const MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -122,5 +122,48 @@ describe("Gradle JDK 25", () => {
     const next = withGradleJavaHome("android.useAndroidX=true\n", "C:\\Program Files\\Java\\jdk-23");
     expect(next).toContain("org.gradle.java.home=C:/Program Files/Java/jdk-23");
     expect(withGradleJavaHome(next, "C:\\Program Files\\Java\\jdk-23")).toBe(next);
+  });
+});
+
+const APP_GRADLE = `android {
+    compileSdk = 36
+    buildTypes {
+        getByName("debug") {
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            isDebuggable = true
+        }
+        getByName("release") {
+            isMinifyEnabled = true
+        }
+    }
+}
+`;
+
+describe("withDebugSigning", () => {
+  it("signs only the debug build type with the named keystore", () => {
+    const patched = withDebugSigning(APP_GRADLE, "/home/runner/.android/debug.keystore");
+    expect(patched).toContain('storeFile = file("/home/runner/.android/debug.keystore")');
+    expect(patched.indexOf("signingConfigs {")).toBeLessThan(patched.indexOf("buildTypes {"));
+    const debug = patched.slice(patched.indexOf('getByName("debug")'), patched.indexOf('getByName("release")'));
+    expect(debug).toContain('signingConfig = signingConfigs.getByName("penIslandDebug")');
+    expect(patched.slice(patched.indexOf('getByName("release")'))).not.toContain("signingConfig");
+  });
+
+  it("is idempotent and keeps Windows paths readable to Gradle", () => {
+    const once = withDebugSigning(APP_GRADLE, "C:\\Users\\me\\.android\\debug.keystore");
+    expect(once).toContain('file("C:/Users/me/.android/debug.keystore")');
+    expect(withDebugSigning(once, "C:\\other.keystore")).toBe(once);
+  });
+
+  it("keeps a CRLF file's line endings", () => {
+    const patched = withDebugSigning(APP_GRADLE.replaceAll("\n", "\r\n"), "/k");
+    const lineBreaks = patched.replaceAll("\r\n", "");
+    expect(lineBreaks).not.toContain("\n");
+    expect(lineBreaks).not.toContain("\r");
+    expect(patched).toContain("\r\n    signingConfigs {\r\n");
+  });
+
+  it("refuses a file it cannot sign rather than building unsigned", () => {
+    expect(() => withDebugSigning("android {}\n", "/k")).toThrow(/buildTypes/);
   });
 });

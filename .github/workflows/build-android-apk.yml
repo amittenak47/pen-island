@@ -135,6 +135,9 @@ jobs:
           if [ -n "$ANDROID_DEBUG_KEYSTORE_B64" ]; then
             mkdir -p ~/.android
             echo "$ANDROID_DEBUG_KEYSTORE_B64" | base64 -d > ~/.android/debug.keystore
+            # Gradle's own lookup ignored this file on the runners; the
+            # overlay signs debug builds with it by name instead.
+            echo "PEN_ISLAND_DEBUG_KEYSTORE=$HOME/.android/debug.keystore" >> "$GITHUB_ENV"
           else
             echo "::warning::ANDROID_DEBUG_KEYSTORE_B64 is not set; this APK gets a one-off debug key."
           fi
