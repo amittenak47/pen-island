@@ -22531,6 +22531,7 @@ html[data-corners="rounded"] {
 }
 
 .lc-footnote-overview-link-list .lc-footnote-note-actions .lc-footnote-mark-tool {
+  box-sizing: border-box;
   flex: 0 0 auto;
   width: 26px;
   min-width: 0;
