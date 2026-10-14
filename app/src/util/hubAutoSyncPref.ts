@@ -8,6 +8,7 @@
  * explicit action: a manual sync walks its stages regardless of this switch.
  */
 
+import { enumPref } from "./prefStore";
 const KEY = "whiteboard.hubAutoSync.v1";
 
 export type HubAutoSyncPref = "off" | "on";
@@ -29,18 +30,10 @@ export const HUB_AUTOSYNC_CHOICES: ReadonlyArray<[HubAutoSyncPref, string, strin
 
 export const HUB_AUTOSYNC_EVENT = "lc-hub-autosync";
 
-function isPref(value: unknown): value is HubAutoSyncPref {
-  return value === "off" || value === "on";
-}
+const autosyncPref = enumPref<HubAutoSyncPref>({ key: KEY, values: ["off", "on"], fallback: HUB_AUTOSYNC_DEFAULT });
 
 export function loadHubAutosyncPref(): HubAutoSyncPref {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw == null) return HUB_AUTOSYNC_DEFAULT;
-    return isPref(raw) ? raw : HUB_AUTOSYNC_DEFAULT;
-  } catch {
-    return HUB_AUTOSYNC_DEFAULT;
-  }
+  return autosyncPref.load();
 }
 
 /** Convenience for gates: true only when background hub traffic may run. */
@@ -49,9 +42,5 @@ export function loadHubAutosync(): boolean {
 }
 
 export function saveHubAutosyncPref(value: HubAutoSyncPref): void {
-  try {
-    localStorage.setItem(KEY, value);
-  } catch {
-    /* private browsing */
-  }
+  autosyncPref.save(value);
 }

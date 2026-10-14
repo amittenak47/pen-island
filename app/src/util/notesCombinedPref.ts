@@ -3,12 +3,15 @@
  * A display choice for this device only; the notes themselves are unchanged.
  */
 
+import { boolPref } from "./prefStore";
 const KEY = "whiteboard.footnoteNotesCombined.v1";
 
+const combinedPref = boolPref({ key: KEY, fallback: false });
+
 export function loadNotesCombined(): boolean {
-  try { return localStorage.getItem(KEY) === "1"; } catch { return false; }
+  return combinedPref.load();
 }
 
 export function saveNotesCombined(combined: boolean): void {
-  try { localStorage.setItem(KEY, combined ? "1" : "0"); } catch { /* a convenience only */ }
+  combinedPref.save(combined);
 }

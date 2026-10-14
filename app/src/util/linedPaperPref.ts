@@ -22,6 +22,7 @@
  * ruling so ink sits just above the rule instead of on it.
  */
 
+import { enumPref } from "./prefStore";
 export type LinedPaperMode = "wide" | "college" | "off";
 export type LinedRuling = "wide" | "college";
 
@@ -68,21 +69,14 @@ export function isLinedRuling(value: unknown): value is LinedRuling {
   return value === "wide" || value === "college";
 }
 
+const paperPref = enumPref<LinedPaperMode>({ key: KEY, values: ["wide", "college", "off"], fallback: "off" });
+
 export function loadLinedPaperMode(): LinedPaperMode {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return isLinedPaperMode(raw) ? raw : "off";
-  } catch {
-    return "off";
-  }
+  return paperPref.load();
 }
 
 export function saveLinedPaperMode(mode: LinedPaperMode): void {
-  try {
-    localStorage.setItem(KEY, mode);
-  } catch {
-    /* private browsing */
-  }
+  paperPref.save(mode);
 }
 
 /** off → wide → college → off. First tap from the default still turns rules on. */

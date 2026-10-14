@@ -14,6 +14,7 @@
  * grey / black-and-white marks) or a ROYGBIV rainbow crawl.
  */
 
+import { enumPref } from "./prefStore";
 export type ChromeWakeMarker = "smear" | "pulse" | "off";
 
 export type ChromeWakeTint = "mono" | "color";
@@ -40,38 +41,23 @@ export function isChromeWakeTint(value: unknown): value is ChromeWakeTint {
   return value === "mono" || value === "color";
 }
 
+const markerPref = enumPref<ChromeWakeMarker>({ key: KEY, values: ["smear", "pulse", "off"], fallback: CHROME_WAKE_DEFAULT });
+const tintPref = enumPref<ChromeWakeTint>({ key: TINT_KEY, values: ["mono", "color"], fallback: CHROME_WAKE_TINT_DEFAULT });
+
 export function loadChromeWakeMarker(): ChromeWakeMarker {
-  try {
-    const raw = localStorage.getItem(KEY);
-    return isChromeWakeMarker(raw) ? raw : CHROME_WAKE_DEFAULT;
-  } catch {
-    return CHROME_WAKE_DEFAULT;
-  }
+  return markerPref.load();
 }
 
 export function saveChromeWakeMarker(marker: ChromeWakeMarker): void {
-  try {
-    localStorage.setItem(KEY, marker);
-  } catch {
-    /* private browsing */
-  }
+  markerPref.save(marker);
 }
 
 export function loadChromeWakeTint(): ChromeWakeTint {
-  try {
-    const raw = localStorage.getItem(TINT_KEY);
-    return isChromeWakeTint(raw) ? raw : CHROME_WAKE_TINT_DEFAULT;
-  } catch {
-    return CHROME_WAKE_TINT_DEFAULT;
-  }
+  return tintPref.load();
 }
 
 export function saveChromeWakeTint(tint: ChromeWakeTint): void {
-  try {
-    localStorage.setItem(TINT_KEY, tint);
-  } catch {
-    /* private browsing */
-  }
+  tintPref.save(tint);
 }
 
 export function chromeWakeMarkerLabel(marker: ChromeWakeMarker): string {

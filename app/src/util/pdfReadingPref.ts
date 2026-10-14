@@ -10,6 +10,7 @@
  * disagree.
  */
 
+import { boolPref, numberPref } from "./prefStore";
 import { PAN_FRICTION } from "../canvas/flickPredict";
 
 const HUD_KEY = "whiteboard.pdfFlickHud.v1";
@@ -33,40 +34,23 @@ function clampMomentum(value: number): number {
   return Math.min(PDF_FLICK_MOMENTUM_MAX, Math.max(PDF_FLICK_MOMENTUM_MIN, value));
 }
 
+const hudPref = boolPref({ key: HUD_KEY, fallback: PDF_FLICK_HUD_DEFAULT });
+const momentumPref = numberPref({ key: MOMENTUM_KEY, min: PDF_FLICK_MOMENTUM_MIN, max: PDF_FLICK_MOMENTUM_MAX, fallback: PDF_FLICK_MOMENTUM_DEFAULT });
+
 export function loadPdfFlickHud(): boolean {
-  try {
-    const raw = localStorage.getItem(HUD_KEY);
-    if (raw == null) return PDF_FLICK_HUD_DEFAULT;
-    return raw !== "0";
-  } catch {
-    return PDF_FLICK_HUD_DEFAULT;
-  }
+  return hudPref.load();
 }
 
 export function savePdfFlickHud(on: boolean): void {
-  try {
-    localStorage.setItem(HUD_KEY, on ? "1" : "0");
-  } catch {
-    /* private browsing */
-  }
+  hudPref.save(on);
 }
 
 export function loadPdfFlickMomentum(): number {
-  try {
-    const raw = localStorage.getItem(MOMENTUM_KEY);
-    if (raw == null) return PDF_FLICK_MOMENTUM_DEFAULT;
-    return clampMomentum(Number(raw));
-  } catch {
-    return PDF_FLICK_MOMENTUM_DEFAULT;
-  }
+  return momentumPref.load();
 }
 
 export function savePdfFlickMomentum(value: number): void {
-  try {
-    localStorage.setItem(MOMENTUM_KEY, String(clampMomentum(value)));
-  } catch {
-    /* private browsing */
-  }
+  momentumPref.save(value);
 }
 
 /**
