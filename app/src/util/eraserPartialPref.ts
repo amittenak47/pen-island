@@ -10,6 +10,7 @@
  * eraser means tracing the line; touching it anywhere ought to be enough.
  */
 
+import { boolPref } from "./prefStore";
 const KEY = "whiteboard.eraser.partial";
 
 export const ERASER_PARTIAL_DEFAULT = true;
@@ -17,20 +18,12 @@ export const ERASER_PARTIAL_DEFAULT = true;
 /** Fired on the window when the preference changes, so open boards pick it up. */
 export const ERASER_PARTIAL_EVENT = "lc-eraser-partial";
 
+const partialPref = boolPref({ key: KEY, fallback: ERASER_PARTIAL_DEFAULT });
+
 export function loadEraserPartial(): boolean {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw == null) return ERASER_PARTIAL_DEFAULT;
-    return raw !== "0";
-  } catch {
-    return ERASER_PARTIAL_DEFAULT;
-  }
+  return partialPref.load();
 }
 
 export function saveEraserPartial(partial: boolean): void {
-  try {
-    localStorage.setItem(KEY, partial ? "1" : "0");
-  } catch {
-    /* private browsing */
-  }
+  partialPref.save(partial);
 }

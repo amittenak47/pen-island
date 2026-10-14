@@ -14,6 +14,7 @@
  * recorded 0 come back at the floor rather than staying invisible.
  */
 
+import { numberPref } from "./prefStore";
 const KEY = "whiteboard.inkBoldness";
 
 export const INK_BOLDNESS_MIN = 0.1;
@@ -25,23 +26,15 @@ function clamp(value: number, fallback = INK_BOLDNESS_DEFAULT): number {
   return Math.min(INK_BOLDNESS_MAX, Math.max(INK_BOLDNESS_MIN, value));
 }
 
+const boldnessPref = numberPref({ key: KEY, min: INK_BOLDNESS_MIN, max: INK_BOLDNESS_MAX, fallback: INK_BOLDNESS_DEFAULT });
+
 /** Stored as 0–3; the UI shows 0–300%. */
 export function loadInkBoldness(): number {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw == null) return INK_BOLDNESS_DEFAULT;
-    return clamp(Number(raw));
-  } catch {
-    return INK_BOLDNESS_DEFAULT;
-  }
+  return boldnessPref.load();
 }
 
 export function saveInkBoldness(value: number): void {
-  try {
-    localStorage.setItem(KEY, String(clamp(value)));
-  } catch {
-    /* private browsing */
-  }
+  boldnessPref.save(value);
 }
 
 export function inkBoldnessFromPercent(percent: number): number {

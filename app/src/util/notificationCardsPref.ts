@@ -5,20 +5,15 @@
  * banners) still shows.
  */
 
+import { boolPref } from "./prefStore";
 const KEY = "whiteboard.notificationCards";
 
+const cardsPref = boolPref({ key: KEY, fallback: true });
+
 export function loadNotificationCards(): boolean {
-  try {
-    return localStorage.getItem(KEY) !== "0";
-  } catch {
-    return true;
-  }
+  return cardsPref.load();
 }
 
 export function saveNotificationCards(on: boolean): void {
-  try {
-    localStorage.setItem(KEY, on ? "1" : "0");
-  } catch {
-    /* private browsing */
-  }
+  cardsPref.save(on);
 }

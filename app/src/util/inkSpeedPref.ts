@@ -7,6 +7,7 @@
  * with an update and makes their existing notes look different.
  */
 
+import { numberPref } from "./prefStore";
 const KEY = "whiteboard.inkSpeed";
 /** Soft rim + dwell growth feel (0 = hard expanding disc, 1 = soft rim / faster grow). */
 const BLOT_BLEND_KEY = "whiteboard.inkSpeedBlotBlend";
@@ -31,23 +32,18 @@ function clamp(value: number, fallback = INK_SPEED_DEFAULT): number {
   return Math.min(INK_SPEED_MAX, Math.max(INK_SPEED_MIN, value));
 }
 
+const speedPref = numberPref({ key: KEY, min: INK_SPEED_MIN, max: INK_SPEED_MAX, fallback: INK_SPEED_DEFAULT });
+const blotBlendPref = numberPref({ key: BLOT_BLEND_KEY, min: INK_SPEED_MIN, max: INK_SPEED_MAX, fallback: INK_SPEED_BLOT_BLEND_DEFAULT });
+const fadePref = numberPref({ key: FADE_KEY, min: INK_SPEED_MIN, max: INK_SPEED_MAX, fallback: INK_SPEED_FADE_DEFAULT });
+const grainPref = numberPref({ key: GRAIN_KEY, min: INK_SPEED_MIN, max: INK_SPEED_MAX, fallback: INK_GRAIN_DEFAULT });
+
 /** Stored as 0–1; the UI shows 0–100%. */
 export function loadInkSpeed(): number {
-  try {
-    const raw = localStorage.getItem(KEY);
-    if (raw == null) return INK_SPEED_DEFAULT;
-    return clamp(Number(raw));
-  } catch {
-    return INK_SPEED_DEFAULT;
-  }
+  return speedPref.load();
 }
 
 export function saveInkSpeed(value: number): void {
-  try {
-    localStorage.setItem(KEY, String(clamp(value)));
-  } catch {
-    /* private browsing */
-  }
+  speedPref.save(value);
 }
 
 export function speedInkFromPercent(percent: number): number {
@@ -60,21 +56,11 @@ export function speedInkToPercent(value: number): number {
 
 /** 0 = hard expanding disc; 1 = wider soft rim + faster dwell growth. */
 export function loadInkSpeedBlotBlend(): number {
-  try {
-    const raw = localStorage.getItem(BLOT_BLEND_KEY);
-    if (raw == null) return INK_SPEED_BLOT_BLEND_DEFAULT;
-    return clamp(Number(raw), INK_SPEED_BLOT_BLEND_DEFAULT);
-  } catch {
-    return INK_SPEED_BLOT_BLEND_DEFAULT;
-  }
+  return blotBlendPref.load();
 }
 
 export function saveInkSpeedBlotBlend(value: number): void {
-  try {
-    localStorage.setItem(BLOT_BLEND_KEY, String(clamp(value, INK_SPEED_BLOT_BLEND_DEFAULT)));
-  } catch {
-    /* private browsing */
-  }
+  blotBlendPref.save(value);
 }
 
 export function speedBlotBlendFromPercent(percent: number): number {
@@ -89,21 +75,11 @@ export function speedBlotBlendToPercent(value: number): number {
 export const INK_SPEED_BLOT_BLEND_EVENT = "lc-ink-speed-blot-blend";
 
 export function loadInkSpeedFade(): number {
-  try {
-    const raw = localStorage.getItem(FADE_KEY);
-    if (raw == null) return INK_SPEED_FADE_DEFAULT;
-    return clamp(Number(raw), INK_SPEED_FADE_DEFAULT);
-  } catch {
-    return INK_SPEED_FADE_DEFAULT;
-  }
+  return fadePref.load();
 }
 
 export function saveInkSpeedFade(value: number): void {
-  try {
-    localStorage.setItem(FADE_KEY, String(clamp(value, INK_SPEED_FADE_DEFAULT)));
-  } catch {
-    /* private browsing */
-  }
+  fadePref.save(value);
 }
 
 export function speedFadeFromPercent(percent: number): number {
@@ -118,21 +94,11 @@ export function speedFadeToPercent(value: number): number {
 export const INK_SPEED_FADE_EVENT = "lc-ink-speed-fade";
 
 export function loadInkGrain(): number {
-  try {
-    const raw = localStorage.getItem(GRAIN_KEY);
-    if (raw == null) return INK_GRAIN_DEFAULT;
-    return clamp(Number(raw), INK_GRAIN_DEFAULT);
-  } catch {
-    return INK_GRAIN_DEFAULT;
-  }
+  return grainPref.load();
 }
 
 export function saveInkGrain(value: number): void {
-  try {
-    localStorage.setItem(GRAIN_KEY, String(clamp(value, INK_GRAIN_DEFAULT)));
-  } catch {
-    /* private browsing */
-  }
+  grainPref.save(value);
 }
 
 export function grainFromPercent(percent: number): number {
