@@ -22552,3 +22552,63 @@ html[data-corners="rounded"] {
   width: 14px;
   height: 14px;
 }
+
+/*
+ * Item colors: each kind of thing in a footnote has its own tint, on its chips
+ * and on the small key at the bottom of the panel.
+ */
+.lc-footnote-overview,
+.lc-footnote-mini-note {
+  --lc-type-annotation: #ea580c;
+  --lc-type-ai-note: #7c3aed;
+  --lc-type-note: #64748b;
+  --lc-type-whiteboard: #16a34a;
+  --lc-type-thread: #2563eb;
+  --lc-type-attachment: #db2777;
+  --lc-type-url: #0891b2;
+  --lc-type-file: #a16207;
+}
+
+.lc-footnote-item-chip[data-type],
+.lc-footnote-type-chip[data-type] {
+  --lc-type: var(--lc-type-note);
+  background: color-mix(in srgb, var(--lc-type) 18%, transparent);
+  box-shadow: inset 2px 0 0 var(--lc-type);
+}
+
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="annotation"] { --lc-type: var(--lc-type-annotation); }
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="ai-note"] { --lc-type: var(--lc-type-ai-note); }
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="note"] { --lc-type: var(--lc-type-note); }
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="whiteboard"] { --lc-type: var(--lc-type-whiteboard); }
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="thread"] { --lc-type: var(--lc-type-thread); }
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="attachment"] { --lc-type: var(--lc-type-attachment); }
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="url"] { --lc-type: var(--lc-type-url); }
+:is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="file"] { --lc-type: var(--lc-type-file); }
+
+.lc-footnote-item-kind {
+  margin-right: 4px;
+  color: var(--lc-type);
+}
+
+.lc-footnote-overview .lc-artifact-line {
+  box-shadow: inset 2px 0 0 var(--lc-type-attachment);
+}
+
+/* The key: footnote-size chips in one quiet row at the foot of the panel. */
+.lc-footnote-type-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px 2px 2px;
+  border-top: 1px solid color-mix(in srgb, var(--chrome-edge) 50%, transparent);
+}
+
+.lc-footnote-type-chip {
+  padding: 1px 6px;
+  border-radius: var(--lc-r-block);
+  color: var(--lc-fn-ink, var(--ink));
+  font-size: 9px;
+  font-weight: 600;
+  line-height: 1.5;
+  letter-spacing: 0.02em;
+}

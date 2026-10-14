@@ -1107,6 +1107,7 @@ export function FootnoteOverview({
                 )}
               </header>
               {subMarks.length > 0 && (
+              <HubSection title="Annotations">
                 <ul
                   className={listClass(subMarks.length)}
                   aria-label="Sub-marks"
@@ -1133,7 +1134,10 @@ export function FootnoteOverview({
                         className="lc-agent-scope-option"
                         onClick={() => selectSubMark(mark)}
                       >
-                        <span className="lc-footnote-overview-entry-text">{mark.excerpt}</span>
+                        <span className="lc-footnote-item-chip" data-type="annotation">
+                          <span className="lc-footnote-item-kind" aria-hidden>{mark.kind === "highlight" ? "▮" : "▁"}</span>
+                          {chipTitle(mark.excerpt) || mark.excerpt}
+                        </span>
                       </button>
                       <button
                         type="button"
@@ -1146,6 +1150,98 @@ export function FootnoteOverview({
                     </li>
                   ))}
                 </ul>
+              </HubSection>
+              )}
+              {(!rowsAreReadOnly || notes.length > 0 || footnote.pending) && (
+              <HubSection title="Notes" onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}>
+                {footnote.pending ? <p className="lc-muted" role="status">{pendingStatus || "ChatBot is writing..."}</p> : null}
+                {notes.length > 0 && (
+                  <ul className={listClass(notes.length)}>
+                    {notes.map((note, index) => (
+                      <NoteRow key={note.id} note={note} index={index} ai={noteIsAi(note, footnote)}
+                        readOnly={rowsAreReadOnly} canOpenMini={canOpenMini(note.id)} miniOpen={activeMiniIds.includes(note.id)}
+                        onShowMini={() => showMini(note.id)}
+                        onOpenFull={onOpenFullNote ? () => onOpenFullNote(note.id) : undefined}
+                        onEdit={readOnly ? undefined : () => openTask({ kind: "note", id: note.id })}
+                        onDelete={() => updateNotes(notes.filter((entry) => entry.id !== note.id))} />
+                    ))}
+                  </ul>
+                )}
+              </HubSection>
+              )}
+              {rowsAreReadOnly ? (
+                whiteboards.length > 0 ? (
+                  <HubSection title="Whiteboards">
+                    <ul className={listClass(whiteboards.length)}>
+                      {whiteboards.map((board) => (
+                        <li key={board.id}>
+                          <span className="lc-agent-scope-option">
+                            <span className="lc-footnote-item-chip" data-type="whiteboard">{board.title || "Whiteboard"}</span>
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                  </HubSection>
+                ) : null
+              ) : (
+              <HubSection title="Whiteboards" onAdd={onCreateWhiteboard}>
+                {whiteboards.length > 0 && (
+                  <ul className={listClass(whiteboards.length)}>
+                    {whiteboards.map((board) => (
+                      <li key={board.id}>
+                        <HoldButton
+                          label={board.title || "Whiteboard"}
+                          className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
+                          ariaLabel={`${board.title || "Whiteboard"} — tap to open, hold to delete`}
+                          holdMs={HOLD_SENSITIVE_MS}
+                          holdThrough
+                          onTap={() => onOpenWhiteboard?.(board.id)}
+                          onConfirm={() => removeWhiteboard(board.id)}
+                        >
+                          <span className="lc-footnote-item-chip" data-type="whiteboard">{board.title || "Whiteboard"}</span>
+                        </HoldButton>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </HubSection>
+              )}
+              <HubSection title="Threads">
+                {!readOnly && availableThreads.some(thread => !threads.some(link => link.rootId === thread.rootId)) &&
+                  <ThreadLinkPicker
+                    threads={availableThreads.filter(thread => !threads.some(link => link.rootId === thread.rootId))}
+                    onPick={thread => onChange({...footnote,threads:[...threads,{...thread,createdAt:Date.now()}]})}
+                  />}
+                {threads.length > 0 && (
+                  <ul className={listClass(threads.length)}>
+                    {threads.map((thread) => (
+                      <li key={thread.rootId}>
+                        <HoldButton
+                          label={thread.title}
+                          ariaLabel={`${thread.title}. Tap to open, hold to unlink. Conversation stays saved`}
+                          holdMs={HOLD_SENSITIVE_MS}
+                          className="lc-agent-scope-option"
+                          disabled={readOnly}
+                          onConfirm={() => removeThread(thread.rootId)}
+                          onTap={() => {
+                            if (onOpenCoachThread) {
+                              onOpenCoachThread(thread.rootId);
+                              return;
+                            }
+                            openTask({ kind: "thread", rootId: thread.rootId });
+                          }}
+                        >
+                          <span className="lc-footnote-item-chip" data-type="thread">{chipTitle(thread.title) || thread.title}</span>
+                        </HoldButton>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </HubSection>
+              {!rowsAreReadOnly && (
+              <HubSection title="Attachments" onAdd={onManageArtifacts}>
+                {onOpenArtifact && <ArtifactCards references={footnote.artifacts} onOpen={onOpenArtifact} />}
+              </HubSection>
               )}
               <HubSection
                 title="Links"
@@ -1160,7 +1256,7 @@ export function FootnoteOverview({
                           className="lc-agent-scope-option"
                           onClick={() => onOpenExternal(searchLink.url)}
                         >
-                          <strong>{searchLink.title}</strong>
+                          <span className="lc-footnote-item-chip" data-type="url">{searchLink.title}</span>
                           <span className="lc-muted">{searchLink.url}</span>
                         </button>
                       </li>
@@ -1176,7 +1272,7 @@ export function FootnoteOverview({
                               : openTask({ kind: "link", index })
                           }
                         >
-                          <strong>{link.title || link.url}</strong>
+                          <span className="lc-footnote-item-chip" data-type="url">{link.title || link.url}</span>
                           {link.title ? <span className="lc-muted">{link.url}</span> : null}
                         </button>
                       </li>
@@ -1205,7 +1301,7 @@ export function FootnoteOverview({
                             // this card's to delete.
                             onConfirm={() => history.removeLink(link.edgeId)}
                           >
-                            <strong className="lc-footnote-overview-entry-text">{link.title}</strong>
+                            <span className="lc-footnote-item-chip" data-type="file">{link.title}</span>
                             <span className="lc-muted">{link.kindLabel}</span>
                           </HoldButton>
                         </li>
@@ -1214,99 +1310,16 @@ export function FootnoteOverview({
                   )}
                 </HubSection>
               )}
-              {(!rowsAreReadOnly || notes.length > 0 || footnote.pending) && (
-              <HubSection title="Notes" onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}>
-                {footnote.pending ? <p className="lc-muted" role="status">{pendingStatus || "ChatBot is writing..."}</p> : null}
-                {notes.length > 0 && (
-                  <ul className={listClass(notes.length)}>
-                    {notes.map((note, index) => (
-                      <NoteRow key={note.id} note={note} index={index} ai={noteIsAi(note, footnote)}
-                        readOnly={rowsAreReadOnly} canOpenMini={canOpenMini(note.id)} miniOpen={activeMiniIds.includes(note.id)}
-                        onShowMini={() => showMini(note.id)}
-                        onOpenFull={onOpenFullNote ? () => onOpenFullNote(note.id) : undefined}
-                        onEdit={readOnly ? undefined : () => openTask({ kind: "note", id: note.id })}
-                        onDelete={() => updateNotes(notes.filter((entry) => entry.id !== note.id))} />
-                    ))}
-                  </ul>
-                )}
-              </HubSection>
-              )}
-              {rowsAreReadOnly ? (
-                whiteboards.length > 0 ? (
-                  <HubSection title="Whiteboards">
-                    <ul className={listClass(whiteboards.length)}>
-                      {whiteboards.map((board) => (
-                        <li key={board.id}>
-                          <span className="lc-agent-scope-option">
-                            <strong className="lc-footnote-overview-entry-text">
-                              {board.title || "Whiteboard"}
-                            </strong>
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
-                  </HubSection>
-                ) : null
-              ) : (
-              <><HubSection title="Attachments" onAdd={onManageArtifacts}>
-                {onOpenArtifact && <ArtifactCards references={footnote.artifacts} onOpen={onOpenArtifact} />}
-              </HubSection>
-              <HubSection title="Whiteboards" onAdd={onCreateWhiteboard}>
-                {whiteboards.length > 0 && (
-                  <ul className={listClass(whiteboards.length)}>
-                    {whiteboards.map((board) => (
-                      <li key={board.id}>
-                        <HoldButton
-                          label={board.title || "Whiteboard"}
-                          className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
-                          ariaLabel={`${board.title || "Whiteboard"} — tap to open, hold to delete`}
-                          holdMs={HOLD_SENSITIVE_MS}
-                          holdThrough
-                          onTap={() => onOpenWhiteboard?.(board.id)}
-                          onConfirm={() => removeWhiteboard(board.id)}
-                        >
-                          <strong className="lc-footnote-overview-entry-text">
-                            {board.title || "Whiteboard"}
-                          </strong>
-                        </HoldButton>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </HubSection></>
-              )}
-              <HubSection title="Threads">
-                {!readOnly && availableThreads.some(thread => !threads.some(link => link.rootId === thread.rootId)) &&
-                  <ThreadLinkPicker
-                    threads={availableThreads.filter(thread => !threads.some(link => link.rootId === thread.rootId))}
-                    onPick={thread => onChange({...footnote,threads:[...threads,{...thread,createdAt:Date.now()}]})}
-                  />}
-                {threads.length > 0 && (
-                  <ul className={listClass(threads.length)}>
-                    {threads.map((thread) => (
-                      <li key={thread.rootId}>
-                        <HoldButton
-                          label={thread.title}
-                          ariaLabel={`${thread.title}. Tap to open, hold to unlink. Conversation stays saved`}
-                          holdMs={HOLD_SENSITIVE_MS}
-                          className="lc-agent-scope-option"
-                          disabled={readOnly}
-                          onConfirm={() => removeThread(thread.rootId)}
-                          onTap={() => {
-                            if (onOpenCoachThread) {
-                              onOpenCoachThread(thread.rootId);
-                              return;
-                            }
-                            openTask({ kind: "thread", rootId: thread.rootId });
-                          }}
-                        >
-                          <span className="lc-footnote-item-chip">{chipTitle(thread.title) || thread.title}</span>
-                        </HoldButton>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </HubSection>
+              <ItemTypeKey types={[
+                subMarks.length > 0 && "annotation",
+                notes.some((note) => noteIsAi(note, footnote)) && "ai-note",
+                notes.some((note) => !noteIsAi(note, footnote)) && "note",
+                whiteboards.length > 0 && "whiteboard",
+                threads.length > 0 && "thread",
+                (footnote.artifacts?.length ?? 0) > 0 && "attachment",
+                (userLinks.length > 0 || Boolean(searchLink)) && "url",
+                workspaceLinks.length > 0 && "file",
+              ]} />
             </motion.div>
           )}
         </AnimatePresence>
@@ -1390,6 +1403,31 @@ function ThreadBubble() {
   );
 }
 
+/** Item kinds in the panel, each with its own chip color. */
+export const ITEM_TYPES = [
+  ["annotation", "Annotation"],
+  ["ai-note", "AI note"],
+  ["note", "Note"],
+  ["whiteboard", "Whiteboard"],
+  ["thread", "Thread"],
+  ["attachment", "Attachment"],
+  ["url", "URL"],
+  ["file", "File"],
+] as const;
+
+/** A row of tiny chips naming the colors of the kinds this footnote holds. */
+function ItemTypeKey({ types }: { types: ReadonlyArray<string | false> }) {
+  const present = ITEM_TYPES.filter(([type]) => types.includes(type));
+  if (present.length === 0) return null;
+  return (
+    <div className="lc-footnote-type-key" aria-label="Item colors">
+      {present.map(([type, label]) => (
+        <span key={type} className="lc-footnote-type-chip" data-type={type}>{label}</span>
+      ))}
+    </div>
+  );
+}
+
 /** How long a tapped note keeps its buttons out with nothing touched. */
 export const NOTE_ACTIONS_IDLE_MS = 4000;
 
@@ -1425,7 +1463,7 @@ function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini,
     return !value;
   });
   const chip = <>
-    {note.text ? <span className="lc-footnote-item-chip">{chipTitle(note.text) || plainPreview(note.text)}</span> : null}
+    {note.text ? <span className="lc-footnote-item-chip" data-type={ai ? "ai-note" : "note"}>{chipTitle(note.text) || plainPreview(note.text)}</span> : null}
     <NoteImages images={note.images} />
   </>;
   return (
