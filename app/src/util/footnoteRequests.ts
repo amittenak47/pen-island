@@ -186,8 +186,20 @@ function looseIndex(text: string, quote: string): { start: number; end: number }
   const needle = quote.trim().replace(/\s+/g, " ").toLowerCase();
   if (!needle) return null;
   const at = loose.indexOf(needle);
-  if (at < 0) return null;
-  return { start: keep[at]!, end: keep[at + needle.length - 1]! + 1 };
+  if (at >= 0) return { start: keep[at]!, end: keep[at + needle.length - 1]! + 1 };
+  // A PDF page's text layer can run words together ("hasendpoints") where the
+  // assistant's extracted text has a space: last, match on letters alone.
+  const letters: number[] = [];
+  let squeezed = "";
+  for (let i = 0; i < text.length; i++) {
+    if (/\s/.test(text[i]!)) continue;
+    squeezed += text[i]!.toLowerCase();
+    letters.push(i);
+  }
+  const bare = needle.replace(/ /g, "");
+  const from = squeezed.indexOf(bare);
+  if (from < 0) return null;
+  return { start: letters[from]!, end: letters[from + bare.length - 1]! + 1 };
 }
 
 /** A palette slot (1-based) on this mark, or undefined when it has no such slot. */

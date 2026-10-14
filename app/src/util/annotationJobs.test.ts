@@ -92,6 +92,14 @@ describe("page-range footnotes", () => {
     expect(footnote.blockText!.slice(mark.start, mark.end)).toBe("Depth-first search");
   });
 
+  it("places a mark whose words the page runs together", () => {
+    const footnote = footnoteFromItem(item({
+      result: { notes: ["Linear time."], marks: [{ kind: "underline", quote: "surprisingly versatile" }] },
+    }), STREAM, [], 50)!;
+    const mark = footnote.subMarks![0]!;
+    expect(footnote.blockText!.slice(mark.start, mark.end)).toBe("surprisinglyversatile");
+  });
+
   it("places delivered items, links library items, and does not duplicate a retry", async () => {
     const delivered = [
       item({ result: { ...item().result, workspace_links: [{ id: "whiteboard:wb-1", kind: "whiteboard", title: "Graph notes" }] } }),
