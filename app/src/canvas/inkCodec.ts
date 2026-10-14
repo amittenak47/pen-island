@@ -511,6 +511,46 @@ export function encodedInkBounds(encoded: EncodedInk): SceneBounds | null {
   );
 }
 
+/** Draw growth uses filtered point extents, including the one-unit dot floor. */
+export function encodedInkContentBottom(
+  encoded: EncodedInk,
+  frame: { x: number; y: number; width: number },
+  headerBand: number,
+): number {
+  const headerBottom = frame.y + headerBand;
+  const right = frame.x + frame.width;
+  let bottom = headerBand;
+  let minY = Infinity, maxY = -Infinity;
+  const point = (x: number, y: number) => {
+    if (x < frame.x || x > right || y < headerBottom) return;
+    minY = Math.min(minY, y);
+    maxY = Math.max(maxY, y);
+  };
+  const finish = () => {
+    if (Number.isFinite(minY)) bottom = Math.max(bottom, minY + Math.max(1, maxY - minY) - frame.y);
+    minY = Infinity;
+    maxY = -Infinity;
+  };
+  for (const record of encoded.ops) {
+    if (record.k !== "d") continue;
+    let x = record.x0, y = record.y0;
+    for (let i = 0; i < record.n; i += 1) {
+      if (i > 0) {
+        x += record.xy[(i - 1) * 2] / COORD_SCALE;
+        y += record.xy[(i - 1) * 2 + 1] / COORD_SCALE;
+      }
+      point(x, y);
+    }
+    finish();
+  }
+  for (const op of encoded.raw ?? []) {
+    if (op.kind !== "draw") continue;
+    for (const pt of op.points) point(pt.x, pt.y);
+    finish();
+  }
+  return bottom;
+}
+
 /**
  * What a page's ink cache needs of a stored page without its strokes: how
  * many ops, the highest id and seq (so new strokes get fresh ones), and where

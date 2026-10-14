@@ -3245,22 +3245,19 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     }
     if (!frame) return false;
 
-    const ops = rasterInkRef.current?.getOps() ?? [];
     // Same widening as the preview split: the frame's box has to be concrete
     // before anything measures against it.
     const curH = num(frame.height, 0);
-    const contentBottomRel = contentBottomInFrame(
-      live,
-      ops,
-      {
-        x: frame.x,
-        y: frame.y,
-        width: num(frame.width, 0),
-        height: curH,
-        customData: frame.customData ?? undefined,
-      },
-      DRAW_HEADER_BAND,
-      false,
+    const growthFrame = {
+      x: frame.x,
+      y: frame.y,
+      width: num(frame.width, 0),
+      height: curH,
+      customData: frame.customData ?? undefined,
+    };
+    const contentBottomRel = Math.max(
+      contentBottomInFrame(live, [], growthFrame, DRAW_HEADER_BAND, false),
+      rasterInkRef.current?.getDrawContentBottom(growthFrame, DRAW_HEADER_BAND) ?? DRAW_HEADER_BAND,
     );
     const nextH = growDrawHeight({
       basePageH,

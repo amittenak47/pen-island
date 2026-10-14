@@ -18,6 +18,7 @@ import {
   concatEncodedInk,
   decodeInkOps,
   encodeInkOps,
+  encodedInkContentBottom,
   knownInkSummary,
   summarizeEncodedInk,
   type EncodedInk,
@@ -84,6 +85,7 @@ export class InkPageBook {
   /** Bumps on every mutation, including undo/redo that keep the same op count. */
   private generation = 0;
   private boundsByPage = new Map<number, SceneBounds | null>();
+  private drawBottomByPage = new Map<number, { key: string; bottom: number }>();
   /**
    * A hot page's encoded copy from when it was decoded, while nothing has
    * changed it since. Moving off a page gives it back instead of encoding
@@ -279,7 +281,25 @@ export class InkPageBook {
 
   /** Draw growth measures point positions, without nib padding or a bottom clip. */
   drawContentBottom(frame: SceneAABB, headerBand: number): number {
-    return contentBottomInFrame([], this.assembleOps(), frame, headerBand, false);
+    const key = JSON.stringify([frame.x, frame.y, frame.width, headerBand]);
+    let bottom = headerBand;
+    for (const id of new Set([...this.hot.keys(), ...this.cold.keys()])) {
+      let cached = this.drawBottomByPage.get(id);
+      if (!cached || cached.key !== key) {
+        const hot = this.hot.get(id);
+        const encoded = this.cold.get(id);
+        const summary = encoded && knownInkSummary(encoded);
+        const outside = summary && (!summary.b || summary.b.maxX < frame.x ||
+          summary.b.minX > frame.x + frame.width || summary.b.maxY < frame.y + headerBand);
+        const measured = hot
+          ? contentBottomInFrame([], hot, frame, headerBand, false)
+          : outside || !encoded ? headerBand : encodedInkContentBottom(encoded, frame, headerBand);
+        cached = { key, bottom: measured };
+        this.drawBottomByPage.set(id, cached);
+      }
+      bottom = Math.max(bottom, cached.bottom);
+    }
+    return bottom;
   }
 
   /** Layout and camera fits must not decode the entire saved notebook. */
@@ -363,6 +383,7 @@ export class InkPageBook {
 
   ingestEncodedPages(pages: Map<number, EncodedInk> | Iterable<[number, EncodedInk]>): void {
     this.boundsByPage.clear();
+    this.drawBottomByPage.clear();
     this.hot.clear();
     this.hydratedFrom.clear();
     this.cold.clear();
@@ -390,6 +411,7 @@ export class InkPageBook {
     for (const [pageId, encoded] of pages) {
       if (this.hot.has(pageId) || this.dirty.has(pageId)) continue;
       this.boundsByPage.delete(pageId);
+      this.drawBottomByPage.delete(pageId);
       this.cold.set(pageId, encoded);
       this.onDisk.add(pageId);
     }
@@ -401,6 +423,7 @@ export class InkPageBook {
   ): void {
     this.storeOnly = false;
     this.boundsByPage.clear();
+    this.drawBottomByPage.clear();
     // Every page that held ink before, so one left empty is written empty.
     const before = this.pageIds();
     // Bin by the layout these strokes are in. A caller replacing ink after a
@@ -539,6 +562,7 @@ export class InkPageBook {
       const encoded = this.encodedPage(pageId);
       if (encoded) pages.set(pageId, encoded);
     }
+    this.drawBottomByPage.clear();
     this.pushUndo({ kind: "clear", pages });
     this.redo = [];
     this.hot.clear();
@@ -685,6 +709,7 @@ export class InkPageBook {
     this.hot.set(pageId, ops);
     this.hydratedFrom.set(pageId, { ops, count: ops.length, encoded });
     this.boundsByPage.delete(pageId);
+    this.drawBottomByPage.delete(pageId);
     this.cold.delete(pageId);
     this.touchLru(pageId);
     return true;
@@ -697,6 +722,7 @@ export class InkPageBook {
     this.hydratedFrom.delete(pageId);
     this.cold.set(pageId, from && from.ops === list && from.count === list.length ? from.encoded : encodeInkOps(list));
     this.boundsByPage.delete(pageId);
+    this.drawBottomByPage.delete(pageId);
     this.hot.delete(pageId);
     this.touchLru(pageId);
   }
@@ -722,6 +748,7 @@ export class InkPageBook {
     this.hydratedFrom.delete(pageId);
     this.storeOnly = false;
     this.boundsByPage.delete(pageId);
+    this.drawBottomByPage.delete(pageId);
     this.dirty.add(pageId);
   }
 

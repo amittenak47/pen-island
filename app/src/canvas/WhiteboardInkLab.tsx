@@ -126,6 +126,7 @@ import {
   type PanCamera,
 } from "./panOffset";
 import { straightAnchorFor } from "./straightAnchor";
+import type { SceneAABB } from "../templates/drawPageGrowth";
 export interface RasterInkHandle {
   clear(): void;
   undo(): boolean;
@@ -148,6 +149,7 @@ export interface RasterInkHandle {
   cancelCameraMotion(): void;
   getOps(): InkOp[];
   getInkBounds(): SceneBounds | null;
+  getDrawContentBottom(frame: SceneAABB, headerBand: number): number;
   getOpsInBounds(bounds: SceneBounds): InkOp[];
   setOps(ops: readonly InkOp[], opts?: { paint?: boolean; frames?: readonly PageFrame[]; preserveIds?: boolean }): void;
   getOpCount(): number;
@@ -1371,6 +1373,9 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
         },
         getInkBounds() {
           return bookRef.current.inkBounds();
+        },
+        getDrawContentBottom(frame, headerBand) {
+          return bookRef.current.drawContentBottom(frame, headerBand);
         },
         getOpsInBounds(bounds) {
           return bookRef.current.opsInBounds(bounds);

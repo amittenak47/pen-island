@@ -15,6 +15,7 @@ import {
   decodeInkOpsAsync,
   encodeInkOps,
   encodedInkBounds,
+  encodedInkContentBottom,
   inkOpsFrom,
   inkStorageStats,
   packEncodedInk,
@@ -22,6 +23,7 @@ import {
   scaleInkStorage,
   unpackEncodedInk,
 } from "./inkCodec";
+import { contentBottomInFrame } from "../templates/drawPageGrowth";
 import { NO_PRESSURE, inkOpsBounds, type InkDrawOp, type InkEraseOp, type InkOp } from "./rasterInk";
 
 function stroke(points: InkDrawOp["points"], extra: Partial<InkDrawOp> = {}): InkDrawOp {
@@ -600,5 +602,28 @@ describe("concatEncodedInk / packEncodedInk", () => {
     expect(op.seq).toBe(7);
     expect(op.points).toHaveLength(40);
     expect(Math.abs(op.points[39]!.x - original.points[39]!.x)).toBeLessThanOrEqual(0.05);
+  });
+});
+
+describe("encoded growth measure", () => {
+  it("matches the decoded point filter through quantization, raw overflow and frame edges", () => {
+    const encoded = encodeInkOps([
+      stampChain(1500),
+      stroke([{ x: 10, y: 1000, pressure: .5 }]),
+      stroke([{ x: 10, y: 999.01, pressure: .5 }, { x: 10, y: 1000.02, pressure: .5 }]),
+      stroke([{ x: 10, y: 900, pressure: .5 }, { x: 5000, y: 6000, pressure: .5 }]),
+      stroke([]),
+      { kind: "erase", radius: 200, points: [{ x: 10, y: 9000, pressure: .5 }] },
+    ]);
+    for (const x of [-100, 0, 10, 5000, 6000]) {
+      for (const y of [0, 900, 1000, 7000]) {
+        for (const header of [0, 50]) {
+          const frame = { x, y, width: 100, height: 1500 };
+          expect(encodedInkContentBottom(encoded, frame, header)).toBe(
+            contentBottomInFrame([], decodeInkOps(encoded), frame, header, false),
+          );
+        }
+      }
+    }
   });
 });

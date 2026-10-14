@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { InkPageBook } from "./inkPageCache";
 import { INK_LRU_RADIUS, SPANNING_PAGE_ID, type PageFrame } from "./inkPageIndex";
@@ -484,5 +484,54 @@ describe("InkPageBook", () => {
     const added = book.commit(stroke(layout[0]!.minY + 60));
     expect(added.id).toBeGreaterThan(119);
     expect(added.seq).toBeGreaterThan(219);
+  });
+});
+
+describe("frame-scoped growth cache", () => {
+  const frame = { x: 0, y: 0, width: 100, height: 1500 };
+
+  it("never assembles history or decodes cold points and reuses unchanged shard measures", () => {
+    const book = new InkPageBook();
+    book.setFrames(frames(20));
+    book.ingestEncodedPages(new Map([[20, encodeInkOps([stroke(2200)])]]));
+    const cold = book.cold.get(20)!;
+    const assemble = vi.spyOn(book, "assembleOps").mockImplementation(() => { throw new Error("Whole history assembled"); });
+    Object.defineProperty(cold.ops[0], "pr", { get() { throw new Error("Cold stroke decoded"); } });
+    expect(book.drawContentBottom(frame, 0)).toBe(2201);
+    Object.defineProperty(cold.ops[0], "xy", { get() { throw new Error("Cold points rescanned"); } });
+    expect(book.drawContentBottom({ ...frame, height: 3000 }, 0)).toBe(2201);
+    book.commit(stroke(40));
+    expect(book.drawContentBottom(frame, 0)).toBe(2201);
+    expect(assemble).not.toHaveBeenCalled();
+    expect(book.hot.has(20)).toBe(false);
+  });
+
+  it("leaves summarized cold pages outside the frame packed", () => {
+    const book = new InkPageBook();
+    const encoded = encodeInkOps([stroke(2300, { points: [{ x: 400, y: 2300, pressure: .5 }] })]);
+    const cold = lazyEncodedInk(packEncodedInk(encoded), summarizeEncodedInk(encoded));
+    book.ingestEncodedPages(new Map([[20, cold]]));
+    Object.defineProperty(cold, "ops", { get() { throw new Error("Unpacked another region"); } });
+    expect(book.drawContentBottom(frame, 0)).toBe(0);
+  });
+
+  it("invalidates measures through replacement, seed, clear, hydration and eviction", () => {
+    const book = new InkPageBook();
+    book.setFrames(frames(20));
+    book.replaceAll([stroke(40), stroke(2200)], { frames: frames(20) });
+    expect(book.drawContentBottom(frame, 0)).toBe(2201);
+    book.setVisiblePage(20);
+    expect(book.drawContentBottom(frame, 0)).toBe(2201);
+    book.setVisiblePage(1);
+    expect(book.drawContentBottom(frame, 0)).toBe(2201);
+    book.markFlushed(book.dirty);
+    book.seedCold([[20, encodeInkOps([stroke(2250)])]]);
+    expect(book.drawContentBottom(frame, 0)).toBe(2251);
+    book.replaceAll([stroke(40)]);
+    expect(book.drawContentBottom(frame, 0)).toBe(41);
+    book.clear();
+    expect(book.drawContentBottom(frame, 0)).toBe(0);
+    book.undoOnce();
+    expect(book.drawContentBottom(frame, 0)).toBe(41);
   });
 });
