@@ -436,6 +436,8 @@ export function FootnoteOverview({
   } | null>(null);
   /** Swallow the click that ends a drag started on the title. */
   const swallowClick = useRef(false);
+  /** The next frame's placement while the panel is dragged or resized. */
+  const placeFrame = useRef(0);
   // A different mark opens beside its own words, not where the last one was dragged.
   useEffect(() => { userPlace.current = null; }, [footnote.id]);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
@@ -652,14 +654,25 @@ export function FootnoteOverview({
       };
       userPlace.current = { left: gesture.left, top: gesture.top };
     }
-    place();
+    // Pens report far more often than the display draws: place once a frame.
+    if (!placeFrame.current) {
+      placeFrame.current = requestAnimationFrame(() => {
+        placeFrame.current = 0;
+        place();
+      });
+    }
   }, [place]);
   const endPanelGesture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const gesture = panelGesture.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     panelGesture.current = null;
+    if (placeFrame.current) {
+      cancelAnimationFrame(placeFrame.current);
+      placeFrame.current = 0;
+      place();
+    }
     if (gesture.moved && gesture.mode === "move") swallowClick.current = true;
-  }, []);
+  }, [place]);
   const nudgePanelSize = useCallback((dx: number, dy: number) => {
     const node = panelRef.current;
     if (!node) return;

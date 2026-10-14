@@ -53,8 +53,13 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
   const [localPlacements, setLocalPlacements] = useState<MiniNotePlacements>({});
   const reservations = useRef<Record<string, { rect: MiniNoteRect; source: MiniNoteRect | undefined }>>({});
   const [front, setFront] = useState<string | null>(null);
+  /*
+   * A drag moves the window itself, once per display frame, and saves the
+   * place only when the pointer lets go. Saving per pointer event re-rendered
+   * the whole workspace and wrote storage up to 240 times a second on a pen.
+   */
   const gesture = useRef<{ key: string; pointerId: number; mode: "move" | "resize";
-    x: number; y: number; rect: MiniNoteRect } | null>(null);
+    x: number; y: number; rect: MiniNoteRect; node: HTMLElement | null; live: MiniNoteRect | null; frame: number } | null>(null);
   const placementFor = (key: string) => {
     const external = placements?.[key];
     const reserved = reservations.current[key];
@@ -110,21 +115,42 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
     if (mode === "move" && event.target instanceof Element && event.target.closest("button, a")) return;
     event.preventDefault(); event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
-    gesture.current = { key, rect, mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    gesture.current = { key, rect, mode, pointerId: event.pointerId, x: event.clientX, y: event.clientY,
+      node: event.currentTarget.closest<HTMLElement>(".lc-footnote-mini-note"), live: null, frame: 0 };
     setFront(key);
+  };
+  const paint = () => {
+    const drag = gesture.current;
+    if (!drag) return;
+    drag.frame = 0;
+    const rect = drag.live;
+    if (!rect || !drag.node) return;
+    drag.node.style.left = `${rect.left}px`;
+    drag.node.style.top = `${rect.top}px`;
+    drag.node.style.width = `${rect.width}px`;
+    drag.node.style.height = `${rect.height}px`;
   };
   const move = (event: ReactPointerEvent<HTMLElement>) => {
     const drag = gesture.current;
     if (!drag || drag.pointerId !== event.pointerId || !bounds) return;
     event.preventDefault(); event.stopPropagation();
     const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
-    commit(drag.key, drag.mode === "move"
+    drag.live = drag.mode === "move"
       ? clampMiniNoteRect({ ...drag.rect, left: drag.rect.left + dx, top: drag.rect.top + dy }, bounds)
-      : resizeMiniNoteRect(drag.rect, dx, dy, bounds));
+      : resizeMiniNoteRect(drag.rect, dx, dy, bounds);
+    if (!drag.node) { commit(drag.key, drag.live); return; }
+    if (!drag.frame) drag.frame = requestAnimationFrame(paint);
+  };
+  const settleDrag = () => {
+    const drag = gesture.current;
+    gesture.current = null;
+    if (!drag) return;
+    if (drag.frame) cancelAnimationFrame(drag.frame);
+    if (drag.live) commit(drag.key, drag.live);
   };
   const finish = (event: ReactPointerEvent<HTMLElement>) => {
     if (gesture.current?.pointerId !== event.pointerId) return;
-    gesture.current = null;
+    settleDrag();
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
   if (!entries.length || !bounds) return null;
@@ -146,7 +172,7 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
       }}>
       <header className="lc-footnote-note-head lc-footnote-note-drag" title="Drag to move note"
         onPointerDown={event => begin(event, key, rect, "move")} onPointerMove={move}
-        onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={() => { gesture.current = null; }}>
+        onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={settleDrag}>
         <strong>Note {entry.number ?? ""}.{entry.noteNumber}</strong>
         <div className="lc-footnote-note-actions">
           {onOpenFullNote && <button type="button" className="lc-footnote-mark-tool" aria-label="Open note in tab"
@@ -158,7 +184,7 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
       <FootnoteNoteBody note={entry.note} onOpenExternal={onOpenExternal} />
       <button type="button" className="lc-footnote-note-resize" aria-label="Resize mini note" title="Drag to resize note"
         onPointerDown={event => begin(event, key, rect, "resize")} onPointerMove={move}
-        onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={() => { gesture.current = null; }}
+        onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={settleDrag}
         onKeyDown={event => {
           const steps = { ArrowLeft: [-16, 0], ArrowRight: [16, 0], ArrowUp: [0, -16], ArrowDown: [0, 16] };
           const step = steps[event.key as keyof typeof steps];

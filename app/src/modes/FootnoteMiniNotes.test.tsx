@@ -106,6 +106,20 @@ describe("mini note interactions", () => {
     expect(rect("n1")).toEqual({ ...original, left: original.left + 80, top: original.top - 150 });
     expect(changed).toHaveBeenCalledTimes(2);
   });
+  it("saves a drag once, when the pointer lets go, however many moves a pen reports", () => {
+    const original = { left: 108, top: 422, width: 280, height: 220 };
+    const changed = vi.fn();
+    const { render } = windows({ placements: { "f1:n1": original }, onPlacementChange: changed });
+    render([entry]);
+    const header = document.querySelector<HTMLElement>(".lc-footnote-note-drag")!;
+    pointer(header, "pointerdown", 120, 450);
+    for (let step = 1; step <= 40; step++) pointer(header, "pointermove", 120 + step * 2, 450 - step);
+    expect(changed).not.toHaveBeenCalled();
+    pointer(header, "pointerup", 200, 410);
+    expect(changed).toHaveBeenCalledTimes(1);
+    expect(changed).toHaveBeenCalledWith("f1:n1", { ...original, left: 188, top: 382 });
+    expect(rect("n1")).toEqual({ ...original, left: 188, top: 382 });
+  });
   it("shows controlled drag commits while props lag and honors later external placement updates", () => {
     const original = { left: 108, top: 422, width: 280, height: 220 };
     const changed = vi.fn();
