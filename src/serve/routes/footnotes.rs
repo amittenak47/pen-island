@@ -49,7 +49,7 @@ pub async fn list_footnote_requests(
 
 pub async fn get_footnote_request(
     UrlPath(id): UrlPath<String>,
-) -> Result<Json<footnotes::FootnoteRequest>, AppError> {
+) -> Result<Json<Value>, AppError> {
     let row = blocking(move || {
         let conn = crate::pads::open(&crate::pads::db_path()?)?;
         footnotes::get_request(&conn, &id)
@@ -58,7 +58,11 @@ pub async fn get_footnote_request(
     })
     .await
     .map_err(map_store_error)?;
-    Ok(Json(row))
+    // How to write for this reader travels with the request.
+    let guide = row.extras.reading.guide();
+    let mut value = serde_json::to_value(&row).map_err(|error| AppError::bad_request(anyhow::anyhow!(error)))?;
+    value["guide"] = Value::String(guide);
+    Ok(Json(value))
 }
 
 pub async fn submit_footnote_result(
@@ -131,9 +135,13 @@ fn create_on(
 }
 
 fn parse_result(body: &Value) -> Result<(Vec<String>, Vec<FootnoteLink>), AppError> {
-    let notes = body.get("notes").and_then(Value::as_array).ok_or_else(|| {
-        AppError::bad_request(anyhow::anyhow!("notes must be an array of strings"))
-    })?;
+    let empty = Vec::new();
+    let notes = match body.get("notes").and_then(Value::as_array) {
+        Some(notes) => notes,
+        // A preset answer may be all fields.
+        None if body.get("fields").is_some_and(Value::is_array) => &empty,
+        None => return Err(AppError::bad_request(anyhow::anyhow!("notes must be an array of strings"))),
+    };
     let mut texts = Vec::with_capacity(notes.len());
     for note in notes {
         let Some(text) = note.as_str() else {
@@ -173,6 +181,8 @@ fn parse_rich(body: &Value) -> Result<footnotes::FootnoteSubmission, AppError> {
         marks: Vec<footnotes::FootnoteMark>,
         #[serde(default)]
         workspace_links: Vec<String>,
+        #[serde(default)]
+        fields: Vec<footnotes::NoteField>,
     }
     let pick = |key: &str| body.get(key).filter(|value| !value.is_null()).cloned();
     let rich = Rich {
@@ -186,12 +196,16 @@ fn parse_rich(body: &Value) -> Result<footnotes::FootnoteSubmission, AppError> {
         workspace_links: pick("workspace_links").map(serde_json::from_value).transpose()
             .map_err(|_| AppError::bad_request(anyhow::anyhow!("workspace_links must be an array of ids")))?
             .unwrap_or_default(),
+        fields: pick("fields").map(serde_json::from_value).transpose()
+            .map_err(|_| AppError::bad_request(anyhow::anyhow!("fields must be objects with label and text")))?
+            .unwrap_or_default(),
     };
     Ok(footnotes::FootnoteSubmission {
         title: rich.title,
         color: rich.color,
         marks: rich.marks,
         workspace_links: rich.workspace_links,
+        fields: rich.fields,
         ..Default::default()
     })
 }
@@ -543,7 +557,7 @@ mod footnote_tests {
         let long_title = "t".repeat(201);
         let rejected: Vec<(&str, Vec<String>, Vec<FootnoteLink>)> = vec![
             ("no-notes", vec![], vec![]),
-            ("nine-notes", vec!["a".into(); 9], vec![]),
+            ("thirteen-notes", vec!["a".into(); 13], vec![]),
             ("blank", vec!["  ".into()], vec![]),
             ("long-note", vec![long_note], vec![]),
             ("nine-links", vec!["ok".into()], (0..9).map(|n| FootnoteLink { title: None, url: format!("https://example.com/{n}") }).collect()),

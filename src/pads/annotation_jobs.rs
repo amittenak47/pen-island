@@ -107,6 +107,9 @@ pub struct NewJob {
     pub workspace_items: Vec<WorkspaceItem>,
     #[serde(default)]
     pub references: Vec<JobReference>,
+    /// What the reader is reading and the note fields they chose.
+    #[serde(default)]
+    pub reading: super::reading::ReadingStyle,
 }
 
 /// One footnote as an assistant describes it for a page.
@@ -136,6 +139,9 @@ pub struct Annotation {
     /// One curiosity question that makes the reader want to read on.
     #[serde(default)]
     pub question: Option<String>,
+    /// The body as labelled fields from the job's preset.
+    #[serde(default)]
+    pub fields: Vec<super::reading::NoteField>,
 }
 
 impl Annotation {
@@ -239,6 +245,7 @@ fn validate_job(job: &NewJob) -> Result<(), FootnoteFail> {
         return Err(invalid("focus must be at most 1000 characters"));
     }
     validate_references(&job.references).map_err(FootnoteFail::Invalid)?;
+    job.reading.validate().map_err(FootnoteFail::Invalid)?;
     footnotes::validate_extras(&FootnoteExtras {
         palette: job.palette.clone(),
         workspace_items: job.workspace_items.clone(),
@@ -295,6 +302,10 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
                     job.answer_mode.as_str(),
                 ],
             )?;
+            conn.execute(
+                "UPDATE annotation_jobs SET reading = ?2 WHERE id = ?1",
+                params![job.id, serde_json::to_string(&job.reading)?],
+            )?;
         }
         summary_of(conn, &job.id)?.ok_or(FootnoteFail::NotFound)
     })
@@ -314,9 +325,18 @@ struct JobRow {
     palette: Vec<String>,
     workspace_items: Vec<WorkspaceItem>,
     references: Vec<JobReference>,
+    reading: super::reading::ReadingStyle,
     status: String,
     summary: Option<String>,
     created_at: i64,
+}
+
+/// A job's reading style; jobs from before reading styles have none.
+fn job_reading(conn: &Connection, id: &str) -> super::reading::ReadingStyle {
+    conn.query_row("SELECT reading FROM annotation_jobs WHERE id = ?1", params![id], |row| row.get::<_, String>(0))
+        .ok()
+        .and_then(|raw| serde_json::from_str(&raw).ok())
+        .unwrap_or_default()
 }
 
 fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> {
@@ -342,7 +362,9 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
     let Some((id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette, items, status, summary, created_at, refs, request_type, answer_mode)) = raw else {
         return Ok(None);
     };
+    let reading = job_reading(conn, &id);
     Ok(Some(JobRow {
+        reading,
         id,
         answer_mode: AnswerMode::from_str(&answer_mode),
         device_id,
@@ -460,6 +482,8 @@ pub fn read_pages(conn: &Connection, id: &str, from: i64, to: i64) -> Result<Val
             "kind": reference.kind,
             "chars": reference.text.chars().count(),
         })).collect::<Vec<_>>(),
+        "reading": job.reading,
+        "guide": job.reading.guide(),
         "all_pages": all,
         "pages_done": done,
         "pages": pages.iter().map(|page| json!({ "page": page.page, "text": page.text })).collect::<Vec<_>>(),
@@ -533,6 +557,7 @@ pub fn submit_page(
                 mark_text: quote.to_string(),
                 workspace_items: job.workspace_items.clone(),
                 doc_kind: job.doc_kind.clone(),
+                reading: job.reading.clone(),
                 ..Default::default()
             };
             let notes = annotation
@@ -545,6 +570,7 @@ pub fn submit_page(
                 color: annotation.color,
                 marks: annotation.marks.clone(),
                 workspace_links: annotation.workspace_links.clone(),
+                fields: annotation.fields.clone(),
             };
             let result = footnotes::validate_submission(&submission, Some(&extras))
                 .map_err(|message| invalid(format!("page {page}, \"{quote}\": {message}")))?;
@@ -656,7 +682,45 @@ mod tests {
             palette: vec!["#60a5fa".into(), "#f472b6".into(), "#facc15".into(), "#34d399".into()],
             workspace_items: vec![WorkspaceItem { id: "whiteboard:wb-1".into(), kind: "whiteboard".into(), title: "Graph notes".into() }],
             references: vec![JobReference { title: "Exercises, pages 104-110".into(), kind: "exercises".into(), text: "3.1. Perform a depth-first search on the following graph.".into() }],
+            reading: Default::default(),
         }
+    }
+
+    #[test]
+    fn a_job_carries_its_reading_style_and_folds_fields_in_order() {
+        use super::super::reading::{NoteField, ReadingStyle};
+        let (_dir, conn) = open();
+        let mut body = job("aj-read");
+        body.reading = ReadingStyle {
+            kind: "textbook".into(),
+            fields: vec!["Idea".into(), "Common mistake".into()],
+            fill: "best".into(),
+            preset: "Study".into(),
+        };
+        create_job(&conn, body, 1).unwrap();
+        let read = read_pages(&conn, "aj-read", 91, 91).unwrap();
+        assert_eq!(read["reading"]["kind"], "textbook");
+        assert!(read["guide"].as_str().unwrap().contains("Idea, Common mistake"));
+        let field = |label: &str, text: &str| NoteField { label: label.into(), text: text.into() };
+        let annotation = Annotation {
+            quote: "Depth-first search is a surprisingly versatile procedure".into(),
+            fields: vec![
+                field("Common mistake", "Forgetting to mark a vertex before recursing loops forever on a cycle."),
+                field("Idea", "Go as deep as possible along one path, then back up to the last fork."),
+            ],
+            ..Default::default()
+        };
+        submit_page(&conn, "aj-read", 91, &[annotation], 2).unwrap();
+        let items = items_for_device(&conn, "tablet").unwrap();
+        let notes: Vec<&str> = items[0]["result"]["notes"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
+        assert_eq!(notes, [
+            "**Idea:** Go as deep as possible along one path, then back up to the last fork.",
+            "**Common mistake:** Forgetting to mark a vertex before recursing loops forever on a cycle.",
+        ]);
+        assert_eq!(items[0]["result"]["fields"], serde_json::json!(["Idea", "Common mistake"]));
+        // A thin field is sent back for a rewrite.
+        let thin = Annotation { quote: "A graph is specified".into(), fields: vec![field("Idea", "Vertices and edges.")], ..Default::default() };
+        assert!(matches!(submit_page(&conn, "aj-read", 92, &[thin], 3), Err(FootnoteFail::Invalid(_))));
     }
 
     fn note(quote: &str) -> Annotation {

@@ -31,10 +31,10 @@ pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
-pub const INSTRUCTIONS: &str = "Explain the selected words in the context of the surrounding text, for a reader who is in the middle of this document. Write markdown notes of a few sentences each, each opening with a short bold label of two to four words and a colon that names this note's specific idea (for example **Finish times reverse edges:**, not a generic heading like **Why it works:**), which the reader's app shows as the note's title: first the idea in plain words, then a small example or the intuition behind it, then a common mistake when there is one. For a selection, use extras.per_page as the limit on the number of notes when present; otherwise write 2-4 notes. Follow extras.focus and the request's prompt when provided. Attachments in extras.references may hold problems, solved homework or notes; infer which from their content. Use them to explain relevant ideas and point toward problems with hints and previews; never solve the problems or quote or paraphrase solutions. Add links only to sources you are confident exist.";
+pub const INSTRUCTIONS: &str = "Every request and every page run carries a guide (in get_footnote_request and get_annotation_pages) saying what the reader is reading and how they want the notes shaped: free-form notes, or labelled `fields` from their preset. Follow it. Explain the quoted words in the context of the surrounding text, for a reader in the middle of this document. For a selection, use extras.per_page as the limit on the number of notes when present; otherwise write 2-4. Follow extras.focus and the request's prompt when provided. Attachments in extras.references may hold problems, solved homework or notes; infer which from their content; use them to explain and to point toward problems with hints and previews, and never solve a problem or quote or paraphrase a solution. Add links only to sources you are confident exist.";
 
 /// How to write a page-range job's footnotes, on top of [`INSTRUCTIONS`].
-pub const JOB_INSTRUCTIONS: &str = "Explain useful passages in the page text, following the reader's focus. Attached files and PDF pages may hold this chapter's problems, solved homework or notes; infer which from their content rather than their title or kind. When attachments contain problems, prepare the reader for them without solving them: pick definitions, the key steps of an algorithm, proof ideas, and traps those problems rely on. Explain the passage itself and show where a problem will lean on it, like a hint or a preview: which idea it uses, never its answer or the steps of a solution. Solved homework is only for seeing which ideas matter; never quote or paraphrase its solutions. Use problems to name exercises or homework questions a passage prepares for, by their numbers in the attachments. Use question for one short question that makes the reader curious to keep reading, tied to a problem when you can, without giving its answer away. Use looking_ahead to hint at what this passage sets up later, without spoiling it. Highlight the key term; underline the phrase a problem hinges on.";
+pub const JOB_INSTRUCTIONS: &str = "Choose the passages a thoughtful reader of this kind of text would most want explained, following the job's focus and guide. Attached files and PDF pages may hold problems, solved homework or notes; infer which from their content rather than their title or kind. Solved homework is only for seeing which ideas matter; never quote or paraphrase its solutions. When attachments contain problems, name the ones a passage prepares for in problems, by their numbers in the attachments. Use question for one short question that makes the reader curious to keep reading, without giving its answer away. Use looking_ahead for a hint at what the passage sets up, drawn only from the pages you were given; never reveal later events. Highlight the key words; underline the phrase the explanation hinges on.";
 
 const SUPPORTED_PROTOCOLS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
 const FALLBACK_PROTOCOL: &str = "2025-06-18";
@@ -393,6 +393,16 @@ fn tool_list() -> Vec<Value> {
                 "properties": {
                     "id": { "type": "string" },
                     "notes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 8 },
+                    "fields": {
+                        "type": "array",
+                        "maxItems": 8,
+                        "description": "When the guide names fields: the body as labelled fields, each label one of the request's fields. Leave out notes then.",
+                        "items": {
+                            "type": "object",
+                            "properties": { "label": { "type": "string" }, "text": { "type": "string" } },
+                            "required": ["label", "text"],
+                        },
+                    },
                     "links": {
                         "type": "array",
                         "description": "Web pages that help (http or https), up to 8.",
@@ -428,7 +438,7 @@ fn tool_list() -> Vec<Value> {
                         "description": "Ids from extras.workspace_items to link, such as a related notebook or document.",
                     },
                 },
-                "required": ["id", "notes"],
+                "required": ["id"],
                 "additionalProperties": false,
             },
         }),
@@ -485,7 +495,17 @@ fn tool_list() -> Vec<Value> {
                             "type": "object",
                             "properties": {
                                 "quote": { "type": "string", "description": "Exact words from the page that this footnote is about (a phrase or sentence)." },
-                                "notes": { "type": "array", "items": { "type": "string" }, "minItems": 1, "maxItems": 5, "description": "Markdown, a few sentences each." },
+                                "notes": { "type": "array", "items": { "type": "string" }, "maxItems": 8, "description": "Free-form markdown notes, a few sentences each, when the guide asks for free-form notes." },
+                                "fields": {
+                                    "type": "array",
+                                    "maxItems": 8,
+                                    "description": "When the guide names fields: the body as labelled fields, each label one of the request's fields. Leave out notes then.",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": { "label": { "type": "string" }, "text": { "type": "string" } },
+                                        "required": ["label", "text"],
+                                    },
+                                },
                                 "title": { "type": "string", "maxLength": 120 },
                                 "color": { "type": "integer", "minimum": 1, "maximum": 8, "description": "Palette slot." },
                                 "problems": { "type": "array", "items": { "type": "string" }, "maxItems": 8, "description": "Exercises or homework questions this passage helps with, e.g. \"Exercise 3.4\"." },
@@ -514,7 +534,7 @@ fn tool_list() -> Vec<Value> {
                                 },
                                 "workspace_links": { "type": "array", "items": { "type": "string" }, "description": "Ids from workspace_items." },
                             },
-                            "required": ["quote", "notes"],
+                            "required": ["quote"],
                         },
                     },
                 },
@@ -619,8 +639,15 @@ fn submit_tool(hub: &dyn FootnoteHub, arguments: &Value) -> Result<Value, String
     if !footnotes::valid_id(id) {
         return Err("id must be a request id from list_footnote_requests".into());
     }
-    let Some(raw_notes) = arguments.get("notes").and_then(Value::as_array) else {
-        return Err("notes must be an array of strings".into());
+    let fields: Vec<footnotes::NoteField> = arguments.get("fields").filter(|value| !value.is_null()).cloned()
+        .map(serde_json::from_value).transpose()
+        .map_err(|_| "fields must be objects with label and text".to_string())?
+        .unwrap_or_default();
+    let empty = Vec::new();
+    let raw_notes = match arguments.get("notes").and_then(Value::as_array) {
+        Some(notes) => notes,
+        None if !fields.is_empty() => &empty,
+        None => return Err("notes must be an array of strings".into()),
     };
     let mut notes = Vec::with_capacity(raw_notes.len());
     for note in raw_notes {
@@ -650,7 +677,7 @@ fn submit_tool(hub: &dyn FootnoteHub, arguments: &Value) -> Result<Value, String
     let workspace_links: Vec<String> = rich("workspace_links").map(serde_json::from_value).transpose()
         .map_err(|_| "workspace_links must be an array of ids".to_string())?
         .unwrap_or_default();
-    let submission = FootnoteSubmission { notes, links, title, color, marks, workspace_links };
+    let submission = FootnoteSubmission { notes, links, title, color, marks, workspace_links, fields };
     // Early, context-free checks; the hub checks quotes, slots and ids against the request.
     let cleaned = footnotes::validate_submission(&submission, None)?;
     hub.submit(id, &FootnoteSubmission {
@@ -660,6 +687,7 @@ fn submit_tool(hub: &dyn FootnoteHub, arguments: &Value) -> Result<Value, String
         color: cleaned.color,
         marks: cleaned.marks,
         workspace_links: submission.workspace_links,
+        fields: submission.fields,
     })
 }
 

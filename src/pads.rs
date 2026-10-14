@@ -18,6 +18,7 @@ mod artifacts;
 pub mod artifact_assets;
 pub mod footnotes;
 pub mod annotation_jobs;
+pub mod reading;
 pub mod sync_content;
 pub mod atomic_sync;
 pub mod snapshot_copies;
@@ -202,6 +203,8 @@ pub fn open(path: &Path) -> Result<Connection> {
     annotation_jobs::migrate(&conn)?;
     // Attachments and the request label shown in the document's history.
     ensure_column(&conn, "annotation_jobs", "refs", "TEXT NOT NULL DEFAULT '[]'")?;
+    // What the reader said they are reading, and the note fields they chose.
+    ensure_column(&conn, "annotation_jobs", "reading", "TEXT NOT NULL DEFAULT '{}'")?;
     ensure_column(&conn, "annotation_jobs", "request_type", "TEXT NOT NULL DEFAULT 'pages'")?;
     ensure_column(&conn, "annotation_jobs", "answer_mode", "TEXT NOT NULL DEFAULT 'bot'")?;
     atomic_sync::sweep(&conn)?;

@@ -84,6 +84,9 @@ pub struct FootnoteExtras {
     pub per_page: Option<u8>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub references: Vec<super::annotation_jobs::JobReference>,
+    /// What the reader is reading and how they want the notes shaped.
+    #[serde(default, skip_serializing_if = "super::reading::ReadingStyle::is_empty")]
+    pub reading: super::reading::ReadingStyle,
 }
 
 /// An underline or highlight on words inside the marked text.
@@ -112,6 +115,9 @@ pub struct FootnoteSubmission {
     /// Ids from the request's `extras.workspace_items`.
     #[serde(default)]
     pub workspace_links: Vec<String>,
+    /// The body as labelled fields, when the request names a preset.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<super::reading::NoteField>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
@@ -131,6 +137,9 @@ pub struct FootnoteResult {
     /// The asking document's kind ("annotate" or "web"), the link's other end.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub link_from: String,
+    /// Preset field labels the notes use, in order; each such note opens "**Label:**".
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -208,6 +217,8 @@ fn valid_hex(color: &str) -> bool {
     color.len() == 7 && color.starts_with('#') && color[1..].bytes().all(|b| b.is_ascii_hexdigit())
 }
 
+pub use super::reading::NoteField;
+
 pub fn validate_extras(extras: &FootnoteExtras) -> Result<(), String> {
     if extras.focus.chars().count() > 1000 {
         return Err("extras.focus must be at most 1000 characters".into());
@@ -216,6 +227,7 @@ pub fn validate_extras(extras: &FootnoteExtras) -> Result<(), String> {
         return Err("extras.per_page must be 1..=8".into());
     }
     super::annotation_jobs::validate_references(&extras.references)?;
+    extras.reading.validate()?;
     if extras.palette.len() > 8 || !extras.palette.iter().all(|color| valid_hex(color)) {
         return Err("extras.palette must be at most 8 #rrggbb colors".into());
     }
@@ -301,7 +313,29 @@ pub fn validate_submission(
     submission: &FootnoteSubmission,
     extras: Option<&FootnoteExtras>,
 ) -> Result<FootnoteResult, String> {
-    let base = validate_notes_and_links(&submission.notes, &submission.links)?;
+    // Fields become labelled notes, ahead of any free notes, once checked
+    // against the request's preset. Without the request (an early check)
+    // they pass through untouched; the hub checks them when it stores them.
+    let (notes, used) = match extras {
+        Some(extras) => {
+            let mut notes = extras.reading.fold_fields(&submission.fields, &extras.mark_text)?;
+            notes.extend(submission.notes.iter().cloned());
+            (notes, extras.reading.used_labels(&submission.fields))
+        }
+        None => {
+            if submission.fields.iter().any(|field| field.label.trim().is_empty() || field.text.trim().is_empty()) {
+                return Err("each field needs a label and text".into());
+            }
+            (submission.notes.clone(), Vec::new())
+        }
+    };
+    let early_fields_only = extras.is_none() && notes.is_empty() && !submission.fields.is_empty();
+    let placeholder = [String::from("fields")];
+    let mut base = validate_notes_and_links(if early_fields_only { &placeholder } else { &notes }, &submission.links)?;
+    if early_fields_only {
+        base.notes.clear();
+    }
+    base.fields = used;
     let slots = extras.map(|extras| extras.palette.len()).filter(|count| *count > 0).unwrap_or(8);
     let slot_ok = |slot: u8| (1..=slots).contains(&(slot as usize));
     let title = match submission.title.as_deref().map(str::trim) {
@@ -361,8 +395,8 @@ pub fn validate_submission(
 }
 
 fn validate_notes_and_links(notes: &[String], links: &[FootnoteLink]) -> Result<FootnoteResult, String> {
-    if !(1..=8).contains(&notes.len()) {
-        return Err("notes must have 1..=8 entries".into());
+    if !(1..=12).contains(&notes.len()) {
+        return Err("write 1 to 12 notes or fields".into());
     }
     let mut cleaned_notes = Vec::with_capacity(notes.len());
     for note in notes {
@@ -666,4 +700,34 @@ fn unpack(packed: PackedRequest) -> Result<FootnoteRequest, FootnoteFail> {
     // Unreadable extras only lose the optional context, never the request.
     request.extras = serde_json::from_str(&packed.extras).unwrap_or_default();
     Ok(request)
+}
+
+#[cfg(test)]
+mod reading_tests {
+    use super::*;
+    use crate::pads::reading::ReadingStyle;
+
+    fn field(label: &str, text: &str) -> NoteField { NoteField { label: label.into(), text: text.into() } }
+
+    #[test]
+    fn a_selection_answer_in_fields_is_folded_against_its_preset() {
+        let extras = FootnoteExtras {
+            mark_text: "Mr. Darcy bowed coldly".into(),
+            reading: ReadingStyle { kind: "story".into(), fields: vec!["Context".into(), "Character".into()], fill: "best".into(), preset: String::new() },
+            ..Default::default()
+        };
+        let submission = FootnoteSubmission {
+            fields: vec![field("Character", "His stiffness reads as pride, though it may be shyness.")],
+            ..Default::default()
+        };
+        let result = validate_submission(&submission, Some(&extras)).unwrap();
+        assert_eq!(result.notes, ["**Character:** His stiffness reads as pride, though it may be shyness."]);
+        assert_eq!(result.fields, ["Character"]);
+        // Before the request is known, a fields-only answer passes the early check untouched.
+        let early = validate_submission(&submission, None).unwrap();
+        assert!(early.notes.is_empty());
+        // A free-form request refuses fields.
+        let free = FootnoteExtras { reading: ReadingStyle { kind: "story".into(), ..Default::default() }, ..extras.clone() };
+        assert!(validate_submission(&submission, Some(&free)).is_err());
+    }
 }
