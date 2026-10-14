@@ -12,6 +12,8 @@
  * move rate instead of the display.
  */
 
+import type { Camera } from "../camera";
+
 export function skipCommittedReplay(
   drawing: boolean,
   liveStamp: unknown | null | undefined,
@@ -208,10 +210,7 @@ export function usePreStrokeStamp(
   return liveStamp != null && hasPreStrokePatch;
 }
 
-export type PaintedLabView = {
-  scrollX: number;
-  scrollY: number;
-  zoom: number;
+export type PaintedLabView = Camera & {
   width: number;
   height: number;
   marginY: number;

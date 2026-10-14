@@ -8,6 +8,7 @@ import { DialogPresence } from "../components/DialogMotion";
 
 import { dedupeInkOps } from "./inkOpsDedupe";
 import { selectionCaptureFrame } from "./selectionCapture";
+import { sceneToScreen } from "./camera";
 import { touchPointersIn } from "./touchPointers";
 import {
   CaptureUpdateAction,
@@ -2838,7 +2839,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     // The whole page box is the sheet; a text page cut short is blank paper
     // from its cut down, not the desk. In a spread the sheet is both pages.
     const column = spreadColumn(bounds);
-    hole.style.transform = `translate(${(column.minX + scrollX) * zoom}px, ${(box.minY + scrollY) * zoom}px)`;
+    const point = sceneToScreen({ scrollX, scrollY, zoom }, column.minX, box.minY);
+    hole.style.transform = `translate(${point.x}px, ${point.y}px)`;
     hole.style.width = `${Math.max(0, (column.maxX - column.minX) * zoom)}px`;
     hole.style.height = `${Math.max(0, (box.maxY - box.minY) * zoom)}px`;
     const spread = pageSpreadRef.current && column.maxX - column.minX > bounds.maxX - bounds.minX + 0.5;
@@ -3203,7 +3205,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const bounds = pageBoundsRef.current;
     const originY = bounds?.minY ?? 0;
     // Lock rules from the frame top; sit ink just above this ruling's line.
-    const firstRulePx = (linedFirstRuleScene(originY, scenePitch, true) + scrollY) * zoom;
+    const firstRulePx = sceneToScreen(
+      { scrollX: 0, scrollY, zoom }, 0, linedFirstRuleScene(originY, scenePitch, true),
+    ).y;
     const phase = ((firstRulePx - gap + 1) % gap + gap) % gap;
     const next = linedOverlayViewport(
       width,

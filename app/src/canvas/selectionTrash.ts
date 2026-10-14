@@ -10,6 +10,8 @@
  * importing `Board` to ask it drags Excalidraw in behind it.
  */
 
+import type { Camera } from "./camera";
+
 /** The shape of a scene element as the selection trash needs to read it. */
 export interface TrashEl {
   id: string;
@@ -63,11 +65,7 @@ export interface TrashBounds {
   maxY: number;
 }
 
-export interface TrashCamera {
-  scrollX: number;
-  scrollY: number;
-  zoom: number;
-}
+export type TrashCamera = Camera;
 
 /** The board's own box in CSS px — what the button must stay inside. */
 export interface TrashViewport {

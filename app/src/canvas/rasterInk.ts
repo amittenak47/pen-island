@@ -10,6 +10,7 @@
  */
 
 import type { InkStroke } from "./capture";
+import { screenToScene, type Camera, type Viewport } from "./camera";
 import {
   INK_BOLDNESS_MIN,
   INK_BOLDNESS_MAX,
@@ -448,15 +449,7 @@ export interface ScenePoint {
   radius?: number;
 }
 
-export interface ViewportTransform {
-  zoom: number;
-  scrollX: number;
-  scrollY: number;
-  offsetLeft: number;
-  offsetTop: number;
-  width: number;
-  height: number;
-}
+export type ViewportTransform = Camera & Viewport;
 
 /** Scroll-host binding shared by draw and erase ops. */
 export interface InkHostBinding {
@@ -6000,11 +5993,7 @@ export function scenePointFromCanvasPixel(
   localY: number,
   viewport: Pick<ViewportTransform, "zoom" | "scrollX" | "scrollY">,
 ): { x: number; y: number } {
-  const { zoom, scrollX, scrollY } = viewport;
-  return {
-    x: localX / zoom - scrollX,
-    y: localY / zoom - scrollY,
-  };
+  return screenToScene(viewport, localX, localY);
 }
 
 export function scenePointFromPointer(

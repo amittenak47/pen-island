@@ -50,6 +50,7 @@ import {
   skipHostBoundPresentWhileCameraBusy,
   skipReplayOnWheelAbort,
   usePreStrokeStamp,
+  type PaintedLabView,
 } from "./inkLab/liveHost";
 import {
   livePresentStride,
@@ -216,7 +217,6 @@ function fallbackViewport(width: number, height: number): ViewportTransform {
   };
 }
 
-type PaintedLabView = PanCamera & { width: number; height: number; marginY: number };
 
 function cloneOps(ops: readonly InkOp[]): InkOp[] {
   return ops.map((op) => ({ ...op, points: [...op.points] }));

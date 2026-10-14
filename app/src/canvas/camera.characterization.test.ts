@@ -2,17 +2,7 @@ import { describe, expect, it } from "vitest";
 import { contentSlotPlaceAt } from "./contentSlotPlace";
 import { scenePointFromCanvasPixel } from "./rasterInk";
 
-type Camera = { scrollX: number; scrollY: number; zoom: number };
-
-// Before the move, these are the proposed helpers. Only this adapter changes.
-const sceneToScreen = (cam: Camera, x: number, y: number) => ({
-  x: (x + cam.scrollX) * cam.zoom,
-  y: (y + cam.scrollY) * cam.zoom,
-});
-const screenToScene = (cam: Camera, x: number, y: number) => ({
-  x: x / cam.zoom - cam.scrollX,
-  y: y / cam.zoom - cam.scrollY,
-});
+import { sceneToScreen, screenToScene, type Camera } from "./camera";
 
 // Formula copies keep the starting revision's operation order and site names.
 const Board_2841 = (scrollX: number, scrollY: number, zoom: number, column: { minX: number }, box: { minY: number }) => ({

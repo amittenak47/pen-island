@@ -1,4 +1,4 @@
-type Camera = { scrollX: number; scrollY: number; zoom: number };
+import type { Camera } from "./camera";
 const LAYERS = ".lc-page-content-slot, .lc-page-marks-slot, .lc-board-lined-overlay, .lc-page-title-slot, .lc-scene-overlay, .lc-scene-select, canvas.excalidraw__canvas, canvas.lc-ink-lab-canvas";
 
 /**

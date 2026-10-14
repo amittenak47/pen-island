@@ -12,6 +12,8 @@
  * ride the last placement by the scroll delta so the slot still moves.
  */
 
+import { sceneToScreen } from "./camera";
+
 export type ContentSlotBounds = {
   minX: number;
   minY: number;
@@ -57,9 +59,10 @@ export function contentSlotPlaceAt(
   last: ContentSlotPlace | null,
 ): ContentSlotPlace | null {
   if (bounds) {
+    const point = sceneToScreen({ scrollX, scrollY, zoom }, bounds.minX, bounds.minY);
     return {
-      left: (bounds.minX + scrollX) * zoom,
-      top: (bounds.minY + scrollY) * zoom,
+      left: point.x,
+      top: point.y,
       sceneWidth: Math.max(1, bounds.maxX - bounds.minX),
       zoom,
       scrollX,

@@ -13,11 +13,9 @@
  * pointer handler.
  */
 
-export interface PanCamera {
-  scrollX: number;
-  scrollY: number;
-  zoom: number;
-}
+import type { Camera } from "./camera";
+
+export type PanCamera = Camera;
 
 export interface PanDelta {
   /** Screen px to translate by. Zero when {@link PanDelta.rebase} is set. */
