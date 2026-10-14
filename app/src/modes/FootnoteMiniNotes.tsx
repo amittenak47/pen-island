@@ -186,7 +186,7 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
       <header className="lc-footnote-note-head lc-footnote-note-drag" title="Drag to move note"
         onPointerDown={event => begin(event, key, rect, "move")} onPointerMove={move}
         onPointerUp={finish} onPointerCancel={finish} onLostPointerCapture={settleDrag}>
-        <strong>Note {entry.number ?? ""}.{entry.noteNumber}</strong>
+        <strong>{entry.noteNumber ? `Note ${entry.number ?? ""}.${entry.noteNumber}` : `All notes ${entry.number ?? ""}`}</strong>
         <div className="lc-footnote-note-actions">
           {onOpenFullNote && <button type="button" className="lc-footnote-mark-tool" aria-label="Open note in tab"
             title="Open note in tab" onClick={() => onOpenFullNote(entry)}><ExpandNoteIcon /></button>}

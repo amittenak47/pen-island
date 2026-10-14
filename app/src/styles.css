@@ -22612,3 +22612,32 @@ html[data-corners="rounded"] {
   line-height: 1.5;
   letter-spacing: 0.02em;
 }
+
+/* Notes: show as one. A small square beside +, tinted while on. */
+.lc-footnote-notes-combine {
+  display: inline-grid;
+  place-items: center;
+  box-sizing: border-box;
+  width: 22px;
+  height: 22px;
+  min-width: 0;
+  min-height: 0;
+  margin-left: auto;
+  margin-right: 4px;
+  padding: 0;
+  border: 1px solid color-mix(in srgb, var(--chrome-edge) 70%, transparent);
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  color: var(--lc-fn-ink, var(--ink));
+  cursor: pointer;
+}
+
+.lc-footnote-notes-combine svg {
+  width: 13px;
+  height: 13px;
+}
+
+.lc-footnote-notes-combine.is-on {
+  border-color: var(--lc-fn-color, var(--accent));
+  background: color-mix(in srgb, var(--lc-fn-color, var(--accent)) 20%, transparent);
+}

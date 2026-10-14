@@ -98,6 +98,33 @@ describe("FootnoteOverview panel", () => {
     }
   });
 
+  it("shows the notes as one when asked, in the panel, a mini note and the note tab", async () => {
+    localStorage.removeItem("whiteboard.footnoteNotesCombined.v1");
+    const onOpenFullNote = vi.fn();
+    const many = { ...MARK, notes: [
+      { id: "n1", text: "**Finish times:** first", createdAt: 1, updatedAt: 1 },
+      { id: "n2", text: "second", createdAt: 2, updatedAt: 2 },
+    ] };
+    mount(many, { onOpenFullNote });
+    expect(document.querySelectorAll(".lc-footnote-note-row")).toHaveLength(2);
+    const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Show the notes as one"]')!;
+    act(() => toggle.click());
+    expect(toggle.getAttribute("aria-checked")).toBe("true");
+    const rows = document.querySelectorAll(".lc-footnote-note-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.querySelector(".lc-footnote-item-chip")!.textContent).toBe("All notes (2)");
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label^="All notes:"]')!.click());
+    expect(document.querySelector('[aria-label="Edit note 1"]')).toBeNull();
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open full note 1"]')!.click());
+    expect(onOpenFullNote).toHaveBeenCalledWith("nt-all");
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open mini note 1"]')!.click());
+    await vi.waitFor(() => expect(document.querySelector(".lc-footnote-mini-note .lc-footnote-note-body")?.textContent).toContain("second"));
+    expect(document.querySelector(".lc-footnote-mini-note strong")?.textContent).toContain("All notes");
+    act(() => toggle.click());
+    expect(document.querySelectorAll(".lc-footnote-note-row")).toHaveLength(2);
+    localStorage.removeItem("whiteboard.footnoteNotesCombined.v1");
+  });
+
   it("replaces the ✕ with a Reset button in the tools row", () => {
     mount(MARK);
     const toolbar = document.querySelector(".lc-footnote-overview-toolbar")!;

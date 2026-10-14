@@ -70,6 +70,40 @@ export function noteIsAi(note: DocFootnoteNote, footnote: { kind: string }): boo
   return note.by === "ai" || (note.by === undefined && footnote.kind === "ai");
 }
 
+/** The id a mini note or note tab uses for all of a footnote's notes together. */
+export const ALL_NOTES_ID = "nt-all";
+
+/**
+ * A footnote's notes as one read-only note, in order, divided by rules.
+ * Null when there are fewer than two notes to combine.
+ */
+export function combinedNote(footnote: { notes?: readonly DocFootnoteNote[] }): DocFootnoteNote | null {
+  const notes = footnote.notes ?? [];
+  if (notes.length < 2) return null;
+  const images = notes.flatMap((note) => note.images ?? []).slice(0, NOTE_IMAGE_LIMIT * 4);
+  return {
+    id: ALL_NOTES_ID,
+    text: notes.map((note) => note.text.trim()).filter(Boolean).join("\n\n---\n\n"),
+    ...(images.length ? { images } : {}),
+    createdAt: Math.min(...notes.map((note) => note.createdAt)),
+    updatedAt: Math.max(...notes.map((note) => note.updatedAt)),
+  };
+}
+
+/** A note by id, the combined note included; `number` is 0 for the combined one. */
+export function noteById(
+  footnote: { notes?: readonly DocFootnoteNote[] } | undefined,
+  id: string,
+): { note: DocFootnoteNote; number: number } | null {
+  if (!footnote) return null;
+  if (id === ALL_NOTES_ID) {
+    const note = combinedNote(footnote);
+    return note ? { note, number: 0 } : null;
+  }
+  const index = footnote.notes?.findIndex((note) => note.id === id) ?? -1;
+  return index >= 0 ? { note: footnote.notes![index]!, number: index + 1 } : null;
+}
+
 /** Most pictures one note keeps. */
 export const NOTE_IMAGE_LIMIT = 8;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;

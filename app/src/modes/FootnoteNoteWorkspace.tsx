@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CloseNoteIcon, PictureInPictureIcon } from "../components/NoteWindowIcons";
 import { NO_CHROME, useShell } from "../shellContext";
 import { ANNOTATE_LIBRARY_EVENT, getAnnotateDoc, type AnnotateDoc } from "../util/annotateStore";
-import { numberFootnotes } from "../util/docFootnotes";
+import { noteById, numberFootnotes } from "../util/docFootnotes";
 import { footnoteDisplayThemes } from "../util/inkPaletteHistory";
 import { footnoteThemeVars } from "../util/footnoteTheme";
 import { openExternalUrl } from "../util/openExternal";
@@ -72,10 +72,13 @@ export function FootnoteNoteWorkspace({ tab, active, showing, splitRole }: {
     ...mark, number: numbers.get(mark.id),
   }))), [doc?.footnotes, numbers]);
   const mark = marks.find(entry => entry.id === ref.footnoteId);
-  const note = mark?.notes?.find(entry => entry.id === ref.noteId);
-  const noteNumber = (mark?.notes?.findIndex(entry => entry.id === ref.noteId) ?? -1) + 1;
+  const found = noteById(mark, ref.noteId);
+  const note = found?.note;
+  const noteNumber = found?.number ?? 0;
   const number = numbers.get(ref.footnoteId);
-  const title = mark ? `${mark.title?.trim() || `Note ${number ?? ""}`}.${noteNumber}` : tab.title;
+  const title = mark
+    ? noteNumber ? `${mark.title?.trim() || `Note ${number ?? ""}`}.${noteNumber}` : `${mark.title?.trim() || `Footnote ${number ?? ""}`}: all notes`
+    : tab.title;
   const theme = themes.get(ref.footnoteId);
   useEffect(() => {
     if (note) patchTab(tab.id, { title, dirty: false });

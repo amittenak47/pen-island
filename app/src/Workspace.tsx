@@ -175,6 +175,7 @@ import {
   freshNoteId,
   freshSubMarkId,
   googleSearchUrl,
+  noteById,
   numberFootnotes,
   removeFootnote,
   searchQueryFor,
@@ -10229,10 +10230,10 @@ export const Workspace = memo(function Workspace({
     ? miniNoteGeometry.placements : loadMiniNotePlacements(miniPlacementDocId);
   const miniNoteEntries = useMemo(() => miniNotes.flatMap(ref => {
     const footnote = annotateFootnotes.find(mark => mark.id === ref.footnoteId);
-    const note = footnote?.notes?.find(note => note.id === ref.noteId);
+    const found = noteById(footnote, ref.noteId);
     const theme = footnoteThemes.get(ref.footnoteId);
-    return footnote && note && theme ? [{ ...ref, footnote, note, theme,
-      number: footnoteNumbers.get(footnote.id), noteNumber: footnote.notes!.indexOf(note) + 1 }] : [];
+    return footnote && found && theme ? [{ ...ref, footnote, note: found.note, theme,
+      number: footnoteNumbers.get(footnote.id), noteNumber: found.number }] : [];
   }), [miniNotes, annotateFootnotes, footnoteThemes, footnoteNumbers]);
   const miniNoteBounds = useCallback(() => {
     const wrap = [...document.querySelectorAll<HTMLElement>(".lc-canvas-wrap")]
@@ -10245,11 +10246,11 @@ export const Workspace = memo(function Workspace({
       const ref = takeMiniNoteRestore(annotateDocId);
       if (!ref) return;
       const mark = annotateFootnotesRef.current.find(mark => mark.id === ref.footnoteId);
-      if (!mark?.notes?.some(note => note.id === ref.noteId)) {
+      if (!noteById(mark, ref.noteId)) {
         setNotice("This note is no longer in its footnote.");
         return;
       }
-      const current = miniNotes.filter(ref => annotateFootnotesRef.current.some(mark => mark.id === ref.footnoteId && mark.notes?.some(note => note.id === ref.noteId)));
+      const current = miniNotes.filter(ref => noteById(annotateFootnotesRef.current.find(mark => mark.id === ref.footnoteId), ref.noteId));
       const next = openMiniNote(current, ref);
       setMiniNotes(next);
       if (!next.some(note => note.footnoteId === ref.footnoteId && note.noteId === ref.noteId)) {
@@ -10266,10 +10267,10 @@ export const Workspace = memo(function Workspace({
       const saved = await saveAnnotateSession({ throwOnError: true });
       if (!saved) throw new Error("Save the document before opening a note tab.");
       const mark = saved.footnotes?.find(mark => mark.id === ref.footnoteId);
-      const noteIndex = mark?.notes?.findIndex(note => note.id === ref.noteId) ?? -1;
-      if (!mark || noteIndex < 0) throw new Error("This note is no longer in its footnote.");
+      const found = noteById(mark, ref.noteId);
+      if (!mark || !found) throw new Error("This note is no longer in its footnote.");
       const number = numberFootnotes(saved.footnotes ?? []).get(ref.footnoteId);
-      openWorkspace(footnoteNoteTab({ docId: saved.id, ...ref }, `Note ${number ?? ""}.${noteIndex + 1}`));
+      openWorkspace(footnoteNoteTab({ docId: saved.id, ...ref }, found.number ? `Note ${number ?? ""}.${found.number}` : `All notes ${number ?? ""}`));
     } catch (cause) { setError(messageOf(cause)); }
   }, [saveAnnotateSession, openWorkspace, setError]);
 
@@ -12083,7 +12084,7 @@ export const Workspace = memo(function Workspace({
             miniNoteCount={miniNoteEntries.length}
             openMiniNoteIds={miniNoteEntries.filter(entry => entry.footnoteId === openFootnote.id).map(entry => entry.noteId)}
             onOpenMiniNote={noteId => setMiniNotes(current => openMiniNote(
-              current.filter(ref => annotateFootnotes.some(mark => mark.id === ref.footnoteId && mark.notes?.some(note => note.id === ref.noteId))),
+              current.filter(ref => noteById(annotateFootnotes.find(mark => mark.id === ref.footnoteId), ref.noteId)),
               { footnoteId: openFootnote.id, noteId },
             ))}
             onOpenFullNote={noteId => { void openFullFootnoteNote({ footnoteId: openFootnote.id, noteId }); }}

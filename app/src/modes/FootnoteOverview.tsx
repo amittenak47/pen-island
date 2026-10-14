@@ -46,7 +46,8 @@ import {
 import { HOLD_SENSITIVE_MS } from "../util/gesture";
 import { useFootnoteHistory } from "./footnoteHistory";
 import { pickPhotos } from "../util/photoAttach";
-import { NOTE_IMAGE_LIMIT, chipTitle, noteIsAi } from "../util/docFootnotes";
+import { ALL_NOTES_ID, NOTE_IMAGE_LIMIT, chipTitle, combinedNote, noteById, noteIsAi } from "../util/docFootnotes";
+import { loadNotesCombined, saveNotesCombined } from "../util/notesCombinedPref";
 export interface FootnoteOverviewProps {
   onOpenArtifact?: (ref: ArtifactRef) => void;
   onManageArtifacts?: () => void;
@@ -832,11 +833,13 @@ export function FootnoteOverview({
     task?.kind === "link" && task.index != null ? userLinks[task.index] ?? null : null;
   const tint = footnoteThemeVars(markColor, palette);
   const localMiniEntries = localMiniNotes.flatMap(ref => {
-    const note = notes.find(entry => entry.id === ref.noteId);
-    return ref.footnoteId === footnote.id && note ? [{ ...ref, note, footnote,
-      number: footnoteNumber, noteNumber: notes.indexOf(note) + 1,
+    const found = noteById(footnote, ref.noteId);
+    return ref.footnoteId === footnote.id && found ? [{ ...ref, note: found.note, footnote,
+      number: footnoteNumber, noteNumber: found.number,
       theme: { color: markColor, palette } }] : [];
   });
+  const [notesCombined, setNotesCombined] = useState(loadNotesCombined);
+  const allNotes = notesCombined ? combinedNote(footnote) : null;
   const activeMiniIds = onOpenMiniNote ? openMiniNoteIds : localMiniEntries.map(entry => entry.noteId);
   const activeMiniCount = onOpenMiniNote ? miniNoteCount : localMiniEntries.length;
   const canOpenMini = (id: string) => activeMiniIds.includes(id) || activeMiniCount < MINI_NOTE_LIMIT;
@@ -1153,9 +1156,26 @@ export function FootnoteOverview({
               </HubSection>
               )}
               {(!rowsAreReadOnly || notes.length > 0 || footnote.pending) && (
-              <HubSection title="Notes" onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}>
+              <HubSection title="Notes" onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}
+                extra={notes.length > 1 ? (
+                  <button type="button" role="switch" aria-checked={notesCombined} aria-label="Show the notes as one"
+                    title={notesCombined ? "Show each note on its own" : "Show the notes as one"}
+                    className={`lc-footnote-notes-combine${notesCombined ? " is-on" : ""}`}
+                    onClick={() => { setNotesCombined(!notesCombined); saveNotesCombined(!notesCombined); }}>
+                    <CombineIcon />
+                  </button>
+                ) : null}>
                 {footnote.pending ? <p className="lc-muted" role="status">{pendingStatus || "ChatBot is writing..."}</p> : null}
-                {notes.length > 0 && (
+                {allNotes ? (
+                  <ul className={listClass(1)}>
+                    <NoteRow note={allNotes} index={0} ai={notes.every((note) => noteIsAi(note, footnote))}
+                      chip={`All notes (${notes.length})`} name="All notes"
+                      readOnly canOpenMini={canOpenMini(ALL_NOTES_ID)} miniOpen={activeMiniIds.includes(ALL_NOTES_ID)}
+                      onShowMini={() => showMini(ALL_NOTES_ID)}
+                      onOpenFull={onOpenFullNote ? () => onOpenFullNote(ALL_NOTES_ID) : undefined}
+                      onDelete={() => {}} />
+                  </ul>
+                ) : notes.length > 0 && (
                   <ul className={listClass(notes.length)}>
                     {notes.map((note, index) => (
                       <NoteRow key={note.id} note={note} index={index} ai={noteIsAi(note, footnote)}
@@ -1438,9 +1458,12 @@ export const NOTE_ACTIONS_IDLE_MS = 4000;
  * buttons (mini note, full note, edit) as small squares beside it; after a
  * few seconds untouched it slides back. Holding still deletes.
  */
-function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini, onOpenFull, onEdit, onDelete }: {
+function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini, onOpenFull, onEdit, onDelete, chip: chipText, name }: {
   note: DocFootnoteNote;
   index: number;
+  /** Chip words in place of the note's own, and the row's spoken name. */
+  chip?: string;
+  name?: string;
   ai: boolean;
   readOnly: boolean;
   canOpenMini: boolean;
@@ -1463,7 +1486,7 @@ function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini,
     return !value;
   });
   const chip = <>
-    {note.text ? <span className="lc-footnote-item-chip" data-type={ai ? "ai-note" : "note"}>{chipTitle(note.text) || plainPreview(note.text)}</span> : null}
+    {note.text ? <span className="lc-footnote-item-chip" data-type={ai ? "ai-note" : "note"}>{chipText ?? (chipTitle(note.text) || plainPreview(note.text))}</span> : null}
     <NoteImages images={note.images} />
   </>;
   return (
@@ -1477,7 +1500,7 @@ function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini,
       ) : null}
       {readOnly ? (
         <button type="button" className="lc-agent-scope-option lc-footnote-note-mini" aria-expanded={open}
-          aria-label={`Note ${index + 1}: ${plainPreview(note.text)}. Tap for its buttons`} onClick={toggle}>{chip}</button>
+          aria-label={`${name ?? `Note ${index + 1}`}: ${chipText ?? plainPreview(note.text)}. Tap for its buttons`} onClick={toggle}>{chip}</button>
       ) : (
         <HoldButton
           label={note.text || "Picture"}
@@ -1517,6 +1540,16 @@ export function plainPreview(text: string): string {
     .replace(/^#+\s+/gm, "");
 }
 
+/** Two stacked sheets becoming one: the notes shown as a single note. */
+function CombineIcon() {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden focusable="false">
+      <rect x="2.5" y="2.5" width="8" height="6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <rect x="5.5" y="7.5" width="8" height="6" fill="none" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
 /** A small curved arrow; Redo mirrors it. */
 function HistoryArrow() {
   return (
@@ -1542,16 +1575,20 @@ function listClass(count: number): string {
 function HubSection({
   title,
   onAdd,
+  extra,
   children,
 }: {
   title: string;
   onAdd?: () => void;
+  /** A small control beside the add button. */
+  extra?: ReactNode;
   children?: ReactNode;
 }) {
   return (
     <section className="lc-footnote-overview-section" aria-label={title}>
       <div className="lc-footnote-overview-section-head">
         <h3 className="lc-agent-turn-role">{title}</h3>
+        {extra}
         {onAdd ? (
           <button
             type="button"
