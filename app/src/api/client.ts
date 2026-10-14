@@ -731,6 +731,56 @@ export interface FootnoteRequestDto {
   extras?: FootnoteExtrasDto;
 }
 
+/** One page of a page-range annotation job, as extracted text. */
+export interface AnnotationJobPageDto {
+  page: number;
+  scope: string;
+  text: string;
+}
+
+export interface NewAnnotationJobDto {
+  id: string;
+  device_id: string;
+  doc_id: string;
+  doc_name: string;
+  doc_kind: "annotate" | "web";
+  focus: string;
+  /** Most footnotes per page (Light 2, Normal 4, Thorough 8). */
+  per_page: number;
+  pages: AnnotationJobPageDto[];
+  palette: string[];
+  workspace_items: FootnoteWorkspaceItemDto[];
+}
+
+export interface AnnotationJobDto {
+  id: string;
+  doc_id: string;
+  doc_name: string;
+  page_from: number;
+  page_to: number;
+  focus: string;
+  per_page: number;
+  pages_total: number;
+  pages_done: number;
+  footnotes: number;
+  status: "open" | "done" | "cancelled";
+  created_at: number;
+  summary?: string;
+}
+
+/** A footnote an assistant described for a page, waiting to be placed. */
+export interface AnnotationJobItemDto {
+  item_id: number;
+  job_id: string;
+  doc_id: string;
+  page: number;
+  scope: string;
+  palette: string[];
+  doc_kind: "annotate" | "web";
+  quote: string;
+  result: FootnoteResultDto;
+}
+
 export interface FootnoteWorkspaceItemDto {
   id: string;
   kind: string;
@@ -1548,6 +1598,54 @@ export class LcClient {
     );
     const rows = body?.footnote_results;
     return Array.isArray(rows) ? rows as FootnotePingResultDto[] : [];
+  }
+
+  async createAnnotationJob(body: NewAnnotationJobDto): Promise<AnnotationJobDto> {
+    return await padInvokeOrHub<AnnotationJobDto>(
+      () => this.cmd("lc_create_annotation_job", { body }),
+      "POST",
+      "/annotation-jobs",
+      body,
+    );
+  }
+
+  /** This device's annotation jobs on one document, newest first. */
+  async annotationJobs(docId: string): Promise<AnnotationJobDto[]> {
+    const device = loadDeviceId();
+    const rows = await padInvokeOrHub<AnnotationJobDto[]>(
+      () => this.cmd("lc_annotation_jobs", { device, doc: docId }),
+      "GET",
+      `/annotation-jobs?device=${encodeURIComponent(device)}&doc=${encodeURIComponent(docId)}`,
+    );
+    return Array.isArray(rows) ? rows : [];
+  }
+
+  async cancelAnnotationJob(id: string): Promise<void> {
+    await padInvokeOrHub(
+      () => this.cmd("lc_cancel_annotation_job", { id }),
+      "POST",
+      `/annotation-jobs/${encodeURIComponent(id)}/cancel`,
+    );
+  }
+
+  async annotationJobItems(): Promise<AnnotationJobItemDto[]> {
+    const device = loadDeviceId();
+    const body = await padInvokeOrHub<{ items?: unknown }>(
+      () => this.cmd("lc_annotation_job_items", { device }),
+      "GET",
+      `/annotation-job-items?device=${encodeURIComponent(device)}`,
+    );
+    return Array.isArray(body?.items) ? body.items as AnnotationJobItemDto[] : [];
+  }
+
+  async ackAnnotationJobItems(ids: readonly number[]): Promise<void> {
+    if (ids.length === 0) return;
+    await padInvokeOrHub(
+      () => this.cmd("lc_ack_annotation_job_items", { ids }),
+      "POST",
+      "/annotation-job-items/ack",
+      { ids },
+    );
   }
 
   async getInkPages(kind: "annotate" | "whiteboard", key: string): Promise<InkPageDto[]> {

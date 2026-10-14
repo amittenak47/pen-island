@@ -314,7 +314,7 @@ function sinksFor(docId: string): OpenAnnotateFootnoteSink[] {
   return matches;
 }
 
-async function writeFootnotes(
+export async function writeFootnotes(
   docId: string,
   mutate: (footnotes: readonly DocFootnote[]) => DocFootnote[],
 ): Promise<FootnoteWriteResult> {
@@ -432,9 +432,22 @@ function nodeOf(item: FootnoteWorkspaceItemDto): NodeRef | null {
 
 /** Link the asking document to each library item the answer chose. */
 async function linkWorkspaceItems(docId: string, answer: ParsedAnswer): Promise<void> {
-  if (answer.workspaceLinks.length === 0) return;
-  const from: NodeRef = { type: answer.linkFrom, id: docId };
-  for (const item of answer.workspaceLinks) {
+  await linkItems(docId, answer.workspaceLinks, answer.linkFrom);
+}
+
+/** The same, for a page-range item's checked result. */
+export async function linkAnswerWorkspaceItems(
+  docId: string,
+  result: { workspace_links?: readonly FootnoteWorkspaceItemDto[] },
+  docKind: "annotate" | "web",
+): Promise<void> {
+  await linkItems(docId, (result.workspace_links ?? []).filter((item) => item?.id?.includes(":")), docKind === "web" ? "web" : "annotate");
+}
+
+async function linkItems(docId: string, items: readonly FootnoteWorkspaceItemDto[], fromType: "annotate" | "web"): Promise<void> {
+  if (items.length === 0) return;
+  const from: NodeRef = { type: fromType, id: docId };
+  for (const item of items) {
     const to = nodeOf(item);
     if (!to || (to.type === from.type && to.id === from.id)) continue;
     try {

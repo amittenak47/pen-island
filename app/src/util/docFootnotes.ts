@@ -205,6 +205,11 @@ export interface DocFootnote {
    * values are dropped on read — a spinner with no request is a stuck mark.
    */
   pending?: string;
+  /**
+   * The page-range ChatBot run that created this mark, so the run can be undone
+   * as a whole. Absent on every mark the reader made.
+   */
+  jobId?: string;
 }
 
 export type DocFootnoteSubMarkKind = "underline" | "highlight";
@@ -674,8 +679,10 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
         whiteboards: rawWhiteboards,
         artifacts: rawArtifacts,
         pending: rawPending,
+        jobId: rawJobId,
         ...rest
       } = candidate as DocFootnote & { userNotes?: unknown };
+      const jobId = typeof rawJobId === "string" && rawJobId.length > 0 && rawJobId.length <= 100 ? rawJobId : undefined;
       // Pulled out of the spread so a stored non-number is dropped rather than
       // passed through as a timestamp nothing can compare.
       const updatedAt =
@@ -720,6 +727,7 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
           ...(subMarks ? { subMarks } : {}),
           ...(updatedAt != null ? { updatedAt } : {}),
           ...(pending ? { pending } : {}),
+        ...(jobId ? { jobId } : {}),
         },
       ];
     })

@@ -184,6 +184,8 @@ import {
   type DocFootnoteSubMarkKind,
 } from "./util/docFootnotes";
 import { footnoteDisplayThemes, footnoteThemeSeed, normalizePalette } from "./util/inkPaletteHistory";
+import { ChatBotPagesDialog } from "./modes/ChatBotPagesDialog";
+import { activeAnnotationJobs, ANNOTATION_JOBS_EVENT } from "./util/annotationJobs";
 import { hashBytesAsync, loadBinaryDocBytesWithRetry, bytesCameFromStore, putDocBytesVerified } from "./util/docBytes";
 import { handOffPickedDoc, takePickedDoc } from "./util/pickedDocHandoff";
 import {
@@ -3825,6 +3827,23 @@ export const Workspace = memo(function Workspace({
   linkTargetsRef.current = linkTargets;
   const hereNodeRef = useRef(hereNode);
   hereNodeRef.current = hereNode;
+  /** The library an answer may link to, by `type:id`, as the link picker offers it. */
+  const chatBotWorkspaceItems = useCallback(() => linkTargetsRef.current
+    .filter((target) => target.node.type !== "thread" && !target.node.id.startsWith("unresolved:"))
+    .slice(0, 60)
+    .map((target) => ({
+      id: `${target.node.type}:${target.node.id}`,
+      kind: target.node.type,
+      title: target.node.title ?? target.node.id,
+    })), []);
+  const [chatBotPagesOpen, setChatBotPagesOpen] = useState(false);
+  // Re-render the tray dot when a run starts, places footnotes or finishes.
+  const [, setAnnotationJobsTick] = useState(0);
+  useEffect(() => {
+    const bump = () => setAnnotationJobsTick((value) => value + 1);
+    window.addEventListener(ANNOTATION_JOBS_EVENT, bump);
+    return () => window.removeEventListener(ANNOTATION_JOBS_EVENT, bump);
+  }, []);
 
   /**
    * The marks on this page, positioned for the link overlay.
@@ -8944,15 +8963,7 @@ export const Workspace = memo(function Workspace({
           exceptId: mark.id,
           palette: normalizePalette(mark.palette) ?? footnoteDisplayThemes(footnotes).get(mark.id)?.palette,
           markText: mark.blockText ?? mark.excerpt,
-          // The library an answer may link to, by `type:id`, as the link picker offers it.
-          workspaceItems: linkTargetsRef.current
-            .filter((target) => target.node.type !== "thread" && !target.node.id.startsWith("unresolved:"))
-            .slice(0, 60)
-            .map((target) => ({
-              id: `${target.node.type}:${target.node.id}`,
-              kind: target.node.type,
-              title: target.node.title ?? target.node.id,
-            })),
+          workspaceItems: chatBotWorkspaceItems(),
           docKind: hereNodeRef.current?.type === "web" ? "web" : "annotate",
         }));
       } catch (cause) {
@@ -11590,6 +11601,14 @@ export const Workspace = memo(function Workspace({
                 : null
             }
             pdfFilmPublish={active}
+            chatBot={
+              annotateSource?.docType === "pdf" && annotateDocId && !footnoteBoardSession
+                ? {
+                    onOpen: () => setChatBotPagesOpen(true),
+                    active: activeAnnotationJobs().some((job) => job.docId === annotateDocId),
+                  }
+                : null
+            }
             pdfDocument={annotateSource?.docType === "pdf" && !footnoteBoardSession}
             pageSpread={
               annotateSource?.docType === "pdf"
@@ -12152,6 +12171,23 @@ export const Workspace = memo(function Workspace({
             const pending = sidecarChoice;
             setSidecarChoice(null);
             pending.resolve(choice);
+          }}
+        />
+      )}
+
+      {chatBotPagesOpen && annotateSource && annotateDocId && (
+        <ChatBotPagesDialog
+          client={client}
+          docId={annotateDocId}
+          docName={annotateSource.name}
+          hash={annotateSource.hash}
+          currentPage={pdfNav?.current ?? 1}
+          pageCount={pdfNav?.count ?? 0}
+          palette={footnoteThemeSeed(annotateFootnotesRef.current).palette}
+          workspaceItems={chatBotWorkspaceItems()}
+          onClose={() => {
+            setChatBotPagesOpen(false);
+            setAnnotationJobsTick((value) => value + 1);
           }}
         />
       )}

@@ -93,6 +93,7 @@ import {
 } from "./util/padSync";
 import { syncBookPass } from "./util/bookSyncPass";
 import { pollFootnoteInbox } from "./util/footnoteRequests";
+import { pollAnnotationJobs } from "./util/annotationJobs";
 import { HUB_AUTOSYNC_EVENT, loadHubAutosyncPref } from "./util/hubAutoSyncPref";
 import { PAD_HUB_EVENT, setHostLoopback } from "./util/padHub";
 import { startPadHubStatusMonitoring } from "./util/padHubStatus";
@@ -358,6 +359,25 @@ export function App() {
       document.removeEventListener("visibilitychange", onVis);
     };
   }, [serverLink, client, hubAutosyncOn]);
+
+  /*
+   * Page-range ChatBot runs deliver their footnotes on this timer whatever the
+   * autosync setting: the reader started the run and is waiting for it.
+   */
+  useEffect(() => {
+    if (serverLink !== "online") return;
+    let cancelled = false;
+    const tick = () => {
+      if (cancelled || document.visibilityState === "hidden") return;
+      void pollAnnotationJobs(client).catch(() => {});
+    };
+    const timer = window.setInterval(tick, PAD_SYNC_PING_MS);
+    tick();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [serverLink, client]);
 
   /*
    * Autosync's pass already delivers footnote answers. When that pass is off,

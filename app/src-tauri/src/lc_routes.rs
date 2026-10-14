@@ -966,6 +966,47 @@ pub async fn lc_footnote_results(
 }
 
 #[tauri::command]
+pub async fn lc_create_annotation_job(
+    state: State<'_, Shared>,
+    body: serde_json::Value,
+) -> Result<LcResponse, String> {
+    go(state, "POST", "/annotation-jobs".into(), Some(body)).await
+}
+
+#[tauri::command]
+pub async fn lc_annotation_jobs(
+    state: State<'_, Shared>,
+    device: String,
+    doc: String,
+) -> Result<LcResponse, String> {
+    go(state, "GET", format!("/annotation-jobs?device={}&doc={}", enc(&device), enc(&doc)), None).await
+}
+
+#[tauri::command]
+pub async fn lc_cancel_annotation_job(
+    state: State<'_, Shared>,
+    id: String,
+) -> Result<LcResponse, String> {
+    go(state, "POST", format!("/annotation-jobs/{}/cancel", enc(&id)), None).await
+}
+
+#[tauri::command]
+pub async fn lc_annotation_job_items(
+    state: State<'_, Shared>,
+    device: String,
+) -> Result<LcResponse, String> {
+    go(state, "GET", format!("/annotation-job-items?device={}", enc(&device)), None).await
+}
+
+#[tauri::command]
+pub async fn lc_ack_annotation_job_items(
+    state: State<'_, Shared>,
+    ids: Vec<i64>,
+) -> Result<LcResponse, String> {
+    go(state, "POST", "/annotation-job-items/ack".into(), Some(serde_json::json!({ "ids": ids }))).await
+}
+
+#[tauri::command]
 pub async fn lc_list_devices(state: State<'_, Shared>) -> Result<LcResponse, String> {
     go(state, "GET", "/devices".into(), None).await
 }

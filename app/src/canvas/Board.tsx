@@ -1348,6 +1348,11 @@ export interface BoardProps {
    */
   pageFilm?: { open: boolean; onToggle: () => void } | null;
   /**
+   * ChatBot in the right tray: ask an assistant to annotate a page range.
+   * `active` while one of this document's runs is still going.
+   */
+  chatBot?: { onOpen: () => void; active?: boolean } | null;
+  /**
    * Write the shared film / hole pointers. Parked books must not; two tabs
    * used to clobber each other's current page.
    */
@@ -1438,6 +1443,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     agentOnline = false,
     onToggleAgent,
     pageFilm = null,
+    chatBot = null,
     pdfFilmPublish = true,
     pdfDocument = false,
     pageSpread = null,
@@ -11176,6 +11182,24 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                     onClick={pageFilm.onToggle}
                   >
                     <PagesFilmIcon />
+                  </button>
+                )}
+                {mountStackTools && chatBot && (
+                  <button
+                    type="button"
+                    className={
+                      chatBot.active
+                        ? "lc-lined-toggle lc-tip-target lc-chatbot-tray is-active"
+                        : "lc-lined-toggle lc-tip-target lc-chatbot-tray"
+                    }
+                    aria-label={chatBot.active ? "ChatBot: annotating pages" : "ChatBot: annotate pages"}
+                    data-tip={chatBot.active ? "ChatBot is annotating" : "Ask ChatBot to annotate pages"}
+                    onClick={chatBot.onOpen}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+                      <path d="M12 8.2l.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9z" fill="currentColor" stroke="none" />
+                    </svg>
                   </button>
                 )}
                 {mountStackTools && pageSpread && (
