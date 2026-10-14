@@ -654,14 +654,33 @@ export function FootnoteOverview({
       };
       userPlace.current = { left: gesture.left, top: gesture.top };
     }
-    // Pens report far more often than the display draws: place once a frame.
+    /*
+     * Pens report far more often than the display draws, so paint once a
+     * frame, and only what changes. A move slides the card with a transform
+     * (no layout at all); a resize sets its size. The full placement, which
+     * measures the page to find the mark, runs once on release: run per frame
+     * it forced the whole document's layout and dropped half the frames.
+     */
     if (!placeFrame.current) {
       placeFrame.current = requestAnimationFrame(() => {
         placeFrame.current = 0;
-        place();
+        const live = panelGesture.current;
+        const card = panelRef.current;
+        if (!live || !card) return;
+        const frame = viewport();
+        if (live.mode === "move" && userPlace.current) {
+          const left = Math.min(Math.max(frame.originX + 8, userPlace.current.left), frame.originX + frame.width - live.width - 8);
+          const top = Math.min(Math.max(frame.originY + 8, userPlace.current.top), frame.originY + frame.height - live.height - 8);
+          card.style.transform = `translate(${Math.round(left - live.left)}px, ${Math.round(top - live.top)}px)`;
+        } else if (live.mode === "resize" && preferredPanelSize) {
+          card.style.maxWidth = "none";
+          card.style.maxHeight = `${Math.round(frame.height - 16)}px`;
+          card.style.width = `${Math.round(preferredPanelSize.width)}px`;
+          card.style.height = `${Math.round(preferredPanelSize.height)}px`;
+        }
       });
     }
-  }, [place]);
+  }, []);
   const endPanelGesture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const gesture = panelGesture.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
@@ -669,6 +688,9 @@ export function FootnoteOverview({
     if (placeFrame.current) {
       cancelAnimationFrame(placeFrame.current);
       placeFrame.current = 0;
+    }
+    if (gesture.moved) {
+      if (panelRef.current) panelRef.current.style.transform = "";
       place();
     }
     if (gesture.moved && gesture.mode === "move") swallowClick.current = true;
