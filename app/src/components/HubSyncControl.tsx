@@ -7,6 +7,7 @@
  * uses the same order.
  */
 
+import { requireAtomicInkHub } from "../util/atomicInkHub";
 import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 
@@ -523,6 +524,7 @@ export function HubSyncControl({
         walkingRef.current = false;
         return;
       }
+      await requireAtomicInkHub(client!, ping);
       const legacyNotice = takeOldBookHubNotice() ? "Update the desktop app to sync safely." : null;
 
       if (runs("index")) {

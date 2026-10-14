@@ -16,6 +16,7 @@
  * only event that needs a rule, and `gone` already models it.
  */
 
+import { requireAtomicInkHub } from "./atomicInkHub";
 import type { EdgeRowDto, InkPageDigestDto, InkPageDto, LcClient, PadGoneDto } from "../api/client";
 import { b64ToBytes, bytesToB64 } from "../api/nativeHttp";
 import {
@@ -1333,6 +1334,7 @@ export async function pullInkPagesOverLocal(
   knownDigests?: readonly InkPageDigestDto[],
   missingOnly = false,
 ): Promise<number> {
+  await requireAtomicInkHub(client);
   const digests = (knownDigests ?? (await client.pingPadSync(0)).ink ?? [])
     .filter((page) => page.kind === kind && page.key === key);
   const byId = new Map(digests.map((page) => [page.page_id, page]));
@@ -1367,6 +1369,7 @@ export async function pushInkPagesToHub(
   kind: InkPadKind,
   key: string,
 ): Promise<number> {
+  await requireAtomicInkHub(client);
   const localRows = await getInkPageRecords(inkDocKey(kind, key));
   const ctx = await padPdfContext(kind, key);
   let pushed = 0;
@@ -1408,6 +1411,7 @@ export async function syncInkPages(
 ): Promise<InkConflict[]> {
   const strict = opts.strict === true;
   if (!loadPadHub()) return [];
+  await requireAtomicInkHub(client);
   const conflicts: InkConflict[] = [];
   const byPad = new Map<string, InkPageDigestDto[]>();
   for (const row of digests) {

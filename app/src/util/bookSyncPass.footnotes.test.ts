@@ -1,3 +1,5 @@
+// Isolate retained legacy adapter mechanics; oldHubInk.test.tsx tests the real capability barrier.
+vi.mock("./atomicInkHub", () => ({ requireAtomicInkHub: async () => {} }));
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 

@@ -7,6 +7,8 @@
  * makes true: where a key lives locally, which boards are worth syncing, and
  * what a resolve writes.
  */
+// Isolate retained legacy adapter mechanics; oldHubInk.test.tsx tests the real capability barrier.
+vi.mock("./atomicInkHub", () => ({ requireAtomicInkHub: async () => {} }));
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { bytesToB64 } from "../api/nativeHttp";

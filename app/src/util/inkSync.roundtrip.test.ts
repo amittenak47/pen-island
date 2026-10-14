@@ -1,3 +1,5 @@
+// Isolate retained legacy adapter mechanics; oldHubInk.test.tsx tests the real capability barrier.
+vi.mock("./atomicInkHub", () => ({ requireAtomicInkHub: async () => {} }));
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { InkPageDto, LcClient } from "../api/client";
 import { encodeInkOps } from "../canvas/inkCodec";

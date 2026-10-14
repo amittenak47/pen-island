@@ -6,6 +6,8 @@
  * digest row, so nothing would ever push it, and a board only the hub has must
  * come down without the reader opening it.
  */
+// Isolate retained legacy adapter mechanics; oldHubInk.test.tsx tests the real capability barrier.
+vi.mock("./atomicInkHub", () => ({ requireAtomicInkHub: async () => {} }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { LcClient } from "../api/client";

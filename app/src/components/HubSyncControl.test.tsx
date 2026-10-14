@@ -1,6 +1,8 @@
 /**
  * @vitest-environment jsdom
  */
+// Isolate retained legacy adapter mechanics; oldHubInk.test.tsx tests the real capability barrier.
+vi.mock("../util/atomicInkHub", () => ({ requireAtomicInkHub: async () => {} }));
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";

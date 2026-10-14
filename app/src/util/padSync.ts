@@ -4,9 +4,11 @@
  * because the server omitted a row.
  */
 
+import { requireAtomicInkHub } from "./atomicInkHub";
 import type {
   AnnotatePadDto,
   LcClient,
+  PadSyncPingDto,
   PadSnapshotDto,
   ProblemPadDto,
   WhiteboardPadDto,
@@ -923,6 +925,7 @@ export async function discoverHubPads(client: LcClient, report:HubLibraryPullRep
     }
     return report.added.length;
   }
+  await requireAtomicInkHub(client, digest);
   const [whiteboards, documents] = await Promise.all([
     client.listWhiteboardPads(), client.listAnnotatePads(),
   ]);
@@ -1016,12 +1019,14 @@ export async function pullMissingHubFiles(client:LcClient):Promise<HubLibraryPul
 }
 
 export async function pullPads(client: LcClient): Promise<void> {
+  let ping: PadSyncPingDto | undefined;
   if (client.pingPadSync) {
     const { syncBookPass, isModernBookHub } = await import("./bookSyncPass");
     const { boundedBookRequest } = await import("./bookSync");
-    const ping = await boundedBookRequest(() => client.pingPadSync(0, {}), new AbortController().signal);
+    ping = await boundedBookRequest(() => client.pingPadSync(0, {}), new AbortController().signal);
     if (isModernBookHub(ping)) { await syncBookPass(client, { ping, libraryPull: true }); return; }
   }
+  await requireAtomicInkHub(client, ping);
   const [whiteboards, annotate] = await Promise.all([
     client.listWhiteboardPads(),
     client.listAnnotatePads(),
@@ -1150,6 +1155,7 @@ async function applyPadSyncPingBody(
     noteHubPingFail();
     throw cause;
   }
+  await requireAtomicInkHub(client, ping);
   const { applyFootnoteAnswers, queueFootnoteDelivery } = await import("./footnoteRequests");
   const delivered = await applyFootnoteAnswers(ping.footnote_results ?? []);
   queueFootnoteDelivery(client, delivered.saved);
