@@ -539,3 +539,35 @@ describe("annotation camera presentation", () => {
     expect(alpha(100, 380)).toBeGreaterThan(0);
   });
 });
+
+it("passes the actual viewport separately from the parked overdraw canvas", async () => {
+  const draw = vi.spyOn(InkTileCache.prototype, "draw");
+  await ready([stroke(100)]);
+  const calls = draw.mock.calls.filter(([, , , paper]) => paper != null);
+  expect(calls.length).toBeGreaterThan(0);
+  for (const [, parked, , paper] of calls) {
+    expect(paper).toEqual(view);
+    expect(parked.height).toBeGreaterThan(paper!.height);
+  }
+});
+
+it("keeps a jumped page hidden when an earlier camera's unfinished tiles arrive", async () => {
+  await ready([stroke(100), stroke(900), stroke(2100)]);
+  worker.blocked = true;
+  view = { ...view, scrollY: -700 };
+  const first = ref.current!.syncCamera();
+  await frames(3);
+  expect(worker.release.length).toBeGreaterThan(0);
+  view = { ...view, scrollY: -1900 };
+  const second = ref.current!.syncCamera();
+  await frames(3);
+  expect(surface().style.visibility).toBe("hidden");
+  const old = worker.release.splice(0);
+  old.forEach(resolve => resolve());
+  await frames(4);
+  expect(surface().style.visibility).toBe("hidden");
+  worker.blocked = false; worker.release.splice(0).forEach(resolve => resolve());
+  await frames(80); await Promise.all([first, second]);
+  expect(surface().style.visibility).toBe("");
+  expect(alpha(100, 380)).toBeGreaterThan(0);
+});

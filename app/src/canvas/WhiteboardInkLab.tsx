@@ -890,7 +890,7 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
           // worker, camera motion only blits; no main-thread stroke remeshing.
           const riding = Boolean(canvas.style.transform);
           tiles.setSliceVisible(!riding && preparingRef.current);
-          tiles.draw(sctx, livePaint, liveDpr);
+          tiles.draw(sctx, livePaint, liveDpr, liveView);
           if (!tiles.covered) {
             // Pending tiles do not make the old page safe to show. In
             // particular a jump/zoom may have hidden its obsolete bitmap.

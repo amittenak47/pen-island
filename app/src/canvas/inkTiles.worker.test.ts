@@ -147,3 +147,57 @@ it("discards unfinished old-page pixels before painting a new page", async () =>
   expect(ctx.getImageData(60, 196, 1, 1).data[3]).toBeGreaterThan(0);
   expect(localPaint).not.toHaveBeenCalled();
 });
+
+it("keeps slow shared-worker jobs off the UI thread, including first-present retries", async () => {
+  const a = makeCache(), b = makeCache();
+  const small = { ...view, width: 100, height: 100 };
+  const canvas = createCanvas(100, 100), ctx = canvas.getContext("2d") as unknown as CanvasRenderingContext2D;
+  for (const { cache } of [a, b]) {
+    cache.setOps([line(10, 40, 90, 40)]);
+    cache.draw(ctx, small, 1);
+  }
+  await tick(a.schedule); await tick(b.schedule);
+  expect(fake.workers).toHaveLength(1);
+  expect(renders()).toHaveLength(2);
+  await vi.advanceTimersByTimeAsync(60_000);
+  a.cache.setSliceVisible(true);
+  a.cache.draw(ctx, small, 1);
+  expect(a.cache.covered).toBe(false);
+  expect(a.localPaint).not.toHaveBeenCalled();
+  expect(b.localPaint).not.toHaveBeenCalled();
+  expect(fake.workers[0]!.terminate).not.toHaveBeenCalled();
+  finish(renders()[1]!);
+  await vi.dynamicImportSettled();
+  b.cache.draw(ctx, small, 1);
+  expect(b.cache.covered).toBe(true);
+  expect(a.cache.covered).toBe(false);
+  finish(renders()[0]!);
+  await vi.dynamicImportSettled();
+  a.cache.draw(ctx, small, 1);
+  expect(a.cache.covered).toBe(true);
+  expect(a.localPaint).not.toHaveBeenCalled();
+  expect(renders()).toHaveLength(2);
+});
+
+it("requests visible paper before overscan and preserves every final pixel", async () => {
+  const local = makeCache(false), remote = makeCache();
+  const ops = denseHistory();
+  const a = createCanvas(256, 512), b = createCanvas(256, 512);
+  const ctxA = a.getContext("2d"), ctxB = b.getContext("2d");
+  for (const { cache } of [local, remote]) {
+    cache.setOps(ops);
+    cache.setClip({ minX: 128, minY: 17, maxX: 243, maxY: 493 });
+  }
+  const paper = { ...view, scrollY: -128, height: 128 };
+  local.cache.draw(ctxA as unknown as CanvasRenderingContext2D, view, 1);
+  remote.cache.draw(ctxB as unknown as CanvasRenderingContext2D, view, 1, paper);
+  await drain(remote.schedule);
+  expect(renders().map(({ tx, ty }) => [tx || 0, ty || 0])).toEqual([
+    [1, 1], [0, 0], [1, 0], [0, 1], [0, 2], [1, 2], [0, 3], [1, 3],
+  ]);
+  remote.cache.draw(ctxB as unknown as CanvasRenderingContext2D, view, 1, paper);
+  const expected = ctxA.getImageData(0, 0, 256, 512).data;
+  expect(ctxB.getImageData(0, 0, 256, 512).data.every((v, i) => v === expected[i])).toBe(true);
+  expect(remote.cache.covered).toBe(true);
+  expect(remote.localPaint).not.toHaveBeenCalled();
+});

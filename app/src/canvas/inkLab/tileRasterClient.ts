@@ -90,11 +90,9 @@ export async function rasterInkTileOffThread(
   if (resident.size > 2) resident.delete(resident.values().next().value!);
   const id = nextId++;
   return new Promise<ImageBitmap | null>((resolve) => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
     const finish = (bitmap: ImageBitmap | null) => {
       if (!pending.has(id)) return;
       pending.delete(id);
-      if (timer !== undefined) clearTimeout(timer);
       resolve(bitmap);
     };
     pending.set(id, { resolve: finish });
@@ -106,10 +104,9 @@ export async function rasterInkTileOffThread(
       tx: job.tx,
       ty: job.ty,
     };
-    // Null makes the caller paint the tile on the UI thread while the worker
-    // may still be painting it: the same tile twice, and a stall. Only give up
-    // on a worker that has stopped answering.
-    timer = setTimeout(() => finish(null), 15_000);
+    // A slow tile still belongs to the worker. Keep waiting: a timeout would
+    // replay it on the UI thread while this job (and other panes) keeps going.
+    // Worker failure terminates it before releasing all pending callers.
     try { target.postMessage(payload); }
     catch (error) { failWorker(error); }
   }).catch(() => null);

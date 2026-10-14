@@ -147,6 +147,7 @@ export function tileRangeFor(view: SceneBounds, tileScene: number): TileRange {
 export function tileVisitOrder(
   range: TileRange,
   scrollDeltaY: number,
+  paperRange?: TileRange | null,
 ): Array<{ tx: number; ty: number }> {
   const rows: number[] = [];
   for (let ty = range.minTy; ty <= range.maxTy; ty++) rows.push(ty);
@@ -157,7 +158,14 @@ export function tileVisitOrder(
       out.push({ tx, ty });
     }
   }
-  return out;
+  if (!paperRange) return out;
+  const paper: typeof out = [], overscan: typeof out = [];
+  for (const tile of out) {
+    const onPaper = tile.tx >= paperRange.minTx && tile.tx <= paperRange.maxTx &&
+      tile.ty >= paperRange.minTy && tile.ty <= paperRange.maxTy;
+    (onPaper ? paper : overscan).push(tile);
+  }
+  return [...paper, ...overscan];
 }
 
 /** Scene rect the viewport shows. */
@@ -1223,6 +1231,7 @@ export class InkTileCache {
     ctx: CanvasRenderingContext2D,
     viewport: ViewportTransform,
     dpr: number,
+    paperViewport?: ViewportTransform,
   ): void {
     this.drawCount += 1;
     const zoom = viewport.zoom || 1;
@@ -1289,12 +1298,17 @@ export class InkTileCache {
       this.lastScrollY == null ? 0 : viewport.scrollY - this.lastScrollY;
     this.lastScrollY = viewport.scrollY;
 
-    for (const { tx, ty } of tileVisitOrder(range, scrollDeltaY)) {
+    // The parked canvas includes overdraw above and below the screen. Keep
+    // the leading-edge order within each band, but fill visible paper first.
+    const paper = paperViewport ? viewportSceneBounds(paperViewport) : null;
+    const paperClip = paper && this.clip ? intersectBounds(paper, this.clip) : paper;
+    const paperRange = paperClip ? tileRangeFor(paperClip, tileScene) : null;
+    for (const { tx, ty } of tileVisitOrder(range, scrollDeltaY, paperRange)) {
       const bounds = this.tileBounds(level, tx, ty);
       const key = tileKey(level, tx, ty);
       let tile = this.tiles.get(key);
       const canSlice =
-        this.now() < deadline && (!this.useWorker || this.sliceVisible);
+        this.now() < deadline && (!this.useWorker || this.sliceVisible) && !this.inflight.has(key);
       if (!tile && canSlice) {
         tile = this.renderTile(level, tx, ty) ?? undefined;
       }

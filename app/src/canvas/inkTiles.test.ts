@@ -1012,3 +1012,12 @@ describe("InkTileCache", () => {
     expect(painted).toHaveLength(1);
   });
 });
+
+it.each([0, -1, 1])("keeps pan order within paper and overscan bands for delta %s", delta => {
+  const range = { minTx: 0, maxTx: 2, minTy: -1, maxTy: 3 };
+  const paper = { minTx: 1, maxTx: 2, minTy: 1, maxTy: 2 };
+  const previous = tileVisitOrder(range, delta);
+  const onPaper = ({ tx, ty }: { tx: number; ty: number }) => tx >= 1 && ty >= 1 && ty <= 2;
+  const expected = [...previous.filter(onPaper), ...previous.filter(tile => !onPaper(tile))];
+  expect(tileVisitOrder(range, delta, paper)).toEqual(expected);
+});
