@@ -15,15 +15,10 @@
  * exists so a model can answer "which line is this circled".
  */
 
+import type { SceneBox } from "./geom";
+export type { SceneBox } from "./geom";
 import { inkOpBounds } from "./inkTiles";
 import { applyInkOp, type InkOp } from "./rasterInk";
-
-export interface SceneBox {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
-}
 
 /** Device pixels per scene unit in the export. Legible without being huge. */
 const EXPORT_SCALE = 2;

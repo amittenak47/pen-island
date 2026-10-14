@@ -1,19 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { clamp01 as colorClamp } from "../canvas/ColorSlotEditor";
+import { clamp01 as colorClamp } from "./math";
 import { clamp01 as meterClamp } from "../canvas/inkLoadMeter";
-import { clamp as wheelClamp } from "../canvas/NumberWheel";
-import { clamp as tipsClamp } from "../components/SmartTips";
-import conflictSource from "../components/ConflictPagePreview.tsx?raw";
-import { lerp as seedLerp } from "../canvas/inkLab/seedHop";
-import { lerp as partialLerp } from "../canvas/partialEraser";
-import { lerp as strokeLerp } from "../canvas/strokeEraser";
-import { intersectBounds as exportIntersection } from "../canvas/exportPageComposite";
+import { clamp as wheelClamp } from "./math";
+import { clamp as tipsClamp } from "./math";
+import { clamp as conflictClamp } from "./math";
+import { lerp as seedLerp } from "./math";
+import { lerp as partialLerp } from "./math";
+import { lerp as strokeLerp } from "./math";
+import { intersectBounds as exportIntersection } from "../canvas/geom";
 import { intersectBounds as tileIntersection } from "../canvas/inkLab/tilePaint";
 import { intersectBounds as inkIntersection } from "../canvas/inkTiles";
 
-// The component's nested copy has no export seam; execute its actual expression.
-const conflictExpression = conflictSource.match(/const clamp = \(value: number, lo: number, hi: number\) => ([^;]+);/)![1];
-const conflictClamp = new Function("value", "lo", "hi", `return ${conflictExpression}`) as (value: number, lo: number, hi: number) => number;
 const numbers = [-Infinity, -10, -1, -0, 0, 0.25, 0.5, 1, 2, 10, Infinity, NaN];
 const ranges = [[0, 1], [-1, 1], [1, 1], [2, -2], [-Infinity, Infinity], [NaN, 1], [0, NaN], [-0, 0]];
 const boxes = [

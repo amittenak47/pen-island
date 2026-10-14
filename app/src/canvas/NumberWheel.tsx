@@ -16,6 +16,7 @@
  * min/max (classic picker fix — without it, 1 sits under 2 and cannot scroll in).
  */
 
+import { clamp } from "../util/math";
 import { useCallback, useEffect, useMemo, useRef, useState, type PointerEvent } from "react";
 
 export interface NumberWheelProps {
@@ -51,10 +52,6 @@ const FINE_STEP_DEFAULT = 0.1;
 const COARSE_MOMENTUM_BOOST = 1.75;
 
 type Slot = number | null;
-
-export function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
 
 function roundToStep(value: number, min: number, step: number): number {
   const n = Math.round((value - min) / step);

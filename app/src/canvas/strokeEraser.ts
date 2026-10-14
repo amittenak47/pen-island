@@ -17,6 +17,7 @@
  * the alternative is another branch inside the pointer path.
  */
 
+import { lerp } from "../util/math";
 import { inkLineWidth, type InkDrawOp, type InkEraseOp, type InkOp, type ScenePoint } from "./rasterInk";
 
 /** Squared distance from `p` to segment `a`–`b`. */
@@ -130,10 +131,6 @@ export function opsAfterStrokeErase(
     return false;
   });
   return hit ? kept : null;
-}
-
-export function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
 }
 
 function pointAt(a: ScenePoint, b: ScenePoint, t: number): ScenePoint {

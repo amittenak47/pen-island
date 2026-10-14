@@ -7,6 +7,7 @@
  * `.lc-page-marks-slot`. Without this step, captures are ink on black/transparent.
  */
 
+import { intersectBounds } from "./geom";
 import type { SceneBounds } from "./rasterInk";
 
 export interface PageExportLayers {
@@ -27,15 +28,6 @@ export function resolveExportPaperColor(
     return paperColor || "#ffffff";
   }
   return viewBackground;
-}
-
-export function intersectBounds(a: SceneBounds, b: SceneBounds): SceneBounds | null {
-  const minX = Math.max(a.minX, b.minX);
-  const minY = Math.max(a.minY, b.minY);
-  const maxX = Math.min(a.maxX, b.maxX);
-  const maxY = Math.min(a.maxY, b.maxY);
-  if (maxX <= minX || maxY <= minY) return null;
-  return { minX, minY, maxX, maxY };
 }
 
 /**

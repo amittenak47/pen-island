@@ -8,18 +8,13 @@
  * back to page 1.
  */
 
+import type { SceneBox } from "./geom";
+export type { SceneBox } from "./geom";
 export interface ViewportInset {
   top: number;
   left: number;
   right: number;
   bottom: number;
-}
-
-export interface SceneBox {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
 }
 
 /**

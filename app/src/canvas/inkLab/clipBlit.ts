@@ -1,9 +1,9 @@
+import type { PixelRect } from "../geom";
+export type { PixelRect } from "../geom";
 import type { StrokeAabb } from "./instance";
 
 /** Live composite clip. Full-canvas snap+SDF blits are plan-C waste. */
 export const CLIP_BLIT_PAD = 8;
-
-export type PixelRect = { x: number; y: number; w: number; h: number };
 
 /**
  * SDF scissor must sit outside the 2D blit. A tighter scissor left a 1px

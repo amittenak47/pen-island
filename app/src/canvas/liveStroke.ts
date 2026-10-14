@@ -12,6 +12,8 @@
  * commit. This session still owns capture, highlighter, eraser, and InkOp save.
  */
 
+import type { PixelRect } from "./geom";
+export type { PixelRect } from "./geom";
 import { overdrawnViewport } from "./panOffset";
 import { DEBUG_INK, inkMetrics, type InkPathTag } from "./inkMetrics";
 import {
@@ -257,8 +259,6 @@ class SpineTape {
 }
 
 export type LivePaintResult = "ok" | "fallback";
-
-export type PixelRect = { x: number; y: number; w: number; h: number };
 
 function unionPixelRects(a: PixelRect, b: PixelRect | null): PixelRect {
   if (!b) return a;

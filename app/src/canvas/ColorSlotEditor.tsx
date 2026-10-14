@@ -5,6 +5,7 @@
  * confirm on this WebView. Check commits; X (or Escape) discards.
  */
 
+import { clamp01 } from "../util/math";
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
 import { createPortal } from "react-dom";
 
@@ -27,10 +28,6 @@ export interface ColorSlotEditorProps {
 }
 
 type ChannelMode = "rgb" | "hex";
-
-export function clamp01(value: number): number {
-  return Math.max(0, Math.min(1, value));
-}
 
 function CheckIcon() {
   return (

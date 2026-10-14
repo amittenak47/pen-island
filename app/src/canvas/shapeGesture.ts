@@ -5,6 +5,8 @@
  * and writes the same element records the painter already strokes.
  */
 
+import type { SceneBounds } from "./geom";
+export type { SceneBounds } from "./geom";
 import type { Skeleton } from "../templates/skeleton";
 import type { ToolName } from "./BoardHandle";
 import { isPageFrame, type PaintSceneElement } from "./paintScene";
@@ -33,13 +35,6 @@ export interface ShapeInk {
   stroke: string;
   fill: string;
   width: number;
-}
-
-export interface SceneBounds {
-  minX: number;
-  minY: number;
-  maxX: number;
-  maxY: number;
 }
 
 export function normBox(

@@ -6,6 +6,7 @@
  * change list sits on top of this in the parent.
  */
 
+import { clamp } from "../util/math";
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import type { InkPageDto } from "../api/client";
@@ -617,7 +618,6 @@ export function ConflictPagePreview({
       const top = slot.top + (box.minY - originY) * scale, bottom = slot.top + (box.maxY - originY) * scale;
       const off = right < slot.left || left > slot.left + slot.width || bottom < slot.top || top > slot.top + slot.height;
       if (!off && right - left >= HIDDEN_MARK_PX && bottom - top >= HIDDEN_MARK_PX) continue;
-      const clamp = (value: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, value));
       rings.push({
         key: `${op.id ?? rings.length}:${op.seq ?? ""}`,
         left: clamp((left + right) / 2, slot.left + HIDDEN_MARK_PX / 2, slot.left + slot.width - HIDDEN_MARK_PX / 2),

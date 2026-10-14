@@ -1,3 +1,4 @@
+import { clamp } from "../util/math";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
@@ -61,10 +62,6 @@ function fits(left: number, top: number, width: number, height: number): boolean
     left + width <= window.innerWidth - PAD &&
     top + height <= window.innerHeight - PAD
   );
-}
-
-export function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }
 
 const FLIP: Record<TipPlacement, TipPlacement[]> = {

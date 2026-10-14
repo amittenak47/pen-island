@@ -3,6 +3,7 @@
  * not the pointer polyline.
  */
 
+import { lerp } from "../../util/math";
 import { curveAlongHop, HOP_CURVE_STEP, type ScenePoint } from "../rasterInk";
 
 import type { SpineDot } from "./instance";
@@ -14,10 +15,6 @@ function sceneOf(d: SpineDot): ScenePoint {
     pressure: d.p ?? 0.5,
     ...(d.slow != null ? { slowness: d.slow } : {}),
   };
-}
-
-export function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
 }
 
 function mixDot(from: SpineDot, to: SpineDot, at: ScenePoint, t: number): SpineDot {

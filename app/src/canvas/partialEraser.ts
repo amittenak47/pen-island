@@ -8,6 +8,7 @@
  * instead of densifying the stroke (densified output made light strokes thicker).
  */
 
+import { lerp } from "../util/math";
 export interface ErasableFreedraw {
   id: string;
   type: string;
@@ -66,10 +67,6 @@ function absoluteSamples(element: ErasableFreedraw): SceneSample[] {
     y: element.y + point[1],
     pressure: pressureAt(element, index),
   }));
-}
-
-export function lerp(a: number, b: number, t: number): number {
-  return a + (b - a) * t;
 }
 
 function sampleAt(
