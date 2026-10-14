@@ -22641,3 +22641,24 @@ html[data-corners="rounded"] {
   border-color: var(--lc-fn-color, var(--accent));
   background: color-mix(in srgb, var(--lc-fn-color, var(--accent)) 20%, transparent);
 }
+
+/*
+ * A full footnote scrolls instead of squeezing: sections keep their height
+ * (shrinking them overlapped the rows), and the panel's body scrolls with no
+ * visible bar, like its lists.
+ */
+.lc-footnote-overview .lc-footnote-overview-hub {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+}
+
+.lc-footnote-overview .lc-footnote-overview-hub::-webkit-scrollbar {
+  display: none;
+}
+
+.lc-footnote-overview .lc-footnote-overview-hub > .lc-footnote-overview-section,
+.lc-footnote-overview .lc-footnote-overview-hub > .lc-footnote-type-key {
+  flex-shrink: 0;
+}
