@@ -242,12 +242,27 @@ export async function localizeHubInkDto(
   if (!ctx) return dto;
   const encoded = await unpackGz(dto.gz);
   if (!encoded) return dto;
+  const result = await localizeEncodedHubInk(client, dto, encoded, ctx, capturedHubWidth);
+  return { ...dto, ...(result.encoded !== encoded ? { gz: await packGz(result.encoded) } : {}), ...(result.localized ? { localized: true } : {}) };
+}
+
+/** Reuse strictly validated, unpacked ink during atomic acquisition. */
+export async function localizeEncodedHubInk(
+  client: LcClient | null | undefined,
+  dto: Pick<InkPageDto, "kind" | "key" | "page_id">,
+  encoded: EncodedInk,
+  ctx: PdfInkContext | null,
+  capturedHubWidth?: number | null,
+): Promise<{ encoded: EncodedInk; localized?: true }> {
+  if (dto.kind !== "annotate" || dto.key.includes("/fn/") || !ctx) return { encoded };
+  // Tagged pages already in this layout need neither point decoding nor inference.
+  if (encoded.layout && samePdfInkLayout(encoded.layout, ctx.layout)) return { encoded, localized: true };
   const ops = decodeInkOps(encoded);
   const from = await sourcePdfInkLayout(dto.key, encoded, dto.page_id, ops, ctx,
     capturedHubWidth === undefined ? await hubPdfWidth(client, dto.key) : capturedHubWidth);
-  if (samePdfInkLayout(from, ctx.layout)) return { ...dto, localized: true };
+  if (samePdfInkLayout(from, ctx.layout)) return { encoded, localized: true };
   const moved = convertPdfInkOps(ops, from, ctx.layout, ctx.sizes);
-  return { ...dto, gz: await packGz({ ...encodeInkOps(moved), layout: ctx.layout }), localized: true };
+  return { encoded: { ...encodeInkOps(moved), layout: ctx.layout }, localized: true };
 }
 
 /**

@@ -2,7 +2,7 @@ import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import type { BookStateDto, CommitRequestDto, CommitResultDto, LcClient } from "../api/client";
 import { bytesToB64 } from "../api/nativeHttp";
-import { decodeInkOps, encodeInkOps, packEncodedInk } from "../canvas/inkCodec";
+import { decodeInkOps, encodeInkOps, packEncodedInk, summarizeEncodedInk, knownInkSummary } from "../canvas/inkCodec";
 import { conflictPdfFrames } from "../components/conflictDocumentLayout";
 import { savePdfPageSizes } from "../modes/pdfPageSizeCache";
 import { saveAnnotateDoc, getAnnotateDoc } from "./annotateStore";
@@ -10,7 +10,7 @@ import { captureBook, preserveRecordView } from "./bookSnapshot";
 import { syncBook } from "./bookSync";
 import { putDocBytes } from "./docBytes";
 import { closeDbForTests } from "./idb";
-import { getInkPageRecord, encodedFromRecord } from "./inkPageStore";
+import { getInkPageRecord, encodedFromRecord, getInkPages } from "./inkPageStore";
 import { resetBookCoordinatorForTests } from "./bookCoordinator";
 import { resetLocalBookStoreForTests } from "./localBookStore";
 import { pdfInkContextFromRecord } from "./pdfInkLayout";
@@ -84,4 +84,41 @@ it.each(["pdf", "markdown"])("uses the incoming frame when the source changes (%
   const remote = { doc_type: docType, hash: "new-source", board: board(760, 62088) };
   expect((preserveRecordView(remote, local).board as ReturnType<typeof board>).elements[0]).toMatchObject({ width: 760, height: 62088 });
   expect(local.board.elements[0].width).toBe(642);
+});
+
+it.each(["same-layout", "translated", "pending-layout", "empty", "corrupt"])("stores a final-byte summary when pulling %s PDF ink", async mode => {
+  const hash = `summary-source-${mode}`;
+  if (mode !== "pending-layout") savePdfPageSizes(hash, sizes);
+  await putDocBytes(hash, new Uint8Array([1, 2, 3]).buffer);
+  await saveAnnotateDoc({ id: owner.id, name: "Summary.pdf", hash, docType: "pdf", source: "", board: board(642, 52667), footnotes: [], agent: [] });
+  const before = await captureBook(owner), layout = { w: mode === "translated" ? 760 : 642, spread: false };
+  const sheet = conflictPdfFrames(sizes, layout.w, false).find(page => page.pageId === 50)!;
+  const ink = { ...encodeInkOps(mode === "empty" ? [] : [{ kind: "draw" as const, id: 71, seq: 92, color: "#123456", baseWidth: 2,
+    maxFullness: 1, pressureClip: 1, pressureSensitive: false, points: [{ x: 100, y: sheet.minY + 100, pressure: .5 }] }]), layout };
+  const bytes = packEncodedInk(ink), checked = await validateInk(bytes);
+  const page = { key: owner.id, page_id: 50, rev: 2, hash: checked.wireHash };
+  const head: BookStateDto = { ...owner, state: "live", book_rev: 2, record_rev: 1, record_hash: await recordHash(before.record!),
+    record: before.record, pages: [page], gone_seq: null };
+  const api = { getBookState: vi.fn(async () => head), checkBookHead: vi.fn(async () => ({ unchanged: true, book_rev: 2 })),
+    getInkPage: vi.fn(async () => ({ kind: owner.kind, key: owner.id, page_id: 50, rev: 2, updated_at: 1,
+      gz: bytesToB64(mode === "corrupt" ? bytes.subarray(0, bytes.length - 1) : bytes) })),
+    stageInkPage: vi.fn(), commitPad: vi.fn() } as unknown as LcClient;
+  const result = await syncBook(api, owner.kind, owner.id, undefined, { timeoutMs: 1000 });
+  if (mode === "corrupt") {
+    expect(result.error?.kind).toBe("hub_page"); expect(await captureBook(owner)).toEqual(before); return;
+  }
+  expect(result.status).toBe("synced");
+  const row = (await getInkPageRecord(`md:${owner.id}`, 50))!, stored = (await encodedFromRecord(row))!;
+  expect(row.sum).toEqual({ v: 1, len: row.gz!.byteLength, ...summarizeEncodedInk(stored) });
+  expect(row.layoutPending === true).toBe(mode === "pending-layout");
+  expect(row.baseLocalHash).toBe((await validateInk(row.gz!)).wireHash);
+  if (mode === "translated") expect(row.baseLocalHash).not.toBe(checked.wireHash);
+  const timer = vi.spyOn(globalThis, "setTimeout");
+  try {
+    const reopened = (await getInkPages(`md:${owner.id}`)).get(50)!;
+    expect(knownInkSummary(reopened)).toEqual(row.sum);
+    expect(Object.getOwnPropertyDescriptor(reopened, "ops")?.get).toBeTypeOf("function");
+    expect(timer.mock.calls.some(([, delay]) => delay === 8000)).toBe(false);
+  } finally { timer.mockRestore(); }
+  expect(api.stageInkPage).not.toHaveBeenCalled(); expect(api.commitPad).not.toHaveBeenCalled();
 });

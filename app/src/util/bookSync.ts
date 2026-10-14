@@ -8,10 +8,10 @@ import { newBookToken, withBookSync } from "./bookCoordinator";
 import { ensureBookReadyForAtomicSync, mutateLocalBook, LocalBookConflictError } from "./localBookStore";
 import { type BookIdentity, type SyncState } from "./syncState";
 import { encodedFromRecord, type InkPageRecord } from "./inkPageStore";
-import { packEncodedInk, encodeInkOps, unpackEncodedInk } from "../canvas/inkCodec";
+import { packEncodedInk, encodeInkOps, unpackEncodedInk, summarizeEncodedInk } from "../canvas/inkCodec";
 import { recordHash, hashBytes, canonicalJson, validateInk } from "./syncContent";
 import { gzipBytes } from "./gzip";
-import { localizeHubInkDto, pdfInkContextFromRecord, tagOutgoingPdfInk } from "./pdfInkLayout";
+import { localizeEncodedHubInk, pdfInkContextFromRecord, tagOutgoingPdfInk } from "./pdfInkLayout";
 import { artifactCatalogFields } from "./padArtifacts";
 import { uploadArtifactAssets, downloadArtifactAssets } from "./artifactAssetSync";
 import { getDocBytes, putDocBytes, bytesMatchDocHash } from "./docBytes";
@@ -154,17 +154,27 @@ async function acquirePage(client: LcClient, capture: BookCapture, remote: BookS
     error.missing = true; throw error;
   }
   try {
-    const validated = await validateInk(b64ToBytes(dto.gz));
-    if (validated.wireHash !== page.hash || dto.rev !== page.rev) throw new Error("Pinned handwriting identity does not match");
+    let bytes = b64ToBytes(dto.gz);
+    let checked = await validateInk(bytes);
+    if (checked.wireHash !== page.hash || dto.rev !== page.rev) throw new Error("Pinned handwriting identity does not match");
+    let encoded = unpackEncodedInk(checked.packed);
+    if (!encoded) throw new Error("Unreadable packed handwriting");
     stop(signal);
     const ctx = capture.kind === "annotate" ? pdfInkContextFromRecord(capture.record) : null;
-    if (ctx && page.key === capture.id && page.page_id === 0 && !unpackEncodedInk(validated.packed)?.layout) await beforeLegacySpanning?.();
+    if (ctx && page.key === capture.id && page.page_id === 0 && !encoded.layout) await beforeLegacySpanning?.();
     const remoteBoard = remote.record?.board as { appState?: { pdfWidth?: number } } | undefined;
-    const localized = await boundedBookRequest(() => localizeHubInkDto(client, dto, ctx, remoteBoard?.appState?.pdfWidth ?? null), signal, options.timeoutMs);
-    const checked = await validateInk(b64ToBytes(localized.gz));
+    const localized = await boundedBookRequest(() => localizeEncodedHubInk(client, dto, encoded!, ctx, remoteBoard?.appState?.pdfWidth ?? null), signal, options.timeoutMs);
+    if (localized.encoded !== encoded) {
+      // Translation produces new bytes: validate/hash those and summarize their
+      // stored representation, including the codec's coordinate rounding.
+      checked = await validateInk(packEncodedInk(localized.encoded));
+      bytes = await gzipBytes(checked.packed);
+      encoded = unpackEncodedInk(checked.packed);
+      if (!encoded) throw new Error("Unreadable localized handwriting");
+    }
     stop(signal);
     return { remote: page, localHash: checked.wireHash, row: { v: 1, docKey, pageId: page.page_id,
-      gz: b64ToBytes(localized.gz), dirty: false, updatedAt: dto.updated_at,
+      gz: bytes, sum: { v: 1, len: bytes.byteLength, ...summarizeEncodedInk(encoded) }, dirty: false, updatedAt: dto.updated_at,
       ...(capture.kind === "annotate" && (remote.record?.doc_type ?? capture.metadata?.docType) === "pdf" && page.key === capture.id && !localized.localized ? { layoutPending: true } : {}) } };
   } catch (cause) {
     if (cause instanceof HubSyncCancelled || cause instanceof LcApiError && cause.status === 409) throw cause;

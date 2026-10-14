@@ -1,10 +1,11 @@
 import { afterEach, expect, it, vi } from "vitest";
+import * as codec from "../canvas/inkCodec";
 import { savePdfPageSizes } from "../modes/pdfPageSizeCache";
 import { conflictPdfFrames } from "../components/conflictDocumentLayout";
 import { encodeInkOps, packEncodedInk, unpackEncodedInk } from "../canvas/inkCodec";
 import { bytesToB64, b64ToBytes } from "../api/nativeHttp";
 import { bytesFromMaybeGzip } from "./gzip";
-import { pdfInkContextFromRecord, localizeHubInkDto } from "./pdfInkLayout";
+import { pdfInkContextFromRecord, localizeHubInkDto, localizeEncodedHubInk } from "./pdfInkLayout";
 import { validateInk } from "./syncContent";
 import type { LcClient } from "../api/client";
 
@@ -28,4 +29,14 @@ it("localizes a pinned page to captured layout without another unpinned record G
   expect(unpackEncodedInk(local)!.layout).toEqual({ w: 760, spread: true });
   expect((await validateInk(local)).wireHash).not.toBe(wire.wireHash);
   expect(pdfInkContextFromRecord(record)!.layout).toEqual(context.layout);
+});
+
+it("reuses tagged same-layout packed ink without decoding operations", async () => {
+  const encoded = { ...encodeInkOps([]), layout: { w: 642, spread: false } };
+  const decode = vi.spyOn(codec, "decodeInkOps");
+  try {
+    const result = await localizeEncodedHubInk(null, { kind: "annotate", key: "same", page_id: 1 }, encoded,
+      { layout: encoded.layout, sizes: [{ pageNumber: 1, width: 600, height: 800 }] }, null);
+    expect(result.encoded).toBe(encoded); expect(result.localized).toBe(true); expect(decode).not.toHaveBeenCalled();
+  } finally { decode.mockRestore(); }
 });
