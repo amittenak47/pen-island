@@ -2,6 +2,8 @@
 import { useCallback, useEffect, useState } from "react";
 import type { AnnotationJobDto, AnnotationJobReferenceDto, FootnoteWorkspaceItemDto, LcClient } from "../api/client";
 import type { DocSelectionResult } from "./DocSelectionLayer";
+import { DialogFrame } from "../components/DialogFrame";
+import { SettingsChoices } from "../components/SettingsChoices";
 import {
   ANNOTATION_JOBS_EVENT, forgetAnnotationJob, loadChatBotAttachments, pdfPagesForJob,
   preparedJobAttachments, referencesSizeError, REFERENCES_TOTAL_CHARS, rememberAnnotationJob,
@@ -11,6 +13,7 @@ import { getAnnotateDocMeta } from "../util/annotateStore";
 import { loadDeviceId } from "../util/devicePrefs";
 import type { DocFootnote } from "../util/docFootnotes";
 import { loadSelectionRuns, rememberSelectionRun, updateSelectionRun, type ChatBotRun } from "../util/chatBotHistory";
+import "../components/settingsDialog.css";
 import "./chatBotPages.css";
 
 const DENSITY = [{ perPage: 2, label: "Light" }, { perPage: 4, label: "Normal" }, { perPage: 8, label: "Thorough" }] as const;
@@ -47,6 +50,10 @@ function rangeError(from: number, to: number, pageCount: number, limit = MAX_JOB
   return to - from + 1 > limit ? `Up to ${limit} pages at a time.` : null;
 }
 function sizeLabel(chars: number): string { return `${chars.toLocaleString()} characters`; }
+const CHATBOT_ICON = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+  <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+  <path d="M12 8.2l.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9z" fill="currentColor" stroke="none" />
+</svg>;
 
 export function ChatBotPagesDialog({
   client, docId, docName, hash, currentPage, pageCount, palette, workspaceItems,
@@ -187,16 +194,16 @@ export function ChatBotPagesDialog({
     finally { setBusy(false); }
   };
   return (
-    <div className="lc-chatbot-pages-scrim" role="presentation" onClick={onClose}>
-      <div className="lc-settings-modal lc-chatbot-pages" role="dialog" aria-modal="true" aria-label="ChatBot" onClick={(event) => event.stopPropagation()}>
-        <header className="lc-settings-head lc-settings-head-row"><h2>ChatBot</h2><button type="button" className="lc-settings-back" aria-label="Close ChatBot" onClick={onClose}>Close</button></header>
-        <div className="lc-settings-body lc-settings-page">
+    <div className="lc-chatbot-pages-scrim" role="presentation" onClick={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <DialogFrame className="lc-settings-dialog lc-chatbot-pages" titleId="lc-chatbot-dialog-title" title="ChatBot" subtitle="" icon={CHATBOT_ICON}
+        shape="blocky" ariaLabel="ChatBot" onClose={onClose}>
+        <div className="lc-settings-body lc-dialog-body lc-scroll-pane">
           <section className="lc-settings-fold"><div className="lc-settings-fold-body lc-settings-fields">
             <div className="lc-settings-subhead">Request</div>
-            <div className="lc-settings-choice lc-settings-choice-compact" role="radiogroup" aria-label="Request type">
+            <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Request type">
               {(hasSelection ? ["selection", "page", "pages"] as const : ["page", "pages"] as const).map((kind) => <button key={kind} type="button" role="radio" aria-checked={selectedRequest === kind}
                 className={`lc-settings-choice-option${selectedRequest === kind ? " is-active" : ""}`} onClick={() => setRequest(kind)}>{kind === "selection" ? "Selection" : kind === "page" ? "This page" : "Pages"}</button>)}
-            </div>
+            </SettingsChoices>
             {selectedRequest === "pages" ? <div className="lc-chatbot-page-range">
               <label>From page<input type="number" min={1} max={pageCount || undefined} value={from || ""} onChange={(event) => setFrom(Number(event.target.value))} /></label>
               <label>To page<input type="number" min={1} max={pageCount || undefined} value={to || ""} onChange={(event) => setTo(Number(event.target.value))} /></label>
@@ -204,28 +211,28 @@ export function ChatBotPagesDialog({
             {inputError ? <p className="lc-chatbot-pages-error" role="alert">{inputError}</p> : null}
             <label>Focus (optional)<textarea rows={2} maxLength={1000} value={focus} onChange={(event) => setFocus(event.target.value)} placeholder="For example: key definitions and proofs" /></label>
             <div className="lc-settings-subhead">How much</div>
-            <div className="lc-settings-choice lc-settings-choice-compact" role="radiogroup" aria-label="How many footnotes">
+            <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="How many footnotes">
               {DENSITY.map((option) => <button key={option.perPage} type="button" role="radio" aria-checked={perPage === option.perPage}
                 className={`lc-settings-choice-option${perPage === option.perPage ? " is-active" : ""}`} onClick={() => setPerPage(option.perPage)}>{option.label}</button>)}
-            </div>
+            </SettingsChoices>
           </div></section>
           <section className="lc-settings-fold"><div className="lc-settings-fold-body lc-settings-fields">
-            <div className="lc-settings-actions-row"><button type="button" className="lc-secondary" aria-expanded={attachOpen} onClick={() => setAttachOpen(!attachOpen)}>Attach</button></div>
+            <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" aria-expanded={attachOpen} onClick={() => setAttachOpen(!attachOpen)}>Attach</button></div>
             {attachments.length ? <ul className="lc-chatbot-attachments" aria-label="Attachments">{attachments.map((attachment, index) => <li key={attachment.kind === "file" ? attachment.docId : `${attachment.from}-${attachment.to}`}>
               <div><strong>{attachment.title || (attachment.kind === "pages" ? pageLabel(attachment.from, attachment.to) : attachment.docId)}</strong><small>{prepared?.[index] ? prepared[index]!.error ?? sizeLabel(prepared[index]!.chars) : "Reading…"}</small></div>
-              <button type="button" className="lc-settings-back" aria-label={`Remove attachment ${index + 1}`} onClick={() => setAttachments(attachments.filter((_, at) => at !== index))}>Remove</button>
+              <button type="button" className="lc-dialog-action" aria-label={`Remove attachment ${index + 1}`} onClick={() => setAttachments(attachments.filter((_, at) => at !== index))}>Remove</button>
             </li>)}</ul> : null}
             {attachOpen ? <>
-              {files.length ? <div className="lc-settings-choice" aria-label="Library files">{files.map((file) => {
+              {files.length ? <SettingsChoices className="lc-settings-choice" aria-label="Library files">{files.map((file) => {
                 const picked = attachments.some((attachment) => attachment.kind === "file" && attachment.docId === file.docId);
                 return <button key={file.docId} type="button" className={`lc-settings-choice-option${picked ? " is-active" : ""}`} aria-pressed={picked}
                   onClick={() => setAttachments(picked ? attachments.filter((entry) => entry.kind !== "file" || entry.docId !== file.docId) : [...attachments, { kind: "file", ...file }])}>{file.title}</button>;
-              })}</div> : <p className="lc-settings-hint">No library files to attach.</p>}
+              })}</SettingsChoices> : <p className="lc-settings-hint">No library files to attach.</p>}
               <div className="lc-settings-subhead">PDF pages</div>
               <div className="lc-chatbot-page-range"><label>Attach from page<input type="number" min={1} max={pageCount || undefined} value={attachFrom || ""} onChange={(event) => setAttachFrom(Number(event.target.value))} /></label>
                 <label>Attach to page<input type="number" min={1} max={pageCount || undefined} value={attachTo || ""} onChange={(event) => setAttachTo(Number(event.target.value))} /></label></div>
               {attachedRangeError ? <p className="lc-chatbot-pages-error">{attachedRangeError}</p> : null}
-              <div className="lc-settings-actions-row"><button type="button" className="lc-secondary" disabled={Boolean(attachedRangeError)} onClick={() => {
+              <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" disabled={Boolean(attachedRangeError)} onClick={() => {
                 if (!attachments.some((entry) => entry.kind === "pages" && entry.from === attachFrom && entry.to === attachTo)) setAttachments([...attachments, { kind: "pages", from: attachFrom, to: attachTo, title: pageLabel(attachFrom, attachTo) }]);
                 setAttachOpen(false);
               }}>Attach pages</button></div>
@@ -234,29 +241,29 @@ export function ChatBotPagesDialog({
             {attachmentError ? <p className="lc-chatbot-pages-error" role="alert">{attachmentError}</p> : null}
           </div></section>
           <p className="lc-settings-hint">Ask your assistant to answer your requests. Footnotes appear as it works.</p>
-          <div className="lc-settings-actions-row"><button type="button" className="lc-primary" disabled={Boolean(inputError || attachmentError) || prepared === null || busy} onClick={() => void start()}>{busy ? "Sending…" : "Start"}</button></div>
+          <div className="lc-settings-actions-row"><button type="button" className="lc-primary lc-dialog-action" disabled={Boolean(inputError || attachmentError) || prepared === null || busy} onClick={() => void start()}>{busy ? "Sending…" : "Start"}</button></div>
           {message && !active ? <p className="lc-settings-hint" role="status">{message}</p> : null}
           {runs.length ? <section className="lc-settings-fold" aria-label="History"><div className="lc-settings-fold-body lc-settings-fields"><div className="lc-settings-subhead">History</div>
             <div className="lc-settings-choice">{runs.map((run) => <button key={run.id} type="button" className="lc-settings-choice-option lc-chatbot-history-row" onClick={() => setActiveId(run.id)}>{runLabel(run)}</button>)}</div>
           </div></section> : null}
         </div>
-        {active ? <div className="lc-chatbot-run-scrim" onClick={() => setActiveId(null)}>
-          <div className="lc-settings-modal lc-chatbot-run-popup" role="dialog" aria-modal="true" aria-label="Run details" onClick={(event) => event.stopPropagation()}>
-            <header className="lc-settings-head lc-settings-head-row"><h2>{requestLabel(active)}</h2><button type="button" className="lc-settings-back" onClick={() => setActiveId(null)}>Close</button></header>
-            <div className="lc-settings-body lc-settings-page">
+      </DialogFrame>
+      {active ? <div className="lc-chatbot-run-scrim" onClick={(event) => { if (event.target === event.currentTarget) setActiveId(null); }}>
+          <DialogFrame className="lc-settings-dialog lc-chatbot-run-popup" titleId="lc-chatbot-run-title" title={requestLabel(active)} subtitle="" icon={CHATBOT_ICON}
+            shape="blocky" ariaLabel="Run details" onClose={() => setActiveId(null)}>
+            <div className="lc-settings-body lc-dialog-body lc-scroll-pane">
               <p className="lc-settings-hint">{pageLabel(active.page_from, active.page_to)} · {DENSITY.find((entry) => entry.perPage === active.per_page)?.label ?? active.per_page} · {statusLabel(active)}</p>
               <p className="lc-settings-hint">Focus: {active.focus || "None"}</p>
               {active.references?.length ? <><div className="lc-settings-subhead">Attachments</div><ul className="lc-chatbot-run-list">{active.references.map((reference, index) => <li key={index}>{reference.title}</li>)}</ul></> : null}
               {active.summary ? <p className="lc-settings-hint">{active.summary}</p> : null}
               <div className="lc-settings-subhead">Footnotes</div>
               {pages.size ? <div className="lc-settings-choice">{[...pages].sort(([a], [b]) => a - b).map(([page, titles]) => <button key={page} type="button" className="lc-settings-choice-option" onClick={() => { onJumpToPage?.(page); onClose(); }}><strong>Page {page}</strong><span>{titles.join(" · ")}</span></button>)}</div> : <p className="lc-settings-hint">No footnotes on this device yet.</p>}
-              <div className="lc-settings-actions-row">{active.status === "open" ? <button type="button" className="lc-secondary" disabled={busy} onClick={() => void cancel(active)}>Cancel</button> : null}
-                {active.footnotes > 0 ? <button type="button" className="lc-secondary" disabled={busy} onClick={() => void undo(active)}>Undo</button> : null}</div>
+              <div className="lc-settings-actions-row">{active.status === "open" ? <button type="button" className="lc-secondary lc-dialog-action" disabled={busy} onClick={() => void cancel(active)}>Cancel</button> : null}
+                {active.footnotes > 0 ? <button type="button" className="lc-secondary lc-dialog-action" disabled={busy} onClick={() => void undo(active)}>Undo</button> : null}</div>
               {message ? <p className="lc-settings-hint" role="status">{message}</p> : null}
             </div>
-          </div>
+          </DialogFrame>
         </div> : null}
-      </div>
     </div>
   );
 }

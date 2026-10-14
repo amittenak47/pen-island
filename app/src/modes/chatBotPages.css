@@ -8,18 +8,31 @@
   padding: 16px;
   background: rgb(0 0 0 / 0.35);
 }
-.lc-chatbot-pages { width: min(480px, 100%); }
+.lc-settings-modal.lc-dialog-frame.lc-chatbot-pages {
+  width: min(480px, 100%);
+  height: auto;
+  max-height: min(90dvh, 720px);
+  overflow-wrap: anywhere;
+}
+/* Let the sheet scroll; shrinking Settings blocks clips their controls. */
+.lc-chatbot-pages .lc-settings-fold { flex-shrink: 0; }
 .lc-chatbot-run-scrim { z-index: 601; }
-.lc-chatbot-run-popup { width: min(360px, 100%); max-height: min(75vh, 560px); }
+.lc-settings-modal.lc-dialog-frame.lc-chatbot-run-popup {
+  width: min(360px, 100%);
+  height: auto;
+  max-height: min(75dvh, 560px);
+  overflow-wrap: anywhere;
+}
+.lc-chatbot-pages .lc-settings-choice-option { max-width: 100%; }
 .lc-chatbot-page-range { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .lc-chatbot-page-range input { min-width: 0; width: 100%; box-sizing: border-box; }
 .lc-chatbot-pages textarea {
   font: inherit;
   padding: 8px 10px;
   border: 1px solid var(--border, rgb(127 127 127 / 30%));
-  border-radius: 8px;
+  border-radius: var(--lc-r-block);
   background: var(--input-bg, var(--bg));
-  color: var(--fg);
+  color: var(--ink);
   resize: vertical;
 }
 .lc-chatbot-attachments,

@@ -226,6 +226,38 @@ describe("ChatBot requests", () => {
     expect(body.references![0]!.text.match(/\[Page \d+\]/g)).toHaveLength(55);
     expect(body.references![0]!.text).toContain("The text of page 160.");
   });
+
+  it("uses Settings' keyboard navigation for request and density choices", async () => {
+    const onSelectionRequest = vi.fn(async (_settings: SelectionRequestSettings) => ({ id: "fr-keyboard", page: 7 }));
+    await mount({ selection, onSelectionRequest });
+    const key = async (node: HTMLButtonElement, name: string) => {
+      await act(async () => { node.focus(); node.dispatchEvent(new KeyboardEvent("keydown", { key: name, bubbles: true })); });
+    };
+    expect(button("Selection").tabIndex).toBe(0); expect(button("This page").tabIndex).toBe(-1);
+    await key(button("Selection"), "ArrowRight");
+    expect(document.activeElement).toBe(button("This page"));
+    expect(button("This page").getAttribute("aria-checked")).toBe("true");
+    await key(button("This page"), "End");
+    expect(document.activeElement).toBe(button("Pages")); expect(input("From page")).toBeTruthy();
+    await key(button("Pages"), "Home");
+    expect(document.activeElement).toBe(button("Selection")); expect(host.querySelector('input[type="number"]')).toBeNull();
+    await key(button("Normal"), "ArrowRight");
+    expect(document.activeElement).toBe(button("Thorough"));
+    expect(button("Thorough").getAttribute("aria-checked")).toBe("true");
+    await click("Start");
+    expect(onSelectionRequest.mock.calls[0]![0].perPage).toBe(8);
+  });
+
+  it("keeps the sheet open on content clicks and closes on its backdrop or close control", async () => {
+    const onClose = vi.fn(); await mount({ onClose });
+    await act(async () => { host.querySelector<HTMLElement>(".lc-chatbot-pages h2")!.click(); });
+    await click("Attach"); await click("Notes 1.md");
+    expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { host.querySelector<HTMLElement>(".lc-chatbot-pages-scrim")!.click(); });
+    expect(onClose).toHaveBeenCalledOnce(); onClose.mockClear();
+    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Close ChatBot"]')!.click(); });
+    expect(onClose).toHaveBeenCalledOnce();
+  });
 });
 
 describe("ChatBot history", () => {
@@ -277,5 +309,19 @@ describe("ChatBot history", () => {
     await openHistory(); await click("Cancel", popup());
     expect(onCancelSelectionRequest).toHaveBeenCalledWith(run.id); expect(fixture.cancel).not.toHaveBeenCalled();
     expect(loadSelectionRuns("algorithms")[0]!.status).toBe("cancelled"); expect(popup().textContent).toContain("Cancelled");
+  });
+
+  it("closes only the popup on its backdrop or close control, preserving the sheet", async () => {
+    fixture.jobs = [job() as AnnotationJobDto]; const onClose = vi.fn(); await mount({ onClose });
+    await openHistory();
+    expect(popup().closest(".lc-chatbot-pages")).toBeNull();
+    await act(async () => { popup().querySelector<HTMLElement>("h2")!.click(); });
+    expect(popup()).toBeTruthy(); expect(onClose).not.toHaveBeenCalled();
+    await act(async () => { host.querySelector<HTMLElement>(".lc-chatbot-run-scrim")!.click(); });
+    expect(popup()).toBeNull(); expect(host.querySelector('[aria-label="ChatBot"]')).toBeTruthy();
+    expect(onClose).not.toHaveBeenCalled();
+    await openHistory();
+    await act(async () => { popup().querySelector<HTMLButtonElement>('[aria-label="Close Pages"]')!.click(); });
+    expect(popup()).toBeNull(); expect(onClose).not.toHaveBeenCalled();
   });
 });
