@@ -315,3 +315,10 @@
   .lc-home-earth-meridian, .lc-home-earth-glow, .lc-home-earth-orbiter { animation: none !important; }
   .lc-home-earth-outline, .lc-home-earth-tilt, .lc-home-graph-node { transition: none; filter: none; }
 }
+
+/* Annotate and Whiteboard: a lighter page outline and lighter writing on it. */
+.lc-home-glyph-sheet { stroke-width: 1.15; }
+.lc-home-glyph-sheet .lc-home-rule,
+.lc-home-glyph-sheet .lc-home-ann-under path,
+.lc-home-glyph-sheet .lc-home-trace,
+.lc-home-glyph-sheet .lc-home-draw { stroke-width: .85; }
