@@ -727,7 +727,7 @@ export interface FootnoteRequestDto {
   wide_context: string;
   page_footnotes: FootnotePageNoteDto[];
   prompt: string | null;
-  /** The mark's palette, its exact text, library items it may link, and the doc kind. */
+  /** Mark context and optional ChatBot sheet settings. */
   extras?: FootnoteExtrasDto;
 }
 
@@ -744,19 +744,20 @@ export interface NewAnnotationJobDto {
   doc_id: string;
   doc_name: string;
   doc_kind: "annotate" | "web";
+  request_type?: "page" | "pages";
   focus: string;
   /** Most footnotes per page (Light 2, Normal 4, Thorough 8). */
   per_page: number;
   pages: AnnotationJobPageDto[];
   palette: string[];
   workspace_items: FootnoteWorkspaceItemDto[];
-  /** The chapter's problem pages, a homework file: what the footnotes should serve. */
+  /** Files and PDF page ranges for the assistant to read alongside the request. */
   references?: AnnotationJobReferenceDto[];
 }
 
 export interface AnnotationJobReferenceDto {
   title: string;
-  kind: "exercises" | "homework" | "notes";
+  kind: "file" | "pages" | "exercises" | "homework" | "notes";
   text: string;
 }
 
@@ -764,6 +765,7 @@ export interface AnnotationJobDto {
   id: string;
   doc_id: string;
   doc_name: string;
+  request_type?: "page" | "pages";
   page_from: number;
   page_to: number;
   focus: string;
@@ -774,6 +776,8 @@ export interface AnnotationJobDto {
   status: "open" | "done" | "cancelled";
   created_at: number;
   summary?: string;
+  /** Only attachment labels are included in history, never their text. */
+  references?: Pick<AnnotationJobReferenceDto, "title" | "kind">[];
 }
 
 /** A footnote an assistant described for a page, waiting to be placed. */
@@ -800,6 +804,9 @@ export interface FootnoteExtrasDto {
   mark_text?: string;
   workspace_items?: FootnoteWorkspaceItemDto[];
   doc_kind?: "annotate" | "web";
+  focus?: string;
+  per_page?: number;
+  references?: AnnotationJobReferenceDto[];
 }
 
 export interface FootnoteMarkDto {

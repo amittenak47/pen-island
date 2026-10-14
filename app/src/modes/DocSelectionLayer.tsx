@@ -304,6 +304,8 @@ export interface DocSelectionLayerProps {
   onSearch?: (selection: DocSelectionResult, anchorRect: DOMRect | null) => void;
   /** Ask ChatBot to write an AI footnote for this text selection. */
   onAskChatBot?: (selection: DocSelectionResult, anchorRect: DOMRect | null) => void;
+  /** Keep document chrome aware of native and marquee text selections. */
+  onSelectionChange?: (selection: DocSelectionResult | null) => void;
   /** Leave the mark and nothing else — the highlighter's plain outcome. */
   onMark?: (selection: DocSelectionResult, anchorRect: DOMRect | null) => void;
   /** Tap on an existing ribbon — reopen the overview for that mark. */
@@ -416,6 +418,7 @@ export function DocSelectionLayer({
   onCopy,
   onSearch,
   onAskChatBot,
+  onSelectionChange,
   onMark,
   onOpenFootnote,
   onRemoveFootnote,
@@ -449,6 +452,8 @@ export function DocSelectionLayer({
   } | null>(null);
   const [rects, setRects] = useState<LocalRect[]>([]);
   const [selection, setSelectionState] = useState<DocSelectionResult | null>(null);
+  const selectionChangeRef = useRef(onSelectionChange);
+  selectionChangeRef.current = onSelectionChange;
   const actionGate = useRef(createSelectionActionGate());
   const [actionBusy, setActionBusy] = useState(false);
   const [actionFailure, setActionFailure] = useState<{ result: SelectionActionFailure; context: SelectionActionContext } | null>(null);
@@ -457,8 +462,12 @@ export function DocSelectionLayer({
     setActionBusy(false);
     setActionFailure(null);
     setSelectionState(next);
+    selectionChangeRef.current?.(next);
   }, []);
-  useEffect(() => () => actionGate.current.reset(), []);
+  useEffect(() => () => {
+    actionGate.current.reset();
+    selectionChangeRef.current?.(null);
+  }, []);
   /**
    * How far along the selection is: still being dragged, waiting to be
    * confirmed, or confirmed and showing what can be done with it.

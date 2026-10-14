@@ -11192,8 +11192,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                         ? "lc-lined-toggle lc-tip-target lc-chatbot-tray is-active"
                         : "lc-lined-toggle lc-tip-target lc-chatbot-tray"
                     }
-                    aria-label={chatBot.active ? "ChatBot: annotating pages" : "ChatBot: annotate pages"}
-                    data-tip={chatBot.active ? "ChatBot is annotating" : "Ask ChatBot to annotate pages"}
+                    aria-label={chatBot.active ? "ChatBot: annotating" : "ChatBot"}
+                    data-tip={chatBot.active ? "ChatBot is annotating" : "Ask ChatBot"}
+                    onPointerDown={(event) => event.preventDefault()}
                     onClick={chatBot.onOpen}
                   >
                     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

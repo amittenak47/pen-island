@@ -44,38 +44,45 @@ TOOLS = frozenset({
 # Keep in step with WORKFLOW and INSTRUCTIONS in src/mcp.rs: the bridge sends
 # these when an assistant connects, before any call reaches `lc mcp`.
 WORKFLOW = (
-    "You are connected to a reader's Pen Island footnote inbox. The reader selects text "
-    "in a document and asks for a footnote; each request waits here until an assistant "
-    "answers it. To answer: call list_footnote_requests, then for each request call "
-    "get_footnote_request and submit_footnote. Only answer requests listed here, and never "
-    "invent request ids. If the inbox is empty, say so. The reader may also ask for a whole "
-    "page range (a chapter) to be annotated: call list_annotation_jobs, read each job's "
-    "pages a few at a time with get_annotation_pages, call submit_page_annotations once per "
-    "page with the footnotes worth adding (each quoting the exact words it is about), then "
-    "finish_annotation_job. When a job lists references (the chapter's problems, a "
-    "solved-homework file), read them first with get_annotation_reference, and aim the "
-    "footnotes at what those problems need. If you can run scheduled or repeating tasks, "
-    "offer to check for new requests and jobs every few minutes."
+    "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a "
+    "document and asks for a footnote; each request waits here until an assistant answers it. To "
+    "answer: call list_footnote_requests, then for each request call get_footnote_request and "
+    "submit_footnote. Read any attachments in extras.references before answering. Only answer "
+    "requests listed here, and never invent request ids. If the inbox is empty, say so. The "
+    "reader may also ask for this page or a page range (a chapter) to be annotated: call "
+    "list_annotation_jobs, read each job's pages a few at a time with get_annotation_pages, call "
+    "submit_page_annotations once per page with the footnotes worth adding (each quoting the "
+    "exact words it is about), then finish_annotation_job. When a job lists attachments in "
+    "references, read them first with get_annotation_reference. Attached files and PDF pages may "
+    "hold the chapter's problems, solved homework or notes; infer which from their content. Aim "
+    "the footnotes at the relevant ideas, and use problems only for hints, previews and "
+    "explanations; never solve them or quote or paraphrase solutions. If you can run scheduled "
+    "or repeating tasks, offer to check for new requests and jobs every few minutes."
 )
 FOOTNOTE_GUIDE = (
-    "Explain the selected words in the context of the surrounding text, for a reader who is "
-    "in the middle of this document. Write 2-4 markdown notes of a few sentences each: first "
-    "the idea in plain words, then a small example or the intuition behind it, then a common "
-    "mistake when there is one. Add links only to sources you are confident exist. If the "
-    "request has a prompt, follow it."
+    "Explain the selected words in the context of the surrounding text, for a reader who is in "
+    "the middle of this document. Write markdown notes of a few sentences each: first the idea "
+    "in plain words, then a small example or the intuition behind it, then a common mistake when "
+    "there is one. For a selection, use extras.per_page as the limit on the number of notes when "
+    "present; otherwise write 2-4 notes. Follow extras.focus and the request's prompt when "
+    "provided. Attachments in extras.references may hold problems, solved homework or notes; "
+    "infer which from their content. Use them to explain relevant ideas and point toward "
+    "problems with hints and previews; never solve the problems or quote or paraphrase "
+    "solutions. Add links only to sources you are confident exist."
 )
 JOB_GUIDE = (
-    "The footnotes sit on the chapter text and prepare the reader for this chapter's "
-    "problems; they never solve them. Pick the passages the problems rely on: definitions, "
-    "the key steps of an algorithm, proof ideas, and traps. Explain the passage itself, and "
-    "show where the problems will lean on it, like a hint or a preview: which idea a "
-    "problem uses, never its answer or the steps of a solution. A solved-homework reference "
-    "is only for seeing which ideas matter; never quote or paraphrase its solutions. Use "
-    "problems to name the exercises or homework questions a passage prepares for, by their "
-    "numbers in the references. Use question for one short question that makes the reader "
-    "curious to keep reading, tied to a problem when you can, without giving its answer "
-    "away. Use looking_ahead to hint at what this passage sets up later in the chapter, "
-    "without spoiling it. Highlight the key term; underline the phrase a problem hinges on."
+    "Explain useful passages in the page text, following the reader's focus. Attached files and "
+    "PDF pages may hold this chapter's problems, solved homework or notes; infer which from "
+    "their content rather than their title or kind. When attachments contain problems, prepare "
+    "the reader for them without solving them: pick definitions, the key steps of an algorithm, "
+    "proof ideas, and traps those problems rely on. Explain the passage itself and show where a "
+    "problem will lean on it, like a hint or a preview: which idea it uses, never its answer or "
+    "the steps of a solution. Solved homework is only for seeing which ideas matter; never quote "
+    "or paraphrase its solutions. Use problems to name exercises or homework questions a passage "
+    "prepares for, by their numbers in the attachments. Use question for one short question that "
+    "makes the reader curious to keep reading, tied to a problem when you can, without giving "
+    "its answer away. Use looking_ahead to hint at what this passage sets up later, without "
+    "spoiling it. Highlight the key term; underline the phrase a problem hinges on."
 )
 INSTRUCTIONS = f"{WORKFLOW}\n\nHow to write each footnote: {FOOTNOTE_GUIDE}"
 
@@ -290,7 +297,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     @bridge.tool(name="get_footnote_request", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def get_footnote_request(id: str) -> ToolResult:
-        """Read one footnote request: wide context, existing page notes, and extras (the mark's palette, its exact text to quote for marks, and library items you may link by id)."""
+        """Read one footnote request: wide context, existing page notes, and extras (palette, exact mark text, library items, focus, per_page note limit, and attached files or PDF pages in references with their text). Infer whether attachments contain problems, solved homework or notes; never solve problems or quote solutions."""
         return await relay("get_footnote_request", {"id": id})
 
     @bridge.tool(name="submit_footnote", output_schema=None,
@@ -331,7 +338,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     @bridge.tool(name="get_annotation_pages", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def get_annotation_pages(job_id: str, from_page: int | None = None, to_page: int | None = None) -> ToolResult:
-        """Read up to five pages of an annotation job, with its focus, per-page limit, palette, library items and references (read those with get_annotation_reference)."""
+        """Read up to five pages of an annotation job with its focus, per-page limit, palette, library items and attachments in references (read them with get_annotation_reference). Infer whether attachments contain problems, solved homework or notes; never solve problems or quote solutions."""
         arguments: dict[str, Any] = {"job_id": job_id}
         if from_page is not None:
             arguments["from_page"] = from_page
@@ -342,7 +349,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     @bridge.tool(name="get_annotation_reference", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def get_annotation_reference(job_id: str, index: int, offset: int | None = None) -> ToolResult:
-        """Read one of a job's references (the chapter's problem pages, a solved-homework file or notes). Long ones come in parts: pass next_offset as offset to continue."""
+        """Read one of a job's attachments: a library file or PDF pages. Infer whether its content holds problems, solved homework or notes. Use problems for hints, previews and explanations; never solve them or quote or paraphrase solutions. Long attachments come in parts: pass next_offset as offset to continue."""
         arguments: dict[str, Any] = {"job_id": job_id, "index": index}
         if offset is not None:
             arguments["offset"] = offset

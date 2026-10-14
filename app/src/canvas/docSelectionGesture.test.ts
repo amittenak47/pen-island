@@ -36,6 +36,12 @@ describe("isDocChromeTarget", () => {
     wheel.remove();
   });
 
+  it("keeps the ChatBot tray from dismissing the current quote", () => {
+    const tray = document.createElement("button");
+    tray.className = "lc-chatbot-tray";
+    expect(isDocChromeTarget(tray)).toBe(true);
+  });
+
   it("ignores page text", () => {
     const p = document.createElement("p");
     document.body.append(p);

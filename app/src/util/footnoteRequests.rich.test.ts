@@ -111,6 +111,38 @@ describe("rich ChatBot answers", () => {
     expect(bare.extras).toBeUndefined();
   });
 
+  it("carries the sheet's focus, density and generic attachments on a selection request", () => {
+    const references = [
+      { kind: "file" as const, title: "Homework.md", text: "A solved problem." },
+      { kind: "pages" as const, title: "Pages 106–114", text: "Chapter problems." },
+    ];
+    const request = buildFootnoteRequest({
+      id: "fr-selection", deviceId: "dev", docId: "doc-1", docName: "Algorithms",
+      anchor: { kind: "text", start: 0, end: 4, scope: "p91" }, excerpt: "DFS",
+      pageText: "DFS explores deep first.", pages: null, viewerPage: 91, footnotes: [], exceptId: "fn-1",
+      focus: "  Preview the next chapter's problems.  ", perPage: 8, references,
+    });
+    expect(request.page).toBe(91);
+    expect(request.extras).toEqual({
+      focus: "Preview the next chapter's problems.", per_page: 8, references,
+    });
+    expect(request.extras!.references![0]).not.toBe(references[0]);
+    expect(request.prompt).toBeNull();
+  });
+
+  it("keeps selection settings within the limits accepted by the hub", () => {
+    const input = {
+      id: "fr-selection", deviceId: "dev", docId: "doc-1", docName: "Algorithms",
+      anchor: { kind: "text" as const, start: 0, end: 4 }, excerpt: "DFS",
+      pageText: null, pages: null, viewerPage: null, footnotes: [], exceptId: "fn-1",
+    };
+    expect(buildFootnoteRequest({ ...input, focus: "x".repeat(1100), perPage: 4 }).extras).toEqual({
+      focus: "x".repeat(1000), per_page: 4,
+    });
+    expect(buildFootnoteRequest({ ...input, focus: "  ", perPage: 0, references: [] }).extras).toBeUndefined();
+    expect(buildFootnoteRequest({ ...input, perPage: 8.5 }).extras).toBeUndefined();
+  });
+
   it("links the document to each chosen library item once the answer is saved", async () => {
     edges.length = 0;
     store.doc = { id: "doc-1", name: "Doc", footnotes: [mark()] };

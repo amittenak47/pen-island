@@ -21,10 +21,8 @@ pub const MAX_PAGES: usize = 40;
 pub const PAGES_PER_READ: i64 = 5;
 const PAGE_TEXT_CAP: usize = 12_000;
 const DELIVERY_CAP: i64 = 100;
-/// Reference material per job: a chapter's problem pages, a homework file.
-pub const MAX_REFERENCES: usize = 4;
-const REFERENCE_CAP: usize = 150_000;
-const REFERENCES_TOTAL_CAP: usize = 300_000;
+/// Bound attachment text without limiting how many files a reader can attach.
+pub const REFERENCES_TOTAL_CAP: usize = 600_000;
 /// Characters of a reference handed over per read.
 pub const REFERENCE_CHUNK: usize = 15_000;
 
@@ -70,14 +68,20 @@ pub struct JobPage {
     pub text: String,
 }
 
-/// Material the footnotes should serve: "exercises" (the chapter's problem
-/// pages), "homework" (a solved-problems file) or "notes".
+/// Attached files or PDF pages. Older clients also use exercises/homework/notes.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct JobReference {
     pub title: String,
     #[serde(default)]
     pub kind: String,
     pub text: String,
+}
+
+/// Attachment labels for history, without copying their text into every row.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct JobReferenceSummary {
+    pub title: String,
+    pub kind: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -88,6 +92,8 @@ pub struct NewJob {
     pub doc_name: String,
     #[serde(default)]
     pub doc_kind: String,
+    #[serde(default)]
+    pub request_type: String,
     #[serde(default)]
     pub focus: String,
     /// Most footnotes an assistant may add to one page (2, 4 or 8).
@@ -165,10 +171,12 @@ pub struct JobSummary {
     pub id: String,
     pub doc_id: String,
     pub doc_name: String,
+    pub request_type: String,
     pub page_from: i64,
     pub page_to: i64,
     pub focus: String,
     pub per_page: u8,
+    pub references: Vec<JobReferenceSummary>,
     pub pages_total: usize,
     pub pages_done: usize,
     pub footnotes: usize,
@@ -213,6 +221,12 @@ fn validate_job(job: &NewJob) -> Result<(), FootnoteFail> {
     if job.pages.is_empty() || job.pages.len() > MAX_PAGES {
         return Err(invalid(format!("pages must have 1..={MAX_PAGES} entries")));
     }
+    if !matches!(job.request_type.as_str(), "" | "page" | "pages") {
+        return Err(invalid("request_type must be page or pages"));
+    }
+    if job.request_type == "page" && job.pages.len() != 1 {
+        return Err(invalid("a page request must have exactly one page"));
+    }
     for page in &job.pages {
         if page.page < 1 || page.text.trim().is_empty() || page.text.chars().count() > PAGE_TEXT_CAP {
             return Err(invalid(format!("each page needs a number and 1..={PAGE_TEXT_CAP} characters of text")));
@@ -221,23 +235,7 @@ fn validate_job(job: &NewJob) -> Result<(), FootnoteFail> {
     if job.focus.chars().count() > 1000 {
         return Err(invalid("focus must be at most 1000 characters"));
     }
-    if job.references.len() > MAX_REFERENCES {
-        return Err(invalid(format!("references must have at most {MAX_REFERENCES} entries")));
-    }
-    let mut total = 0;
-    for reference in &job.references {
-        let chars = reference.text.chars().count();
-        total += chars;
-        if reference.title.trim().is_empty() || reference.title.chars().count() > 300 || reference.kind.chars().count() > 20 {
-            return Err(invalid("each reference needs a title of at most 300 characters"));
-        }
-        if reference.text.trim().is_empty() || chars > REFERENCE_CAP {
-            return Err(invalid(format!("each reference needs 1..={REFERENCE_CAP} characters of text")));
-        }
-    }
-    if total > REFERENCES_TOTAL_CAP {
-        return Err(invalid(format!("references may hold at most {REFERENCES_TOTAL_CAP} characters in all")));
-    }
+    validate_references(&job.references).map_err(FootnoteFail::Invalid)?;
     footnotes::validate_extras(&FootnoteExtras {
         palette: job.palette.clone(),
         workspace_items: job.workspace_items.clone(),
@@ -245,6 +243,25 @@ fn validate_job(job: &NewJob) -> Result<(), FootnoteFail> {
         ..Default::default()
     })
     .map_err(FootnoteFail::Invalid)
+}
+
+/// Shared by page jobs and selection requests so Attach has the same limits.
+pub fn validate_references(references: &[JobReference]) -> Result<(), String> {
+    let mut total = 0;
+    for reference in references {
+        let chars = reference.text.chars().count();
+        total += chars;
+        if reference.title.trim().is_empty() || reference.title.chars().count() > 300 || reference.kind.chars().count() > 20 {
+            return Err("each reference needs a title of at most 300 characters and a short kind".into());
+        }
+        if reference.text.trim().is_empty() {
+            return Err("each reference needs non-empty text".into());
+        }
+        if total > REFERENCES_TOTAL_CAP {
+            return Err(format!("references may hold at most {REFERENCES_TOTAL_CAP} characters in all"));
+        }
+    }
+    Ok(())
 }
 
 pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary, FootnoteFail> {
@@ -256,8 +273,8 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
         if exists.is_none() {
             conn.execute(
                 "INSERT INTO annotation_jobs (id, device_id, doc_id, doc_name, doc_kind, focus, per_page,
-                    pages, palette, workspace_items, status, summary, created_at, finished_at, refs)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', NULL, ?11, NULL, ?12)",
+                    pages, palette, workspace_items, status, summary, created_at, finished_at, refs, request_type)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, 'open', NULL, ?11, NULL, ?12, ?13)",
                 params![
                     job.id,
                     job.device_id,
@@ -271,6 +288,7 @@ pub fn create_job(conn: &Connection, job: NewJob, now: i64) -> Result<JobSummary
                     serde_json::to_string(&job.workspace_items)?,
                     now,
                     serde_json::to_string(&job.references)?,
+                    if job.request_type.is_empty() { "pages" } else { job.request_type.as_str() },
                 ],
             )?;
         }
@@ -284,6 +302,7 @@ struct JobRow {
     doc_id: String,
     doc_name: String,
     doc_kind: String,
+    request_type: String,
     focus: String,
     per_page: u8,
     pages: Vec<JobPage>,
@@ -299,7 +318,7 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
     let raw = conn
         .query_row(
             "SELECT id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette,
-                    workspace_items, status, summary, created_at, refs
+                    workspace_items, status, summary, created_at, refs, request_type
              FROM annotation_jobs WHERE id = ?1",
             params![id],
             |row| {
@@ -309,11 +328,12 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
                     row.get::<_, u8>(6)?, row.get::<_, String>(7)?, row.get::<_, String>(8)?,
                     row.get::<_, String>(9)?, row.get::<_, String>(10)?, row.get::<_, Option<String>>(11)?,
                     row.get::<_, i64>(12)?, row.get::<_, String>(13)?,
+                    row.get::<_, String>(14)?,
                 ))
             },
         )
         .optional()?;
-    let Some((id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette, items, status, summary, created_at, refs)) = raw else {
+    let Some((id, device_id, doc_id, doc_name, doc_kind, focus, per_page, pages, palette, items, status, summary, created_at, refs, request_type)) = raw else {
         return Ok(None);
     };
     Ok(Some(JobRow {
@@ -322,6 +342,7 @@ fn job_row(conn: &Connection, id: &str) -> Result<Option<JobRow>, FootnoteFail> 
         doc_id,
         doc_name,
         doc_kind,
+        request_type,
         focus,
         per_page,
         pages: serde_json::from_str(&pages)?,
@@ -353,8 +374,13 @@ fn summary_of(conn: &Connection, id: &str) -> Result<Option<JobSummary>, Footnot
         id: job.id,
         doc_id: job.doc_id,
         doc_name: job.doc_name,
+        request_type: job.request_type,
         focus: job.focus,
         per_page: job.per_page,
+        references: job.references.into_iter().map(|reference| JobReferenceSummary {
+            title: reference.title,
+            kind: reference.kind,
+        }).collect(),
         pages_done,
         footnotes,
         status: job.status,
@@ -396,6 +422,7 @@ pub fn read_pages(conn: &Connection, id: &str, from: i64, to: i64) -> Result<Val
     Ok(json!({
         "id": job.id,
         "doc_name": job.doc_name,
+        "request_type": job.request_type,
         "status": job.status,
         "focus": job.focus,
         "per_page": job.per_page,
@@ -480,6 +507,7 @@ pub fn submit_page(
                 mark_text: quote.to_string(),
                 workspace_items: job.workspace_items.clone(),
                 doc_kind: job.doc_kind.clone(),
+                ..Default::default()
             };
             let notes = annotation
                 .reader_notes()
@@ -591,6 +619,7 @@ mod tests {
             doc_id: "algo".into(),
             doc_name: "Algorithms".into(),
             doc_kind: "annotate".into(),
+            request_type: "pages".into(),
             focus: "key definitions".into(),
             per_page: 2,
             pages: vec![
@@ -704,6 +733,57 @@ mod tests {
     }
 
     #[test]
+    fn history_has_attachment_labels_without_their_text() {
+        let (_dir, conn) = open();
+        let mut attached = job("aj-history");
+        attached.request_type = "page".into();
+        attached.pages.truncate(1);
+        attached.references = ["file", "pages", "exercises", "homework", "notes"].iter()
+            .map(|kind| JobReference { title: format!("Attached {kind}"), kind: (*kind).into(), text: "Private attachment text".into() }).collect();
+        create_job(&conn, attached, 1).unwrap();
+        let history = serde_json::to_value(list_for_doc(&conn, "tablet", "algo").unwrap()).unwrap();
+        assert_eq!(history[0]["request_type"], "page");
+        let references = history[0]["references"].as_array().unwrap();
+        assert_eq!(references.len(), 5);
+        assert_eq!(references[0], json!({ "title": "Attached file", "kind": "file" }));
+        assert_eq!(references[1], json!({ "title": "Attached pages", "kind": "pages" }));
+        assert!(!history.to_string().contains("Private attachment text"));
+        assert_eq!(read_pages(&conn, "aj-history", 91, 91).unwrap()["request_type"], "page");
+    }
+
+    #[test]
+    fn attachments_have_only_a_total_text_size_cap() {
+        let (_dir, conn) = open();
+        let mut attached = job("aj-many");
+        attached.references = (0..20).map(|index| JobReference {
+            title: format!("File {index}"), kind: "file".into(), text: "Notes".into(),
+        }).collect();
+        create_job(&conn, attached, 1).unwrap();
+        let mut boundary = job("aj-boundary");
+        boundary.references = vec![JobReference {
+            title: "Large file".into(), kind: "file".into(), text: "\u{1f4dd}".repeat(REFERENCES_TOTAL_CAP),
+        }];
+        create_job(&conn, boundary.clone(), 2).unwrap();
+        boundary.id = "aj-over-cap".into();
+        boundary.references[0].text.push('x');
+        assert!(matches!(create_job(&conn, boundary, 3), Err(FootnoteFail::Invalid(_))));
+        assert_eq!(list_for_doc(&conn, "tablet", "algo").unwrap().len(), 2);
+    }
+
+    #[test]
+    fn page_request_types_are_checked_and_old_jobs_default_to_pages() {
+        let (_dir, conn) = open();
+        let mut legacy = job("aj-legacy");
+        legacy.request_type.clear();
+        assert_eq!(create_job(&conn, legacy, 1).unwrap().request_type, "pages");
+        let mut single = job("aj-single");
+        single.request_type = "page".into();
+        assert!(matches!(create_job(&conn, single.clone(), 2), Err(FootnoteFail::Invalid(_))));
+        single.pages.truncate(1);
+        assert_eq!(create_job(&conn, single, 2).unwrap().request_type, "page");
+    }
+
+    #[test]
     fn jobs_are_validated_when_they_are_made() {
         let (_dir, conn) = open();
         let mut too_many = job("aj-4");
@@ -713,7 +793,7 @@ mod tests {
         let mut density = job("aj-6");
         density.per_page = 9;
         let mut refs = job("aj-9");
-        refs.references = (0..5).map(|i| JobReference { title: format!("r{i}"), kind: "notes".into(), text: "x".into() }).collect();
+        refs.references = vec![JobReference { title: "Too large".into(), kind: "file".into(), text: "x".repeat(REFERENCES_TOTAL_CAP + 1) }];
         for (name, bad) in [("pages", too_many), ("empty", empty_page), ("density", density), ("references", refs)] {
             assert!(matches!(create_job(&conn, bad, 1), Err(FootnoteFail::Invalid(_))), "{name}");
         }

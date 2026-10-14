@@ -77,6 +77,23 @@ it("dismissal invalidates a capture before its late failure can offer a fallback
   expect(draft).not.toHaveBeenCalled();
 });
 
+it("reports the current native selection to document chrome and clears it on dismissal", async () => {
+  const changed = vi.fn();
+  act(() => root.render(<DocSelectionLayer footnotes={footnotes} onSelectionChange={changed}><p data-doc-scope="p1">Selected words for a question</p></DocSelectionLayer>));
+  const text = host.querySelector("p")!.firstChild!;
+  const range = document.createRange(); range.selectNodeContents(text);
+  window.getSelection()!.addRange(range);
+  await act(async () => { text.parentElement!.dispatchEvent(new MouseEvent("mouseup", { bubbles: true })); });
+  expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({
+    text: "Selected words for a question",
+    anchor: expect.objectContaining({ kind: "text", scope: "p1" }),
+  }));
+  act(() => document.querySelector<HTMLButtonElement>('[aria-label="Dismiss selection actions"]')!.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, cancelable: true })));
+  expect(changed).toHaveBeenLastCalledWith(null);
+  act(() => root.render(null));
+  expect(changed).toHaveBeenLastCalledWith(null);
+});
+
 function touchDown(target: EventTarget, pointerId: number) {
   const event = new MouseEvent("pointerdown", { bubbles: true, cancelable: true, button: 0, clientX: 40, clientY: 60 });
   Object.defineProperties(event, { pointerId: { value: pointerId }, pointerType: { value: "touch" } });
@@ -119,19 +136,26 @@ it("offers ChatBot for an Android quote marquee with a durable text anchor", asy
   vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
   const originalHitTest = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
   const ask = vi.fn();
+  const changed = vi.fn();
   const pointer = (type: string, x: number, y: number) => {
     const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
     Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "touch" } });
     return event;
   };
   try {
-    act(() => root.render(<DocSelectionLayer footnotes={footnotes} onAskChatBot={ask}><p data-doc-scope="p1">Selected words for a question</p></DocSelectionLayer>));
+    act(() => root.render(<DocSelectionLayer footnotes={footnotes} onAskChatBot={ask} onSelectionChange={changed}><p data-doc-scope="p1">Selected words for a question</p></DocSelectionLayer>));
     const text = host.querySelector("p")!;
     Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => text });
     act(() => text.dispatchEvent(pointer("pointerdown", 40, 60)));
     act(() => { vi.advanceTimersByTime(400); });
     act(() => text.dispatchEvent(pointer("pointermove", 160, 80)));
     act(() => text.dispatchEvent(pointer("pointerup", 160, 80)));
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ text: "Selected words for a question" }));
+    const tray = document.createElement("button");
+    tray.className = "lc-chatbot-tray";
+    document.body.append(tray);
+    act(() => tray.dispatchEvent(pointer("pointerdown", 800, 60)));
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ text: "Selected words for a question" }));
     const confirm = document.querySelector<HTMLButtonElement>('[aria-label="Use this selection"]');
     expect(confirm).toBeTruthy();
     await act(async () => confirm!.click());

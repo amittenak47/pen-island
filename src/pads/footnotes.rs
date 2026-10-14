@@ -73,6 +73,12 @@ pub struct FootnoteExtras {
     pub workspace_items: Vec<WorkspaceItem>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub doc_kind: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub focus: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub per_page: Option<u8>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<super::annotation_jobs::JobReference>,
 }
 
 /// An underline or highlight on words inside the marked text.
@@ -196,6 +202,13 @@ fn valid_hex(color: &str) -> bool {
 }
 
 pub fn validate_extras(extras: &FootnoteExtras) -> Result<(), String> {
+    if extras.focus.chars().count() > 1000 {
+        return Err("extras.focus must be at most 1000 characters".into());
+    }
+    if extras.per_page.is_some_and(|per_page| !matches!(per_page, 1..=8)) {
+        return Err("extras.per_page must be 1..=8".into());
+    }
+    super::annotation_jobs::validate_references(&extras.references)?;
     if extras.palette.len() > 8 || !extras.palette.iter().all(|color| valid_hex(color)) {
         return Err("extras.palette must be at most 8 #rrggbb colors".into());
     }

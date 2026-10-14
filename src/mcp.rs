@@ -13,7 +13,7 @@ use crate::pads::footnotes::{self, FootnoteLink, FootnoteSubmission};
 
 /// How the inbox works, sent to every assistant when it connects. Assistants
 /// only act when prompted or scheduled, so this asks them to offer the watch.
-pub const WORKFLOW: &str = "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a document and asks for a footnote; each request waits here until an assistant answers it. To answer: call list_footnote_requests, then for each request call get_footnote_request and submit_footnote. Only answer requests listed here, and never invent request ids. If the inbox is empty, say so. The reader may also ask for a whole page range (a chapter) to be annotated: call list_annotation_jobs, read each job's pages a few at a time with get_annotation_pages, call submit_page_annotations once per page with the footnotes worth adding (each quoting the exact words it is about), then finish_annotation_job. When a job lists references (the chapter's problems, a solved-homework file), read them first with get_annotation_reference, and aim the footnotes at what those problems need. If you can run scheduled or repeating tasks, offer to check for new requests and jobs every few minutes.";
+pub const WORKFLOW: &str = "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a document and asks for a footnote; each request waits here until an assistant answers it. To answer: call list_footnote_requests, then for each request call get_footnote_request and submit_footnote. Read any attachments in extras.references before answering. Only answer requests listed here, and never invent request ids. If the inbox is empty, say so. The reader may also ask for this page or a page range (a chapter) to be annotated: call list_annotation_jobs, read each job's pages a few at a time with get_annotation_pages, call submit_page_annotations once per page with the footnotes worth adding (each quoting the exact words it is about), then finish_annotation_job. When a job lists attachments in references, read them first with get_annotation_reference. Attached files and PDF pages may hold the chapter's problems, solved homework or notes; infer which from their content. Aim the footnotes at the relevant ideas, and use problems only for hints, previews and explanations; never solve them or quote or paraphrase solutions. If you can run scheduled or repeating tasks, offer to check for new requests and jobs every few minutes.";
 
 /// Ready-made prompts: (name, title, description, text sent as the user's message).
 pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
@@ -31,10 +31,10 @@ pub const PROMPTS: &[(&str, &str, &str, &str)] = &[
     ),
 ];
 
-pub const INSTRUCTIONS: &str = "Explain the selected words in the context of the surrounding text, for a reader who is in the middle of this document. Write 2-4 markdown notes of a few sentences each: first the idea in plain words, then a small example or the intuition behind it, then a common mistake when there is one. Add links only to sources you are confident exist. If the request has a prompt, follow it.";
+pub const INSTRUCTIONS: &str = "Explain the selected words in the context of the surrounding text, for a reader who is in the middle of this document. Write markdown notes of a few sentences each: first the idea in plain words, then a small example or the intuition behind it, then a common mistake when there is one. For a selection, use extras.per_page as the limit on the number of notes when present; otherwise write 2-4 notes. Follow extras.focus and the request's prompt when provided. Attachments in extras.references may hold problems, solved homework or notes; infer which from their content. Use them to explain relevant ideas and point toward problems with hints and previews; never solve the problems or quote or paraphrase solutions. Add links only to sources you are confident exist.";
 
 /// How to write a page-range job's footnotes, on top of [`INSTRUCTIONS`].
-pub const JOB_INSTRUCTIONS: &str = "The footnotes sit on the chapter text and prepare the reader for this chapter's problems; they never solve them. Pick the passages the problems rely on: definitions, the key steps of an algorithm, proof ideas, and traps. Explain the passage itself, and show where the problems will lean on it, like a hint or a preview: which idea a problem uses, never its answer or the steps of a solution. A solved-homework reference is only for seeing which ideas matter; never quote or paraphrase its solutions. Use problems to name the exercises or homework questions a passage prepares for, by their numbers in the references. Use question for one short question that makes the reader curious to keep reading, tied to a problem when you can, without giving its answer away. Use looking_ahead to hint at what this passage sets up later in the chapter, without spoiling it. Highlight the key term; underline the phrase a problem hinges on.";
+pub const JOB_INSTRUCTIONS: &str = "Explain useful passages in the page text, following the reader's focus. Attached files and PDF pages may hold this chapter's problems, solved homework or notes; infer which from their content rather than their title or kind. When attachments contain problems, prepare the reader for them without solving them: pick definitions, the key steps of an algorithm, proof ideas, and traps those problems rely on. Explain the passage itself and show where a problem will lean on it, like a hint or a preview: which idea it uses, never its answer or the steps of a solution. Solved homework is only for seeing which ideas matter; never quote or paraphrase its solutions. Use problems to name exercises or homework questions a passage prepares for, by their numbers in the attachments. Use question for one short question that makes the reader curious to keep reading, tied to a problem when you can, without giving its answer away. Use looking_ahead to hint at what this passage sets up later, without spoiling it. Highlight the key term; underline the phrase a problem hinges on.";
 
 const SUPPORTED_PROTOCOLS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"];
 const FALLBACK_PROTOCOL: &str = "2025-06-18";
@@ -311,7 +311,7 @@ fn tool_list() -> Vec<Value> {
         json!({
             "name": "get_footnote_request",
             "annotations": { "readOnlyHint": true, "openWorldHint": false },
-            "description": "Fetch one footnote request, including wide_context, page_footnotes (other footnotes already on that page) and extras: palette (the mark's colors; refer to them by slot number, 1 = first), mark_text (the exact marked text; quote from it for marks) and workspace_items (the reader's library items you may link by id).",
+            "description": "Fetch one footnote request, including wide_context, page_footnotes (other footnotes already on that page) and extras: palette (the mark's colors; refer to them by slot number, 1 = first), mark_text (the exact marked text; quote from it for marks), workspace_items (library items you may link by id), focus, per_page (the note limit for this selection) and references (attached files or PDF pages, with their text). Infer whether attachments contain problems, solved homework or notes; use them for hints and explanations, never solve problems or quote solutions.",
             "inputSchema": {
                 "type": "object",
                 "properties": { "id": { "type": "string" } },
@@ -376,7 +376,7 @@ fn tool_list() -> Vec<Value> {
         json!({
             "name": "get_annotation_pages",
             "annotations": { "readOnlyHint": true, "openWorldHint": false },
-            "description": "Read up to five pages of an annotation job, plus its focus, per_page limit, palette (colors by slot, 1 = first), workspace_items (library items you may link) and references (the chapter's problems or a homework file; read them with get_annotation_reference). next_from says where to continue; pages_done lists pages already annotated.",
+            "description": "Read up to five pages of an annotation job, plus its focus, per_page limit, palette (colors by slot, 1 = first), workspace_items (library items you may link) and references (attached files or PDF pages; read them with get_annotation_reference). Infer whether attachments hold problems, solved homework or notes from their content; never solve problems or quote solutions. next_from says where to continue; pages_done lists pages already annotated.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -391,7 +391,7 @@ fn tool_list() -> Vec<Value> {
         json!({
             "name": "get_annotation_reference",
             "annotations": { "readOnlyHint": true, "openWorldHint": false },
-            "description": "Read one of an annotation job's references (index from get_annotation_pages): the chapter's problem pages, a solved-homework file or notes. Long ones come in parts; pass next_offset as offset to continue.",
+            "description": "Read one of an annotation job's attachments (index from get_annotation_pages): a library file or PDF pages. Infer whether its content holds problems, solved homework or notes. Footnotes point toward problems with hints, previews and explanations; never solve them or quote or paraphrase solutions. Long attachments come in parts; pass next_offset as offset to continue.",
             "inputSchema": {
                 "type": "object",
                 "properties": {
@@ -798,6 +798,22 @@ mod tests {
         let bad = call(6, "submit_page_annotations", json!({ "job_id": "aj-1", "annotations": [] }));
         assert_eq!(bad["result"]["isError"], true);
         assert_eq!(hub.calls.lock().unwrap().len(), 5);
+    }
+
+    #[test]
+    fn attachment_tools_infer_content_and_keep_problem_answers_private() {
+        for name in ["get_footnote_request", "get_annotation_pages", "get_annotation_reference"] {
+            let tools = tool_list();
+            let description = tools.iter().find(|tool| tool["name"] == name).unwrap()["description"]
+                .as_str().unwrap().to_lowercase();
+            assert!(description.contains("infer"), "{name}");
+            assert!(description.contains("problems, solved homework or notes"), "{name}");
+            assert!(description.contains("never solve"), "{name}");
+        }
+        assert!(JOB_INSTRUCTIONS.contains("rather than their title or kind"));
+        assert!(JOB_INSTRUCTIONS.contains("never quote or paraphrase its solutions"));
+        assert!(INSTRUCTIONS.contains("extras.per_page"));
+        assert!(INSTRUCTIONS.contains("extras.focus"));
     }
 
     #[test]

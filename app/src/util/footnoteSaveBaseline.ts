@@ -8,6 +8,7 @@
 
 import { footnoteRevision, type DocFootnote } from "./docFootnotes";
 import type { FootnoteWriteResult } from "./footnoteRequests";
+import type { AnnotationJobReferenceDto } from "../api/client";
 
 export function pristineMarksFromSaved(
   saved: { footnotes?: readonly DocFootnote[] | null },
@@ -34,10 +35,17 @@ export function footnotesPendingSave(
   return live;
 }
 
+export type SelectionFootnoteOptions = {
+  focus: string;
+  perPage: number;
+  references: readonly AnnotationJobReferenceDto[];
+};
+
 export type HeldFootnoteAsk = {
   requestId: string;
   footnoteId: string;
   answerMode?: "bot" | "llm";
+  options?: SelectionFootnoteOptions;
 };
 
 export function partitionHeldAsks(

@@ -3,7 +3,7 @@
  * and the answer applied back here. The document is only written on the device.
  */
 
-import { LcApiError, type FootnoteMarkDto, type FootnotePingResultDto, type FootnoteRequestDto, type FootnoteWorkspaceItemDto, type LcClient } from "../api/client";
+import { LcApiError, type AnnotationJobReferenceDto, type FootnoteMarkDto, type FootnotePingResultDto, type FootnoteRequestDto, type FootnoteWorkspaceItemDto, type LcClient } from "../api/client";
 import { isTextAnchor } from "./docAnchors";
 import { makeEdge, putEdge, type NodeRef, type NodeType } from "./noteLinks";
 import { readFootnoteOutbox, storeFootnoteRequest, markFootnoteRequestSent, forgetFootnoteRequest } from "./footnoteOutbox";
@@ -131,6 +131,10 @@ export function buildFootnoteRequest(input: {
   /** Library items an answer may link (most relevant first). */
   workspaceItems?: readonly FootnoteWorkspaceItemDto[];
   docKind?: "annotate" | "web";
+  /** Settings from the ChatBot sheet also travel on selection requests. */
+  focus?: string;
+  perPage?: number;
+  references?: readonly AnnotationJobReferenceDto[];
 }): FootnoteRequestDto {
   const excerpt = input.excerpt.slice(0, 4000);
   const palette = (input.palette ?? []).filter((color) => /^#[0-9a-fA-F]{6}$/.test(color)).slice(0, 8);
@@ -139,11 +143,17 @@ export function buildFootnoteRequest(input: {
     .filter((item) => item.id && item.id.length <= 300)
     .slice(0, 60)
     .map((item) => ({ id: item.id, kind: item.kind.slice(0, 20), title: item.title.slice(0, 300) }));
+  const focus = (input.focus ?? "").trim().slice(0, 1000);
+  const perPage = input.perPage;
+  const references = (input.references ?? []).map((reference) => ({ ...reference }));
   const extras = {
     ...(palette.length ? { palette } : {}),
     ...(markText ? { mark_text: markText } : {}),
     ...(workspaceItems.length ? { workspace_items: workspaceItems } : {}),
     ...(input.docKind ? { doc_kind: input.docKind } : {}),
+    ...(focus ? { focus } : {}),
+    ...(typeof perPage === "number" && Number.isInteger(perPage) && perPage >= 1 && perPage <= 8 ? { per_page: perPage } : {}),
+    ...(references.length ? { references } : {}),
   };
   const pageText = input.pageText ?? "";
   const scope = input.anchor.scope;

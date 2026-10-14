@@ -200,14 +200,17 @@ import {
   enqueueFootnoteRequest,
   flushFootnoteQueue,
   freshFootnoteRequestId,
+  pageNumberFor,
   registerOpenAnnotateFootnotes,
 } from "./util/footnoteRequests";
+import { forgetFootnoteRequest } from "./util/footnoteOutbox";
 import {
   completeAnnotateSave,
   footnotesPendingSave,
   partitionHeldAsks,
   settleOpenFootnoteWrite,
   type HeldFootnoteAsk,
+  type SelectionFootnoteOptions,
 } from "./util/footnoteSaveBaseline";
 import { installHandednessAttr } from "./util/inkHandedness";
 import { installUiHandednessAttr } from "./util/uiHandedness";
@@ -3837,6 +3840,16 @@ export const Workspace = memo(function Workspace({
       title: target.node.title ?? target.node.id,
     })), []);
   const [chatBotPagesOpen, setChatBotPagesOpen] = useState(false);
+  const docSelectionRef = useRef<DocSelectionResult | null>(null);
+  const [chatBotSelection, setChatBotSelection] = useState<DocSelectionResult | null>(null);
+  const onDocSelectionChange = useCallback((selection: DocSelectionResult | null) => {
+    docSelectionRef.current = selection;
+  }, []);
+  useEffect(() => {
+    docSelectionRef.current = null;
+    setChatBotSelection(null);
+    setChatBotPagesOpen(false);
+  }, [annotateSource?.hash, annotateDocId]);
   // Re-render the tray dot when a run starts, places footnotes or finishes.
   const [, setAnnotationJobsTick] = useState(0);
   useEffect(() => {
@@ -8979,6 +8992,9 @@ export const Workspace = memo(function Workspace({
           markText: mark.blockText ?? mark.excerpt,
           workspaceItems: chatBotWorkspaceItems(),
           docKind: hereNodeRef.current?.type === "web" ? "web" : "annotate",
+          focus: ask.options?.focus,
+          perPage: ask.options?.perPage,
+          references: ask.options?.references,
         }));
       } catch (cause) {
         // A durable queue failure must leave every unsent ask held for the
@@ -8993,12 +9009,12 @@ export const Workspace = memo(function Workspace({
   }, [client]);
   deliverHeldFootnoteAsksRef.current = deliverHeldFootnoteAsks;
 
-  const onAskChatBot = useCallback(
-    (selection: DocSelectionResult) => {
+  const requestSelectionFootnote = useCallback(
+    async (selection: DocSelectionResult, options?: SelectionFootnoteOptions) => {
       // Unique Android quotes and native selections carry text anchors.
       // Ambiguous marquee quotes keep their region rather than guessing words.
       const excerpt = (selection.excerpt || selection.text).trim();
-      if (!excerpt) return;
+      if (!excerpt) throw new Error("Select some text first.");
       const requestId = freshFootnoteRequestId();
       const existing = annotateFootnotesRef.current;
       const footnoteId = freshFootnoteId(existing);
@@ -9010,6 +9026,7 @@ export const Workspace = memo(function Workspace({
         excerpt: excerpt.slice(0, 4000),
         createdAt: Date.now(),
         pending: requestId,
+        ...(options ? { jobId: requestId } : {}),
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(existing),
         ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
@@ -9017,17 +9034,65 @@ export const Workspace = memo(function Workspace({
       });
       heldFootnoteAsksRef.current = [
         ...heldFootnoteAsksRef.current.filter((ask) => ask.requestId !== requestId),
-        { requestId, footnoteId, answerMode: loadChatBotAnswerMode() },
+        { requestId, footnoteId, answerMode: loadChatBotAnswerMode(), ...(options ? { options } : {}) },
       ];
       flushSync(() => setAnnotateFootnotes(next));
       // The save posts the ask only when the stored record contains this pending mark.
       // A failed save leaves the mark and the ask in place for the next one.
-      void saveAnnotateSession().catch(() => {
-        /* saveAnnotateSession already surfaces the error */
-      });
+      const saved = await saveAnnotateSession();
+      if (!saved) throw new Error("Save this document to send the request.");
+      const source = annotateSourceRef.current;
+      return {
+        id: requestId,
+        page: pageNumberFor(selection.anchor.scope, source?.hash ? extractedPagesFor(source.hash) : null, pdfNavRef.current?.current ?? null) ?? 1,
+      };
     },
     [saveAnnotateSession, setAnnotateFootnotes],
   );
+
+  const onAskChatBot = useCallback((selection: DocSelectionResult) => {
+    void requestSelectionFootnote(selection).catch(() => {
+      /* saveAnnotateSession already surfaces the error */
+    });
+  }, [requestSelectionFootnote]);
+
+  const onChatBotSelectionRequest = useCallback(async (options: SelectionFootnoteOptions) => {
+    if (!chatBotSelection?.text.trim()) throw new Error("Select some text first.");
+    return await requestSelectionFootnote(chatBotSelection, options);
+  }, [chatBotSelection, requestSelectionFootnote]);
+
+  const onCancelChatBotSelectionRequest = useCallback(async (requestId: string) => {
+    const docId = annotateDocIdRef.current;
+    heldFootnoteAsksRef.current = heldFootnoteAsksRef.current.filter((ask) => ask.requestId !== requestId);
+    // Wait for any queued upload before acknowledging it, so it cannot reopen
+    // the cancelled request after the acknowledgement reaches the hub.
+    await flushFootnoteQueue(client);
+    try {
+      await client.ackFootnoteRequest(requestId);
+    } catch (cause) {
+      if (!(cause instanceof LcApiError && cause.isMissing)) throw cause;
+    }
+    await forgetFootnoteRequest(requestId);
+    if (annotateDocIdRef.current !== docId) throw new Error("Reopen the original document to finish cancelling this request.");
+    const cleared = new Set<string>();
+    flushSync(() => setAnnotateFootnotes((current) => current.map((entry) => {
+      if (entry.pending !== requestId) return entry;
+      cleared.add(entry.id);
+      const next = { ...entry };
+      delete next.pending;
+      return next;
+    })));
+    try {
+      const saved = await saveAnnotateSession();
+      if (!saved || saved.id !== docId) throw new Error("Save this document to finish cancelling the request.");
+    } catch (cause) {
+      // Keep Cancel available for retry while retaining edits made during the save.
+      flushSync(() => setAnnotateFootnotes((current) => current.map((entry) =>
+        cleared.has(entry.id) && !entry.pending ? { ...entry, pending: requestId } : entry,
+      )));
+      throw cause;
+    }
+  }, [client, saveAnnotateSession, setAnnotateFootnotes]);
 
   const onOpenFootnote = useCallback((footnote: DocFootnote, anchorRect: DOMRect | null) => {
     openFootnoteOverview(footnote.id, anchorRect);
@@ -11486,6 +11551,7 @@ export const Workspace = memo(function Workspace({
                 />
               ) : problem && isAnnotate(problem) && annotateSource ? (
                 <DocSelectionLayer
+                  key={`${annotateDocId ?? "new"}:${annotateSource.hash}`}
                   paletteScope={tab.id}
                   enabled={!annotateCode || Boolean(openFootnote) || highlighting}
                   highlighting={highlighting}
@@ -11497,6 +11563,7 @@ export const Workspace = memo(function Workspace({
                   onCopy={onDocCopy}
                   onSearch={onDocSearch}
                   onAskChatBot={onAskChatBot}
+                  onSelectionChange={onDocSelectionChange}
                   onMark={highlighting ? onDocMark : undefined}
                   onOpenFootnote={onOpenFootnote}
                   onRemoveFootnote={onRemoveFootnote}
@@ -11618,7 +11685,11 @@ export const Workspace = memo(function Workspace({
             chatBot={
               annotateSource?.docType === "pdf" && annotateDocId && !footnoteBoardSession
                 ? {
-                    onOpen: () => setChatBotPagesOpen(true),
+                    onOpen: () => {
+                      const selection = docSelectionRef.current;
+                      setChatBotSelection(selection?.text.trim() ? selection : null);
+                      setChatBotPagesOpen(true);
+                    },
                     active: activeAnnotationJobs().some((job) => job.docId === annotateDocId),
                   }
                 : null
@@ -12192,6 +12263,7 @@ export const Workspace = memo(function Workspace({
 
       {chatBotPagesOpen && annotateSource && annotateDocId && (
         <ChatBotPagesDialog
+          key={annotateDocId}
           client={client}
           docId={annotateDocId}
           docName={annotateSource.name}
@@ -12200,8 +12272,17 @@ export const Workspace = memo(function Workspace({
           pageCount={pdfNav?.count ?? 0}
           palette={footnoteThemeSeed(annotateFootnotesRef.current).palette}
           workspaceItems={chatBotWorkspaceItems()}
+          selection={chatBotSelection}
+          footnotes={annotateFootnotes}
+          onSelectionRequest={onChatBotSelectionRequest}
+          onCancelSelectionRequest={onCancelChatBotSelectionRequest}
+          onJumpToPage={(page) => {
+            boardRef.current?.aimPdfPage(page);
+            boardRef.current?.scrollToPdfPage(page);
+          }}
           onClose={() => {
             setChatBotPagesOpen(false);
+            setChatBotSelection(null);
             setAnnotationJobsTick((value) => value + 1);
           }}
         />

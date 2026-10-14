@@ -263,6 +263,7 @@ mod footnote_tests {
                 id: "whiteboard:wb-dfs".into(), kind: "whiteboard".into(), title: "DFS notes".into(),
             }],
             doc_kind: "web".into(),
+            ..Default::default()
         };
         body
     }
@@ -330,6 +331,34 @@ mod footnote_tests {
         // Old devices send no extras; requests still work.
         footnotes::create_request(&conn, sample("fr-x3", "dev-a"), 1).unwrap();
         assert_eq!(footnotes::get_request(&conn, "fr-x3").unwrap().unwrap().extras, footnotes::FootnoteExtras::default());
+    }
+
+    #[test]
+    fn selection_settings_and_many_attachments_are_kept_and_validated() {
+        use crate::pads::annotation_jobs::{JobReference, REFERENCES_TOTAL_CAP};
+        let (_dir, conn) = open();
+        let mut body = rich_sample("fr-attached");
+        body.extras.focus = "Graph ideas".into();
+        body.extras.per_page = Some(2);
+        body.extras.references = (0..20).map(|index| JobReference {
+            title: format!("File {index}"), kind: "file".into(), text: "Chapter notes".into(),
+        }).collect();
+        footnotes::create_request(&conn, body.clone(), 1).unwrap();
+        let request = footnotes::get_request(&conn, "fr-attached").unwrap().unwrap();
+        assert_eq!(request.extras, body.extras);
+        assert_eq!(request.extras.references.len(), 20);
+        let mut bad_focus = body.clone();
+        bad_focus.extras.focus = "x".repeat(1001);
+        let mut bad_density = body.clone();
+        bad_density.extras.per_page = Some(9);
+        let mut too_large = body.clone();
+        too_large.extras.references = vec![JobReference {
+            title: "Large file".into(), kind: "file".into(), text: "x".repeat(REFERENCES_TOTAL_CAP + 1),
+        }];
+        for (name, mut bad) in [("focus", bad_focus), ("density", bad_density), ("attachments", too_large)] {
+            bad.id = format!("fr-bad-{name}");
+            assert!(matches!(footnotes::create_request(&conn, bad, 2), Err(FootnoteFail::Invalid(_))), "{name}");
+        }
     }
 
     #[test]

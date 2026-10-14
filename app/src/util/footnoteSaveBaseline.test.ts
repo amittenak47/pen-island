@@ -52,6 +52,25 @@ function deferred() {
 }
 
 describe("footnote save baseline", () => {
+  it("keeps selection focus, density and attachments through a failed save and retry", () => {
+    const footnotes = [mark({ pending: "fr-selection" })];
+    const pristine = { current: "" };
+    const held: HeldFootnoteAsk[] = [{
+      requestId: "fr-selection",
+      footnoteId: "fn-1",
+      options: {
+        focus: "motivation",
+        perPage: 8,
+        references: [{ title: "Pages 4-6", kind: "pages", text: "Review exercises" }],
+      },
+    }];
+    const failed = completeAnnotateSave({ saved: null, live: footnotes, pristine, held });
+    expect(failed.send).toEqual([]);
+    const retried = completeAnnotateSave({ saved: { id: "doc-1", footnotes }, live: footnotes, pristine, held: failed.keep });
+    expect(retried.send[0]?.options).toEqual(held[0]?.options);
+    expect(retried.keep).toEqual([]);
+  });
+
   it("keeps a reader note dirty when it lands while an answer save is in flight", async () => {
     const live = { current: [mark()] as DocFootnote[] };
     const pristine = { current: "" };

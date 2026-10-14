@@ -8,21 +8,27 @@ import type { DocFootnote } from "./docFootnotes";
 const PIECES = ["Chapter 3 ", "Decompositions of graphs", "Depth-first", " search is a surprisingly", "versatile procedure."];
 const STREAM = PIECES.join("");
 
-const pdf = vi.hoisted(() => ({ open: true }));
+const pdf = vi.hoisted(() => ({ open: true, pieces: null as string[] | null,
+  wait: null as Promise<void> | null, reads: 0 }));
 vi.mock("../modes/pdfOpenDocs", () => ({
   borrowPdfDocument: () => pdf.open ? {
     numPages: 400,
-    getPage: async () => ({ getTextContent: async () => ({ items: PIECES.map((str) => ({ str })) }) }),
+    getPage: async () => {
+      pdf.reads += 1;
+      if (pdf.wait) await pdf.wait;
+      return { getTextContent: async () => ({ items: (pdf.pieces ?? PIECES).map((str) => ({ str })) }) };
+    },
   } : null,
 }));
 
-const store = vi.hoisted(() => ({ footnotes: [] as unknown[] }));
+const store = vi.hoisted(() => ({ footnotes: [] as unknown[], files: {} as Record<string, string>, fail: false }));
 vi.mock("./annotateStore", () => ({
-  getAnnotateDoc: async (id: string) => id === "hw"
-    ? { id, name: "dpv_ch3.md", hash: "h-hw", docType: "markdown", source: "# 3.1 Run DFS on the graph." }
-    : { id, name: "Algorithms", hash: "h-algo", docType: "pdf", footnotes: store.footnotes },
+  getAnnotateDoc: async (id: string) => id === "algo"
+    ? { id, name: "Algorithms", hash: "h-algo", docType: "pdf", footnotes: store.footnotes }
+    : id in store.files ? { id, name: `${id}.md`, docType: "markdown", source: store.files[id] } : null,
   saveAnnotateDoc: async () => {},
   mutateAnnotateFootnotes: async (_id: string, mutate: (footnotes: unknown[]) => unknown[]) => {
+    if (store.fail) throw new Error("Storage unavailable");
     store.footnotes = [...mutate(store.footnotes)];
     return "saved";
   },
@@ -34,7 +40,12 @@ vi.mock("./noteLinks", async (importOriginal) => ({
   putEdge: async (edge: unknown) => { edges.push(edge); },
 }));
 
-import { findLoosely, footnoteFromItem, jobReferences, placeAnnotationJobItems, undoAnnotationJob } from "./annotationJobs";
+import {
+  findLoosely, footnoteFromItem, jobReferences, loadChatBotAttachments, placeAnnotationJobItems,
+  preparedJobAttachments, referenceChars, referencesSizeError, REFERENCES_TOTAL_CHARS,
+  saveChatBotAttachments, undoAnnotationJob, type ChatBotAttachment,
+} from "./annotationJobs";
+import { registerOpenAnnotateFootnotes } from "./footnoteRequests";
 
 const PALETTE = ["#60a5fa", "#f472b6", "#facc15", "#34d399"];
 
@@ -70,8 +81,23 @@ function client(items: AnnotationJobItemDto[]) {
   };
 }
 
-beforeEach(() => { store.footnotes = []; edges.length = 0; pdf.open = true; });
-afterEach(() => vi.restoreAllMocks());
+const storage = new Map<string, string>();
+beforeEach(() => {
+  store.fail = false;
+  store.footnotes = [];
+  store.files = { hw: "# 3.1 Run DFS on the graph." };
+  edges.length = 0;
+  pdf.open = true;
+  pdf.pieces = null;
+  pdf.wait = null;
+  pdf.reads = 0;
+  storage.clear();
+  vi.stubGlobal("localStorage", {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+  });
+});
+afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 describe("page-range footnotes", () => {
   it("finds a quote whatever the spacing between the PDF's text pieces", () => {
@@ -125,9 +151,13 @@ describe("page-range footnotes", () => {
     expect(store.footnotes).toHaveLength(0);
   });
 
-  it("gathers the problem pages and homework files a run is read against", async () => {
-    const refs = await jobReferences({ hash: "h-algo", problems: { from: 104, to: 105 }, files: [{ docId: "hw", title: "dpv_ch3.md" }] });
-    expect(refs.map((ref) => [ref.kind, ref.title])).toEqual([["exercises", "Problems, pages 104–105"], ["homework", "dpv_ch3.md"]]);
+  it("gathers generic PDF page ranges and library files in their chosen order", async () => {
+    const refs = await jobReferences({ hash: "h-algo", attachments: [
+      { kind: "pages", from: 104, to: 105 },
+      { kind: "file", docId: "hw", title: "dpv_ch3.md" },
+      { kind: "pages", from: 110, to: 110 },
+    ] });
+    expect(refs.map((ref) => [ref.kind, ref.title])).toEqual([["pages", "Pages 104–105"], ["file", "dpv_ch3.md"], ["pages", "Page 110"]]);
     expect(refs[0]!.text).toContain("[Page 104]");
     expect(refs[1]!.text).toContain("Run DFS");
   });
@@ -139,5 +169,154 @@ describe("page-range footnotes", () => {
     expect(store.footnotes).toHaveLength(2);
     expect(await undoAnnotationJob("algo", "aj-1")).toBe(1);
     expect(store.footnotes).toEqual([mine]);
+    const retried = client([item()]);
+    expect(await placeAnnotationJobItems(retried.client)).toEqual({ placed: 0, unplaced: 0, waiting: 0 });
+    expect(retried.acked).toEqual([[1]]);
+    expect(store.footnotes).toEqual([mine]);
+  });
+
+  it("undo stops a poll already reading the PDF without creating links", async () => {
+    await placeAnnotationJobItems(client([item()]).client);
+    let release!: () => void;
+    pdf.wait = new Promise<void>((resolve) => { release = resolve; });
+    const retried = client([item({ item_id: 2, result: { ...item().result,
+      workspace_links: [{ id: "whiteboard:late", kind: "whiteboard", title: "Late link" }] } })]);
+    const placing = placeAnnotationJobItems(retried.client);
+    await vi.waitFor(() => { expect(pdf.reads).toBe(2); });
+    expect(await undoAnnotationJob("algo", "aj-1")).toBe(1);
+    release();
+    expect(await placing).toEqual({ placed: 0, unplaced: 0, waiting: 0 });
+    expect(retried.acked).toEqual([[2]]);
+    expect(store.footnotes).toEqual([]);
+    expect(edges).toEqual([]);
+  });
+
+  it("reports an undo save failure without claiming the run was removed", async () => {
+    await placeAnnotationJobItems(client([item()]).client);
+    store.fail = true;
+    await expect(undoAnnotationJob("algo", "aj-1")).rejects.toThrow("Couldn't save");
+    expect(store.footnotes).toHaveLength(1);
+    store.fail = false;
+    const retried = client([item()]);
+    expect((await placeAnnotationJobItems(retried.client)).placed).toBe(1);
+    expect(retried.acked).toEqual([[1]]);
+    expect(store.footnotes).toHaveLength(1);
+  });
+
+  it("keeps queued items when an Undo save fails while a poll is waiting", async () => {
+    await placeAnnotationJobItems(client([item()]).client);
+    let release!: () => void;
+    const saving = new Promise<void>((resolve) => { release = resolve; });
+    const unregister = registerOpenAnnotateFootnotes({
+      docId: () => "algo",
+      write: async () => { await saving; return "failed"; },
+    });
+    try {
+      const undo = undoAnnotationJob("algo", "aj-1");
+      const failedUndo = expect(undo).rejects.toThrow("Couldn't save");
+      const retried = client([item({ item_id: 2 })]);
+      const placing = placeAnnotationJobItems(retried.client);
+      await Promise.resolve();
+      expect(retried.acked).toEqual([]);
+      release();
+      await failedUndo;
+      expect(await placing).toEqual({ placed: 0, unplaced: 0, waiting: 1 });
+      expect(retried.acked).toEqual([]);
+      expect(store.footnotes).toHaveLength(1);
+    } finally { unregister(); release(); }
+  });
+});
+
+describe("ChatBot attachments", () => {
+  it("accepts more than three files and retains long attachments without truncation", async () => {
+    const attachments: ChatBotAttachment[] = Array.from({ length: 8 }, (_, index) => {
+      const docId = `file-${index}`;
+      store.files[docId] = index === 0 ? "x".repeat(160_000) : `Content ${index}`;
+      return { kind: "file", docId, title: `${docId}.md` };
+    });
+    const references = await jobReferences({ hash: "h-algo", attachments });
+    expect(references).toHaveLength(8);
+    expect(references[0]!.text).toHaveLength(160_000);
+    const [prepared] = await preparedJobAttachments({ hash: "h-algo", attachments: attachments.slice(0, 1) });
+    expect(prepared!.chars).toBe(160_000);
+    expect(prepared!.error).toBeNull();
+  });
+
+  it("reads a PDF attachment beyond the text limit used for job pages", async () => {
+    pdf.pieces = ["x".repeat(15_000), " trailing words"];
+    const [reference] = await jobReferences({ hash: "h-algo", attachments: [{ kind: "pages", from: 1, to: 1 }] });
+    expect(reference!.text.length).toBeGreaterThan(15_000);
+    expect(reference!.text).toContain("trailing words");
+  });
+
+  it("reports each unreadable or empty attachment instead of silently omitting it", async () => {
+    store.files.empty = "   ";
+    const attachments: ChatBotAttachment[] = [
+      { kind: "file", docId: "hw", title: "Homework.md" },
+      { kind: "file", docId: "missing", title: "Missing.md" },
+      { kind: "file", docId: "empty", title: "Empty.md" },
+    ];
+    const prepared = await preparedJobAttachments({ hash: "h-algo", attachments });
+    expect(prepared).toHaveLength(3);
+    expect(prepared[0]).toMatchObject({ chars: store.files.hw!.length, error: null });
+    expect(prepared[1]).toMatchObject({ reference: null, chars: 0 });
+    expect(prepared[1]!.error).toContain("Missing.md");
+    expect(prepared[2]!.error).toContain("no text");
+    await expect(jobReferences({ hash: "h-algo", attachments })).rejects.toThrow("Missing.md");
+  });
+
+  it("enforces only the combined character cap and counts Unicode as the hub does", async () => {
+    store.files.large = "x".repeat(REFERENCES_TOTAL_CHARS);
+    const large: ChatBotAttachment = { kind: "file", docId: "large", title: "Large.md" };
+    const references = await jobReferences({ hash: "h-algo", attachments: [large] });
+    expect(referencesSizeError(references)).toBeNull();
+    const attachments: ChatBotAttachment[] = [large, { kind: "file", docId: "hw", title: "Homework.md" }];
+    const prepared = await preparedJobAttachments({ hash: "h-algo", attachments });
+    expect(prepared.every((entry) => entry.error === null)).toBe(true);
+    expect(referencesSizeError(prepared.map((entry) => entry.reference!))).toContain("600,000");
+    await expect(jobReferences({ hash: "h-algo", attachments })).rejects.toThrow("remove an attachment");
+    expect(referenceChars("A😀B")).toBe(3);
+    expect(referencesSizeError([{ kind: "file", title: "Unicode.md", text: "😀".repeat(REFERENCES_TOTAL_CHARS) }])).toBeNull();
+  });
+
+  it("reports PDF attachments without readable text or outside the document", async () => {
+    pdf.pieces = [];
+    const [empty, outside] = await preparedJobAttachments({ hash: "h-algo", attachments: [
+      { kind: "pages", from: 1, to: 2 }, { kind: "pages", from: 399, to: 401 },
+    ] });
+    expect(empty).toMatchObject({ reference: null, chars: 0 });
+    expect(empty!.error).toContain("no text");
+    expect(outside!.error).toContain("outside this document");
+  });
+
+  it("remembers multiple page ranges and files independently for each document", () => {
+    const attachments: ChatBotAttachment[] = [
+      { kind: "pages", from: 106, to: 114 },
+      { kind: "file", docId: "hw", title: "Homework.md" },
+      { kind: "pages", from: 120, to: 124, title: "Chapter notes" },
+    ];
+    saveChatBotAttachments("algo", attachments);
+    expect(loadChatBotAttachments("algo")).toEqual(attachments);
+    expect(loadChatBotAttachments("other")).toEqual([]);
+  });
+
+  it("migrates old problem pages and all remembered library files", () => {
+    storage.set("whiteboard.chatBotPages.refs.v1:algo", JSON.stringify({
+      problemFrom: " 104 ", problemTo: "105", files: ["hw", "notes", "a", "b", "hw", 7],
+    }));
+    expect(loadChatBotAttachments("algo")).toEqual([
+      { kind: "pages", from: 104, to: 105 },
+      ...["hw", "notes", "a", "b"].map((docId) => ({ kind: "file", docId, title: docId })),
+    ]);
+    saveChatBotAttachments("algo", []);
+    expect(loadChatBotAttachments("algo")).toEqual([]);
+  });
+
+  it("ignores malformed remembered descriptors", () => {
+    storage.set("whiteboard.chatBotPages.attachments.v2:algo", JSON.stringify([
+      null, { kind: "file", docId: 7 }, { kind: "pages", from: 5, to: 2 },
+      { kind: "pages", from: 0, to: 2 }, { kind: "pages", from: 2, to: 3 },
+    ]));
+    expect(loadChatBotAttachments("algo")).toEqual([{ kind: "pages", from: 2, to: 3 }]);
   });
 });
