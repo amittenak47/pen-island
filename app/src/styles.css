@@ -22493,3 +22493,54 @@ html[data-corners="rounded"] {
 .lc-doc-sheet.lc-footnote-overview:not([style*="--lc-fn-color"]) {
   box-shadow: 0 1px 2px rgb(0 0 0 / 10%), 0 14px 30px -16px rgb(0 0 0 / 30%);
 }
+
+/*
+ * Item chips: an item's text is a few words on a tinted chip, not a line of
+ * prose. Square like the rest of the panel; two lines at most.
+ */
+.lc-footnote-item-chip {
+  display: -webkit-inline-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: var(--lc-r-block);
+  background: color-mix(in srgb, var(--lc-fn-color, var(--accent)) 14%, transparent);
+  color: var(--lc-fn-ink, var(--ink));
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.35;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+.lc-footnote-overview .lc-footnote-overview-link-list .lc-footnote-overview-entry-hold .lc-hold-reveal-label {
+  align-items: flex-start;
+}
+
+/* A tapped note's buttons: small squares that slide in beside it. */
+.lc-footnote-overview-link-list .lc-footnote-note-row > .lc-footnote-note-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
+  padding: 0 4px;
+  white-space: nowrap;
+}
+
+.lc-footnote-overview-link-list .lc-footnote-note-actions .lc-footnote-mark-tool {
+  flex: 0 0 auto;
+  width: 26px;
+  min-width: 0;
+  height: 26px;
+  min-height: 0;
+  padding: 0;
+  border-radius: var(--lc-r-block);
+}
+
+.lc-footnote-overview-link-list .lc-footnote-note-actions .lc-footnote-mark-tool svg {
+  width: 14px;
+  height: 14px;
+}

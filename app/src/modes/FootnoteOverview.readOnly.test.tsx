@@ -54,6 +54,12 @@ afterEach(() => {
   document.body.textContent = "";
 });
 
+/** Tap a note row so its buttons slide out (they are hidden until then). */
+function reveal(n: number) {
+  if (document.querySelector(`[aria-label="Open mini note ${n}"]`)) return;
+  act(() => document.querySelector<HTMLButtonElement>(`[aria-label^="Note ${n}:"]`)!.click());
+}
+
 describe("FootnoteOverview readOnly", () => {
   it("still shows what the mark holds", () => {
     /*
@@ -92,7 +98,8 @@ describe("FootnoteOverview readOnly", () => {
       displayTheme: { color: "#0d9488", palette: ["#0d9488", "#115e59", "#5eead4", "#ccfbf1"] } });
     expect(document.querySelector('[aria-label="Add Notes"]')).not.toBeNull();
     expect(document.querySelector('[aria-label="Underline"]')).not.toBeNull();
-    act(() => document.querySelector<HTMLButtonElement>('[aria-label^="Preview note 1"]')!.click());
+    reveal(1);
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open mini note 1"]')!.click());
     await vi.waitFor(() => expect(document.querySelector('.lc-footnote-mini-note .lc-footnote-note-body')?.textContent).toContain(MARK.notes![0]!.text));
     const card = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Footnote 2"]')!;
     const mini = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Mini note 2.1"]')!;
@@ -109,6 +116,7 @@ describe("FootnoteOverview readOnly", () => {
 
   it("reads a conflict copy in a mini without offering editing or a tab of a different copy", async () => {
     const { onChange } = mount(true, { ...MARK, kind: "ai" });
+    reveal(1);
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open mini note 1"]')!.click());
     await vi.waitFor(() => expect(document.querySelector('.lc-footnote-mini-note .lc-footnote-note-body')?.textContent).toContain(MARK.notes![0]!.text));
     expect(document.querySelector('[aria-label="Edit note 1"]')).toBeNull();
@@ -119,6 +127,7 @@ describe("FootnoteOverview readOnly", () => {
   it("sends full opening to the tab owner and leaves the footnote card in place", () => {
     const onOpenFullNote = vi.fn();
     const { onChange } = mount(false, MARK, { onOpenFullNote });
+    reveal(1);
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open full note 1"]')!.click());
     expect(onOpenFullNote).toHaveBeenCalledWith("n1");
     expect(document.querySelector('[aria-label="Footnote"]')).not.toBeNull();
@@ -130,9 +139,10 @@ describe("FootnoteOverview readOnly", () => {
     mount(false, { ...MARK, notes: Array.from({ length: 4 }, (_, i) => ({
       id: `n${i + 1}`, text: `note ${i + 1}`, createdAt: 1, updatedAt: 1,
     })) });
-    const open = (n: number) => act(() => document.querySelector<HTMLButtonElement>(`[aria-label="Open mini note ${n}"]`)!.click());
+    const open = (n: number) => { reveal(n); act(() => document.querySelector<HTMLButtonElement>(`[aria-label="Open mini note ${n}"]`)!.click()); };
     open(1); open(2); open(3); open(1); open(4);
     expect(document.querySelectorAll('.lc-footnote-mini-note')).toHaveLength(3);
+    reveal(4);
     expect(document.querySelector<HTMLButtonElement>('[aria-label="Open mini note 4"]')!.disabled).toBe(true);
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="Close mini note"]')!.click());
     open(4);

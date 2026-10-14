@@ -70,11 +70,34 @@ afterEach(() => {
   vi.restoreAllMocks();
 });
 
+/** Tap a note row so its buttons slide out (they are hidden until then). */
+function reveal(n: number) {
+  if (document.querySelector(`[aria-label="Open mini note ${n}"]`)) return;
+  act(() => document.querySelector<HTMLButtonElement>(`[aria-label^="Note ${n}:"]`)!.click());
+}
+
 describe("FootnoteOverview panel", () => {
   it("shows assistant app failures on pending footnotes", () => {
     mount({ ...MARK, pending: "fr-app" }, { pendingStatus: "Codex couldn't finish. Open Settings → ChatBot → Test." });
     expect(document.querySelector('[role="status"]')?.textContent).toBe("Codex couldn't finish. Open Settings → ChatBot → Test.");
   });
+  it("shows a note as a chip; a tap slides its buttons out and a pause slides them away", async () => {
+    vi.useFakeTimers();
+    try {
+      mount(MARK);
+      expect(document.querySelector(".lc-footnote-note-row .lc-footnote-item-chip")?.textContent).toBe("a note");
+      expect(document.querySelector('[aria-label="Open mini note 1"]')).toBeNull();
+      act(() => document.querySelector<HTMLButtonElement>('[aria-label^="Note 1:"]')!.click());
+      expect(document.querySelector('[aria-label="Open mini note 1"]')).not.toBeNull();
+      expect(document.querySelector('[aria-label="Edit note 1"]')).not.toBeNull();
+      await act(async () => { vi.advanceTimersByTime(4100); });
+      vi.useRealTimers();
+      await vi.waitFor(() => expect(document.querySelector('[aria-label="Open mini note 1"]')).toBeNull());
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("replaces the ✕ with a Reset button in the tools row", () => {
     mount(MARK);
     const toolbar = document.querySelector(".lc-footnote-overview-toolbar")!;
@@ -142,6 +165,7 @@ describe("FootnoteOverview panel", () => {
     const panel = document.querySelector<HTMLElement>(".lc-footnote-overview")!;
     const original = panelPlacement(panel);
     for (let index = 1; index <= 3; index++) {
+      reveal(index);
       act(() => panel.querySelector<HTMLButtonElement>(`[aria-label="Open mini note ${index}"]`)!.click());
       expect(document.querySelectorAll(".lc-footnote-mini-note")).toHaveLength(index);
       expect(panelPlacement(panel)).toEqual(original);

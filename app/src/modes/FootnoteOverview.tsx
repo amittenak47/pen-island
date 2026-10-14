@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
-import { AnimatePresence, motion } from "motion/react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { AgentChatMessage } from "./AgentSidePanel";
 import type { ArtifactRef } from "../util/padArtifacts";
 import { ArtifactCards } from "./ArtifactCards";
@@ -46,7 +46,7 @@ import {
 import { HOLD_SENSITIVE_MS } from "../util/gesture";
 import { useFootnoteHistory } from "./footnoteHistory";
 import { pickPhotos } from "../util/photoAttach";
-import { NOTE_IMAGE_LIMIT, noteIsAi, summaryTitle } from "../util/docFootnotes";
+import { NOTE_IMAGE_LIMIT, chipTitle, noteIsAi } from "../util/docFootnotes";
 export interface FootnoteOverviewProps {
   onOpenArtifact?: (ref: ArtifactRef) => void;
   onManageArtifacts?: () => void;
@@ -1220,43 +1220,12 @@ export function FootnoteOverview({
                 {notes.length > 0 && (
                   <ul className={listClass(notes.length)}>
                     {notes.map((note, index) => (
-                      <li key={note.id} className={`lc-footnote-note-row${noteIsAi(note, footnote) ? " is-ai" : ""}`}>
-                        {noteIsAi(note, footnote) ? (
-                          <span className="lc-footnote-note-ai" title="Written by ChatBot" aria-label="Written by ChatBot">
-                            <span aria-hidden>✦</span>
-                            <span aria-hidden>AI</span>
-                          </span>
-                        ) : null}
-                        {rowsAreReadOnly ? <button type="button" className="lc-agent-scope-option lc-footnote-note-mini"
-                          aria-label={`Preview note ${index + 1}`} disabled={!canOpenMini(note.id)}
-                          onClick={() => showMini(note.id)}>
-                          {note.text && <NoteRowText text={note.text} />}
-                          <NoteImages images={note.images} />
-                        </button> : <HoldButton
-                          label={note.text || "Picture"}
-                          className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
-                          ariaLabel={`Preview note ${index + 1} — hold to delete`}
-                          holdMs={HOLD_SENSITIVE_MS}
-                          holdThrough
-                          onTap={() => showMini(note.id)}
-                          onConfirm={() =>
-                            updateNotes(notes.filter((entry) => entry.id !== note.id))
-                          }
-                        >
-                          {note.text && <NoteRowText text={note.text} />}
-                          <NoteImages images={note.images} />
-                        </HoldButton>}
-                        <div className="lc-footnote-note-actions">
-                          <button type="button" className="lc-footnote-mark-tool" aria-label={`Open mini note ${index + 1}`}
-                            disabled={!canOpenMini(note.id)} aria-pressed={activeMiniIds.includes(note.id)}
-                            title={canOpenMini(note.id) ? "Open mini note" : "Close a mini note to open another (3 maximum)"}
-                            onClick={() => showMini(note.id)}><PictureInPictureIcon /></button>
-                          {onOpenFullNote && <button type="button" className="lc-footnote-mark-tool" aria-label={`Open full note ${index + 1}`}
-                            title="Open note in tab" onClick={() => onOpenFullNote(note.id)}><ExpandNoteIcon /></button>}
-                          {!readOnly && <button type="button" className="lc-footnote-mark-tool" aria-label={`Edit note ${index + 1}`}
-                            title="Edit note" onClick={() => openTask({ kind: "note", id: note.id })}><PenToolIcon /></button>}
-                        </div>
-                      </li>
+                      <NoteRow key={note.id} note={note} index={index} ai={noteIsAi(note, footnote)}
+                        readOnly={rowsAreReadOnly} canOpenMini={canOpenMini(note.id)} miniOpen={activeMiniIds.includes(note.id)}
+                        onShowMini={() => showMini(note.id)}
+                        onOpenFull={onOpenFullNote ? () => onOpenFullNote(note.id) : undefined}
+                        onEdit={readOnly ? undefined : () => openTask({ kind: "note", id: note.id })}
+                        onDelete={() => updateNotes(notes.filter((entry) => entry.id !== note.id))} />
                     ))}
                   </ul>
                 )}
@@ -1331,7 +1300,7 @@ export function FootnoteOverview({
                             openTask({ kind: "thread", rootId: thread.rootId });
                           }}
                         >
-                          <strong className="lc-footnote-overview-entry-text">{summaryTitle(thread.title).title || thread.title}</strong>
+                          <span className="lc-footnote-item-chip">{chipTitle(thread.title) || thread.title}</span>
                         </HoldButton>
                       </li>
                     ))}
@@ -1421,13 +1390,85 @@ function ThreadBubble() {
   );
 }
 
-/** A note row: a short title, then one muted line of what follows. */
-function NoteRowText({ text }: { text: string }) {
-  const { title, detail } = summaryTitle(text);
-  return <>
-    <strong className="lc-footnote-overview-entry-text">{title || plainPreview(text)}</strong>
-    {detail ? <span className="lc-footnote-overview-entry-detail">{detail}</span> : null}
+/** How long a tapped note keeps its buttons out with nothing touched. */
+export const NOTE_ACTIONS_IDLE_MS = 4000;
+
+/**
+ * A note in the hub: a full-width row whose text is a short chip.
+ *
+ * Tapping it slides the row in from the right and shows the note's three
+ * buttons (mini note, full note, edit) as small squares beside it; after a
+ * few seconds untouched it slides back. Holding still deletes.
+ */
+function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini, onOpenFull, onEdit, onDelete }: {
+  note: DocFootnoteNote;
+  index: number;
+  ai: boolean;
+  readOnly: boolean;
+  canOpenMini: boolean;
+  miniOpen: boolean;
+  onShowMini: () => void;
+  onOpenFull?: () => void;
+  onEdit?: () => void;
+  onDelete: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const idle = useRef(0);
+  const reduce = useReducedMotion();
+  const keepOpen = useCallback(() => {
+    window.clearTimeout(idle.current);
+    idle.current = window.setTimeout(() => setOpen(false), NOTE_ACTIONS_IDLE_MS);
+  }, []);
+  useEffect(() => () => window.clearTimeout(idle.current), []);
+  const toggle = () => setOpen((value) => {
+    if (value) window.clearTimeout(idle.current); else keepOpen();
+    return !value;
+  });
+  const chip = <>
+    {note.text ? <span className="lc-footnote-item-chip">{chipTitle(note.text) || plainPreview(note.text)}</span> : null}
+    <NoteImages images={note.images} />
   </>;
+  return (
+    <li className={`lc-footnote-note-row${ai ? " is-ai" : ""}${open ? " is-open" : ""}`}
+      onPointerDownCapture={open ? keepOpen : undefined} onFocusCapture={open ? keepOpen : undefined}>
+      {ai ? (
+        <span className="lc-footnote-note-ai" title="Written by ChatBot" aria-label="Written by ChatBot">
+          <span aria-hidden>✦</span>
+          <span aria-hidden>AI</span>
+        </span>
+      ) : null}
+      {readOnly ? (
+        <button type="button" className="lc-agent-scope-option lc-footnote-note-mini" aria-expanded={open}
+          aria-label={`Note ${index + 1}: ${plainPreview(note.text)}. Tap for its buttons`} onClick={toggle}>{chip}</button>
+      ) : (
+        <HoldButton
+          label={note.text || "Picture"}
+          className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
+          ariaLabel={`Note ${index + 1}: ${note.text ? plainPreview(note.text) : "picture"}. Tap for its buttons, hold to delete`}
+          holdMs={HOLD_SENSITIVE_MS}
+          holdThrough
+          onTap={toggle}
+          onConfirm={onDelete}
+        >{chip}</HoldButton>
+      )}
+      <AnimatePresence initial={false}>
+        {open ? (
+          <motion.div key="actions" className="lc-footnote-note-actions"
+            initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }}
+            transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 40, mass: 0.7 }}>
+            <button type="button" className="lc-footnote-mark-tool" aria-label={`Open mini note ${index + 1}`}
+              disabled={!canOpenMini} aria-pressed={miniOpen}
+              title={canOpenMini ? "Open mini note" : "Close a mini note to open another (3 maximum)"}
+              onClick={onShowMini}><PictureInPictureIcon /></button>
+            {onOpenFull ? <button type="button" className="lc-footnote-mark-tool" aria-label={`Open full note ${index + 1}`}
+              title="Open note in tab" onClick={onOpenFull}><ExpandNoteIcon /></button> : null}
+            {onEdit ? <button type="button" className="lc-footnote-mark-tool" aria-label={`Edit note ${index + 1}`}
+              title="Edit note" onClick={onEdit}><PenToolIcon /></button> : null}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+    </li>
+  );
 }
 
 /** A note row shows plain words: markdown emphasis, code ticks and link syntax dropped. */

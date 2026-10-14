@@ -437,6 +437,32 @@ export function summaryTitle(text: string, maxWords = 8): { title: string; detai
 }
 
 /**
+ * The few words on an item's chip.
+ *
+ * A label the text starts with stays ("Think about it"), and a problem list
+ * is folded into it while it is short ("Helps with 3.3(c), 3.3(d)").
+ * Otherwise the first sentence, cut at its first natural break (a comma,
+ * colon or dash) when that leaves a phrase, and only then at `maxWords`.
+ */
+export function chipTitle(text: string, maxWords = 5): string {
+  const { title, detail } = summaryTitle(text, 40);
+  if (!title) return "";
+  if (detail && /^helps with$/i.test(title)) {
+    const compact = detail.replace(/\bexercises?\s+/gi, "").replace(/\s+/g, " ").trim();
+    return compact.length <= 22 ? `${title} ${compact}` : title;
+  }
+  const words = title.replace(/[.?!…]$/, "").split(" ");
+  // A short whole sentence reads better than a clipped one.
+  if (words.length <= maxWords + 2) return title.replace(/\.$/, "");
+  const phrase = /^([^,;:—–]+?)\s*[,;:—–]/.exec(title)?.[1]?.trim();
+  if (phrase && phrase.split(" ").length >= 2 && phrase.split(" ").length <= maxWords + 1) return phrase;
+  const kept = words.slice(0, maxWords);
+  // Never end on a joining word ("…opposite to…").
+  while (kept.length > 2 && /^(a|an|the|to|of|and|or|in|on|for|with|by|at|is|are|that)$/i.test(kept[kept.length - 1]!)) kept.pop();
+  return `${kept.join(" ")}…`;
+}
+
+/**
  * A one-line label for a saved thread, from what the reader asked.
  *
  * First line only, and short: the list is meant to be scanned, and a row that
