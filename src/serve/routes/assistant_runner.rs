@@ -34,6 +34,42 @@ pub async fn get_assistant_runner() -> Result<Json<AssistantRunnerStatus>, AppEr
     Ok(Json(assistant_runner::status()))
 }
 
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct StartBody {
+    #[serde(default)]
+    pub job_id: Option<String>,
+}
+
+/// An assistant bot hands its pending work (or one page run) to the app on this PC.
+///
+/// Refused unless the reader switched it on: this is the one way a request
+/// from outside the PC can start a local program, and the program it starts
+/// is the same bounded run the app mode uses.
+pub async fn start_assistant_runner(State(state): State<Shared>, body: Option<Json<StartBody>>) -> Result<Json<serde_json::Value>, AppError> {
+    desktop()?;
+    if !state.cfg_snapshot().assistant_app.allow_bots {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "Handing work to an app on this PC is off. Turn it on in Settings, ChatBot, on the PC."
+        )));
+    }
+    let job_id = body.and_then(|Json(body)| body.job_id).filter(|id| !id.is_empty());
+    if job_id.as_deref().is_some_and(|id| !crate::pads::footnotes::valid_id(id)) {
+        return Err(AppError::bad_request(anyhow::anyhow!("job_id must be a page run id from list_annotation_jobs")));
+    }
+    let job = job_id.clone();
+    let handed = super::blocking(move || {
+        let conn = crate::pads::open(&crate::pads::db_path()?)?;
+        match job {
+            Some(id) => crate::pads::annotation_jobs::hand_over_to_app(&conn, &id).map(|_| 1).map_err(super::footnotes::into_anyhow),
+            None => crate::pads::footnotes::hand_over_pending_to_app(&conn).map_err(super::footnotes::into_anyhow),
+        }
+    })
+    .await
+    .map_err(super::footnotes::map_store_error)?;
+    assistant_runner::schedule(job_id.as_deref());
+    Ok(Json(serde_json::json!({ "started": true, "handed_over": handed, "status": assistant_runner::status() })))
+}
+
 pub async fn test_assistant_runner(State(state): State<Shared>, body: Option<Json<AssistantAppConfig>>) -> Result<Json<AssistantRunnerStatus>, AppError> {
     desktop()?;
     let config = body.map(|Json(config)| config).unwrap_or_else(|| state.cfg_snapshot().assistant_app);

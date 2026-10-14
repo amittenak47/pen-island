@@ -25,7 +25,7 @@ from fastmcp import FastMCP
 from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.auth import AuthContext
 from fastmcp.server.auth.providers.github import GitHubProvider
-from fastmcp.server.middleware import AuthMiddleware
+from fastmcp.server.middleware import AuthMiddleware, Middleware
 from fastmcp.server.providers.proxy import ProxyClient
 from fastmcp.tools import ToolResult
 from key_value.aio.stores.filetree import FileTreeStore
@@ -41,6 +41,8 @@ TOOLS = frozenset({
     "list_annotation_jobs", "get_annotation_pages", "get_annotation_reference",
     "submit_page_annotations", "finish_annotation_job",
 })
+HANDOFF_TOOLS = frozenset({"start_assistant_app", "assistant_app_status"})
+TOOLS = TOOLS | HANDOFF_TOOLS
 # Keep in step with WORKFLOW and INSTRUCTIONS in src/mcp.rs: the bridge sends
 # these when an assistant connects, before any call reaches `lc mcp`.
 WORKFLOW = (
@@ -256,9 +258,21 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
         mode="legacy",
         timeout=30.0,
     )
+    class HandoffGate(Middleware):
+        """Offer the hand-off tools only while `lc mcp` does (the reader's Settings switch)."""
+
+        async def on_list_tools(self, context, call_next):
+            tools = await call_next(context)
+            try:
+                async with backend.new() as client:
+                    offered = {tool.name for tool in await client.list_tools()}
+            except Exception:
+                offered = set()
+            return [tool for tool in tools if tool.name not in HANDOFF_TOOLS or tool.name in offered]
+
     bridge = FastMCP(
         "Pen Island ChatBot", instructions=INSTRUCTIONS, version="1.0.0",
-        auth=auth, middleware=[AuthMiddleware(auth=owner_check(config.github_owner_id))],
+        auth=auth, middleware=[AuthMiddleware(auth=owner_check(config.github_owner_id)), HandoffGate()],
         mask_error_details=True,
     )
 
@@ -376,6 +390,18 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     async def finish_annotation_job(job_id: str, summary: str = "") -> ToolResult:
         """Mark an annotation job finished, with a short summary for the reader."""
         return await relay("finish_annotation_job", {"job_id": job_id, "summary": summary})
+
+    @bridge.tool(name="start_assistant_app", output_schema=None,
+                 annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+    async def start_assistant_app(job_id: str | None = None) -> ToolResult:
+        """Hand the writing to the assistant app on the reader's PC (Codex or Claude Code, on their own subscription) instead of writing the footnotes yourself. Without job_id it takes every pending footnote request; with job_id it takes that page run. It runs in the background and takes minutes: call assistant_app_status every 30-60 seconds until state is done or failed, then tell the reader how it went. Use it when the reader asks you to use Codex, Claude Code or their PC."""
+        return await relay("start_assistant_app", {} if job_id is None else {"job_id": job_id})
+
+    @bridge.tool(name="assistant_app_status", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def assistant_app_status() -> ToolResult:
+        """Progress of the assistant app on the reader's PC: state (idle, running, done or failed), start and finish times, the page run, requests answered, and any error."""
+        return await relay("assistant_app_status", {})
 
     return bridge
 

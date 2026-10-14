@@ -506,6 +506,14 @@ pub fn list_pending_llm(conn: &Connection, device: Option<&str>) -> Result<Vec<F
 }
 
 /// Automatic assistant runs never claim requests waiting for a bot or model.
+/// An assistant bot asked the app on this PC to write its pending requests.
+pub fn hand_over_pending_to_app(conn: &Connection) -> Result<usize, FootnoteFail> {
+    Ok(conn.execute(
+        "UPDATE footnote_requests SET answer_mode = 'app' WHERE status = 'pending' AND answer_mode = 'bot'",
+        [],
+    )?)
+}
+
 pub fn list_pending_app(conn: &Connection) -> Result<Vec<FootnoteRequest>, FootnoteFail> {
     let mut stmt = conn.prepare("SELECT id FROM footnote_requests WHERE status='pending' AND answer_mode='app'
         ORDER BY created_at, id LIMIT ?1")?;

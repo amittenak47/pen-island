@@ -137,6 +137,7 @@ pub fn router(state: Shared) -> Router {
         .route("/assistant-runner", get(routes::get_assistant_runner))
         .route("/assistant-runner/config", get(routes::get_assistant_runner_config).put(routes::put_assistant_runner_config))
         .route("/assistant-runner/test", post(routes::test_assistant_runner))
+        .route("/assistant-runner/start", post(routes::start_assistant_runner))
         .route("/problems", get(routes::list_problems))
         .route("/datasets", get(routes::list_datasets))
         .route("/tags", get(routes::list_tags))

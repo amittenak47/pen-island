@@ -410,6 +410,18 @@ pub fn list_open(conn: &Connection) -> Result<Vec<JobSummary>, FootnoteFail> {
     summaries(conn, "SELECT id FROM annotation_jobs WHERE status = 'open' ORDER BY created_at ASC, id ASC LIMIT 20", &[])
 }
 
+/// An assistant bot asked the app on this PC to write this open page run.
+pub fn hand_over_to_app(conn: &Connection, id: &str) -> Result<(), FootnoteFail> {
+    let changed = conn.execute(
+        "UPDATE annotation_jobs SET answer_mode = 'app' WHERE id = ?1 AND status = 'open'",
+        params![id],
+    )?;
+    if changed == 0 {
+        return Err(FootnoteFail::Invalid(format!("{id} is not an open page run")));
+    }
+    Ok(())
+}
+
 /// Pending page runs reserved for the automatic assistant app.
 pub fn list_open_app(conn: &Connection) -> Result<Vec<JobSummary>, FootnoteFail> {
     summaries(conn, "SELECT id FROM annotation_jobs WHERE status = 'open' AND answer_mode = 'app' ORDER BY created_at ASC, id ASC LIMIT 20", &[])
@@ -825,6 +837,18 @@ mod tests {
         assert_eq!(done.answer_mode, AnswerMode::App);
         assert_eq!(done.status, "done");
         assert_eq!(done.summary.as_deref(), Some("Automatic notes"));
+    }
+
+    #[test]
+    fn a_bot_can_hand_one_open_run_to_the_app() {
+        let (_dir, conn) = open();
+        create_job(&conn, job("aj-hand"), 1).unwrap();
+        assert!(list_open_app(&conn).unwrap().is_empty());
+        hand_over_to_app(&conn, "aj-hand").unwrap();
+        assert_eq!(list_open_app(&conn).unwrap()[0].id, "aj-hand");
+        finish_job(&conn, "aj-hand", "done", 2).unwrap();
+        assert!(matches!(hand_over_to_app(&conn, "aj-hand"), Err(FootnoteFail::Invalid(_))));
+        assert!(matches!(hand_over_to_app(&conn, "aj-none"), Err(FootnoteFail::Invalid(_))));
     }
 
     #[test]

@@ -1657,6 +1657,31 @@ export function SettingsModal({
   const modelListHint = modelHint(catalog, catalogBusy, provider.model.trim(), selectedModel);
   const visionHint = visionEvidence(catalog, selectedModel, provider.vision === true);
   const searching = Boolean(settingsQuery.trim());
+  /** App, model, effort and Test for the assistant app on this PC. */
+  const renderRunnerFields = (config: AssistantRunnerConfig) => (
+    <div className="lc-settings-fields">
+        <p className="lc-settings-hint">These settings are saved on your PC.</p>
+        <label><span>App</span><select aria-label="Assistant app" value={config.app}
+          onChange={event => setRunnerConfig({ ...config, app: event.target.value as AssistantRunnerConfig["app"] })}>
+          <option value="codex">Codex</option><option value="claude">Claude Code</option>
+        </select></label>
+        <label><span>Model (optional)</span><input aria-label="Assistant app model" value={config.model} maxLength={200}
+          placeholder="Use the app's default" onChange={event => setRunnerConfig({ ...config, model: event.target.value })} /></label>
+        {config.app === "codex" ? <label><span>Effort</span><select aria-label="Assistant app effort" value={config.effort}
+          onChange={event => setRunnerConfig({ ...config, effort: event.target.value as AssistantRunnerConfig["effort"] })}>
+          <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+        </select></label> : null}
+        <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" disabled={runnerTesting || saving}
+          onClick={() => {
+            setRunnerTesting(true); setRunnerError(null);
+            void client.testAssistantRunner(config).then(setRunnerStatus).catch(() => {
+              setRunnerError("The assistant app couldn't finish its check. Make sure it is installed and signed in on your PC.");
+            }).finally(() => setRunnerTesting(false));
+          }}>{runnerTesting ? "Testing…" : "Test"}</button></div>
+        <p className="lc-settings-hint">Test checks the connection without answering requests.</p>
+      </div>
+  );
+
   return <DialogPresence>{open && (
     <DialogBackdrop className="lc-settings-backdrop" role="presentation"
       onPointerDown={e=>{backdropDown.current=e.target===e.currentTarget;}}
@@ -3367,27 +3392,7 @@ export function SettingsModal({
                   {chatBotAnswerMode === "llm" ? <p className="lc-settings-hint">A local model or a cloud API key. Quick; fine for single footnotes.</p>
                     : chatBotAnswerMode === "app" ? <>
                       <p className="lc-settings-hint">Codex or Claude Code. Runs automatically when you ask for a footnote, using your subscription's limits.</p>
-                      {runnerConfig ? <div className="lc-settings-fields">
-                        <p className="lc-settings-hint">These settings are saved on your PC.</p>
-                        <label><span>App</span><select aria-label="Assistant app" value={runnerConfig.app}
-                          onChange={event => setRunnerConfig({ ...runnerConfig, app: event.target.value as AssistantRunnerConfig["app"] })}>
-                          <option value="codex">Codex</option><option value="claude">Claude Code</option>
-                        </select></label>
-                        <label><span>Model (optional)</span><input aria-label="Assistant app model" value={runnerConfig.model} maxLength={200}
-                          placeholder="Use the app's default" onChange={event => setRunnerConfig({ ...runnerConfig, model: event.target.value })} /></label>
-                        {runnerConfig.app === "codex" ? <label><span>Effort</span><select aria-label="Assistant app effort" value={runnerConfig.effort}
-                          onChange={event => setRunnerConfig({ ...runnerConfig, effort: event.target.value as AssistantRunnerConfig["effort"] })}>
-                          <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
-                        </select></label> : null}
-                        <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" disabled={runnerTesting || saving}
-                          onClick={() => {
-                            setRunnerTesting(true); setRunnerError(null);
-                            void client.testAssistantRunner(runnerConfig).then(setRunnerStatus).catch(() => {
-                              setRunnerError("The assistant app couldn't finish its check. Make sure it is installed and signed in on your PC.");
-                            }).finally(() => setRunnerTesting(false));
-                          }}>{runnerTesting ? "Testing…" : "Test"}</button></div>
-                        <p className="lc-settings-hint">Test checks the connection without answering requests.</p>
-                      </div> : null}
+                      {runnerConfig ? renderRunnerFields(runnerConfig) : null}
                       {runnerStatus ? <p className="lc-settings-hint" role="status">{assistantRunnerMessage(runnerStatus)}</p> : null}
                       {runnerError ? <p className="lc-settings-hint" role="alert">{runnerError}</p> : null}
                     </> : <>
@@ -3399,6 +3404,16 @@ export function SettingsModal({
                   </label>
                   <p className="lc-settings-hint">{CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.help}</p>
                   <p className="lc-settings-hint">Connect the assistant in its own app. Every connected assistant sees the same list of requests.</p>
+                  {runnerConfig ? <SettingsChoices className="lc-settings-choice">
+                    <button type="button" role="switch" aria-checked={runnerConfig.allow_bots}
+                      className={runnerConfig.allow_bots ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                      onClick={() => setRunnerConfig({ ...runnerConfig, allow_bots: !runnerConfig.allow_bots })}>
+                      <strong>Let it hand the writing to an app on this PC</strong>
+                      <span className="lc-muted">Ask your assistant to “use Codex”, and Codex or Claude Code writes the footnotes with your subscription.</span>
+                    </button>
+                  </SettingsChoices> : null}
+                  {runnerConfig?.allow_bots ? renderRunnerFields(runnerConfig) : null}
+                  {runnerStatus && runnerConfig?.allow_bots ? <p className="lc-settings-hint" role="status">{assistantRunnerMessage(runnerStatus)}</p> : null}
                   <details className="lc-settings-advanced">
                     <summary>Advanced: connection commands</summary>
                     <label><span>Command for assistants on this PC</span><input readOnly value="lc mcp" /></label>

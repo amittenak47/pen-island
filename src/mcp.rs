@@ -46,6 +46,8 @@ pub trait FootnoteHub {
     /// Any other hub route (annotation jobs), relative to the hub base.
     fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String>;
     fn automatic_inbox(&self) -> bool { false }
+    /// Whether the reader lets an assistant bot hand work to the app on this PC.
+    fn bot_handoff_allowed(&self) -> bool { false }
 }
 
 /// Automatic runs cannot consume bot-mode requests or another page run.
@@ -156,6 +158,10 @@ impl FootnoteHub for HttpFootnoteHub {
 
     fn get(&self, id: &str) -> Result<Value, String> {
         self.send(self.client.get(format!("{}/footnote-requests/{id}", self.base)))
+    }
+
+    fn bot_handoff_allowed(&self) -> bool {
+        self.call("GET", "/assistant-runner/config", None).is_ok_and(|config| config["allow_bots"] == true)
     }
 
     fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
@@ -305,6 +311,7 @@ pub fn dispatch(hub: &dyn FootnoteHub, message: &Value) -> Option<Value> {
         "tools/list" => {
             let mut tools = tool_list();
             if hub.automatic_inbox() { tools.retain(|tool| crate::serve::assistant_runner::MCP_TOOLS.contains(&tool["name"].as_str().unwrap_or(""))); }
+            else if hub.bot_handoff_allowed() { tools.extend(handoff_tools()); }
             result_reply(id, json!({ "tools": tools }))
         },
         "prompts/list" => result_reply(id, json!({ "prompts": prompt_list() })),
@@ -529,6 +536,28 @@ fn tool_list() -> Vec<Value> {
     ]
 }
 
+/// Offered to assistant bots only while the reader allows it (Settings, ChatBot).
+fn handoff_tools() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "start_assistant_app",
+            "annotations": { "readOnlyHint": false, "destructiveHint": false, "openWorldHint": false },
+            "description": "Hand the writing to the assistant app on the reader's PC (Codex or Claude Code, on their own subscription), instead of writing the footnotes yourself. Without job_id it takes every pending footnote request; with job_id it takes that page run. It runs in the background and takes minutes: call assistant_app_status every 30-60 seconds until state is done or failed, then tell the reader how it went. Use it when the reader asks you to use Codex, Claude Code or their PC.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "job_id": { "type": "string", "description": "A page run id from list_annotation_jobs." } },
+                "additionalProperties": false,
+            },
+        }),
+        json!({
+            "name": "assistant_app_status",
+            "annotations": { "readOnlyHint": true, "openWorldHint": false },
+            "description": "Progress of the assistant app on the reader's PC: state (idle, running, done or failed), when it started and finished, the page run, requests answered, and any error.",
+            "inputSchema": { "type": "object", "properties": {}, "additionalProperties": false },
+        }),
+    ]
+}
+
 fn call_tool(hub: &dyn FootnoteHub, params: &Value) -> Value {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
@@ -562,6 +591,14 @@ fn call_tool(hub: &dyn FootnoteHub, params: &Value) -> Value {
             let summary = arguments.get("summary").and_then(Value::as_str).unwrap_or("");
             hub.call("POST", &format!("/annotation-jobs/{id}/finish"), Some(json!({ "summary": summary })))
         }),
+        "start_assistant_app" if !hub.automatic_inbox() => {
+            let body = match arguments.get("job_id") {
+                None | Some(Value::Null) => Ok(json!({})),
+                Some(_) => job_id(&arguments).map(|id| json!({ "job_id": id })),
+            };
+            body.and_then(|body| hub.call("POST", "/assistant-runner/start", Some(body)))
+        }
+        "assistant_app_status" if !hub.automatic_inbox() => hub.call("GET", "/assistant-runner", None),
         _ => Err(format!("unknown tool {name}")),
     };
     match outcome {
@@ -984,5 +1021,75 @@ mod tests {
         let stored = hub.submits.lock().unwrap();
         assert_eq!(stored[0].0, "fr-1");
         assert_eq!(stored[0].1, ["A lemma is a stepping stone."]);
+    }
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use super::*;
+    use std::sync::Mutex;
+
+    /// A hub that records calls; `allow` is the reader's Settings switch.
+    struct Hub {
+        allow: bool,
+        calls: Mutex<Vec<(String, String, Option<Value>)>>,
+    }
+
+    impl FootnoteHub for Hub {
+        fn list_pending(&self) -> Result<Value, String> { Ok(json!([])) }
+        fn get(&self, _id: &str) -> Result<Value, String> { Err("none".into()) }
+        fn submit(&self, _id: &str, _submission: &FootnoteSubmission) -> Result<Value, String> { Ok(json!({})) }
+        fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+            self.calls.lock().unwrap().push((method.into(), path.into(), body));
+            Ok(json!({ "ok": true }))
+        }
+        fn bot_handoff_allowed(&self) -> bool { self.allow }
+    }
+
+    fn hub(allow: bool) -> Hub { Hub { allow, calls: Mutex::new(Vec::new()) } }
+
+    fn names(hub: &dyn FootnoteHub) -> Vec<String> {
+        let listed = dispatch(hub, &json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {} })).unwrap();
+        listed["result"]["tools"].as_array().unwrap().iter().map(|tool| tool["name"].as_str().unwrap().to_string()).collect()
+    }
+
+    fn call(hub: &dyn FootnoteHub, name: &str, arguments: Value) -> Value {
+        dispatch(hub, &json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/call", "params": { "name": name, "arguments": arguments } })).unwrap()
+    }
+
+    #[test]
+    fn handoff_tools_appear_only_when_the_reader_allows_them() {
+        assert!(!names(&hub(false)).iter().any(|name| name == "start_assistant_app"));
+        let allowed = names(&hub(true));
+        assert!(allowed.iter().any(|name| name == "start_assistant_app"));
+        assert!(allowed.iter().any(|name| name == "assistant_app_status"));
+    }
+
+    #[test]
+    fn handoff_tools_reach_the_start_and_status_routes() {
+        let hub = hub(true);
+        call(&hub, "start_assistant_app", json!({}));
+        call(&hub, "start_assistant_app", json!({ "job_id": "aj-1" }));
+        call(&hub, "assistant_app_status", json!({}));
+        let bad = call(&hub, "start_assistant_app", json!({ "job_id": "../x" }));
+        assert_eq!(bad["result"]["isError"], true);
+        let calls = hub.calls.lock().unwrap();
+        assert_eq!((calls[0].0.as_str(), calls[0].1.as_str()), ("POST", "/assistant-runner/start"));
+        assert_eq!(calls[0].2, Some(json!({})));
+        assert_eq!(calls[1].2, Some(json!({ "job_id": "aj-1" })));
+        assert_eq!((calls[2].0.as_str(), calls[2].1.as_str()), ("GET", "/assistant-runner"));
+        assert_eq!(calls.len(), 3);
+    }
+
+    #[test]
+    fn an_app_run_can_never_start_another_run() {
+        // Even with the switch on underneath, the app's own tool server hides
+        // the hand-off tools and refuses to call them.
+        let app = AppFootnoteHub::new(hub(true), Some("aj-1".into()), false).unwrap();
+        let listed = names(&app);
+        assert!(!listed.iter().any(|name| name.contains("assistant")));
+        let refused = call(&app, "start_assistant_app", json!({}));
+        assert_eq!(refused["result"]["isError"], true);
+        assert!(app.hub.calls.lock().unwrap().is_empty());
     }
 }

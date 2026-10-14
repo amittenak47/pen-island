@@ -80,3 +80,17 @@ it("keeps app mode unsaved when desktop settings cannot be written", async () =>
   expect(loadChatBotAnswerMode()).toBe("bot"); expect(host.textContent).toContain("Desktop unavailable");
   await act(async () => button("Save").click()); expect(loadChatBotAnswerMode()).toBe("app");
 });
+
+it("lets an assistant bot hand the writing to an app on this PC, off by default", async () => {
+  const api = client(); await open(api);
+  const toggle = () => [...host.querySelectorAll<HTMLButtonElement>('button[role="switch"]')]
+    .find(node => node.textContent?.includes("hand the writing"))!;
+  expect(toggle().getAttribute("aria-checked")).toBe("false");
+  expect(host.querySelector('[aria-label="Assistant app"]')).toBeNull();
+  await act(async () => toggle().click());
+  expect(toggle().getAttribute("aria-checked")).toBe("true");
+  expect(host.querySelector('[aria-label="Assistant app"]')).not.toBeNull();
+  await act(async () => button("Save").click());
+  expect(api.putAssistantRunnerConfig).toHaveBeenCalledWith({ app: "codex", model: "desktop-model", effort: "high", allow_bots: true });
+  expect(loadChatBotAnswerMode()).toBe("bot");
+});
