@@ -317,6 +317,22 @@ mod footnote_tests {
     }
 
     #[test]
+    fn a_field_that_repeats_the_excerpt_is_refused_without_mark_text() {
+        let (_dir, conn) = open();
+        let mut body = sample("fr-copy", "dev-a");
+        body.excerpt = "Mr. Darcy bowed coldly and said nothing.".into();
+        body.extras.reading = crate::pads::reading::ReadingStyle {
+            kind: "story".into(), fields: vec!["Context".into()], fill: "best".into(), preset: String::new(),
+        };
+        footnotes::create_request(&conn, body, 1).unwrap();
+        let copy = footnotes::FootnoteSubmission {
+            fields: vec![footnotes::NoteField { label: "Context".into(), text: "Mr. Darcy bowed coldly and said nothing.".into() }],
+            ..Default::default()
+        };
+        assert!(matches!(footnotes::submit_answer(&conn, "fr-copy", &copy, 2), Err(FootnoteFail::Invalid(_))));
+    }
+
+    #[test]
     fn rich_answers_are_checked_against_the_request() {
         let (_dir, conn) = open();
         footnotes::create_request(&conn, rich_sample("fr-check"), 1).unwrap();

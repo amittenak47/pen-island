@@ -575,7 +575,13 @@ pub fn submit_answer(
     now: i64,
 ) -> Result<(), FootnoteFail> {
     transact(conn, || {
-        let extras = get_request(conn, id)?.map(|request| request.extras);
+        // Fields are checked against the marked text, or the excerpt when a
+        // client sent none, so an answer can't just repeat the passage.
+        let extras = get_request(conn, id)?.map(|request| {
+            let mut extras = request.extras;
+            if extras.mark_text.is_empty() { extras.mark_text = request.excerpt; }
+            extras
+        });
         let result = validate_submission(submission, extras.as_ref()).map_err(FootnoteFail::Invalid)?;
         let stored = serde_json::to_string(&result)?;
         let status: Option<String> = conn
