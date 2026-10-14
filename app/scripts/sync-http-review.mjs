@@ -98,14 +98,19 @@ try {
     } catch {await sleep(100);}
   }
   const a=await browser("http-a"),b=await browser("http-b");
+  await a.call("transfers",true);
   const initial=await a.call("seed");
+  const stages=await a.call("transfers",false);assert.equal(stages.peak,4);assert.equal(stages.completed.length,42);
   const initialHead=await a.call("head"); assert.equal(initialHead.state,"live"); assert.equal(initialHead.pages.length,42);
   assert(initialHead.book_rev>initialHead.record_rev); assert(initialHead.pages.every(page=>page.rev>0&&page.hash));
   await b.call("failPage",17);
   await assert.rejects(()=>b.call("discover"));
   assert.equal(await b.call("hasDocument"),false,"incomplete import exposed a document without its ink");
   await b.call("failPage",null);await b.call("traffic",true);
+  await b.call("transfers",true);
   const received=await b.call("discover");assert.deepEqual(received,initial);
+  const downloads=await b.call("transfers",false);assert.equal(downloads.peak,4);assert.equal(downloads.completed.length,42);
+  assert.notDeepEqual(downloads.completed.slice(0,4),[1,2,3,4],"responses were not reordered");
   const imports=(await b.call("traffic")).filter(url=>url.includes("/pads/ink/"));
   assert.equal(imports.length,42);assert(imports.every(url=>url.includes("book_rev=")&&url.includes("page_rev=")),"reads must pin both revisions");
   assert.equal(received.scratchInk.ops.length,12);

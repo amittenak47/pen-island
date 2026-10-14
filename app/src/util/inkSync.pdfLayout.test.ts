@@ -155,7 +155,8 @@ describe("PDF ink through atomic two-device sync", () => {
     const spanning = { ...pdfStroke(pdfSizes, tabletLayout, pageId), points: [
       pdfPoint(pdfSizes, tabletLayout, 45, "left", .3, .8), pdfPoint(pdfSizes, tabletLayout, 46, "left", .3, .2),
     ] };
-    for (const [id, encoded] of [[0, encodeInkOps([spanning])], [pageId, sheet]] as const) {
+    const siblings = Array.from({ length: 6 }, (_, i) => [pageId + i, i ? encodeInkOps([pdfStroke(pdfSizes, tabletLayout, pageId + i)]) : sheet] as const);
+    for (const [id, encoded] of [[0, encodeInkOps([spanning])], ...siblings] as const) {
       const packed = packEncodedInk(encoded), wire = await validateInk(packed);
       pages.set(id, { kind: owner.kind, key: owner.id, page_id: id, rev: ++revision, hash: wire.wireHash, updated_at: 456, gz: bytesToB64(packed) });
     }
@@ -163,8 +164,16 @@ describe("PDF ink through atomic two-device sync", () => {
     const state = (record.board as { appState: { pdfWidth?: number } }).appState;
     if (hint == null) delete state.pdfWidth; else state.pdfWidth = hint;
     head = { ...head, record, record_hash: await recordHash(record), record_rev: ++revision, book_rev: revision,
-      pages: [pages.get(0)!, pages.get(pageId)!].map(row => ({ key: row.key, page_id: row.page_id, rev: row.rev!, hash: row.hash! })) };
+      pages: [...pages.values()].map(row => ({ key: row.key, page_id: row.page_id, rev: row.rev!, hash: row.hash! })) };
+    // Page 0 returns first; the sheets finish in reverse order across several
+    // request waves. It must still use their inferred source layout, once.
+    const get = vi.mocked(api.getInkPage).getMockImplementation()!;
+    vi.mocked(api.getInkPage).mockImplementation(async (...args) => {
+      await new Promise(resolve => setTimeout(resolve, args[2] === 0 ? 0 : 52 - args[2])); return get(...args);
+    });
+    vi.mocked(api.getInkPage).mockClear();
     expect((await sync()).status).toBe("synced");
+    expect(vi.mocked(api.getInkPage).mock.calls.map(call => call[2]).sort((a, b) => a - b)).toEqual([0, 45, 46, 47, 48, 49, 50]);
     const ink = (await encodedFromRecord((await getInkPageRecord(docKey, 0))!))!;
     const ops = decodeInkOps(ink);
     expectSpanningSheets(ops);

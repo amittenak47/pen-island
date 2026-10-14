@@ -60,7 +60,7 @@ function inkPageOf(url:string,init?:RequestInit):number|null {
 }
 let heldBarrier: { point: string; entered: boolean; promise: Promise<void>; release():void } | null = null;
 async function barrier(point: string) {const held=heldBarrier;if(held?.point===point) {held.entered=true;await held.promise;}}
-window.fetch = async (input,init) => {
+async function hubFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const url=String(input); requests.push(url);
   if(url.endsWith("/pads/commit")&&init?.method==="POST")await barrier("commit");
   if(url.includes("/pads/ink/")&&(init?.method??"GET")==="GET")await barrier("read");
@@ -78,6 +78,19 @@ window.fetch = async (input,init) => {
     await new Promise<void>(resolve=>hung.push(resolve));
   }
   return nativeFetch(input,init);
+}
+let measureTransfers = false, activeTransfers = 0, peakTransfers = 0;
+let completedTransfers: number[] = [];
+window.fetch = async (input, init) => {
+  const match = String(input).match(/\/pads\/(?:ink|stage\/[^/]+)\/annotate\/[^?]+\/(\d+)(?:\?|$)/);
+  const page = match ? Number(match[1]) : null;
+  if (!measureTransfers || page == null) return hubFetch(input, init);
+  peakTransfers = Math.max(peakTransfers, ++activeTransfers);
+  try {
+    const response = await hubFetch(input, init);
+    await new Promise(resolve => setTimeout(resolve, (4 - page % 4) * 15));
+    completedTransfers.push(page); return response;
+  } finally { activeTransfers--; }
 };
 const syncOptions = { timeoutMs: 1500, wait: async () => {} };
 async function current(choice?: "local" | "server" | "merged" | "none", timeoutMs = 1500) {
@@ -206,6 +219,12 @@ const api = {
     return api.pull();
   },
   async failPage(page:number|null) {failedPage=page;},
+  async transfers(enabled: boolean) {
+    const result = { peak: peakTransfers, completed: completedTransfers };
+    measureTransfers = enabled;
+    if (enabled) { peakTransfers = 0; completedTransfers = []; }
+    return result;
+  },
   async failAttachments(value:boolean) {failAssets=value;},
   async editConversationLocal(source:string) {
     const catalog=(await readArtifactCatalog({kind:"annotate",id}))!;

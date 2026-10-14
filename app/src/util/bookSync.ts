@@ -117,6 +117,21 @@ export function boundedBookRequest<T>(work: () => Promise<T>, signal: AbortSigna
   });
 }
 const wait = (milliseconds: number, signal: AbortSignal) => boundedBookRequest(() => new Promise<void>(resolve => setTimeout(resolve, milliseconds)), signal, milliseconds + 100);
+type BookTransfer = <T>(work: () => Promise<T>) => Promise<T>;
+function bookTransfers(signal: AbortSignal): BookTransfer {
+  let active = 0;
+  const queued: Array<() => void> = [];
+  return async work => {
+    stop(signal);
+    if (active >= 4) await new Promise<void>(resolve => queued.push(resolve));
+    else active++;
+    try { stop(signal); return await work(); }
+    finally {
+      const next = queued.shift();
+      if (next) next(); else active--;
+    }
+  };
+}
 function retryable(cause: unknown) { return !(cause instanceof LcApiError) || cause.status === 0 || cause.status === 408 || cause.status >= 500; }
 async function retryThree<T>(work: () => Promise<T>, signal: AbortSignal, options: BookSyncOptions): Promise<T> {
   for (let attempt = 0; ; attempt++) {
@@ -145,10 +160,10 @@ async function prepareLocalPages(capture: BookCapture): Promise<Map<string, Loca
   }
   return pages;
 }
-async function acquirePage(client: LcClient, capture: BookCapture, remote: BookStateDto, page: BookPageStateDto, options: BookSyncOptions, signal: AbortSignal, beforeLegacySpanning?: () => Promise<void>): Promise<PreparedBookPage> {
+async function acquirePage(client: LcClient, capture: BookCapture, remote: BookStateDto, page: BookPageStateDto, options: BookSyncOptions, signal: AbortSignal, transfer: BookTransfer, beforeLegacySpanning?: () => Promise<void>, sheetsReady?: Promise<void>): Promise<PreparedBookPage> {
   const docKey = localPageKey(capture, page.key);
-  const dto = await boundedBookRequest(() => client.getInkPage(capture.kind as "annotate" | "whiteboard", page.key, page.page_id,
-    { bookRev: remote.book_rev, pageRev: page.rev }, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+  const dto = await transfer(() => boundedBookRequest(() => client.getInkPage(capture.kind as "annotate" | "whiteboard", page.key, page.page_id,
+    { bookRev: remote.book_rev, pageRev: page.rev }, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs));
   if (!dto) {
     const error = new BookSyncError("hub_page", "The advertised hub page is missing", [{ key: page.key, pageId: page.page_id }]);
     error.missing = true; throw error;
@@ -159,6 +174,7 @@ async function acquirePage(client: LcClient, capture: BookCapture, remote: BookS
     if (checked.wireHash !== page.hash || dto.rev !== page.rev) throw new Error("Pinned handwriting identity does not match");
     let encoded = unpackEncodedInk(checked.packed);
     if (!encoded) throw new Error("Unreadable packed handwriting");
+    await sheetsReady;
     stop(signal);
     const ctx = capture.kind === "annotate" ? pdfInkContextFromRecord(capture.record) : null;
     if (ctx && page.key === capture.id && page.page_id === 0 && !encoded.layout) await beforeLegacySpanning?.();
@@ -399,6 +415,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
         let recordClass: Classification = deleting ? "skip" : restoring && remote.state === "gone" && capture.record ? "upload" : classifyBookItem(recordLocalHash, capture.state.baseRecordLocalHash, remoteLogicalHash, remote.record_rev, capture.state.recordRev);
         const acquired = new Map<string, PreparedBookPage>();
         const conflicts: BookPageStateDto[] = [], uploads: LocalPage[] = [], downloads: PreparedBookPage[] = [];
+        const downloadTasks: Array<() => Promise<PreparedBookPage>> = [];
         const virtual = new Map<string, PreparedBookPage>();
         if (remoteInline) for (const row of remoteInline.rows) {
           const key = wirePageKey(capture, row.docKey), encoded = await encodedFromRecord(row);
@@ -407,19 +424,26 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           virtual.set(pageIdentity(key, row.pageId), { remote: page, row, localHash: hash });
         }
         const pageController = new AbortController();
+        const transfer = bookTransfers(pageController.signal);
         const acquiring = new Map<string, Promise<PreparedBookPage>>();
+        let sheetsReady = Promise.resolve();
         const load = async (page: BookPageStateDto): Promise<PreparedBookPage> => {
           stop(pageController.signal);
           const identity = pageIdentity(page.key, page.page_id), cached = acquired.get(identity) ?? (page.rev === 0 ? virtual.get(identity) : undefined);
           if (cached) return cached;
           let pending = acquiring.get(identity);
           if (!pending) {
-            pending = acquirePage(client, capture, remote, page, options, pageController.signal, async () => {
+            // Infer legacy sheet layouts in request order even when GETs finish
+            // out of order. Page 0 waits for sheets without occupying this chain.
+            const previousSheet = sheetsReady;
+            let finishSheet = () => {};
+            if (capture.kind === "annotate" && page.key === capture.id && page.page_id > 0) sheetsReady = new Promise(resolve => { finishSheet = resolve; });
+            pending = acquirePage(client, capture, remote, page, options, pageController.signal, transfer, async () => {
               // Only untagged page 0 needs siblings; sheets cannot recurse here.
-              for (const sheet of remotePages.values()) if (sheet.key === page.key && sheet.page_id > 0) await load(sheet);
-            }).then(value => {
+              await Promise.all([...remotePages.values()].filter(sheet => sheet.key === page.key && sheet.page_id > 0).map(load));
+            }, page.page_id > 0 ? previousSheet : undefined).then(value => {
               stop(pageController.signal); acquired.set(identity, value); return value;
-            }).finally(() => { acquiring.delete(identity); });
+            }).finally(() => { finishSheet(); acquiring.delete(identity); });
             acquiring.set(identity, pending);
           }
           return pending;
@@ -471,7 +495,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
                 // A Server choice can retire a locally new child page the hub
                 // never had. Preserve its readable erasure locally without
                 // staging a foreign, unreferenced page into a live book.
-                if (!localChildren?.[child] && mine.localHash === hash) { downloads.push({ ...absent, row: mine.row }); continue; }
+                if (!localChildren?.[child] && mine.localHash === hash) { downloadTasks.push(async () => ({ ...absent, row: mine.row })); continue; }
               }
               if (mine?.row.syncedRev && !(restoring && remote.state === "gone")) throw new BookSyncError("needs_choice", "A previously synchronized page is absent from this hub version", [{ key: mine.key, pageId: mine.row.pageId }]);
               if (mine) uploads.push(mine); continue;
@@ -491,9 +515,10 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
             }
             if (classification === "conflict") conflicts.push(page);
             else if (classification === "upload") uploads.push(mine!);
-            else if (classification === "download") downloads.push(await load(page));
-            else if (classification === "equal") downloads.push({ remote: page, localHash: mine!.localHash, row: mine!.row });
+            else if (classification === "download") downloadTasks.push(() => load(page));
+            else if (classification === "equal") downloadTasks.push(async () => ({ remote: page, localHash: mine!.localHash, row: mine!.row }));
           }
+          downloads.push(...await Promise.all(downloadTasks.map(work => work())));
           const lifecycleConflict = !!capture.state.lifecycle && ((capture.state.lifecycle.action === "delete" && capture.state.lifecycle.baseBookRev !== remote.book_rev)
             || restoring && remote.state === "gone" && capture.state.lifecycle.baseBookRev !== remote.book_rev);
           if (recordClass === "conflict" || conflicts.length || lifecycleConflict) {
@@ -556,8 +581,12 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
               const ack = await retryThree(() => boundedBookRequest(() => client.stageInkPage(uploadId, owner.kind as "annotate" | "whiteboard", page.key, page.row.pageId, page.gz, { timeoutMs }), signal, timeoutMs), signal, options);
               if (ack.hash !== page.hash) throw new BookSyncError("invalid", "The stage acknowledged different handwriting");
             };
-            if (action !== "delete") for (const page of uploads) {
-              try { await stage(page); } catch (cause) { if (cause instanceof HubSyncCancelled) throw cause; failed.push({ key: page.key, pageId: page.row.pageId }); }
+            if (action !== "delete") {
+              const results = await Promise.all(uploads.map(async page => {
+                try { await transfer(() => stage(page)); return []; }
+                catch (cause) { if (cause instanceof HubSyncCancelled) throw cause; return [{ key: page.key, pageId: page.row.pageId }]; }
+              }));
+              failed.push(...results.flat());
             }
             if (failed.length) throw new BookSyncError("stage", "Handwriting pages did not upload", failed);
             const body: CommitRequestDto = { upload_id: uploadId, ...owner, action,
@@ -617,12 +646,26 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
             }
             publicationCapture = afterAck;
             const capturedIdentities = new Map(capture.pages.map(row => [pageIdentity(wirePageKey(capture, row.docKey), row.pageId), row]));
-            for (const page of vector(final)) {
-              const identity = pageIdentity(page.key, page.page_id), mine = local.get(identity);
-              if (mine?.hash === page.hash) {
-                acquired.set(identity, { remote: page, row: capturedIdentities.get(identity) ?? mine.row, localHash: mine.localHash });
-              } else acquired.set(identity, await acquirePage(client, capture, final, page, options, signal));
-            }
+            const finalLoads = new Map<string, Promise<PreparedBookPage>>();
+            let finalSheetsReady = Promise.resolve();
+            const loadFinal = (page: BookPageStateDto): Promise<PreparedBookPage> => {
+              const identity = pageIdentity(page.key, page.page_id);
+              let pending = finalLoads.get(identity);
+              if (!pending) {
+                const mine = local.get(identity);
+                const previousSheet = finalSheetsReady;
+                let finishSheet = () => {};
+                if (capture.kind === "annotate" && page.key === capture.id && page.page_id > 0) finalSheetsReady = new Promise(resolve => { finishSheet = resolve; });
+                pending = mine?.hash === page.hash ? previousSheet.then(() => ({ remote: page, row: capturedIdentities.get(identity) ?? mine.row, localHash: mine.localHash }))
+                  : acquirePage(client, capture, final, page, options, pageController.signal, transfer, async () => {
+                    await Promise.all(vector(final).filter(sheet => sheet.key === page.key && sheet.page_id > 0).map(loadFinal));
+                  }, page.page_id > 0 ? previousSheet : undefined);
+                pending = pending.finally(() => finishSheet());
+                finalLoads.set(identity, pending);
+              }
+              return pending;
+            };
+            for (const page of await Promise.all(vector(final).map(loadFinal))) acquired.set(pageIdentity(page.remote.key, page.remote.page_id), page);
           }
           const record = final.record ? await localizedRecordHash(final.record, capture) : null;
           const publication = action === "upsert" && !committed ? downloads : [...acquired.values()];

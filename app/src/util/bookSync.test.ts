@@ -98,6 +98,78 @@ const different = () => ({ ...empty, layout: { w: 500, spread: false } });
 const drawing = (color = "#111111") => encodeInkOps([{ kind: "draw", color, baseWidth: 2, maxFullness: .8, pressureClip: .6, pressureSensitive: true,
   points: [{ x: 1, y: 2, pressure: .5 }, { x: 4, y: 5, pressure: .5 }] }]);
 
+function transferGates() {
+  const release = new Map<number, () => void>();
+  const gates = new Map(Array.from({ length: 8 }, (_, i) => [i + 1, new Promise<void>(resolve => release.set(i + 1, resolve))]));
+  return { gates, release, all: () => release.forEach(resolve => resolve()) };
+}
+
+describe("bounded book transfers", () => {
+  it.each(["GET", "stage"])("bounds %s concurrency and waits for reordered responses before publication", async mode => {
+    await save();
+    if (mode === "GET") { await syncBook(api, "whiteboard", "book", undefined, options); for (let i = 1; i <= 8; i++) await remotePage(i, drawing()); }
+    else await putInkPages("wb:book", Array.from({ length: 8 }, (_, i) => [i + 1, drawing()] as const));
+    const before = await captureBook({ kind: "whiteboard", id: "book" });
+    vi.mocked(api.commitPad).mockClear();
+    const held = transferGates(), started: number[] = [], finished: number[] = []; let active = 0, peak = 0;
+    const get = vi.mocked(api.getInkPage).getMockImplementation()!, stage = vi.mocked(api.stageInkPage).getMockImplementation()!;
+    const hold = async (id: number) => { started.push(id); peak = Math.max(peak, ++active); await held.gates.get(id); active--; finished.push(id); };
+    if (mode === "GET") vi.mocked(api.getInkPage).mockImplementation(async (...args) => { await hold(args[2]); return get(...args); });
+    else vi.mocked(api.stageInkPage).mockImplementation(async (...args) => { await hold(args[3]); return stage(...args); });
+    const sync = syncBook(api, "whiteboard", "book", undefined, { ...options, timeoutMs: 5000 });
+    try {
+      await vi.waitFor(() => expect(started).toHaveLength(4));
+      for (const id of [3, 1, 4, 2]) { held.release.get(id)!(); await vi.waitFor(() => expect(finished).toContain(id)); }
+      await vi.waitFor(() => expect(started).toHaveLength(8));
+      expect(peak).toBe(4); expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
+      expect(api.commitPad).not.toHaveBeenCalled();
+      for (const id of [8, 6, 5, 7]) held.release.get(id)!();
+      expect((await sync).status).toBe("synced");
+      expect(api.commitPad).toHaveBeenCalledTimes(mode === "stage" ? 1 : 0);
+      expect((await captureBook({ kind: "whiteboard", id: "book" })).pages.map(row => row.pageId).sort((a, b) => a - b)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    } finally { held.all(); await sync; }
+  });
+  it.each(["GET", "stage"])("keeps the whole local book after a failed middle %s", async mode => {
+    await save();
+    if (mode === "GET") { await syncBook(api, "whiteboard", "book", undefined, options); for (let i = 1; i <= 8; i++) await remotePage(i, drawing()); }
+    else await putInkPages("wb:book", Array.from({ length: 8 }, (_, i) => [i + 1, drawing()] as const));
+    const before = await captureBook({ kind: "whiteboard", id: "book" }); vi.mocked(api.commitPad).mockClear();
+    const get = vi.mocked(api.getInkPage).getMockImplementation()!, stage = vi.mocked(api.stageInkPage).getMockImplementation()!;
+    if (mode === "GET") vi.mocked(api.getInkPage).mockImplementation(async (...args) => args[2] === 4 ? null : get(...args));
+    else vi.mocked(api.stageInkPage).mockImplementation(async (...args) => { if (args[3] === 4) throw new LcApiError("failed middle page", 500); return stage(...args); });
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("failed");
+    expect(api.commitPad).not.toHaveBeenCalled(); expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
+  });
+  it("restarts pinned reads on changing hub revisions and publishes nothing if the hub keeps moving", async () => {
+    await initial(); for (let i = 1; i <= 8; i++) await remotePage(i, drawing());
+    const before = await captureBook({ kind: "whiteboard", id: "book" }); vi.mocked(api.commitPad).mockClear();
+    const get = vi.mocked(api.getInkPage).getMockImplementation()!, pins: number[] = [];
+    vi.mocked(api.getInkPage).mockImplementation(async (...args) => {
+      pins.push(args[3]!.bookRev!); if (args[2] === 1) await remoteRecord("Still moving"); return get(...args);
+    });
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.kind).toBe("hub_changed"); expect(new Set(pins).size).toBe(3);
+    expect(api.commitPad).not.toHaveBeenCalled(); expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
+  });
+  it.each(["GET", "stage"])("cancels active and queued %s without publishing late responses", async mode => {
+    await save();
+    if (mode === "GET") { await syncBook(api, "whiteboard", "book", undefined, options); for (let i = 1; i <= 8; i++) await remotePage(i, drawing()); }
+    else await putInkPages("wb:book", Array.from({ length: 8 }, (_, i) => [i + 1, drawing()] as const));
+    const before = await captureBook({ kind: "whiteboard", id: "book" }); vi.mocked(api.commitPad).mockClear();
+    const abort = new AbortController(), held = transferGates(), started: number[] = [];
+    const get = vi.mocked(api.getInkPage).getMockImplementation()!, stage = vi.mocked(api.stageInkPage).getMockImplementation()!;
+    if (mode === "GET") vi.mocked(api.getInkPage).mockImplementation(async (...args) => { started.push(args[2]); await held.gates.get(args[2]); return get(...args); });
+    else vi.mocked(api.stageInkPage).mockImplementation(async (...args) => { started.push(args[3]); await held.gates.get(args[3]); return stage(...args); });
+    const sync = syncBook(api, "whiteboard", "book", undefined, { ...options, timeoutMs: 5000, signal: abort.signal });
+    try {
+      await vi.waitFor(() => expect(started).toHaveLength(4)); abort.abort();
+      expect((await sync).status).toBe("cancelled"); held.all();
+      await Promise.resolve(); expect(started).toHaveLength(4);
+      expect(api.commitPad).not.toHaveBeenCalled(); expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
+    } finally { abort.abort(); held.all(); await sync; }
+  });
+});
+
 describe("modern current-state book sync", () => {
   it("reports an unreachable hub after staging and retains the pending receipt and dirty ink", async () => {
     await initial();
