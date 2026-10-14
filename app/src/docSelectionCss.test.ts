@@ -1,7 +1,6 @@
-import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
-const css = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
+import css from "./styles.css?raw";
 
 /** Selectors of rules keyed on a mode class the selection layer toggles. */
 function selectorsFor(modeClass: string): string[] {
