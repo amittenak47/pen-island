@@ -602,11 +602,6 @@ export function FootnoteOverview({
         new DOMRect(view.originX, view.originY, view.width, view.height));
       return;
     }
-    if (miniNoteCount > 0 || localMiniNotes.length > 0) {
-      node.style.maxHeight = `${Math.max(100, bounds.height * .48 - 16)}px`;
-      settle(node, bounds.left + 8, bounds.top + 8, bounds);
-      return;
-    }
     if (
       hasUsableViewportBox(live) &&
       live &&
@@ -616,7 +611,7 @@ export function FootnoteOverview({
       return;
     }
     clampPanel(node, live);
-  }, [anchorRect, footnote.id, onClose, task, miniNoteCount, localMiniNotes.length]);
+  }, [anchorRect, footnote.id, onClose, task]);
   const beginPanelGesture = useCallback((event: ReactPointerEvent<HTMLElement>, mode: "move" | "resize") => {
     const node = panelRef.current;
     if (!node || event.button > 0) return;

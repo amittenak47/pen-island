@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it } from "vitest";
-import { clampMiniNoteRect, defaultMiniNoteRect, loadMiniNotePlacements, saveMiniNotePlacements,
+import { clampMiniNoteRect, defaultMiniNoteRect, firstFreeMiniNoteRect, loadMiniNotePlacements, saveMiniNotePlacements,
   requestMiniNoteRestore, takeMiniNoteRestore } from "./miniNoteWindows";
 
 describe("mini note positions across workspace eviction", () => {
@@ -50,6 +50,34 @@ describe("mini note window bounds", () => {
     expect(box.top).toBeGreaterThanOrEqual(46);
     expect(box.left + box.width).toBeLessThanOrEqual(380);
     expect(box.top + box.height).toBeLessThanOrEqual(592);
+  });
+  it("places new notes around occupied slots without changing earlier rectangles", () => {
+    const first = firstFreeMiniNoteRect(canvas, []);
+    const before = { ...first };
+    const second = firstFreeMiniNoteRect(canvas, [first]);
+    const third = firstFreeMiniNoteRect(canvas, [first, second]);
+    expect(first).toEqual(before);
+    expect(first.width).toBe(280);
+    expect(second.left).toBeGreaterThanOrEqual(first.left + first.width + 8);
+    expect(third.top + third.height).toBeLessThanOrEqual(first.top - 8);
+  });
+  it("finds a slot above a panel covering the bottom of a narrow pane", () => {
+    const narrow = { left: 0, top: 38, width: 388, height: 562 };
+    const panel = { left: 8, top: 350, width: 372, height: 242 };
+    const note = firstFreeMiniNoteRect(narrow, [panel]);
+    expect(note.top + note.height).toBeLessThanOrEqual(panel.top - 8);
+    expect(note.left).toBeGreaterThanOrEqual(8);
+  });
+  it("fits a smaller new note in remaining room and never mutates occupied windows", () => {
+    const small = { left: 0, top: 0, width: 420, height: 280 };
+    const occupied = [{ left: 8, top: 8, width: 200, height: 264 }];
+    const before = structuredClone(occupied);
+    const note = firstFreeMiniNoteRect(small, occupied);
+    expect(note.width).toBe(180);
+    expect(note.left).toBeGreaterThanOrEqual(216);
+    expect(occupied).toEqual(before);
+    const impossible = firstFreeMiniNoteRect({ left: 0, top: 0, width: 190, height: 130 }, occupied);
+    expect(Number.isFinite(impossible.left)).toBe(true);
   });
 });
 

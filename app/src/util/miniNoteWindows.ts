@@ -38,6 +38,31 @@ export function defaultMiniNoteRect(index: number, count: number, bounds: MiniNo
     top: bounds.top + bounds.height - 8 - height, width, height }, bounds);
 }
 
+/** Find room for the new window while every existing window stays in place. */
+export function firstFreeMiniNoteRect(bounds: MiniNoteBounds, occupied: readonly MiniNoteRect[]): MiniNoteRect {
+  const preferred = defaultMiniNoteRect(0, 1, bounds);
+  const gap = 8;
+  let best = preferred;
+  let bestOverlap = Infinity;
+  for (const size of [preferred, clampMiniNoteRect({ ...preferred, width: 180, height: 120 }, bounds)]) {
+    const xs = [bounds.left + gap, bounds.left + bounds.width - gap - size.width,
+      ...occupied.flatMap(rect => [rect.left - gap - size.width, rect.left + rect.width + gap])];
+    const ys = [bounds.top + bounds.height - gap - size.height, bounds.top + gap,
+      ...occupied.flatMap(rect => [rect.top - gap - size.height, rect.top + rect.height + gap])];
+    const candidates = xs.flatMap(left => ys.map(top => clampMiniNoteRect({ ...size, left, top }, bounds)))
+      .sort((a, b) => b.top - a.top || a.left - b.left);
+    for (const candidate of candidates) {
+      const overlap = occupied.reduce((total, rect) => total +
+        Math.max(0, Math.min(candidate.left + candidate.width, rect.left + rect.width + gap) - Math.max(candidate.left, rect.left - gap)) *
+        Math.max(0, Math.min(candidate.top + candidate.height, rect.top + rect.height + gap) - Math.max(candidate.top, rect.top - gap)), 0);
+      if (overlap === 0) return candidate;
+      if (overlap < bestOverlap) { best = candidate; bestOverlap = overlap; }
+    }
+  }
+  // Small panes may have no clear slot; only the incoming window compromises.
+  return best;
+}
+
 export function resizeMiniNoteRect(rect: MiniNoteRect, dx: number, dy: number, bounds: MiniNoteBounds): MiniNoteRect {
   return clampMiniNoteRect({ ...rect,
     width: Math.min(rect.width + dx, bounds.left + bounds.width - 8 - rect.left),

@@ -12115,7 +12115,7 @@ export const Workspace = memo(function Workspace({
             }}
           />
         )}
-        <FootnoteMiniNotes entries={miniNoteEntries} getBounds={miniNoteBounds}
+        <FootnoteMiniNotes key={miniPlacementDocId ?? tab.id} entries={miniNoteEntries} getBounds={miniNoteBounds}
           placements={miniNotePlacements}
           onPlacementChange={(key, rect) => setMiniNoteGeometry(current => {
             const placements = { ...(current.docId === miniPlacementDocId

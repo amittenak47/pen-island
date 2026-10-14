@@ -5,7 +5,7 @@ import type { DocFootnote, DocFootnoteNote } from "../util/docFootnotes";
 import { footnoteThemeVars } from "../util/footnoteTheme";
 import { FootnoteNoteBody } from "./FootnoteNoteBody";
 import { subscribePageSurfaceMove } from "./sheetAnchor";
-import { clampMiniNoteRect, defaultMiniNoteRect, miniNoteKey, resizeMiniNoteRect, type MiniNoteBounds,
+import { clampMiniNoteRect, firstFreeMiniNoteRect, miniNoteKey, resizeMiniNoteRect, type MiniNoteBounds,
   type MiniNotePlacements, type MiniNoteRect } from "../util/miniNoteWindows";
 
 export const MINI_NOTE_LIMIT = 3;
@@ -24,6 +24,20 @@ export interface MiniNoteEntry extends MiniNoteRef {
   theme: { color: string; palette: readonly string[] };
 }
 
+function sameRect(a: MiniNoteRect | undefined, b: MiniNoteRect | undefined): boolean {
+  return a === b || Boolean(a && b && a.left === b.left && a.top === b.top && a.width === b.width && a.height === b.height);
+}
+
+function panelRects(bounds: MiniNoteBounds): MiniNoteRect[] {
+  return [...document.querySelectorAll<HTMLElement>(".lc-footnote-overview")].flatMap(panel => {
+    const style = window.getComputedStyle(panel);
+    if (style.display === "none" || style.visibility === "hidden") return [];
+    const rect = panel.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0 && rect.right > bounds.left && rect.left < bounds.left + bounds.width &&
+      rect.bottom > bounds.top && rect.top < bounds.top + bounds.height ? [rect] : [];
+  });
+}
+
 /** Separate windows share a compact tray, leaving the footnote card available. */
 export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote, onOpenExternal,
   placements, onPlacementChange }: {
@@ -35,15 +49,23 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
   placements?: MiniNotePlacements;
   onPlacementChange?: (key: string, rect: MiniNoteRect) => void;
 }) {
-  const [bounds, setBounds] = useState<MiniNoteBounds>({ left: 0, top: 0, width: window.innerWidth, height: window.innerHeight });
+  const [bounds, setBounds] = useState<MiniNoteBounds | null>(null);
   const [localPlacements, setLocalPlacements] = useState<MiniNotePlacements>({});
+  const reservations = useRef<Record<string, { rect: MiniNoteRect; source: MiniNoteRect | undefined }>>({});
   const [front, setFront] = useState<string | null>(null);
   const gesture = useRef<{ key: string; pointerId: number; mode: "move" | "resize";
     x: number; y: number; rect: MiniNoteRect } | null>(null);
-  const currentPlacements = placements ?? localPlacements;
+  const placementFor = (key: string) => {
+    const external = placements?.[key];
+    const reserved = reservations.current[key];
+    // Keep a commit visible while its parent catches up; a new external rect wins.
+    if (reserved && (!external || sameRect(external, reserved.source) || sameRect(external, reserved.rect))) return reserved.rect;
+    return external ?? localPlacements[key];
+  };
   const commit = (key: string, rect: MiniNoteRect) => {
-    if (onPlacementChange) onPlacementChange(key, rect);
-    else setLocalPlacements(current => ({ ...current, [key]: rect }));
+    reservations.current[key] = { rect, source: placements?.[key] };
+    setLocalPlacements(current => sameRect(current[key], rect) ? current : { ...current, [key]: rect });
+    onPlacementChange?.(key, rect);
   };
   useLayoutEffect(() => {
     const place = () => {
@@ -54,11 +76,35 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
       const right = Math.min(box.right, (view?.offsetLeft ?? 0) + (view?.width ?? window.innerWidth));
       const bottom = Math.min(box.bottom, (view?.offsetTop ?? 0) + (view?.height ?? window.innerHeight));
       const next = { left, top, width: Math.max(0, right - left), height: Math.max(0, bottom - top) };
-      setBounds(current => Object.keys(next).every(key => current[key as keyof MiniNoteBounds] === next[key as keyof MiniNoteBounds]) ? current : next);
+      setBounds(current => sameRect(current ?? undefined, next) ? current : next);
     };
     place();
     return subscribePageSurfaceMove(place);
   }, [getBounds, entries.length]);
+  useLayoutEffect(() => {
+    if (!bounds || bounds.width <= 0 || bounds.height <= 0) return;
+    const visible = entries.slice(0, MINI_NOTE_LIMIT);
+    const occupied = panelRects(bounds);
+    for (const entry of visible) {
+      const key = miniNoteKey(entry);
+      const reserved = reservations.current[key];
+      const external = placements?.[key];
+      if (reserved && external && (sameRect(external, reserved.rect) || !sameRect(external, reserved.source))) delete reservations.current[key];
+      const saved = placementFor(key);
+      if (!saved) continue;
+      const rect = clampMiniNoteRect(saved, bounds);
+      if (!sameRect(saved, rect)) commit(key, rect);
+      occupied.push(rect);
+    }
+    for (const entry of visible) {
+      const key = miniNoteKey(entry);
+      if (placementFor(key)) continue;
+      const rect = firstFreeMiniNoteRect(bounds, occupied);
+      // Reserve before publishing so another incoming note cannot take the slot.
+      commit(key, rect);
+      occupied.push(rect);
+    }
+  }, [bounds, entries, placements, localPlacements, onPlacementChange]);
   const begin = (event: ReactPointerEvent<HTMLElement>, key: string, rect: MiniNoteRect, mode: "move" | "resize") => {
     if (event.button !== 0) return;
     if (mode === "move" && event.target instanceof Element && event.target.closest("button, a")) return;
@@ -69,7 +115,7 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
   };
   const move = (event: ReactPointerEvent<HTMLElement>) => {
     const drag = gesture.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
+    if (!drag || drag.pointerId !== event.pointerId || !bounds) return;
     event.preventDefault(); event.stopPropagation();
     const dx = event.clientX - drag.x, dy = event.clientY - drag.y;
     commit(drag.key, drag.mode === "move"
@@ -81,11 +127,13 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
     gesture.current = null;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
   };
-  if (!entries.length) return null;
+  if (!entries.length || !bounds) return null;
   return createPortal(<div className="lc-footnote-mini-tray">
-    {entries.slice(0, MINI_NOTE_LIMIT).map((entry, index) => {
+    {entries.slice(0, MINI_NOTE_LIMIT).map((entry) => {
       const key = miniNoteKey(entry);
-      const rect = clampMiniNoteRect(currentPlacements[key] ?? defaultMiniNoteRect(index, Math.min(entries.length, MINI_NOTE_LIMIT), bounds), bounds);
+      const saved = placementFor(key);
+      if (!saved) return null;
+      const rect = clampMiniNoteRect(saved, bounds);
       return <section key={key}
       className={`lc-footnote-mini-note${entry.footnote.kind === "ai" && !entry.footnote.pending ? " is-chatbot-complete" : ""}`}
       role="dialog" aria-label={`Mini note ${entry.number ?? ""}.${entry.noteNumber}`}
