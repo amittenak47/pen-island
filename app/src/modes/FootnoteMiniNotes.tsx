@@ -125,8 +125,12 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
     drag.frame = 0;
     const rect = drag.live;
     if (!rect || !drag.node) return;
-    drag.node.style.left = `${rect.left}px`;
-    drag.node.style.top = `${rect.top}px`;
+    if (drag.mode === "move") {
+      // A slide on its own layer; the page under it is not repainted.
+      drag.node.style.willChange = "transform";
+      drag.node.style.transform = `translate(${rect.left - drag.rect.left}px, ${rect.top - drag.rect.top}px)`;
+      return;
+    }
     drag.node.style.width = `${rect.width}px`;
     drag.node.style.height = `${rect.height}px`;
   };
@@ -146,6 +150,15 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
     gesture.current = null;
     if (!drag) return;
     if (drag.frame) cancelAnimationFrame(drag.frame);
+    if (drag.node) {
+      // Land where it was shown, in one step, before React catches up.
+      if (drag.live) {
+        drag.node.style.left = `${drag.live.left}px`;
+        drag.node.style.top = `${drag.live.top}px`;
+      }
+      drag.node.style.transform = "";
+      drag.node.style.willChange = "";
+    }
     if (drag.live) commit(drag.key, drag.live);
   };
   const finish = (event: ReactPointerEvent<HTMLElement>) => {

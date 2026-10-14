@@ -642,6 +642,8 @@ export function FootnoteOverview({
       if (gesture.mode === "move" && Math.hypot(dx, dy) < 5) return;
       gesture.moved = true;
       if (gesture.mode === "move") event.currentTarget.setPointerCapture?.(event.pointerId);
+      // Its own compositor layer while it moves: a slide, not a repaint of the page under it.
+      if (gesture.mode === "move") node.style.willChange = "transform";
     }
     event.preventDefault();
     const view = viewport();
@@ -690,7 +692,10 @@ export function FootnoteOverview({
       placeFrame.current = 0;
     }
     if (gesture.moved) {
-      if (panelRef.current) panelRef.current.style.transform = "";
+      if (panelRef.current) {
+        panelRef.current.style.transform = "";
+        panelRef.current.style.willChange = "";
+      }
       place();
     }
     if (gesture.moved && gesture.mode === "move") swallowClick.current = true;
