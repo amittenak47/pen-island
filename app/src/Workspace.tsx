@@ -493,8 +493,6 @@ import { saveCoachRequest, requireCoachRequest } from "./modes/coachRequestStore
 /** How a workspace link came about, in words; a link the reader picked needs none. */
 const EDGE_ORIGIN: Partial<Record<string, string>> = {
   wiki: "linked in the text",
-  "footnote-thread": "from a chat",
-  "footnote-url": "from a link",
   ink: "drawn link",
   chatbot: "added by ChatBot",
 };
@@ -3798,7 +3796,9 @@ export const Workspace = memo(function Workspace({
   const workspaceLinkRows = useMemo(() => {
     const here = hereNode;
     if (!here) return [];
-    return hereEdges.map((edge) => {
+    // A footnote's own URLs and threads are lifted into edges for the graph;
+    // the panel already lists them under Links and Threads.
+    return hereEdges.filter((edge) => edge.kind !== "footnote-url" && edge.kind !== "footnote-thread").map((edge) => {
       const other = sameNode(edge.from, here) ? edge.to : edge.from;
       return {
         edgeId: edge.id,
