@@ -343,6 +343,7 @@ export function footnoteFromItem(
     ...(result.title ? { title: result.title } : {}),
     ...(typeof result.color === "number" ? { color: result.color } : {}),
     marks: result.marks ?? [],
+    fields: result.fields ?? [],
   }, now);
   return filled ?? null;
 }

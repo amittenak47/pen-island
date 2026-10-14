@@ -3,7 +3,7 @@
  * and the answer applied back here. The document is only written on the device.
  */
 
-import { LcApiError, type AnnotationJobReferenceDto, type FootnoteMarkDto, type FootnotePingResultDto, type FootnoteRequestDto, type FootnoteWorkspaceItemDto, type LcClient } from "../api/client";
+import { LcApiError, type AnnotationJobReferenceDto, type FootnoteMarkDto, type FootnotePingResultDto, type FootnoteRequestDto, type FootnoteWorkspaceItemDto, type LcClient, type ReadingStyleDto } from "../api/client";
 import { isTextAnchor } from "./docAnchors";
 import { makeEdge, putEdge, type NodeRef, type NodeType } from "./noteLinks";
 import { readFootnoteOutbox, storeFootnoteRequest, markFootnoteRequestSent, forgetFootnoteRequest } from "./footnoteOutbox";
@@ -136,6 +136,7 @@ export function buildFootnoteRequest(input: {
   focus?: string;
   perPage?: number;
   references?: readonly AnnotationJobReferenceDto[];
+  reading?: ReadingStyleDto | null;
 }): FootnoteRequestDto {
   const excerpt = input.excerpt.slice(0, 4000);
   const palette = (input.palette ?? []).filter((color) => /^#[0-9a-fA-F]{6}$/.test(color)).slice(0, 8);
@@ -155,6 +156,7 @@ export function buildFootnoteRequest(input: {
     ...(focus ? { focus } : {}),
     ...(typeof perPage === "number" && Number.isInteger(perPage) && perPage >= 1 && perPage <= 8 ? { per_page: perPage } : {}),
     ...(references.length ? { references } : {}),
+    ...(input.reading?.kind ? { reading: { ...input.reading } } : {}),
   };
   const pageText = input.pageText ?? "";
   const scope = input.anchor.scope;
@@ -226,6 +228,15 @@ export interface FootnoteAnswer {
   title?: string;
   color?: number;
   marks?: readonly FootnoteMarkDto[];
+  /** Preset field labels the notes use. */
+  fields?: readonly string[];
+}
+
+/** The preset field a note fills, from its "**Label:**" opening. */
+function fieldOf(text: string, fields: readonly string[] | undefined): string | undefined {
+  if (!fields?.length) return undefined;
+  const label = /^\*\*([^*\n]{1,40}?):\*\*/.exec(text)?.[1]?.trim();
+  return label ? fields.find((field) => field.toLowerCase() === label.toLowerCase()) : undefined;
 }
 
 /**
@@ -248,10 +259,12 @@ export function applyFootnoteResult(
     if (typeof raw !== "string") continue;
     const text = raw.trim();
     if (!text) continue;
+    const field = fieldOf(text, result.fields);
     added.push({
       id: freshNoteId([...existing, ...added], now),
       text,
       by: "ai",
+      ...(field ? { field } : {}),
       createdAt: now,
       updatedAt: now,
     });
@@ -410,6 +423,7 @@ interface ParsedAnswer {
   marks: FootnoteMarkDto[];
   workspaceLinks: FootnoteWorkspaceItemDto[];
   linkFrom: "annotate" | "web";
+  fields: string[];
 }
 
 function answerOf(result: FootnotePingResultDto["result"]): ParsedAnswer | null {
@@ -440,6 +454,7 @@ function answerOf(result: FootnotePingResultDto["result"]): ParsedAnswer | null 
     marks,
     workspaceLinks,
     linkFrom: result.link_from === "web" ? "web" : "annotate",
+    fields: Array.isArray(result.fields) ? result.fields.filter((field): field is string => typeof field === "string") : [],
   };
 }
 
@@ -515,6 +530,7 @@ async function applyAnswersBody(
         ...(answer.title ? { title: answer.title } : {}),
         ...(answer.color !== undefined ? { color: answer.color } : {}),
         marks: answer.marks,
+        fields: answer.fields,
       }),
     );
     if (outcome === "failed") failed.push(row.id);

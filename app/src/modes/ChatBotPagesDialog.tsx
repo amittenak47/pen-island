@@ -1,6 +1,6 @@
 /** The ChatBot sheet shares Settings' blocks and keeps run details one tap away. */
 import { useCallback, useEffect, useState } from "react";
-import type { AnnotationJobDto, AnnotationJobReferenceDto, AssistantRunnerStatus, FootnoteWorkspaceItemDto, LcClient } from "../api/client";
+import type { AnnotationJobDto, AnnotationJobReferenceDto, AssistantRunnerStatus, FootnoteWorkspaceItemDto, LcClient, ReadingStyleDto } from "../api/client";
 import type { DocSelectionResult } from "./DocSelectionLayer";
 import { DialogFrame } from "../components/DialogFrame";
 import { SettingsChoices } from "../components/SettingsChoices";
@@ -14,13 +14,17 @@ import { loadDeviceId } from "../util/devicePrefs";
 import { assistantRunnerMessage, loadChatBotAnswerMode } from "../util/chatBotClient";
 import type { DocFootnote } from "../util/docFootnotes";
 import { loadSelectionRuns, rememberSelectionRun, updateSelectionRun, type ChatBotRun } from "../util/chatBotHistory";
+import {
+  MAX_NOTE_FIELDS, PRESETS, READING_KINDS, choiceFields, fieldsFor, loadReadingChoice, readingStyleOf, saveReadingChoice,
+  type ReadingChoice, type ReadingKind,
+} from "../util/readingStyles";
 import "../components/settingsDialog.css";
 import "./chatBotPages.css";
 
 const DENSITY = [{ perPage: 2, label: "Light" }, { perPage: 4, label: "Normal" }, { perPage: 8, label: "Thorough" }] as const;
 export const MAX_JOB_PAGES = 40;
 type RequestType = "selection" | "page" | "pages";
-export interface SelectionRequestSettings { focus: string; perPage: number; references: AnnotationJobReferenceDto[] }
+export interface SelectionRequestSettings { focus: string; perPage: number; references: AnnotationJobReferenceDto[]; reading?: ReadingStyleDto | null }
 export interface ChatBotPagesDialogProps {
   client: LcClient;
   docId: string;
@@ -65,6 +69,28 @@ export function ChatBotPagesDialog({
   const [from, setFrom] = useState(Math.max(1, currentPage));
   const [to, setTo] = useState(Math.min(pageCount || currentPage, Math.max(1, currentPage) + 9));
   const [focus, setFocus] = useState("");
+  // Starts from the last request; the first request ever starts with no type.
+  const [reading, setReading] = useState<ReadingChoice>(loadReadingChoice);
+  const [customDraft, setCustomDraft] = useState("");
+  const readingFields = choiceFields(reading);
+  const readingStyle = readingStyleOf(reading);
+  const readingError = !reading.kind ? "Choose what you're reading."
+    : reading.notes === "custom" && readingFields.length === 0 ? "Pick at least one field for Custom." : null;
+  const chooseKind = (kind: ReadingKind) => setReading((current) => ({
+    ...current,
+    kind,
+    // A preset belongs to its kind; switching kinds starts from that kind's first.
+    notes: current.notes === "free" || current.notes === "custom" || PRESETS[kind].some((preset) => preset.id === current.notes)
+      ? current.notes : PRESETS[kind][0]!.id,
+  }));
+  const toggleCustomField = (label: string) => setReading((current) => {
+    if (!current.kind) return current;
+    const fields = current.custom[current.kind] ?? [];
+    const next = fields.some((field) => field.toLowerCase() === label.toLowerCase())
+      ? fields.filter((field) => field.toLowerCase() !== label.toLowerCase())
+      : fields.length >= MAX_NOTE_FIELDS ? fields : [...fields, label];
+    return { ...current, custom: { ...current.custom, [current.kind]: next } };
+  });
   const [perPage, setPerPage] = useState(4);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -142,12 +168,13 @@ export function ChatBotPagesDialog({
     pages.set(page, [...(pages.get(page) ?? []), mark.title?.trim() || mark.excerpt.slice(0, 70) || "Footnote"]);
   }
   const start = async () => {
-    if (inputError || attachmentError || prepared === null || busy) return;
+    if (inputError || attachmentError || readingError || prepared === null || busy) return;
     setBusy(true); setMessage(null);
     try {
+      saveReadingChoice(reading);
       const references = prepared.flatMap((entry) => entry.reference ? [entry.reference] : []);
       if (selectedRequest === "selection" && onSelectionRequest) {
-        const sent = await onSelectionRequest({ focus: focus.trim(), perPage, references });
+        const sent = await onSelectionRequest({ focus: focus.trim(), perPage, references, reading: readingStyle });
         rememberSelectionRun(docId, { id: sent.id, doc_id: docId, doc_name: docName, request_type: "selection",
           answer_mode: answerMode,
           page_from: sent.page, page_to: sent.page, focus: focus.trim(), per_page: perPage,
@@ -161,7 +188,8 @@ export function ChatBotPagesDialog({
         const id = `aj-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
         await client.createAnnotationJob({ id, device_id: loadDeviceId(), doc_id: docId, doc_name: docName,
           doc_kind: "annotate", request_type: selectedRequest === "page" ? "page" : "pages", answer_mode: answerMode, focus: focus.trim(), per_page: perPage,
-          pages: requestedPages, palette: [...palette], workspace_items: [...workspaceItems], references });
+          pages: requestedPages, palette: [...palette], workspace_items: [...workspaceItems], references,
+          ...(readingStyle ? { reading: readingStyle } : {}) });
         rememberAnnotationJob(id, docId);
         setMessage(`Sent to ChatBot.${skipped.length ? ` Skipped ${skipped.length} page${skipped.length === 1 ? "" : "s"} without text.` : ""}`);
         await refresh();
@@ -228,6 +256,54 @@ export function ChatBotPagesDialog({
                 className={`lc-settings-choice-option${perPage === option.perPage ? " is-active" : ""}`} onClick={() => setPerPage(option.perPage)}>{option.label}</button>)}
             </SettingsChoices>
           </div></section>
+          <section className="lc-settings-fold lc-chatbot-reading" aria-label="What you're reading"><div className="lc-settings-fold-body lc-settings-fields">
+            <div className="lc-settings-subhead">What you're reading</div>
+            <SettingsChoices className="lc-settings-choice lc-settings-choice-compact" role="radiogroup" aria-label="Kind of text">
+              {READING_KINDS.map(({ kind, label }) => <button key={kind} type="button" role="radio" aria-checked={reading.kind === kind}
+                className={`lc-settings-choice-option${reading.kind === kind ? " is-active" : ""}`} onClick={() => chooseKind(kind)}>{label}</button>)}
+            </SettingsChoices>
+            {!reading.kind ? <p className="lc-settings-hint">ChatBot writes for the kind of text: a story gets a reading companion, a textbook a study guide.</p> : <>
+              <div className="lc-settings-subhead">Notes</div>
+              <SettingsChoices className="lc-settings-choice lc-settings-choice-compact" role="radiogroup" aria-label="Notes">
+                {[{ id: "free", label: "Free-form" }, ...PRESETS[reading.kind], { id: "custom", label: "Custom" }].map((option) =>
+                  <button key={option.id} type="button" role="radio" aria-checked={reading.notes === option.id}
+                    className={`lc-settings-choice-option${reading.notes === option.id ? " is-active" : ""}`}
+                    onClick={() => setReading({ ...reading, notes: option.id })}>{option.label}</button>)}
+              </SettingsChoices>
+              <p className="lc-settings-hint">{reading.notes === "free" ? "ChatBot shapes each footnote itself."
+                : readingFields.length ? readingFields.join(" · ") : "Pick the fields below."}</p>
+              {reading.notes === "custom" ? <>
+                <SettingsChoices className="lc-settings-choice lc-settings-choice-compact lc-chatbot-fields" aria-label="Custom fields">
+                  {[...new Set([...fieldsFor(reading.kind), ...readingFields])].map((label) => {
+                    const on = readingFields.some((field) => field.toLowerCase() === label.toLowerCase());
+                    return <button key={label} type="button" aria-pressed={on} className={`lc-settings-choice-option${on ? " is-active" : ""}`}
+                      onClick={() => toggleCustomField(label)}>{label}</button>;
+                  })}
+                </SettingsChoices>
+                <div className="lc-chatbot-field-add">
+                  <input aria-label="Name your own field" placeholder="Name your own field" maxLength={40} value={customDraft}
+                    onChange={(event) => setCustomDraft(event.target.value)} onKeyDown={(event) => {
+                      if (event.key !== "Enter" || !customDraft.trim()) return;
+                      event.preventDefault(); toggleCustomField(customDraft.trim()); setCustomDraft("");
+                    }} />
+                  <button type="button" className="lc-secondary lc-dialog-action" disabled={!customDraft.trim()}
+                    onClick={() => { toggleCustomField(customDraft.trim()); setCustomDraft(""); }}>Add</button>
+                </div>
+              </> : null}
+              {reading.notes !== "free" ? <>
+                <div className="lc-settings-subhead">Fill</div>
+                <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Fill">
+                  {([["best", "Best fit"], ["all", "All fields"]] as const).map(([fill, label]) => <button key={fill} type="button" role="radio"
+                    aria-checked={reading.fill === fill} className={`lc-settings-choice-option${reading.fill === fill ? " is-active" : ""}`}
+                    onClick={() => setReading({ ...reading, fill })}>{label}</button>)}
+                </SettingsChoices>
+                <p className="lc-settings-hint">{reading.fill === "best"
+                  ? "Only the fields with something worthwhile to say about each passage."
+                  : "Every field for every footnote, a sentence or two each."}</p>
+              </> : null}
+            </>}
+            {readingError && reading.kind ? <p className="lc-chatbot-pages-error" role="alert">{readingError}</p> : null}
+          </div></section>
           <section className="lc-settings-fold"><div className="lc-settings-fold-body lc-settings-fields">
             <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" aria-expanded={attachOpen} onClick={() => setAttachOpen(!attachOpen)}>Attach</button></div>
             {attachments.length ? <ul className="lc-chatbot-attachments" aria-label="Attachments">{attachments.map((attachment, index) => <li key={attachment.kind === "file" ? attachment.docId : `${attachment.from}-${attachment.to}`}>
@@ -255,7 +331,7 @@ export function ChatBotPagesDialog({
           <p className="lc-settings-hint">{answerMode === "app" ? "Your PC starts the assistant automatically. Footnotes appear as it works."
             : answerMode === "llm" && selectedRequest !== "selection" ? "Your AI model answers single footnotes; page runs need an assistant."
               : "Ask your assistant to answer your requests. Footnotes appear as it works."}</p>
-          <div className="lc-settings-actions-row"><button type="button" className="lc-primary lc-dialog-action" disabled={Boolean(inputError || attachmentError) || prepared === null || busy} onClick={() => void start()}>{busy ? "Sending…" : "Start"}</button></div>
+          <div className="lc-settings-actions-row"><button type="button" className="lc-primary lc-dialog-action" disabled={Boolean(inputError || attachmentError || readingError) || prepared === null || busy} onClick={() => void start()}>{busy ? "Sending…" : "Start"}</button></div>
           {message && !active ? <p className="lc-settings-hint" role="status">{message}</p> : null}
           {runs.length ? <section className="lc-settings-fold" aria-label="History"><div className="lc-settings-fold-body lc-settings-fields"><div className="lc-settings-subhead">History</div>
             <div className="lc-settings-choice">{runs.map((run) => <button key={run.id} type="button" className="lc-settings-choice-option lc-chatbot-history-row" onClick={() => setActiveId(run.id)}>{runLabel(run, statusFor(run))}</button>)}</div>

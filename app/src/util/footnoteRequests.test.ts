@@ -78,6 +78,15 @@ describe("applyFootnoteResult", () => {
     expect(next[1]).toBe(other);
   });
 
+  it("marks the notes that fill a preset field", () => {
+    const next = applyFootnoteResult([mark()], {
+      id: "fr-1",
+      notes: ["**Idea:** A lemma is a small theorem.", "**Bold** but not a field.", "**Gotcha:** not in this preset."],
+      fields: ["Idea", "Example"],
+    }, 50);
+    expect(next[0]?.notes?.map((note) => note.field)).toEqual(["Idea", undefined, undefined]);
+  });
+
   it("appends after notes the reader already wrote", () => {
     const reader = { id: "nt-reader", text: "my note", createdAt: 2, updatedAt: 2 };
     const next = applyFootnoteResult(

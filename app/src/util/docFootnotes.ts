@@ -61,6 +61,8 @@ export interface DocFootnoteNote {
    * existed have none; on a ChatBot footnote they count as the assistant's.
    */
   by?: "ai" | "reader";
+  /** The preset field this note fills ("Character"); its text opens "**Field:**". */
+  field?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -503,6 +505,20 @@ export function chipTitle(text: string, maxWords = 5): string {
 }
 
 /**
+ * A preset field note's chip: its field as a small tag, and a few words of
+ * what it says. "Idea" alone tells the reader nothing about the note.
+ */
+export function fieldChip(note: Pick<DocFootnoteNote, "text" | "field">): { tag: string; text: string } | null {
+  if (!note.field) return null;
+  const body = note.text.replace(/^\*\*[^*\n]{1,40}?:\*\*\s*/, "").trim();
+  if (/^helps with$/i.test(note.field)) {
+    const compact = body.replace(/\bexercises?\s+/gi, "").replace(/\s+/g, " ").replace(/\.$/, "").trim();
+    return { tag: note.field, text: compact.length <= 28 ? compact : `${compact.slice(0, 27).replace(/[,\s]+$/, "")}…` };
+  }
+  return { tag: note.field, text: chipTitle(body) };
+}
+
+/**
  * A one-line label for a saved thread, from what the reader asked.
  *
  * First line only, and short: the list is meant to be scanned, and a row that
@@ -695,6 +711,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
             text: candidate.text,
             ...(images.length > 0 ? { images } : {}),
             ...(candidate.by === "ai" || candidate.by === "reader" ? { by: candidate.by } : {}),
+            ...(typeof candidate.field === "string" && candidate.field.trim() && candidate.field.length <= 40 ? { field: candidate.field.trim() } : {}),
             createdAt,
             updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : createdAt,
           },

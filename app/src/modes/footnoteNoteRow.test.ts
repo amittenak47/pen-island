@@ -45,5 +45,11 @@ describe("item chips", () => {
     expect(chipTitle("Think of a single clock ticking through the whole search")).toBe("Think of a single clock…");
     expect(chipTitle("Edges point opposite to the order in which DFS finishes them")).toBe("Edges point opposite…");
     expect(chipTitle("Short.")).toBe("Short");
+    const { fieldChip } = await import("../util/docFootnotes");
+    expect(fieldChip({ text: "**Idea:** Finish times run opposite to the arrows." })).toBeNull();
+    expect(fieldChip({ text: "**Idea:** Finish times run opposite to the arrows.", field: "Idea" }))
+      .toEqual({ tag: "Idea", text: "Finish times run opposite to the arrows" });
+    expect(fieldChip({ text: "**Helps with:** Exercise 3.3(c), Exercise 3.3(d).", field: "Helps with" }))
+      .toEqual({ tag: "Helps with", text: "3.3(c), 3.3(d)" });
   });
 });

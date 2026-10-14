@@ -6,6 +6,7 @@ import type { AnnotationJobDto, AssistantRunnerStatus, LcClient, NewAnnotationJo
 import { saveChatBotAnswerMode } from "../util/chatBotClient";
 import type { DocFootnote } from "../util/docFootnotes";
 import { loadSelectionRuns, rememberSelectionRun, type ChatBotRun } from "../util/chatBotHistory";
+import { loadReadingChoice, saveReadingChoice } from "../util/readingStyles";
 
 const fixture = vi.hoisted(() => ({
   jobs: [] as AnnotationJobDto[],
@@ -99,6 +100,8 @@ async function openHistory() {
 beforeAll(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; });
 beforeEach(() => {
   localStorage.clear(); fixture.jobs = [];
+  // Most tests are about other choices: start them from a remembered type.
+  saveReadingChoice({ kind: "textbook", notes: "free", fill: "best", custom: {} });
   fixture.runner = null;
   fixture.sources = Object.fromEntries(files.map((_, index) => [`file-${index}`, `Text ${index}`]));
   fixture.create.mockReset().mockImplementation(async (_body: NewAnnotationJobDto) => undefined);
@@ -113,6 +116,52 @@ afterEach(async () => {
 });
 
 describe("ChatBot requests", () => {
+  it("needs a type on the first request, then starts from the last one", async () => {
+    localStorage.clear(); await mount();
+    expect(button("Start").disabled).toBe(true);
+    expect(host.querySelector('[aria-label="Notes"]')).toBeNull();
+    await click("Story");
+    expect(button("Start").disabled).toBe(false);
+    expect(button("Free-form").getAttribute("aria-checked")).toBe("true");
+    await click("Reading companion");
+    expect(host.textContent).toContain("Context · Character · Word or phrase · Theme · Think about it");
+    await click("All fields"); await click("Start");
+    expect(fixture.create.mock.calls[0]![0]).toMatchObject({ reading: {
+      kind: "story", preset: "Reading companion", fill: "all",
+      fields: ["Context", "Character", "Word or phrase", "Theme", "Think about it"],
+    } });
+    expect(loadReadingChoice()).toMatchObject({ kind: "story", notes: "companion", fill: "all" });
+    await act(async () => root!.unmount()); host.remove(); await mount();
+    expect(button("Story").getAttribute("aria-checked")).toBe("true");
+    expect(button("Reading companion").getAttribute("aria-checked")).toBe("true");
+    // Still changeable: another kind keeps Free-form and Custom, and moves off a preset it lacks.
+    await click("Code");
+    expect(button("Code reading").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("builds a custom preset from the kind's fields and the reader's own", async () => {
+    const onSelectionRequest = vi.fn(async (_settings: SelectionRequestSettings) => ({ id: "fr-selected", page: 7 }));
+    await mount({ selection, onSelectionRequest });
+    await click("Custom");
+    expect(button("Start").disabled).toBe(true);
+    expect(host.querySelector('[role="alert"]')!.textContent).toContain("Pick at least one field");
+    await click("Common mistake");
+    const own = host.querySelector<HTMLInputElement>('input[aria-label="Name your own field"]')!;
+    await fill(own, "Proof sketch"); await click("Add");
+    expect(button("Proof sketch").getAttribute("aria-pressed")).toBe("true");
+    await click("Start");
+    expect(onSelectionRequest.mock.calls[0]![0].reading).toEqual({
+      kind: "textbook", preset: "Custom", fill: "best", fields: ["Common mistake", "Proof sketch"],
+    });
+    expect(loadReadingChoice().custom.textbook).toEqual(["Common mistake", "Proof sketch"]);
+  });
+
+  it("sends a free-form request with only its kind", async () => {
+    await mount(); await click("Start");
+    expect(fixture.create.mock.calls[0]![0]).toMatchObject({ reading: { kind: "textbook" } });
+    expect((fixture.create.mock.calls[0]![0] as NewAnnotationJobDto).reading).toEqual({ kind: "textbook" });
+  });
+
   it("sends the selected answer mode on page jobs and explains the single-footnote model limit", async () => {
     saveChatBotAnswerMode("app"); await mount(); await click("Start");
     expect(fixture.create.mock.calls[0]![0]).toMatchObject({ answer_mode: "app" });

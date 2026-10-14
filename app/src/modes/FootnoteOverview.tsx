@@ -46,7 +46,7 @@ import {
 import { HOLD_SENSITIVE_MS } from "../util/gesture";
 import { useFootnoteHistory } from "./footnoteHistory";
 import { pickPhotos } from "../util/photoAttach";
-import { ALL_NOTES_ID, NOTE_IMAGE_LIMIT, chipTitle, combinedNote, noteById, noteIsAi } from "../util/docFootnotes";
+import { ALL_NOTES_ID, NOTE_IMAGE_LIMIT, chipTitle, combinedNote, fieldChip, noteById, noteIsAi } from "../util/docFootnotes";
 import { loadNotesCombined, saveNotesCombined } from "../util/notesCombinedPref";
 export interface FootnoteOverviewProps {
   onOpenArtifact?: (ref: ArtifactRef) => void;
@@ -1485,8 +1485,11 @@ function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini,
     if (value) window.clearTimeout(idle.current); else keepOpen();
     return !value;
   });
+  const field = chipText ? null : fieldChip(note);
   const chip = <>
-    {note.text ? <span className="lc-footnote-item-chip" data-type={ai ? "ai-note" : "note"}>{chipText ?? (chipTitle(note.text) || plainPreview(note.text))}</span> : null}
+    {note.text ? <span className="lc-footnote-item-chip" data-type={ai ? "ai-note" : "note"}>
+      {field ? <><span className="lc-footnote-field-tag">{field.tag}</span>{field.text}</> : chipText ?? (chipTitle(note.text) || plainPreview(note.text))}
+    </span> : null}
     <NoteImages images={note.images} />
   </>;
   return (

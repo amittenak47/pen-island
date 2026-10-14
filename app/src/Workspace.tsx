@@ -9013,6 +9013,7 @@ export const Workspace = memo(function Workspace({
           focus: ask.options?.focus,
           perPage: ask.options?.perPage,
           references: ask.options?.references,
+          reading: ask.options?.reading,
         }));
       } catch (cause) {
         // A durable queue failure must leave every unsent ask held for the
@@ -9070,11 +9071,12 @@ export const Workspace = memo(function Workspace({
     [saveAnnotateSession, setAnnotateFootnotes],
   );
 
+  // Every request says what is being read, so Ask ChatBot opens the sheet
+  // with the selection chosen; Start sends it with the last type and notes.
   const onAskChatBot = useCallback((selection: DocSelectionResult) => {
-    void requestSelectionFootnote(selection).catch(() => {
-      /* saveAnnotateSession already surfaces the error */
-    });
-  }, [requestSelectionFootnote]);
+    setChatBotSelection(selection.text.trim() ? selection : null);
+    openChatBot();
+  }, [openChatBot]);
 
   const onChatBotSelectionRequest = useCallback(async (options: SelectionFootnoteOptions) => {
     if (!chatBotSelection?.text.trim()) throw new Error("Select some text first.");

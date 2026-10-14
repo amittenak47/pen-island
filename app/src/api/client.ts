@@ -755,6 +755,7 @@ export interface NewAnnotationJobDto {
   workspace_items: FootnoteWorkspaceItemDto[];
   /** Files and PDF page ranges for the assistant to read alongside the request. */
   references?: AnnotationJobReferenceDto[];
+  reading?: ReadingStyleDto;
 }
 
 export interface AnnotationJobReferenceDto {
@@ -829,6 +830,16 @@ export interface FootnoteExtrasDto {
   focus?: string;
   per_page?: number;
   references?: AnnotationJobReferenceDto[];
+  reading?: ReadingStyleDto;
+}
+
+/** What the reader is reading and how they want notes shaped (see readingStyles). */
+export interface ReadingStyleDto {
+  kind: "textbook" | "story" | "article" | "paper" | "notes" | "code" | "other";
+  /** A preset's field labels in order; absent for free-form notes. */
+  fields?: string[];
+  fill?: "best" | "all";
+  preset?: string;
 }
 
 export interface FootnoteMarkDto {
@@ -853,6 +864,8 @@ export interface FootnoteResultDto {
   workspace_links?: FootnoteWorkspaceItemDto[];
   /** Kind of the asking document, the other end of each workspace link. */
   link_from?: "annotate" | "web";
+  /** Preset field labels the notes use; such a note opens "**Label:**". */
+  fields?: string[];
 }
 
 export interface FootnotePingResultDto {

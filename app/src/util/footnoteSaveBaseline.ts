@@ -8,7 +8,7 @@
 
 import { footnoteRevision, type DocFootnote } from "./docFootnotes";
 import type { FootnoteWriteResult } from "./footnoteRequests";
-import type { AnnotationJobReferenceDto } from "../api/client";
+import type { AnnotationJobReferenceDto, ReadingStyleDto } from "../api/client";
 import type { ChatBotAnswerMode } from "./chatBotClient";
 
 export function pristineMarksFromSaved(
@@ -40,6 +40,7 @@ export type SelectionFootnoteOptions = {
   focus: string;
   perPage: number;
   references: readonly AnnotationJobReferenceDto[];
+  reading?: ReadingStyleDto | null;
 };
 
 export type HeldFootnoteAsk = {

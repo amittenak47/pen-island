@@ -22569,6 +22569,16 @@ html[data-corners="rounded"] {
   --lc-type-file: #a16207;
 }
 
+/* A preset field's name, ahead of what the note says. */
+.lc-footnote-field-tag {
+  margin-right: 5px;
+  font-size: 9.5px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
 .lc-footnote-item-chip[data-type],
 .lc-footnote-type-chip[data-type] {
   --lc-type: var(--lc-type-note);

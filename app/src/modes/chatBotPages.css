@@ -65,3 +65,16 @@
   width: 0;
   height: 0;
 }
+
+/* What you're reading: the custom field editor. */
+.lc-chatbot-field-add { display: flex; gap: 8px; }
+.lc-chatbot-field-add input {
+  flex: 1 1 auto;
+  min-width: 0;
+  font: inherit;
+  padding: 6px 10px;
+  border: 1px solid var(--border, rgb(127 127 127 / 30%));
+  border-radius: var(--lc-r-block);
+  background: var(--input-bg, var(--bg));
+  color: var(--ink);
+}
