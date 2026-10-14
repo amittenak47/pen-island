@@ -1598,7 +1598,7 @@ export async function syncEdges(
   if (!loadPadHub()) return;
   const goneAt = new Map(goneRows.filter((row) => row.kind === "edge").map((row) => [row.id, row.gone_at]));
   // A tombstone the hub reports has to land here, or this device offers the
-  // edge back on its next push — unless the edge here was made after it (linked
+  // edge back on its next push â€” unless the edge here was made after it (linked
   // again, or an undone unlink), which the push below hands the hub to revive.
   const revived = new Set<string>();
   for (const id of goneIds) {
