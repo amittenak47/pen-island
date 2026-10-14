@@ -4,7 +4,7 @@ import { withBookWrite, newBookToken, inkBookIdentity } from "./bookCoordinator"
 import { abortTransaction, withTransaction, STORE_BOOK_META, STORE_CONTENT, STORE_PROBLEM_BOARDS,
   STORE_INK_PAGES, STORE_SYNC_STATE, STORE_SYNC_RECOVERY } from "./idb";
 import { allocateChangeSeqRange, seedSyncState, syncStateKey, type BookIdentity, type BookMeta, type SyncState } from "./syncState";
-import { inkPageKey, type InkPageRecord } from "./inkPageStore";
+import { inkPageKey, inkPageKeyRange, type InkPageRecord } from "./inkPageStore";
 import { notifyBookMetadataChanged, LocalBookConflictError } from "./localBookStore";
 import { LOCAL_VIEW_KEYS, recordHash, hashBytes } from "./syncContent";
 import { recordAuthoredExtras } from "./recordAuthoredExtras";
@@ -82,17 +82,22 @@ function readCapture(tx: IDBTransaction, owner: BookIdentity, done: (capture: Bo
       const meta = tx.objectStore(STORE_BOOK_META).get(syncStateKey(owner.kind, owner.id));
       const payload = tx.objectStore(owner.kind === "problem" ? STORE_PROBLEM_BOARDS : STORE_CONTENT).get(owner.id);
       const state = tx.objectStore(STORE_SYNC_STATE).get(syncStateKey(owner.kind, owner.id));
-      const pages = tx.objectStore(STORE_INK_PAGES).getAll();
+      const ink = tx.objectStore(STORE_INK_PAGES);
+      const pages = owner.kind === "problem" ? [] : [ink.getAll(inkPageKeyRange(`${owner.kind === "annotate" ? "md" : "wb"}:${owner.id}`))];
+      if (owner.kind === "annotate") pages.push(ink.getAll(IDBKeyRange.bound(`fnwb:${owner.id}:`, `fnwb:${owner.id};`, false, true)));
       const children: Record<string, Record<string, unknown>> = Object.create(null);
-      let remaining = 5;
+      let remaining = 4 + pages.length;
       const loaded = () => {
         if (--remaining) return;
         try {
           const capture = { ...owner, metadata: meta.result ?? null, payload: payload.result ?? null,
             state: state.result ?? seedSyncState(owner.kind, owner.id), children,
-            pages: (pages.result as InkPageRecord[]).filter(row => {
+            pages: pages.flatMap(request => request.result as InkPageRecord[]).filter(row => {
               const identity = inkBookIdentity(row.docKey);
               return identity?.kind === owner.kind && identity.id === owner.id;
+            }).sort((a, b) => {
+              const left = inkPageKey(a.docKey, a.pageId), right = inkPageKey(b.docKey, b.pageId);
+              return left < right ? -1 : left > right ? 1 : 0;
             }) };
           const record = buildRecord(capture);
           done({ ...capture, record: record ? bookWireRecord(record) : null });
@@ -106,7 +111,7 @@ function readCapture(tx: IDBTransaction, owner: BookIdentity, done: (capture: Bo
         const childId = String(row.key).slice(`fnwb:${owner.id}:`.length);
         Object.defineProperty(children, childId, { value: row.value, enumerable: true, configurable: true }); row.continue();
       };
-      for (const request of [meta, payload, state, pages]) request.onsuccess = loaded;
+      for (const request of [meta, payload, state, ...pages]) request.onsuccess = loaded;
 }
 
 function retainedRecord(capture: BookCapture, id: string, source: string) {
