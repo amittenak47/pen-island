@@ -16,6 +16,25 @@ pub const KINDS: &[&str] = &["textbook", "story", "article", "paper", "notes", "
 pub const MAX_FIELDS: usize = 8;
 /// Fewest words a field may have: shorter is a heading, not a note.
 const MIN_FIELD_WORDS: usize = 6;
+/// The field naming attached tasks. A short list is its whole point, and
+/// with nothing attached to name it is left out even when every field is asked for.
+pub const HELPS_WITH: &str = "Helps with";
+
+/// What the fields any kind of text can use mean, told to the assistant
+/// when a preset includes them.
+const SHARED_FIELDS: &[(&str, &str)] = &[
+    (HELPS_WITH, "Helps with names the attached tasks this passage prepares the reader for (exercises, \
+        homework, essay prompts, discussion questions) by their numbers or titles in the attachments, \
+        never their answers; leave it out when nothing attached is a task."),
+    ("Think about it", "Think about it asks one short question that makes the reader curious to keep \
+        reading, without giving its answer away."),
+    ("Looking ahead", "Looking ahead hints at what the passage sets up, drawn only from the pages you were \
+        given; never reveal later events."),
+];
+
+fn is_helps_with(label: &str) -> bool {
+    label.trim().eq_ignore_ascii_case(HELPS_WITH)
+}
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ReadingStyle {
@@ -117,18 +136,26 @@ impl ReadingStyle {
         let shape = if self.fields.is_empty() {
             "Write free-form markdown notes of a few sentences each, each opening with a short bold label of \
              two to four words and a colon that names its specific idea (for example **A cold first meeting:**, \
-             never a generic heading like **Why it matters:**)."
+             never a generic heading like **Why it matters:**). When something attached is a task (an \
+             exercise, homework, an essay prompt, a discussion question) this passage prepares for, a note \
+             labelled **Helps with:** may name it by its number or title, never its answer."
                 .to_string()
         } else {
             let labels = self.fields.join(", ");
             let fill = if self.fill == "all" {
-                "Fill every one of these fields for each footnote, a sentence or two each, without padding."
+                "Fill every one of these fields for each footnote, a sentence or two each, without padding \
+                 (Helps with only when something attached is a task)."
             } else {
                 "Use only the fields that have something specific and worthwhile to say about this passage, \
                  usually two or three; leave the others out."
             };
+            let meanings: Vec<&str> = SHARED_FIELDS.iter()
+                .filter(|(label, _)| self.fields.iter().any(|field| field.trim().eq_ignore_ascii_case(label)))
+                .map(|(_, meaning)| *meaning)
+                .collect();
+            let meanings = if meanings.is_empty() { String::new() } else { format!(" {}", meanings.join(" ")) };
             format!("Write each footnote's body as `fields`, each with one of these labels, in this order: \
-                {labels}. {fill} A field holds plain prose; its label is added for you.")
+                {labels}. {fill} A field holds plain prose; its label is added for you.{meanings}")
         };
         format!(
             "{kind} {shape} Every note or field must say something specific to the quoted words, the kind of \
@@ -141,7 +168,7 @@ impl ReadingStyle {
     /// in the preset's order. `quote` is the text the footnote is about.
     pub fn fold_fields(&self, fields: &[NoteField], quote: &str) -> Result<Vec<String>, String> {
         if fields.is_empty() {
-            if !self.fields.is_empty() && self.fill == "all" {
+            if self.fill == "all" && self.fields.iter().any(|label| !is_helps_with(label)) {
                 return Err(format!("fill every field: {}", self.fields.join(", ")));
             }
             return Ok(Vec::new());
@@ -164,7 +191,7 @@ impl ReadingStyle {
             if text.chars().count() > 1500 {
                 return Err(format!("the field \"{label}\" is longer than 1500 characters"));
             }
-            if text.split_whitespace().count() < MIN_FIELD_WORDS {
+            if !is_helps_with(label) && text.split_whitespace().count() < MIN_FIELD_WORDS {
                 return Err(format!("the field \"{label}\" is too thin: say something specific about the passage, in a full sentence"));
             }
             let key = squeezed(text);
@@ -176,12 +203,14 @@ impl ReadingStyle {
             }
             placed.push(Placed { slot, label: self.fields[slot].trim().to_string(), text: text.to_string(), key });
         }
-        if self.fill == "all" && placed.len() < self.fields.len() {
+        if self.fill == "all" {
             let missing: Vec<&str> = self.fields.iter().enumerate()
-                .filter(|(at, _)| !placed.iter().any(|seen| seen.slot == *at))
+                .filter(|(at, label)| !is_helps_with(label) && !placed.iter().any(|seen| seen.slot == *at))
                 .map(|(_, label)| label.as_str())
                 .collect();
-            return Err(format!("fill every field; missing: {}", missing.join(", ")));
+            if !missing.is_empty() {
+                return Err(format!("fill every field; missing: {}", missing.join(", ")));
+            }
         }
         placed.sort_by_key(|seen| seen.slot);
         Ok(placed.into_iter().map(|seen| format!("**{}:** {}", seen.label, seen.text)).collect())
@@ -202,6 +231,31 @@ mod tests {
     }
 
     fn field(label: &str, text: &str) -> NoteField { NoteField { label: label.into(), text: text.into() } }
+
+    #[test]
+    fn helps_with_is_a_short_list_and_optional_when_all_fields_are_asked() {
+        let style = ReadingStyle {
+            kind: "textbook".into(),
+            fields: vec!["Idea".into(), HELPS_WITH.into(), "Think about it".into()],
+            fill: "all".into(),
+            preset: String::new(),
+        };
+        let guide = style.guide();
+        assert!(guide.contains("never their answers"));
+        assert!(guide.contains("without giving its answer away"));
+        assert!(!guide.contains("Looking ahead hints"));
+        let idea = field("Idea", "Finishing order, not discovery order, is what topological sort reads off.");
+        let ask = field("Think about it", "Which vertex could finish last if the graph had a cycle?");
+        // Nothing attached is a task: Helps with is left out, and that is complete.
+        assert_eq!(style.fold_fields(&[idea.clone(), ask.clone()], "DFS").unwrap().len(), 2);
+        // A short list is its whole point.
+        let notes = style.fold_fields(&[idea, field("helps with", "Exercise 3.4, HW 2(b)"), ask], "DFS").unwrap();
+        assert_eq!(notes[1], "**Helps with:** Exercise 3.4, HW 2(b)");
+        // Other fields still have to be filled.
+        assert!(style.fold_fields(&[field(HELPS_WITH, "Exercise 3.4")], "DFS").unwrap_err().contains("missing: Idea, Think about it"));
+        // Free-form notes may name tasks too.
+        assert!(ReadingStyle { kind: "story".into(), ..Default::default() }.guide().contains("**Helps with:**"));
+    }
 
     #[test]
     fn styles_are_checked() {

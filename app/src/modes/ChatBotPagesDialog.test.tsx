@@ -124,11 +124,11 @@ describe("ChatBot requests", () => {
     expect(button("Start").disabled).toBe(false);
     expect(button("Free-form").getAttribute("aria-checked")).toBe("true");
     await click("Reading companion");
-    expect(host.textContent).toContain("Context · Character · Word or phrase · Theme · Think about it");
+    expect(host.textContent).toContain("Context · Character · Word or phrase · Theme · Think about it · Helps with");
     await click("All fields"); await click("Start");
     expect(fixture.create.mock.calls[0]![0]).toMatchObject({ reading: {
       kind: "story", preset: "Reading companion", fill: "all",
-      fields: ["Context", "Character", "Word or phrase", "Theme", "Think about it"],
+      fields: ["Context", "Character", "Word or phrase", "Theme", "Think about it", "Helps with"],
     } });
     expect(loadReadingChoice()).toMatchObject({ kind: "story", notes: "companion", fill: "all" });
     await act(async () => root!.unmount()); host.remove(); await mount();

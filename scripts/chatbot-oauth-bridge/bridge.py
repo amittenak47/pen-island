@@ -46,20 +46,22 @@ TOOLS = TOOLS | HANDOFF_TOOLS
 # Keep in step with WORKFLOW and INSTRUCTIONS in src/mcp.rs: the bridge sends
 # these when an assistant connects, before any call reaches `lc mcp`.
 WORKFLOW = (
-    "You are connected to a reader's Pen Island footnote inbox. The reader selects text in a "
-    "document and asks for a footnote; each request waits here until an assistant answers it. To "
-    "answer: call list_footnote_requests, then for each request call get_footnote_request and "
-    "submit_footnote. Read any attachments in extras.references before answering. Only answer "
-    "requests listed here, and never invent request ids. If the inbox is empty, say so. The "
-    "reader may also ask for this page or a page range (a chapter) to be annotated: call "
-    "list_annotation_jobs, read each job's pages a few at a time with get_annotation_pages, call "
-    "submit_page_annotations once per page with the footnotes worth adding (each quoting the "
-    "exact words it is about), then finish_annotation_job. When a job lists attachments in "
-    "references, read them first with get_annotation_reference. Attached files and PDF pages may "
-    "hold the chapter's problems, solved homework or notes; infer which from their content. Aim "
-    "the footnotes at the relevant ideas, and use problems only for hints, previews and "
-    "explanations; never solve them or quote or paraphrase solutions. If you can run scheduled "
-    "or repeating tasks, offer to check for new requests and jobs every few minutes."
+    "You are connected to a reader's Pen Island footnote inbox. The reader selects text in "
+    "a document and asks for a footnote; each request waits here until an assistant answers "
+    "it. To answer: call list_footnote_requests, then for each request call "
+    "get_footnote_request and submit_footnote. Read any attachments in extras.references "
+    "before answering. Only answer requests listed here, and never invent request ids. If "
+    "the inbox is empty, say so. The reader may also ask for this page or a page range (a "
+    "chapter) to be annotated: call list_annotation_jobs, read each job's pages a few at a "
+    "time with get_annotation_pages, call submit_page_annotations once per page with the "
+    "footnotes worth adding (each quoting the exact words it is about), then "
+    "finish_annotation_job. When a job lists attachments in references, read them first "
+    "with get_annotation_reference. Attached files and PDF pages may hold problems or other "
+    "tasks (exercises, homework, essay prompts, discussion questions), solved homework or "
+    "notes; infer which from their content. Aim the footnotes at the relevant ideas, and "
+    "use tasks only for hints, previews and explanations; never solve them or quote or "
+    "paraphrase solutions. If you can run scheduled or repeating tasks, offer to check for "
+    "new requests and jobs every few minutes."
 )
 FOOTNOTE_GUIDE = (
     "Every request and every page run carries a guide (in get_footnote_request and "
@@ -76,14 +78,10 @@ FOOTNOTE_GUIDE = (
 JOB_GUIDE = (
     "Choose the passages a thoughtful reader of this kind of text would most want "
     "explained, following the job's focus and guide. Attached files and PDF pages may hold "
-    "problems, solved homework or notes; infer which from their content rather than their "
-    "title or kind. Solved homework is only for seeing which ideas matter; never quote or "
-    "paraphrase its solutions. When attachments contain problems, name the ones a passage "
-    "prepares for in problems, by their numbers in the attachments. Use question for one "
-    "short question that makes the reader curious to keep reading, without giving its "
-    "answer away. Use looking_ahead for a hint at what the passage sets up, drawn only from "
-    "the pages you were given; never reveal later events. Highlight the key words; "
-    "underline the phrase the explanation hinges on."
+    "tasks (exercises, homework, essay prompts, discussion questions), solved homework or "
+    "notes; infer which from their content rather than their title or kind. Solved homework "
+    "is only for seeing which ideas matter; never quote or paraphrase its solutions. "
+    "Highlight the key words; underline the phrase the explanation hinges on."
 )
 INSTRUCTIONS = f"{WORKFLOW}\n\nHow to write each footnote: {FOOTNOTE_GUIDE}"
 
@@ -237,12 +235,6 @@ class PageAnnotation(BaseModel):
     links: list[FootnoteLink] | None = None
     marks: list["FootnoteMark"] | None = None
     workspace_links: list[str] | None = None
-    problems: Annotated[list[str], Field(max_length=8)] | None = Field(
-        default=None, description='Exercises or homework questions this passage helps with, e.g. "Exercise 3.4".')
-    question: Annotated[str, Field(max_length=1000)] | None = Field(
-        default=None, description="One curiosity question that makes the reader want to read on.")
-    looking_ahead: Annotated[str, Field(max_length=1000)] | None = Field(
-        default=None, description="A hint at what this sets up later in the chapter, without spoiling it.")
 
 
 class FootnoteMark(BaseModel):

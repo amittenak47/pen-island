@@ -112,8 +112,11 @@ pub struct NewJob {
     pub reading: super::reading::ReadingStyle,
 }
 
-/// One footnote as an assistant describes it for a page.
+/// One footnote as an assistant describes it for a page. Unknown keys are
+/// refused, so an assistant using the old problems/question/looking_ahead
+/// slots hears that they are now fields instead of losing them silently.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[serde(deny_unknown_fields)]
 pub struct Annotation {
     /// Exact words on the page the footnote is about; the device places it there.
     pub quote: String,
@@ -130,41 +133,10 @@ pub struct Annotation {
     pub marks: Vec<FootnoteMark>,
     #[serde(default)]
     pub workspace_links: Vec<String>,
-    /// Problems this passage helps with ("Exercise 3.4", "HW 2(b)").
-    #[serde(default)]
-    pub problems: Vec<String>,
-    /// A hint at what this sets up later in the chapter, without spoiling it.
-    #[serde(default)]
-    pub looking_ahead: Option<String>,
-    /// One curiosity question that makes the reader want to read on.
-    #[serde(default)]
-    pub question: Option<String>,
-    /// The body as labelled fields from the job's preset.
+    /// The body as labelled fields from the job's preset ("Helps with",
+    /// "Think about it" and "Looking ahead" among them when it has them).
     #[serde(default)]
     pub fields: Vec<super::reading::NoteField>,
-}
-
-impl Annotation {
-    /// The notes as the reader sees them: the assistant's own, then the
-    /// problems, the question and the look ahead, each as a labelled note.
-    fn reader_notes(&self) -> Result<Vec<String>, String> {
-        let mut notes = self.notes.clone();
-        let problems: Vec<&str> = self.problems.iter().map(|p| p.trim()).filter(|p| !p.is_empty()).collect();
-        if problems.len() > 8 || problems.iter().any(|p| p.chars().count() > 80) {
-            return Err("problems must have at most 8 entries of at most 80 characters".into());
-        }
-        if !problems.is_empty() {
-            notes.push(format!("**Helps with:** {}", problems.join(", ")));
-        }
-        for (label, text) in [("Think about it", &self.question), ("Looking ahead", &self.looking_ahead)] {
-            let Some(text) = text.as_deref().map(str::trim).filter(|t| !t.is_empty()) else { continue };
-            if text.chars().count() > 1000 {
-                return Err(format!("{} must be at most 1000 characters", label.to_lowercase()));
-            }
-            notes.push(format!("**{label}:** {text}"));
-        }
-        Ok(notes)
-    }
 }
 
 /// What the device receives: the quote and a checked footnote result.
@@ -560,11 +532,8 @@ pub fn submit_page(
                 reading: job.reading.clone(),
                 ..Default::default()
             };
-            let notes = annotation
-                .reader_notes()
-                .map_err(|message| invalid(format!("page {page}, \"{quote}\": {message}")))?;
             let submission = FootnoteSubmission {
-                notes,
+                notes: annotation.notes.clone(),
                 links: annotation.links.clone(),
                 title: annotation.title.clone(),
                 color: annotation.color,
@@ -806,21 +775,11 @@ mod tests {
         assert!(rest["next_offset"].is_null());
         assert!(matches!(read_reference(&conn, "aj-8", 5, 0), Err(FootnoteFail::Invalid(_))));
 
-        let annotation = Annotation {
-            problems: vec!["Exercise 3.1".into()],
-            question: Some("What would DFS miss without the chalk?".into()),
-            looking_ahead: Some("Pre and post numbers come next.".into()),
-            ..note("Depth-first search")
-        };
-        submit_page(&conn, "aj-8", 91, &[annotation], 2).unwrap();
-        let items = items_for_device(&conn, "tablet").unwrap();
-        let notes: Vec<&str> = items[0]["result"]["notes"].as_array().unwrap().iter().map(|n| n.as_str().unwrap()).collect();
-        assert_eq!(notes, [
-            "A note.",
-            "**Helps with:** Exercise 3.1",
-            "**Think about it:** What would DFS miss without the chalk?",
-            "**Looking ahead:** Pre and post numbers come next.",
-        ]);
+        // The old fixed slots are refused by name rather than dropped.
+        let old: Result<Annotation, _> = serde_json::from_value(serde_json::json!({
+            "quote": "Depth-first search", "notes": ["A note."], "problems": ["Exercise 3.1"],
+        }));
+        assert!(old.unwrap_err().to_string().contains("problems"));
     }
 
     #[test]

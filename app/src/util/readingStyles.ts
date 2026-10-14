@@ -33,19 +33,27 @@ export const PRESETS: Record<ReadingKind, readonly NotesPreset[]> = {
     { id: "exam", label: "Exam prep", fields: ["Idea", "Common mistake", "Helps with", "Think about it"] },
   ],
   story: [
-    { id: "companion", label: "Reading companion", fields: ["Context", "Character", "Word or phrase", "Theme", "Think about it"] },
+    { id: "companion", label: "Reading companion", fields: ["Context", "Character", "Word or phrase", "Theme", "Think about it", "Helps with"] },
     { id: "light", label: "Light", fields: ["Context", "Word or phrase"] },
   ],
-  article: [{ id: "argument", label: "Argument", fields: ["Claim", "Evidence", "Counterpoint", "Key term"] }],
-  paper: [{ id: "paper", label: "Paper reading", fields: ["Contribution", "Method", "Assumption", "Limitation"] }],
+  article: [{ id: "argument", label: "Argument", fields: ["Claim", "Evidence", "Counterpoint", "Key term", "Helps with"] }],
+  paper: [{ id: "paper", label: "Paper reading", fields: ["Contribution", "Method", "Assumption", "Limitation", "Helps with"] }],
   notes: [{ id: "review", label: "Review", fields: ["Idea", "Check this step", "Helps with"] }],
-  code: [{ id: "code", label: "Code reading", fields: ["What it does", "Why", "Gotcha"] }],
-  other: [{ id: "explain", label: "Explain", fields: ["Idea", "Example", "Think about it"] }],
+  code: [{ id: "code", label: "Code reading", fields: ["What it does", "Why", "Gotcha", "Helps with"] }],
+  other: [{ id: "explain", label: "Explain", fields: ["Idea", "Example", "Think about it", "Helps with"] }],
 };
 
-/** Every field a kind's presets use, offered when building a Custom preset. */
+/**
+ * Fields any kind of text can use. Helps with names attached tasks
+ * (exercises, essay prompts, discussion questions) and is skipped when
+ * nothing attached is one; Looking ahead stays out of the story presets,
+ * where it comes closest to a spoiler, but can be picked for Custom.
+ */
+export const SHARED_FIELDS = ["Helps with", "Think about it", "Looking ahead"] as const;
+
+/** Every field a kind's presets use, then the shared ones, offered when building a Custom preset. */
 export function fieldsFor(kind: ReadingKind): string[] {
-  return [...new Set(PRESETS[kind].flatMap((preset) => preset.fields))];
+  return [...new Set([...PRESETS[kind].flatMap((preset) => preset.fields), ...SHARED_FIELDS])];
 }
 
 export const MAX_NOTE_FIELDS = 8;
