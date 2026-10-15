@@ -1378,7 +1378,13 @@ export function FootnoteOverview({
         onClose={ref => setLocalMiniNotes(current => current.filter(entry => entry.noteId !== ref.noteId))}
         onOpenExternal={onOpenExternal} />}
     </>,
-    document.body,
+    /*
+     * Into the app root, not <body>. On Android the root is position: fixed,
+     * which makes it its own stacking context, so a panel in <body> (z 231)
+     * drew over every dialog inside the app, the offline gate (z 250)
+     * included. Inside the root the z-indices compare as intended.
+     */
+    document.querySelector(".lc-app") ?? document.body,
   );
 }
 /**
