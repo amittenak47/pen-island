@@ -1,3 +1,4 @@
+import { publishBooktabPages } from "../util/booktabPages";
 import { DialogPresence } from "../components/DialogMotion";
 /**
  * The board surface: Ink lab pad plus Board chrome.
@@ -1548,6 +1549,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * kept in step with the content slot's, and the marks portal into it.
    */
   const marksSlotNodeRef = useRef<HTMLDivElement | null>(null);
+  // Edge tabs must sit above the fitted page mask as well as the paper.
+  const booktabsSlotNodeRef = useRef<HTMLDivElement | null>(null);
+  const attachBooktabsSlot = useCallback((node: HTMLDivElement | null) => {
+    booktabsSlotNodeRef.current = node;
+    if (node && contentSlotNodeRef.current) node.style.transform = contentSlotNodeRef.current.style.transform;
+  }, []);
   /** Last paper height written onto the marks slot — reuse across mode flips. */
   const marksSlotHeightPxRef = useRef(0);
   /**
@@ -1584,6 +1591,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     onMarksSlotRef.current?.(node);
   }, []);
   const syncMarksSlotFrom = (content: HTMLElement, measure = true) => {
+    if (booktabsSlotNodeRef.current) booktabsSlotNodeRef.current.style.transform = content.style.transform;
     const marks = marksSlotNodeRef.current;
     if (!marks) return;
     marks.style.transform = content.style.transform;
@@ -2211,6 +2219,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const applyVisualScrollNowRef = useRef<(scrollX: number, scrollY: number) => void>(() => {});
   /** Pages reading: the scene span of the open page, or null when scrolling freely. */
   const pageLockRef = useRef<{ minY: number; maxY: number } | null>(null);
+  useEffect(() => () => publishBooktabPages(filmScope, []), [filmScope]);
   /** Text pages, until the document or the view changes size. */
   /** `fitted`: the page height came from a real reading fit, not a camera before any fit. */
   const textPagesRef = useRef<{ key: string; frames: PageFrame[]; pageH: number; fitted: boolean } | null>(null);
@@ -2342,6 +2351,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       };
       apply(contentSlotNodeRef.current);
       apply(marksSlotNodeRef.current);
+      apply(booktabsSlotNodeRef.current);
       for (const node of ensurePanRideNodes()) apply(node);
     },
     [ensurePanRideNodes],
@@ -9488,6 +9498,31 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     return pdf.length > 0 ? pdf : textPageFrames();
   };
 
+  /** Share the board's actual text sheets with the visual booktab layer. */
+  const publishTextBooktabs = () => {
+    const span = pageLockRef.current;
+    const text = textPagesRef.current;
+    const slot = contentSlotNodeRef.current;
+    const body = slot?.querySelector<HTMLElement>(".lc-doc-selectable-body");
+    const bounds = pageBoundsRef.current;
+    if (!span || !text || !body || !slot || !bounds || peekPdfReadingFrames(filmScope).length > 0) {
+      publishBooktabPages(filmScope, []);
+      return;
+    }
+    const box = body.getBoundingClientRect();
+    const slotBox = slot.getBoundingClientRect();
+    const scale = body.offsetWidth > 0 ? box.width / body.offsetWidth : 1;
+    const offsetY = scale > 0 ? (slotBox.top - box.top) / scale : 0;
+    const offsetX = scale > 0 ? (slotBox.left - box.left) / scale : 0;
+    const pad = pageFitRef.current != null && !pageSpreadRef.current ? sheetPadRef.current : 0;
+    publishBooktabPages(filmScope, text.frames.map(frame => ({
+      rect: { left: offsetX - pad, top: frame.minY - bounds.minY + offsetY,
+        width: body.offsetWidth + pad * 2, height: text.pageH },
+      contentBottom: frame.maxY - bounds.minY + offsetY,
+      visible: frame.minY >= span.minY && frame.minY < (pageShownRef.current?.maxY ?? span.maxY),
+    })));
+  };
+
   /**
    * Pages reading with a page fit: the whole open page in the middle of the
    * view, `pageFitRef` of it on the limiting side. `clampPanScroll` holds the
@@ -9550,6 +9585,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     sheetPadRef.current = textSheet
       ? Math.max(0, ((availW * fraction - 2 * SHEET_DESK_PX) / zoom - bareW) / 2)
       : 0;
+    publishTextBooktabs();
     const column = spreadColumn(bounds);
     const w = column.maxX - column.minX;
     pageFitZoomRef.current = zoom;
@@ -9637,6 +9673,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     side?: "left" | "right",
   ) => {
     if (!span) {
+      publishBooktabPages(filmScope, []);
       pageLockRef.current = null;
       pageShownRef.current = null;
       const cam = committedPanCameraRef.current;
@@ -9656,10 +9693,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       pageLockRef.current = { minY: span.minY, maxY: span.minY + textH };
       pageShownRef.current = { minY: span.minY, maxY: Math.min(span.maxY, span.minY + textH) };
     } else {
+      publishBooktabPages(filmScope, []);
       pageLockRef.current = { minY: span.minY, maxY: span.maxY };
       pageShownRef.current = { minY: span.minY, maxY: span.maxY };
     }
     if (pageFitRef.current != null) applyPageFit();
+    else publishTextBooktabs();
   };
   lockPageSpanRef.current = lockPageSpan;
 
@@ -10245,6 +10284,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         const was = pageFitRef.current;
         if (next === was) return;
         pageFitRef.current = next;
+        if (next == null) publishTextBooktabs();
         if (next != null) {
           applyPageFit();
           return;
@@ -10726,6 +10766,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           className="lc-page-marks-slot"
           style={{ width: contentSceneWidth + 24 }}
         />
+      )}
+      {pageContent && (
+        <div ref={attachBooktabsSlot} className="lc-page-marks-slot lc-page-booktabs-slot"
+          style={{ width: contentSceneWidth + 24 }} aria-hidden />
       )}
       {linedPaperOn && linedSlotOn && (
         <div ref={linedSlotNodeRef} className="lc-board-lined-overlay" aria-hidden />

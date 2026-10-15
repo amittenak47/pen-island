@@ -8,6 +8,7 @@ import type { LcClient } from "../api/client";
 import { loadAgentDisplayPrefs } from "../util/agentDisplayPrefs";
 import { loadUiHandedness } from "../util/uiHandedness";
 import { loadInkHandedness } from "../util/inkHandedness";
+import { loadShowBooktabs, loadBooktabPosition, loadBooktabFootnotes } from "../util/booktabsPref";
 import { loadPalettePrefs } from "../util/palettePref";
 
 vi.mock("../util/devicePrefs", async importOriginal => ({
@@ -159,4 +160,23 @@ it("keeps capture in Annotate and places all debug controls in Diagnostics", asy
   await act(async()=>button('Troubleshooting').click());
   for(const label of ['Measurement refresh rate','Speed overlay','Drawing speed bar','Page preview while flicking','Floating Sync button','Activity log'])
     expect(host.querySelector(`[aria-label="${label}"]`)).not.toBeNull();
+});
+
+it("stages booktab choices with Display settings and hides dependents when off", async () => {
+  const api = client(); await show(api);
+  expect(switchButton("Show booktabs").getAttribute("aria-checked")).toBe("true");
+  expect(button("Beside the footnote").getAttribute("aria-checked")).toBe("true");
+  expect(button("ChatBot footnotes").getAttribute("aria-checked")).toBe("true");
+  await act(async () => { button("Top edge").click(); button("All footnotes").click(); });
+  expect(count()).toBe("2 changes");
+  expect(loadBooktabPosition()).toBe("beside"); expect(loadBooktabFootnotes()).toBe("chatbot");
+  await act(async () => switchButton("Show booktabs").click());
+  expect(host.querySelector('[aria-label="Booktab position"]')).toBeNull();
+  expect(host.querySelector('[aria-label="Booktab footnotes"]')).toBeNull();
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Reset Display"]')!.click());
+  expect(count()).toBe("No changes");
+  await act(async () => { button("Bottom edge").click(); button("All footnotes").click(); });
+  await act(async () => button("Save").click());
+  expect(loadShowBooktabs()).toBe(true); expect(loadBooktabPosition()).toBe("bottom"); expect(loadBooktabFootnotes()).toBe("all");
+  expect(api.putConfig).not.toHaveBeenCalled();
 });

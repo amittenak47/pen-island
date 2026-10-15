@@ -29,6 +29,7 @@ import { countSettingsChanges } from "../util/settingsChanges";
 import "./settingsDialog.css";
 import { SettingsSlider } from "./SettingsSlider";
 import { SettingsChoices } from "./SettingsChoices";
+import { loadShowBooktabs, saveShowBooktabs, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes, type BooktabPosition, type BooktabFootnotes } from "../util/booktabsPref";
 import { HoldButton } from "./HoldButton";
 import { HEADER_MODES, loadHeaderModes, saveHeaderModes, type HeaderModes } from "../util/headerModesPref";
 import { loadTestForwardMode, saveTestForwardMode, type TestForwardMode } from "../util/agentPrefs";
@@ -491,6 +492,9 @@ interface DevicePrefs {
   readingMode: ReadingMode;
   /** Pages reading: the whole page edge to edge, or with a margin. */
   pageFit: PageFitPref;
+  showBooktabs: boolean;
+  booktabPosition: BooktabPosition;
+  booktabFootnotes: BooktabFootnotes;
   handedness: InkHandedness;
   /**
    * Hand a failed run to the coach without being asked.
@@ -562,6 +566,9 @@ function loadDevicePrefs(): DevicePrefs {
     startupTabs: loadStartupTabs(),
     readingMode: loadReadingMode(),
     pageFit: loadPageFit(),
+    showBooktabs: loadShowBooktabs(),
+    booktabPosition: loadBooktabPosition(),
+    booktabFootnotes: loadBooktabFootnotes(),
     handedness: loadInkHandedness(),
     testForward: loadTestForwardMode(),
     captureMode: loadCaptureMode(),
@@ -608,6 +615,9 @@ function prefsEqual(a: DevicePrefs, b: DevicePrefs): boolean {
     a.startupTabs === b.startupTabs &&
     a.readingMode === b.readingMode &&
     a.pageFit === b.pageFit &&
+    a.showBooktabs === b.showBooktabs &&
+    a.booktabPosition === b.booktabPosition &&
+    a.booktabFootnotes === b.booktabFootnotes &&
     a.handedness === b.handedness &&
     a.testForward === b.testForward &&
     a.captureMode === b.captureMode &&
@@ -981,6 +991,9 @@ export function SettingsModal({
   const [headerModes, setHeaderModes] = useState(loadHeaderModes);
   const [readingMode, setReadingMode] = useState<ReadingMode>(loadReadingMode);
   const [pageFit, setPageFit] = useState<PageFitPref>(loadPageFit);
+  const [showBooktabs, setShowBooktabs] = useState(loadShowBooktabs);
+  const [booktabPosition, setBooktabPosition] = useState(loadBooktabPosition);
+  const [booktabFootnotes, setBooktabFootnotes] = useState(loadBooktabFootnotes);
   const [agentDisplay, setAgentDisplay] = useState(loadAgentDisplayPrefs);
   const [colorWheelOnToolbar, setColorWheelOnToolbar] = useState(
     () => loadInkToolPresets().colorWheelOnToolbar,
@@ -1207,6 +1220,9 @@ export function SettingsModal({
     setStartupTabs(prefs.startupTabs);
     setReadingMode(prefs.readingMode);
     setPageFit(prefs.pageFit);
+    setShowBooktabs(prefs.showBooktabs);
+    setBooktabPosition(prefs.booktabPosition);
+    setBooktabFootnotes(prefs.booktabFootnotes);
     setAgentDisplay(prefs.agentDisplay);
     setTestForward(prefs.testForward);
     setCaptureMode(prefs.captureMode);
@@ -1334,6 +1350,9 @@ export function SettingsModal({
     startupTabs,
     readingMode,
     pageFit,
+    showBooktabs,
+    booktabPosition,
+    booktabFootnotes,
     handedness,
     testForward,
     captureMode,
@@ -1396,7 +1415,7 @@ export function SettingsModal({
     "ink-tools": ["tapOk", "colorWheelOnToolbar", "palettePrefs"],
     reading: ["pdfFlickMomentum"],
     storage: ["autosaveMs", "autosaveBanner", "hubAutoSync", "offlineMerge"],
-    ui: ["headerModes", "uiHandedness", "uiCorners", "startupTabs", "readingMode", "pageFit", "agentDisplay", "notificationCards"],
+    ui: ["headerModes", "uiHandedness", "uiCorners", "startupTabs", "readingMode", "pageFit", "showBooktabs", "booktabPosition", "booktabFootnotes", "agentDisplay", "notificationCards"],
     diagnostics: ["inkDisplayHz", "inkPerfOverlay", "inkPerfBar", "pdfFlickHud", "hubSyncWindowPill"],
     tests: ["testForward"],
   };
@@ -1487,6 +1506,9 @@ export function SettingsModal({
         saveStartupTabs(startupTabs);
         saveReadingMode(readingMode);
         savePageFit(pageFit);
+        saveShowBooktabs(showBooktabs);
+        saveBooktabPosition(booktabPosition);
+        saveBooktabFootnotes(booktabFootnotes);
         saveAgentDisplayPrefs(agentDisplay);
         saveTestForwardMode(testForward);
         saveCaptureMode(captureMode);
@@ -2686,6 +2708,31 @@ export function SettingsModal({
                     </button>)}
                   </SettingsChoices>
                 )}
+                </div>
+<div className="lc-setting-row">
+<div className="lc-settings-subhead">Booktabs</div>
+                <p className="lc-settings-hint">Numbered tabs match each footnote's color and mark its place on the page.</p>
+                <SettingsChoices className="lc-settings-choice" aria-label="Booktabs">
+                  <button type="button" role="switch" aria-checked={showBooktabs}
+                    className={showBooktabs ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                    onClick={() => setShowBooktabs(!showBooktabs)}><strong>Show booktabs</strong></button>
+                </SettingsChoices>
+                {showBooktabs && <>
+                  <div className="lc-settings-subhead">Position</div>
+                  <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Booktab position">
+                    {([["beside", "Beside the footnote"], ["top", "Top edge"], ["bottom", "Bottom edge"]] as const).map(([value, label]) =>
+                      <button key={value} type="button" role="radio" aria-checked={booktabPosition === value}
+                        className={booktabPosition === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                        onClick={() => setBooktabPosition(value)}><strong>{label}</strong></button>)}
+                  </SettingsChoices>
+                  <div className="lc-settings-subhead">Which footnotes</div>
+                  <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Booktab footnotes">
+                    {([["chatbot", "ChatBot footnotes"], ["all", "All footnotes"]] as const).map(([value, label]) =>
+                      <button key={value} type="button" role="radio" aria-checked={booktabFootnotes === value}
+                        className={booktabFootnotes === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                        onClick={() => setBooktabFootnotes(value)}><strong>{label}</strong></button>)}
+                  </SettingsChoices>
+                </>}
                 </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Assistant replies</div>

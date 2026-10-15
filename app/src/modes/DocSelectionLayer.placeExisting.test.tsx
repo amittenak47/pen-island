@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
 
+import { saveShowBooktabs, saveBooktabPosition, saveBooktabFootnotes } from "../util/booktabsPref";
+import { publishBooktabPages } from "../util/booktabPages";
 import { DocSelectionLayer } from "./DocSelectionLayer";
 import type { DocFootnote } from "../util/docFootnotes";
 import type { PageFrame } from "../canvas/inkPageIndex";
@@ -78,11 +80,14 @@ function landText(host: HTMLElement) {
 }
 
 beforeEach(() => {
+  localStorage.clear();
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
 });
 
 afterEach(() => {
   document.body.textContent = "";
+  localStorage.clear();
+  publishBooktabPages("booktabs-render", []);
   resetPdfFilmScopes();
   resetDocCameraForTests();
   vi.unstubAllGlobals();
@@ -459,5 +464,110 @@ describe("marks made on a wider copy of the same page", () => {
     expect(measured).toBeGreaterThan(0);
     expect(host.querySelector(".lc-doc-footnote-band")).not.toBeNull();
     act(() => root.unmount());
+  });
+});
+
+describe("booktab display choices", () => {
+  function mountTabs(pdf: boolean, portal = false) {
+    vi.spyOn(HTMLElement.prototype, "offsetWidth", "get").mockReturnValue(400);
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (this: HTMLElement) {
+      const page = this.dataset.pdfPage;
+      return page ? new DOMRect(20, page === "1" ? 100 : 800, 360, 600) : new DOMRect(0, 0, 400, 1500);
+    });
+    const slots = document.createElement("div");
+    const marksSlot = document.createElement("div");
+    const tabsSlot = document.createElement("div");
+    tabsSlot.className = "lc-page-booktabs-slot";
+    slots.append(marksSlot, tabsSlot);
+    if (portal) document.body.append(slots);
+    const marks: DocFootnote[] = [
+      { ...PAGE1_MARK, id: "late", kind: "ai", anchor: { kind: "region", scope: "p1", x: 50, y: 80, w: 40, h: 18 } },
+      { ...PAGE1_MARK, id: "right", kind: "note", anchor: { kind: "region", scope: "p1", x: 150, y: 20, w: 40, h: 18 } },
+      { ...PAGE1_MARK, id: "left", kind: "ai", anchor: { kind: "region", scope: "p1", x: 20, y: 20, w: 40, h: 18 } },
+      { ...PAGE1_MARK, id: "next", kind: "ai", anchor: { kind: "region", scope: "p2", x: 20, y: 20, w: 40, h: 18 } },
+    ];
+    const host = document.createElement("div"); document.body.append(host);
+    const root = createRoot(host);
+    act(() => root.render(<DocSelectionLayer enabled={false} marksHost={portal ? marksSlot : null} paletteScope="booktabs-render" footnotes={marks}>
+      <div data-doc-scope="p1" {...(pdf ? { "data-pdf-page": "1" } : {})} />
+      <div data-doc-scope="p2" {...(pdf ? { "data-pdf-page": "2" } : {})} />
+    </DocSelectionLayer>));
+    const tab = (id: string) => host.querySelector<HTMLElement>(`[data-footnote-id="${id}"] .lc-doc-footnote-tab`);
+    return { host, root, tab, marksSlot, tabsSlot };
+  }
+  it("portals visual tabs above the page mask while controls stay in the marks layer", () => {
+    const { root, marksSlot, tabsSlot } = mountTabs(true, true);
+    try {
+      expect(marksSlot.querySelectorAll(".lc-doc-footnote-bookmark")).toHaveLength(4);
+      expect(marksSlot.querySelector(".lc-doc-footnote-tab")).toBeNull();
+      expect(tabsSlot.querySelectorAll(".lc-doc-footnote-tab")).toHaveLength(3);
+      expect(tabsSlot.querySelector(".lc-doc-footnote-tab")!.getAttribute("aria-hidden")).toBe("true");
+    } finally { act(() => root.unmount()); }
+  });
+  it("keeps today's beside placement and stacking, and includes other footnotes live", () => {
+    const { host, root, tab } = mountTabs(true);
+    try {
+      expect(host.querySelectorAll(".lc-doc-footnote-tab")).toHaveLength(3);
+      expect(tab("right")).toBeNull();
+      expect(tab("left")!.style.left).toBe("-14px");
+      expect(tab("left")!.style.top).toBe("120px");
+      expect(tab("left")!.style.width).toBe("28px");
+      expect(tab("left")!.style.height).toBe("18px");
+      act(() => saveBooktabFootnotes("all"));
+      expect(host.querySelectorAll(".lc-doc-footnote-tab")).toHaveLength(4);
+      expect(tab("right")!.style.top).toBe("140px");
+      for (const element of host.querySelectorAll(".lc-doc-footnote-tab")) {
+        expect(element.tagName).toBe("SPAN");
+        expect(element.getAttribute("aria-hidden")).toBe("true");
+        expect(element.hasAttribute("tabindex")).toBe(false);
+      }
+      act(() => saveShowBooktabs(false));
+      expect(host.querySelectorAll(".lc-doc-footnote-tab")).toHaveLength(0);
+      expect(host.querySelectorAll(".lc-doc-footnote-bookmark")).toHaveLength(4);
+      act(() => saveShowBooktabs(true));
+      expect(tab("right")).not.toBeNull();
+    } finally { act(() => root.unmount()); }
+  });
+  it.each(["top", "bottom"] as const)("lays out each PDF sheet's %s tabs in reading order", edge => {
+    saveBooktabPosition(edge); saveBooktabFootnotes("all");
+    const { root, tab } = mountTabs(true);
+    try {
+      for (const [index, id] of ["left", "right", "late"].entries()) {
+        const element = tab(id)!;
+        expect(element.style.left).toBe(`${24 + index * 22}px`);
+        expect(element.style.top).toBe(`${edge === "top" ? 86 : 686}px`);
+        expect(element.style.width).toBe("18px"); expect(element.style.height).toBe("28px");
+      }
+      expect(tab("next")!.style.left).toBe("24px");
+      expect(tab("next")!.style.top).toBe(`${edge === "top" ? 786 : 1386}px`);
+      act(() => saveBooktabPosition(edge === "top" ? "bottom" : "top"));
+      expect(tab("left")!.style.top).toBe(`${edge === "top" ? 686 : 86}px`);
+    } finally { act(() => root.unmount()); }
+  });
+  it.each(["top", "bottom"] as const)("uses text page cuts for %s and falls back in continuous mode", edge => {
+    saveBooktabPosition(edge); saveBooktabFootnotes("all");
+    const { root, tab } = mountTabs(false);
+    try {
+      expect(tab("left")!.style.left).toBe("-14px");
+      expect(tab("right")!.style.top).toBe("60px");
+      act(() => publishBooktabPages("booktabs-render", [
+        { rect: { left: 0, top: 0, width: 400, height: 60 }, contentBottom: 60 },
+        { rect: { left: 0, top: 60, width: 400, height: 60 }, contentBottom: 120 },
+      ]));
+      expect(tab("left")!.style.top).toBe(`${edge === "top" ? -14 : 46}px`);
+      expect(tab("late")!.style.top).toBe(`${edge === "top" ? 46 : 106}px`);
+      act(() => publishBooktabPages("booktabs-render", [
+        { rect: { left: 0, top: 0, width: 400, height: 60 }, contentBottom: 60, visible: false },
+        { rect: { left: 0, top: 60, width: 400, height: 60 }, contentBottom: 120, visible: true },
+      ]));
+      expect(tab("left")).toBeNull();
+      expect(tab("late")).not.toBeNull();
+      act(() => saveBooktabPosition("beside"));
+      expect(tab("left")).toBeNull();
+      expect(tab("late")).not.toBeNull();
+      act(() => publishBooktabPages("booktabs-render", []));
+      expect(tab("left")!.style.left).toBe("-14px");
+      expect(tab("left")!.style.height).toBe("18px");
+    } finally { act(() => root.unmount()); }
   });
 });

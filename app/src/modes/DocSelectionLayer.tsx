@@ -44,7 +44,9 @@ import {
   type DocFootnoteSubMark,
   type DocFootnoteSubMarkKind,
 } from "../util/docFootnotes";
-import { AI_TAB_HEIGHT, AI_TAB_WIDTH, aiBookTabLeft, stackAiTabTops } from "../util/aiBookTabs";
+import { AI_TAB_HEIGHT, AI_TAB_WIDTH, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "../util/aiBookTabs";
+import { useBooktabs } from "../util/booktabsPref";
+import { useBooktabPages } from "../util/booktabPages";
 import { footnoteDisplayThemes, paletteForMarkIndex } from "../util/inkPaletteHistory";
 import { HoldButton } from "../components/HoldButton";
 import {
@@ -139,6 +141,8 @@ type RibbonPlacement = {
   bands: LocalRect[];
   useBands: boolean;
   number: number;
+  page?: LocalRect;
+  pageKey?: string;
 };
 
 function localRectEqual(a: LocalRect, b: LocalRect): boolean {
@@ -157,6 +161,9 @@ function ribbonsPlacementEqual(a: RibbonPlacement[], b: RibbonPlacement[]): bool
       x.number !== y.number ||
       x.useBands !== y.useBands ||
       !localRectEqual(x.at, y.at) ||
+      x.pageKey !== y.pageKey ||
+      (!!x.page !== !!y.page) ||
+      (x.page && y.page && !localRectEqual(x.page, y.page)) ||
       x.bands.length !== y.bands.length
     ) {
       return false;
@@ -481,15 +488,9 @@ export function DocSelectionLayer({
   const [phase, setPhase] = useState<"idle" | "confirm" | "actions">("idle");
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
-  const [ribbons, setRibbons] = useState<
-    Array<{
-      footnote: DocFootnote;
-      at: LocalRect;
-      bands: LocalRect[];
-      useBands: boolean;
-      number: number;
-    }>
-  >([]);
+  const booktabs = useBooktabs();
+  const booktabPages = useBooktabPages(paletteScope ?? "");
+  const [ribbons, setRibbons] = useState<RibbonPlacement[]>([]);
   const [paintedSubMarks, setPaintedSubMarks] = useState<PaintedSubMark[]>([]);
   /** PDF pages currently intersecting the viewport; empty means show every mark. */
   const [viewPages, setViewPages] = useState<readonly number[]>([]);
@@ -1915,8 +1916,18 @@ export function DocSelectionLayer({
         if (bands.length === 0) continue;
         const at = unionLocalRects(bands);
         if (!at) continue;
+        const sheet = root.closest<HTMLElement>("[data-pdf-page]");
+        const sheetBox = sheet?.getBoundingClientRect();
+        const page = sheetBox && sheetBox.width > 0 && sheetBox.height > 0 ? {
+          left: (sheetBox.left - bodyBox.left) / bodyScale,
+          top: (sheetBox.top - bodyBox.top) / bodyScale,
+          width: sheetBox.width / bodyScale,
+          height: sheetBox.height / bodyScale,
+        } : undefined;
         placed.push({
           footnote,
+          page,
+          pageKey: sheet ? `${sheet.dataset.pdfPage}:${sheet.dataset.pdfHalf ?? ""}` : undefined,
           at,
           bands,
           useBands: live.length > 0 || usableStored.length > 0,
@@ -2444,7 +2455,8 @@ export function DocSelectionLayer({
     () =>
       stackAiTabTops(
         visibleRibbons
-          .filter((entry) => entry.footnote.kind === "ai")
+          .filter((entry) => entry.footnote.kind === "ai" ||
+            (booktabs.show && booktabs.footnotes === "all"))
           .map((entry) => ({
             id: entry.footnote.id,
             y:
@@ -2453,9 +2465,38 @@ export function DocSelectionLayer({
                 : entry.at?.top) ?? 0,
           })),
       ),
-    [visibleRibbons],
+    [visibleRibbons, booktabs],
   );
+  const booktabRects = useMemo(() => {
+    const rects = new Map<string, LocalRect>();
+    if (!booktabs.show) return rects;
+    const groups = new Map<string, { page: LocalRect; tabs: RibbonPlacement[] }>();
+    for (const entry of visibleRibbons) {
+      if (booktabs.footnotes === "chatbot" && entry.footnote.kind !== "ai") continue;
+      const textPage = booktabPages.find(page => entry.at.top >= page.rect.top && entry.at.top < page.contentBottom);
+      if (!entry.page && textPage?.visible === false) continue;
+      const page = entry.page ?? textPage?.rect;
+      if (booktabs.position === "beside" || !page) {
+        rects.set(entry.footnote.id, {
+          left: aiBookTabLeft(), top: aiTabTops.get(entry.footnote.id) ?? entry.at.top,
+          width: AI_TAB_WIDTH, height: AI_TAB_HEIGHT,
+        });
+      } else {
+        const key = entry.pageKey ?? `text:${page.top}`;
+        let group = groups.get(key);
+        if (!group) { group = { page, tabs: [] }; groups.set(key, group); }
+        group.tabs.push(entry);
+      }
+    }
+    if (booktabs.position !== "beside") for (const { page, tabs } of groups.values()) {
+      tabs.sort((a, b) => a.at.top - b.at.top || a.at.left - b.at.left || a.number - b.number);
+      const ordered = tabs.map(entry => ({ id: entry.footnote.id }));
+      for (const [id, rect] of edgeBookTabRects(page, booktabs.position, ordered)) rects.set(id, rect);
+    }
+    return rects;
+  }, [visibleRibbons, booktabs, booktabPages, aiTabTops]);
 
+  const booktabsHost = marksHost?.parentElement?.querySelector<HTMLElement>(".lc-page-booktabs-slot") ?? null;
   return (
     <div className="lc-doc-selectable" ref={hostRef}>
       <div className="lc-doc-selectable-body" ref={bodyRef}>
@@ -2561,7 +2602,9 @@ export function DocSelectionLayer({
                 right: paintBands[0]!.left + paintBands[0]!.width,
               },
             );
-            const isAiTab = footnote.kind === "ai";
+            const tabRect = booktabRects.get(footnote.id);
+            const isBesideTab = !!tabRect && tabRect.width > tabRect.height;
+            const isAiTab = footnote.kind === "ai" || isBesideTab;
             const chipPad = 3;
             const chipW = 16;
             const pageWidth = bodyRef.current?.offsetWidth ?? 0;
@@ -2608,14 +2651,14 @@ export function DocSelectionLayer({
                     />
                   );
                 })}
-                {isAiTab ? (
+                {tabRect ? overlay(booktabsHost,
                   <span
-                    className="lc-doc-footnote lc-doc-footnote-ai lc-doc-footnote-tab"
+                    className={`lc-doc-footnote lc-doc-footnote-${footnote.kind} lc-doc-footnote-tab`}
                     aria-hidden="true"
-                    style={{ left: aiBookTabLeft(), top: chipTop, width: AI_TAB_WIDTH, height: AI_TAB_HEIGHT, ...tint }}
+                    style={{ ...tabRect, ...tint }}
                   >
                     {number}
-                  </span>
+                  </span>,
                 ) : null}
                 {caption ? (
                   <span

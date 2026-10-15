@@ -18898,12 +18898,11 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 .lc-doc-footnote-tab {
-  width: 28px !important;
-  min-width: 28px !important;
-  height: 18px !important;
-  min-height: 18px !important;
-  border-radius: 0 7px 7px 0;
-  overflow: visible;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  border-radius: var(--lc-r-block);
+  overflow: hidden;
+  box-sizing: border-box;
   box-shadow: 0 1px 3px rgb(0 0 0 / 22%);
   pointer-events: none;
 }
@@ -21085,6 +21084,11 @@ button.lc-row-selected:hover:not(:disabled) {
   transform-origin: 0 0;
   pointer-events: none;
   overflow: visible;
+}
+
+/* Visual tabs hang beyond the fitted reader's page mask (44). */
+.lc-page-marks-slot.lc-page-booktabs-slot {
+  z-index: 45;
 }
 
 /* Hide page annotations until the pinch's final camera has painted. Marked on
