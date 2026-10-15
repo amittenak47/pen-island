@@ -138,7 +138,7 @@ import {
   pdfDocumentOpenFor,
   type PdfDocumentLease,
 } from "./pdfOpenDocs";
-import { alignTextLayerToGlyphsInSlices } from "../util/pdfTextFit";
+import { alignTextLayerToGlyphs } from "../util/pdfTextFit";
 import { loadPdfPageSizes, savePdfPageSizes } from "./pdfPageSizeCache";
 
 /**
@@ -490,12 +490,40 @@ export function pdfStackMeasureHeight(
   return last + padBottom;
 }
 
-function queryPageSlots(host: HTMLElement, n: number): HTMLElement[] {
+/*
+ * Slots by page number, per host. Scanning every slot for each lookup cost
+ * ~0.5 s in 20 s of dragging through a long book on the tablet, because it runs
+ * several times a frame. The index is checked on every read: the slot count,
+ * the first and last slot (a window shifting by a page keeps the count but
+ * changes an end), and each slot found still a child with the same page. Any
+ * change since it was built just triggers a rebuild.
+ */
+const slotIndexes = new WeakMap<HTMLElement, { count: number; first: Element | null; last: Element | null; byPage: Map<string, HTMLElement[]> }>();
+
+function indexPageSlots(host: HTMLElement) {
+  const byPage = new Map<string, HTMLElement[]>();
+  for (const node of Array.from(host.children)) {
+    if (!(node instanceof HTMLElement)) continue;
+    const page = node.dataset.pdfPage;
+    if (!page) continue;
+    const list = byPage.get(page);
+    if (list) list.push(node); else byPage.set(page, [node]);
+  }
+  const index = { count: host.childElementCount, first: host.firstElementChild, last: host.lastElementChild, byPage };
+  slotIndexes.set(host, index);
+  return index;
+}
+
+export function queryPageSlots(host: HTMLElement, n: number): HTMLElement[] {
   // Slots are direct children. A descendant selector walks every retained
   // pdf.js text span each time the preview ring blits during a flick.
-  return Array.from(host.children).filter(
-    (node): node is HTMLElement => node instanceof HTMLElement && node.dataset.pdfPage === String(n),
-  );
+  const page = String(n);
+  let index = slotIndexes.get(host);
+  const stale = !index || index.count !== host.childElementCount ||
+    index.first !== host.firstElementChild || index.last !== host.lastElementChild ||
+    (index.byPage.get(page) ?? []).some((node) => node.parentElement !== host || node.dataset.pdfPage !== page);
+  if (stale) index = indexPageSlots(host);
+  return [...(index!.byPage.get(page) ?? [])];
 }
 
 function zeroPageSlots(host: HTMLElement, n: number): void {
@@ -1350,7 +1378,13 @@ export function PdfDocument({
      * landed page's sharp paint: started 0.4 s after a turn, it landed under
      * the next swipe of a reader turning in cadence.
      */
-    const textBusy = () => renderBusy() || isPageTurnBusy();
+    /*
+     * And not the moment a drag pauses either: a hold-and-drag through Scroll
+     * reading rests for a beat between moves, the fill started in that beat,
+     * and the next move ran into it. `isCameraBusy` holds on after the camera
+     * last moved (0.9 s on Android), so the text waits for the hand to rest.
+     */
+    const textBusy = () => renderBusy() || isPageTurnBusy() || isCameraBusy();
 
     /**
      * Lay pdf.js's spans over a page's picture.
@@ -1379,8 +1413,8 @@ export function PdfDocument({
         /*
          * pdf.js sizes each span by setting a canvas font and measuring its
          * string: thousands of font switches and measurements on the UI thread,
-         * ~4 s on a dense page on the tablet. alignTextLayerToGlyphsInSlices below
-         * already measures every span's real width, a slice at a time, and scales it
+         * ~4 s on a dense page on the tablet. alignTextLayerToGlyphs below
+         * already measures every span's real width in one batch and scales it
          * to the PDF's own glyph width, from any starting scale. So pdf.js gets
          * horizontal items without a width, which skips its measuring; vertical
          * text, which that fit leaves alone, is measured as before.
@@ -1401,15 +1435,13 @@ export function PdfDocument({
         if (blocked()) return false;
         await layer.render();
         if (blocked()) return false;
-        await alignTextLayerToGlyphsInSlices(
+        if (blocked()) return false;
+        alignTextLayerToGlyphs(
           spreadHost,
           layer.textDivs,
           content.items,
           entry.fit,
-          yieldToInput,
-          blocked,
         );
-        if (blocked()) return false;
       }
       textFilledRef.current.add(n);
       publishDocPlacementRev(filmScope, [n]);
