@@ -12,6 +12,7 @@
 .lc-dialog-frame.lc-library-menu .lc-dialog-foot .lc-library-footer-pull .lc-hold-reveal-label { display: block; }
 .lc-library-footer-pull :is(.lc-annotate-menu-label, .lc-whiteboard-menu-label) { gap: 8px; }
 .lc-library-footer-pull :is(.lc-annotate-row-icon, .lc-whiteboard-row-icon) { color: var(--accent); width: 16px; height: 16px; flex-basis: 16px; }
+.lc-dialog-frame.lc-library-menu[data-dialog-shape="blocky"] { --lc-dialog-control-radius: var(--lc-r-block); }
 .lc-settings-modal.lc-library-menu {
   width: min(620px, 100%);
   max-height: min(70dvh, 480px);
@@ -43,6 +44,12 @@
   box-shadow: none;
 }
 .lc-library-menu .lc-scratch-load-entry { align-items: center; gap: 4px; padding: 6px 0; }
+/* Entries with several local actions keep their title above the controls. */
+.lc-library-menu .lc-library-entry { flex-wrap: wrap; gap: 8px; }
+.lc-library-menu .lc-library-entry > .lc-library-subtitle { flex: 1 0 100%; min-width: 0; font-size: 13px; }
+.lc-library-menu .lc-library-entry .lc-library-subtitle strong { display: block; overflow: hidden; text-overflow: ellipsis; }
+.lc-library-menu .lc-library-entry .lc-muted { display: block; font-size: 11px; line-height: 1.4; }
+.lc-library-menu .lc-library-entry .lc-dialog-action { min-width: 0; }
 .lc-library-menu .lc-scratch-load-entry:hover,
 .lc-library-menu .lc-document-menu > button:hover:not(:disabled),
 .lc-library-menu .lc-document-menu > .lc-hold-choice:hover:not(:disabled),

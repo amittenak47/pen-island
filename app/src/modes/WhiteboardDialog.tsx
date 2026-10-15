@@ -244,7 +244,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
     refreshList();
   };
 
-  const morphRef = useLibraryMorph(`${section}:${pickingLoad}:${pickingSnapshots}:${saveTitle!==null}`);
+  const morphRef = useLibraryMorph(`${section}:${pickingLoad}:${pickingSnapshots}:${pickingRecovery}:${saveTitle!==null}`);
   const archived = props.mode === "entry" ? trash : [];
 
   return (
@@ -269,7 +269,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
         className="lc-attempt-modal lc-library-holds lc-library-menu lc-library-whiteboard lc-whiteboard-dialog"
         ariaLabel={isLeave ? "Leave whiteboard?" : "Open whiteboard"}
         titleId="lc-whiteboard-dialog-title"
-        title={isLeave ? "Leave whiteboard?" : pickingLoad ? "Load" : pickingSnapshots ? "Restore" : section === "open" ? "Open" : section === "export" ? "Export" : "Whiteboard"}
+        title={isLeave ? "Leave whiteboard?" : pickingRecovery ? "Retained copies" : pickingLoad ? "Load" : pickingSnapshots ? "Restore" : section === "open" ? "Open" : section === "export" ? "Export" : "Whiteboard"}
         subtitle="Notebooks"
         icon={<NotebookIcon />}
         mode="whiteboard"

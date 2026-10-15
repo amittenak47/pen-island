@@ -321,7 +321,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     }
   };
 
-  const morphRef = useLibraryMorph(`${section}:${pickingRecent}:${pickingSnapshots}:${newTitle!==null}:${saveTitle!==null}`);
+  const morphRef = useLibraryMorph(`${section}:${pickingRecent}:${pickingSnapshots}:${pickingRecovery}:${newTitle!==null}:${saveTitle!==null}`);
   const archived = visibleTrash;
 
   return (
@@ -341,7 +341,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
       <DialogFrame ref={morphRef} exiting={exiting}
         className={`lc-attempt-modal lc-library-holds lc-library-menu lc-annotate-dialog ${isWeb ? "lc-library-web" : "lc-library-annotate"}`}
         titleId="lc-annotate-dialog-title"
-        title={isLeave ? "Leave document?" : section === "open" && !pickingRecent ? "Open" : section === "new" ? "New" : section === "export" ? "Export" : section === "sets" ? "Annotations" : pickingRecent ? "Recents" : isWeb ? "Web" : "Annotate"}
+        title={isLeave ? "Leave document?" : pickingRecovery ? "Retained copies" : section === "open" && !pickingRecent ? "Open" : section === "new" ? "New" : section === "export" ? "Export" : section === "sets" ? "Annotations" : pickingRecent ? "Recents" : isWeb ? "Web" : "Annotate"}
         subtitle={isWeb ? "Write onto a page snapshot" : "Ink for this document"}
         icon={<DocumentIcon web={isWeb} />}
         mode={isWeb ? "browse" : "annotate"}
