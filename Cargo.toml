@@ -57,6 +57,14 @@ rustpython = { version = "0.5.0", optional = true, default-features = false, fea
 pdf-extract = "0.12.0"
 tempfile = "3.27.0"
 
+# Debug builds keep line numbers for backtraces but skip full debug info,
+# which keeps target/debug much smaller. Dependencies get none at all.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = true
 strip = true

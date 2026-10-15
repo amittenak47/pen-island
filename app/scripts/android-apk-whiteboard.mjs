@@ -42,5 +42,5 @@ const env = gradleJdkEnv(jdk);
 
 const tauri = ["exec", "--", "tauri", "android", "build", "--apk"];
 if (debug) tauri.push("--debug");
-tauri.push("--", "--no-default-features");
+tauri.push("--target", "aarch64", "--", "--no-default-features");
 run("npm", tauri, env);

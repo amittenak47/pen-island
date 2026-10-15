@@ -60,6 +60,14 @@ tauri-plugin-voicedictation = { path = "plugins/voicedictation" }
 # no share sheet to hand bytes to.
 base64 = "0.22"
 
+# Debug builds keep line numbers for backtraces but skip full debug info,
+# which keeps target/debug much smaller. Dependencies get none at all.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 [profile.release]
 lto = true
 strip = true

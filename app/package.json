@@ -16,7 +16,7 @@
     "android:overlay": "node scripts/android-overlay.mjs",
     "android:dev": "node scripts/android-overlay.mjs && npm run icons:sync && node scripts/android-with-jdk.mjs tauri android dev",
     "android:apk:practice": "node scripts/android-overlay.mjs && npm run icons:sync && node scripts/android-with-jdk.mjs tauri android build --apk --debug --target aarch64",
-    "android:apk:practice:release": "node scripts/android-overlay.mjs && npm run icons:sync && node scripts/android-with-jdk.mjs tauri android build --apk",
+    "android:apk:practice:release": "node scripts/android-overlay.mjs && npm run icons:sync && node scripts/android-with-jdk.mjs tauri android build --apk --target aarch64",
     "android:apk:whiteboard": "node scripts/android-apk-whiteboard.mjs --debug",
     "android:apk:whiteboard:release": "node scripts/android-apk-whiteboard.mjs",
     "android:apk": "npm run android:apk:practice",
