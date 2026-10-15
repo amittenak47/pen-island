@@ -38,7 +38,7 @@
   padding: 16px 24px;
   border: 0;
   border-bottom: var(--lc-dialog-edge) solid var(--lc-dialog-line);
-  border-radius: 0;
+  border-radius: calc(var(--lc-r-block) - 2px);
   text-align: left;
   color: var(--ink);
   background: transparent;

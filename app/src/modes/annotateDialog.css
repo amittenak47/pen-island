@@ -20,7 +20,7 @@
 .lc-dialog-frame.lc-annotate-dialog .lc-document-menu > .lc-hold-choice,
 .lc-dialog-frame.lc-annotate-dialog .lc-library-refresh > .lc-hub-pull-command {
   width: 100%; min-height: 62px; padding: 16px 24px; border: 0;
-  border-bottom: var(--lc-dialog-edge) solid var(--lc-dialog-line); border-radius: 0;
+  border-bottom: var(--lc-dialog-edge) solid var(--lc-dialog-line); border-radius: calc(var(--lc-r-block) - 2px);
   text-align: left; color: var(--ink); background: transparent; box-shadow: none;
 }
 .lc-annotate-menu-label { display: flex; align-items: center; gap: 16px; min-width: 0; }

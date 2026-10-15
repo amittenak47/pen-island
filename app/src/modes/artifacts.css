@@ -20,7 +20,7 @@
   height: 100%;
   max-height: 100%;
   border: 1px solid var(--chrome-edge);
-  border-radius: 14px;
+  border-radius: calc(var(--lc-r-block) * 7);
   background: var(--bg);
   box-shadow: 0 18px 48px rgb(0 0 0 / 28%);
   overflow: hidden;
@@ -61,7 +61,7 @@
   margin: 0;
   padding: 4px 8px;
   border: 1px solid var(--chrome-edge);
-  border-radius: 7px;
+  border-radius: calc(var(--lc-r-block) * 3.5);
   background: var(--bg);
   color: inherit;
   font: inherit;
@@ -160,7 +160,7 @@
   height: 16px;
   padding: 0;
   border: 0;
-  border-radius: 3px;
+  border-radius: calc(var(--lc-r-block) * 1.5);
   background: transparent;
   color: inherit;
   line-height: 0;
@@ -206,7 +206,7 @@
   min-height: 32px;
   padding: 2px 3px 2px 4px;
   border: 1px solid var(--chrome-edge);
-  border-radius: 8px;
+  border-radius: calc(var(--lc-r-block) * 4);
   background: var(--bg);
   color: var(--ink);
 }
@@ -243,7 +243,7 @@
   height: 22px;
   padding: 0;
   border: 0;
-  border-radius: 4px;
+  border-radius: calc(var(--lc-r-block) * 2);
   background: transparent;
   color: var(--hint);
   line-height: 0;
@@ -338,7 +338,7 @@
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: calc(var(--lc-r-block) * 3.5);
   line-height: 0;
   background: transparent;
   color: var(--hint);
@@ -456,7 +456,7 @@
   height: 26px;
   padding: 0;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(var(--lc-r-block) * 3);
   background: transparent;
   color: var(--hint);
   box-shadow: none;
@@ -526,7 +526,7 @@
   height: 26px;
   padding: 0 8px;
   border: 0;
-  border-radius: 6px;
+  border-radius: calc(var(--lc-r-block) * 3);
   background: transparent;
   color: var(--hint);
   font-size: 12px;
@@ -584,7 +584,7 @@
 .lc-artifact-picker-reference-row .lc-number-wheel {
   width: 26px;
   height: 20px;
-  border-radius: 4px;
+  border-radius: calc(var(--lc-r-block) * 2);
 }
 
 .lc-artifact-picker-reference-row .lc-number-wheel-item,
@@ -605,7 +605,7 @@
   height: 28px;
   padding: 0;
   border: 0;
-  border-radius: 7px;
+  border-radius: calc(var(--lc-r-block) * 3.5);
   line-height: 0;
   background: transparent;
   color: var(--hint);
@@ -679,7 +679,7 @@
   border-radius: 2px;
 }
 
-.lc-dialog-frame button.lc-artifact-picker-source { border-radius: 0; }
+.lc-dialog-frame button.lc-artifact-picker-source { border-radius: calc(var(--lc-r-block) - 2px); }
 
 .lc-dialog-frame .lc-artifact-picker-sources {
   flex-wrap: wrap;

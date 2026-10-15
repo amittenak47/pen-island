@@ -4,4 +4,4 @@
 .lc-confirm-dialog .lc-dialog-action.lc-hold-danger { border-color: var(--bad); color: var(--bad); }
 .lc-settings-modal.lc-dialog-frame.lc-llm-status-dialog { width: min(500px, 100%); max-height: 85dvh; padding: 0; }
 .lc-llm-status-dialog .lc-dialog-body { gap: 0; }
-.lc-llm-status-dialog .lc-hold-choice { min-width: 0; border-radius: 0; border: 0; border-bottom: 2px solid var(--lc-dialog-line); padding: 16px 0; background: transparent; color: var(--ink); }
+.lc-llm-status-dialog .lc-hold-choice { min-width: 0; border-radius: calc(var(--lc-r-block) - 2px); border: 0; border-bottom: 2px solid var(--lc-dialog-line); padding: 16px 0; background: transparent; color: var(--ink); }
