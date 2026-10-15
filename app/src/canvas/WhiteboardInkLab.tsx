@@ -1725,6 +1725,7 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
           pending.opened = true;
           holdNestedScroll();
           drawingRef.current = false;
+          strokePointerId = null;
           lastStrokeAtRef.current = performance.now();
           scheduleIdleRemesh();
           highlightPtsRef.current = null;
@@ -1831,6 +1832,12 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
 
       let strokePaintView: ViewportTransform | null = null;
       let strokeDpr = 1;
+      /*
+       * The finger or pen that started the stroke. Only it feeds the stroke:
+       * a second finger's moves used to be spliced in, drawing spokes that
+       * jumped between the two touches.
+       */
+      let strokePointerId: number | null = null;
       const cancelIdleRemesh = () => {
         if (idleRemeshTimerRef.current != null) {
           window.clearTimeout(idleRemeshTimerRef.current);
@@ -1857,6 +1864,9 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
           return;
         }
         if (event.button !== 0) return;
+        // Another touch while a stroke is drawing is not part of it; leave it
+        // to the board (a pinch, a pan) instead of starting a second stroke.
+        if (drawingRef.current && strokePointerId !== null && event.pointerId !== strokePointerId) return;
         event.preventDefault();
         event.stopPropagation();
         /*
@@ -1904,6 +1914,7 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
           armWheel();
         }
         drawingRef.current = true;
+        strokePointerId = event.pointerId;
         holdNestedScroll();
         try {
           canvas.setPointerCapture(event.pointerId);
@@ -1984,7 +1995,7 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
           pending.lastX = event.clientX;
           pending.lastY = event.clientY;
         }
-        if (!drawingRef.current) return;
+        if (!drawingRef.current || event.pointerId !== strokePointerId) return;
         if (strokeHostPinRef.current || lastHostScrollRef.current.length > 0) {
           holdNestedScroll();
         }
@@ -2033,10 +2044,11 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
             return;
           }
         }
-        if (!drawingRef.current) return;
+        if (!drawingRef.current || event.pointerId !== strokePointerId) return;
         holdNestedScroll();
         if (toolRef.current === "eraser") stampEraser(event);
         drawingRef.current = false;
+        strokePointerId = null;
         stopPaintPump();
         if (toolRef.current === "eraser") engine.paint();
         lastStrokeAtRef.current = performance.now();

@@ -243,6 +243,30 @@ describe("annotation camera presentation", () => {
     expect(alpha(100, 280)).toBeGreaterThan(0);
   });
 
+  it("draws only from the finger that started a stroke when a second finger moves", async () => {
+    await ready([], "pen");
+    const event = (type: string, pointerId: number, x: number, y: number) => {
+      const e = new MouseEvent(type, { button: 0, clientX: x, clientY: y, bubbles: true });
+      Object.defineProperties(e, { pointerId: { value: pointerId }, pointerType: { value: "touch" }, pressure: { value: .5 } });
+      surface().dispatchEvent(e);
+    };
+    await act(async () => {
+      event("pointerdown", 1, 40, 100);
+      event("pointerdown", 2, 160, 160);
+      event("pointermove", 1, 60, 100);
+      event("pointermove", 2, 170, 170);
+      event("pointermove", 1, 80, 100);
+      event("pointerup", 2, 170, 170);
+      event("pointermove", 1, 100, 100);
+      event("pointerup", 1, 100, 100);
+    });
+    const ops = ref.current!.getOps();
+    expect(ops).toHaveLength(1);
+    // Every point stays on the first finger's line: none jumps to the second.
+    const ys = (ops[0] as { points: { y: number }[] }).points.map((point) => point.y);
+    expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(1);
+  });
+
   it("hides an unsafe old camera until interrupted loading lands at the latest page", async () => {
     await ready([stroke(100), stroke(850)]);
     worker.blocked = true;
