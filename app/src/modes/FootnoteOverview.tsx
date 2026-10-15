@@ -22,7 +22,7 @@ import {
 } from "../util/docFootnotes";
 import { ColorRadial } from "../canvas/ColorRadial";
 import { HoldButton } from "../components/HoldButton";
-import { PenToolIcon, UnderlineIcon } from "../components/MarkToolIcons";
+import { HighlighterIcon, PenToolIcon, UnderlineIcon } from "../components/MarkToolIcons";
 import { ExpandNoteIcon, PictureInPictureIcon } from "../components/NoteWindowIcons";
 import { FootnoteMiniNotes, MINI_NOTE_LIMIT, openMiniNote, type MiniNoteRef } from "./FootnoteMiniNotes";
 import { isDocChromeTarget, pointerInSubMark } from "../canvas/docSelectionGesture";
@@ -476,7 +476,8 @@ export function FootnoteOverview({
     const current = footnoteRef.current;
     onChange({ ...current, palette: nextPalette, color: nextColor });
   };
-  const underlineArmed = subMarkMode === "underline";
+  // Underline or highlight armed: the wheel paints the new sub-mark, not the footnote.
+  const underlineArmed = subMarkMode === "underline" || subMarkMode === "highlight";
   const wheelPalette = underlineArmed
     ? (subMarkPaintTheme?.palette ?? stepFallbackPalette(palette, 1))
     : palette;
@@ -510,7 +511,7 @@ export function FootnoteOverview({
   useEffect(() => {
     const prev = prevSubMarkModeRef.current;
     prevSubMarkModeRef.current = subMarkMode;
-    if (subMarkMode !== "underline" || prev === "underline") return;
+    if (!subMarkMode || prev === subMarkMode) return;
     const next = stepFallbackPalette(palette, 1);
     onSubMarkPaintTheme?.({ palette: next, color: next[0] ?? "#0d9488" });
     onActiveSubMarkIdChange?.(null);
@@ -568,11 +569,6 @@ export function FootnoteOverview({
     window.addEventListener("pointerdown", onDown, true);
     return () => window.removeEventListener("pointerdown", onDown, true);
   }, [onClose, task]);
-
-  // Highlight sub-mark retired from the panel — clear a leftover armed mode.
-  useEffect(() => {
-    if (subMarkMode === "highlight") onSubMarkModeChange(null);
-  }, [subMarkMode, onSubMarkModeChange]);
 
   const copyMarkText = useCallback(async () => {
     const live = window.getSelection()?.toString().trim() ?? "";
@@ -820,7 +816,7 @@ export function FootnoteOverview({
     onChange({ ...footnote, subMarks: next.length > 0 ? next : undefined });
   };
   const selectSubMark = (mark: (typeof subMarks)[number]) => {
-    if (subMarkMode !== "underline") return;
+    if (!underlineArmed) return;
     const nextPalette =
       normalizePalette(mark.palette) ?? subMarkPaintTheme?.palette ?? stepFallbackPalette(palette, 1);
     const nextColor = mark.color ?? nextPalette[0] ?? "#0d9488";
@@ -1025,7 +1021,7 @@ export function FootnoteOverview({
               />
               <header className="lc-footnote-overview-toolbar" aria-label="Mark style">
                 <div className="lc-footnote-submark-modes" role="group" aria-label="Mark actions">
-                  {/* Underline draws on the mark, so it is a write. Copy is not. */}
+                  {/* Underline and highlight draw on the mark, so they are writes. Copy is not. */}
                   {readOnly ? null : (
                   <button
                     type="button"
@@ -1038,6 +1034,20 @@ export function FootnoteOverview({
                     }
                   >
                     <UnderlineIcon size={16} />
+                  </button>
+                  )}
+                  {readOnly ? null : (
+                  <button
+                    type="button"
+                    className={`lc-footnote-mark-tool${subMarkMode === "highlight" ? " is-active" : ""}`}
+                    aria-label="Highlight"
+                    title="Highlight"
+                    aria-pressed={subMarkMode === "highlight"}
+                    onClick={() =>
+                      onSubMarkModeChange(subMarkMode === "highlight" ? null : "highlight")
+                    }
+                  >
+                    <HighlighterIcon size={16} />
                   </button>
                   )}
                   <button

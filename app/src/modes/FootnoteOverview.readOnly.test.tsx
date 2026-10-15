@@ -91,6 +91,30 @@ describe("FootnoteOverview readOnly", () => {
     mount(false);
     expect(addButtons().length).toBeGreaterThan(0);
     expect(document.querySelector('[aria-label="Underline"]')).not.toBeNull();
+    expect(document.querySelector('[aria-label="Highlight"]')).not.toBeNull();
+  });
+
+  it("arms highlight next to underline and keeps it armed", () => {
+    const onSubMarkModeChange = vi.fn();
+    mount(false, MARK, { onSubMarkModeChange });
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Highlight"]')!.click());
+    expect(onSubMarkModeChange).toHaveBeenLastCalledWith("highlight");
+    onSubMarkModeChange.mockClear();
+    act(() => mountedRoot!.unmount());
+    document.body.textContent = "";
+    mount(false, MARK, { subMarkMode: "highlight", onSubMarkModeChange });
+    // Highlight used to be cancelled as soon as it was armed.
+    expect(onSubMarkModeChange).not.toHaveBeenCalled();
+    expect(document.querySelector('[aria-label="Highlight"]')!.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("closes on a tap off the panel, even next to the mark, while nothing is armed", () => {
+    const onClose = vi.fn();
+    mount(false, MARK, { onClose });
+    const page = document.createElement("canvas");
+    document.body.append(page);
+    act(() => { page.dispatchEvent(new MouseEvent("pointerdown", { bubbles: true, button: 0, clientX: 40, clientY: 40 })); });
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
   it("opens a separate mini while keeping the completed ChatBot footnote visible", async () => {

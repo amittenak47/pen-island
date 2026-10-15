@@ -892,33 +892,13 @@ export function DocSelectionLayer({
     };
   }, [enabled, highlighting, subMarkArmed, subMarkParent]);
 
-  /** Panel open: hit-test the mark so the overview card does not close on a tap in-band. Board pan ignores this. */
-  useEffect(() => {
-    if (!subMarkParent || subMarkArmed) return;
-    const SUBMARK_HIT_PAD = 48;
-    const hit = (clientX: number, clientY: number): boolean => {
-      const body = bodyRef.current;
-      if (!body) return false;
-      const scope = subMarkParent.anchor.scope;
-      const root = scopeRootIn(body, scope) as HTMLElement | null;
-      if (!root) return false;
-      const stored =
-        subMarkParent.bands && subMarkParent.bands.length > 0
-          ? tightLocalRects(body, subMarkParent.bands)
-          : [];
-      const fallback = (() => {
-        const at = rectForAnchor(body, root, subMarkParent.anchor);
-        return at && !localRectCoversHost(body, at) ? [at] : [];
-      })();
-      const liveAnchor = liveFootnoteAnchor(root, subMarkParent);
-      const range = liveAnchor ? rangeFromAnchor(root, liveAnchor) : null;
-      const live = range ? tightLocalRects(body, localRects(body, range)) : [];
-      const bands = live.length > 0 ? live : stored.length > 0 ? stored : fallback;
-      if (bands.length === 0) return false;
-      return pointInLocalBands(body, bands, clientX, clientY, SUBMARK_HIT_PAD);
-    };
-    return setSubMarkPointerHit(hit);
-  }, [subMarkParent, subMarkArmed]);
+  /*
+   * With the panel open and nothing armed, a tap anywhere off the panel closes
+   * it, the mark included. The mark only keeps taps (so words in it can be
+   * selected) while Underline or Highlight is armed: see the armed gesture
+   * below. Exempting a padded zone around the mark here swallowed taps on the
+   * page's blank space near it, so the panel seemed not to react.
+   */
 
   // Reading mode (and Ask-area 🔍): hold still to arm annotate marquee.
   // Native drag-select is separate — do not preventDefault selectstart until armed.
