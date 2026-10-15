@@ -11,6 +11,7 @@
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties } from "react";
 
 import { isDocCameraLive, subscribeDocCameraLive } from "../canvas/docSelectionGesture";
+import { attachDragScroll } from "../util/dragScroll";
 import {
   PDF_FILM_RAIL_CELL,
   PDF_FILM_RAIL_GAP,
@@ -138,6 +139,13 @@ export function PdfPageRail({
       prev.start === next.start && prev.end === next.end ? prev : next,
     );
   }, [currentPage, count]);
+
+  // A mouse or pen drags the strip and can flick it; fingers scroll natively.
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip || count < 2) return;
+    return attachDragScroll(strip);
+  }, [count]);
 
   useEffect(() => {
     const strip = stripRef.current;
