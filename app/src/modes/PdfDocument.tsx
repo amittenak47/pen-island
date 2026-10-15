@@ -138,7 +138,7 @@ import {
   pdfDocumentOpenFor,
   type PdfDocumentLease,
 } from "./pdfOpenDocs";
-import { alignTextLayerToGlyphs } from "../util/pdfTextFit";
+import { alignTextLayerToGlyphsInSlices } from "../util/pdfTextFit";
 import { loadPdfPageSizes, savePdfPageSizes } from "./pdfPageSizeCache";
 
 /**
@@ -1345,7 +1345,7 @@ export function PdfDocument({
     type PdfTextContent = Awaited<ReturnType<PdfPageProxy["getTextContent"]>>;
     const renderBusy = () => isDocCameraLive(filmScope) || isPageTurnBusy(filmScope);
     /*
-     * The text layer is one freeze that cannot be cut short (0.15–0.4 s a
+     * The text layer is one freeze that cannot be cut short (0.15â€“0.4 s a
      * page on the tablet), so it waits for the hand to rest, not just for the
      * landed page's sharp paint: started 0.4 s after a turn, it landed under
      * the next swipe of a reader turning in cadence.
@@ -1379,8 +1379,8 @@ export function PdfDocument({
         /*
          * pdf.js sizes each span by setting a canvas font and measuring its
          * string: thousands of font switches and measurements on the UI thread,
-         * ~4 s on a dense page on the tablet. alignTextLayerToGlyphs below
-         * already measures every span's real width in one batch and scales it
+         * ~4 s on a dense page on the tablet. alignTextLayerToGlyphsInSlices below
+         * already measures every span's real width, a slice at a time, and scales it
          * to the PDF's own glyph width, from any starting scale. So pdf.js gets
          * horizontal items without a width, which skips its measuring; vertical
          * text, which that fit leaves alone, is measured as before.
@@ -1401,12 +1401,15 @@ export function PdfDocument({
         if (blocked()) return false;
         await layer.render();
         if (blocked()) return false;
-        alignTextLayerToGlyphs(
+        await alignTextLayerToGlyphsInSlices(
           spreadHost,
           layer.textDivs,
           content.items,
           entry.fit,
+          yieldToInput,
+          blocked,
         );
+        if (blocked()) return false;
       }
       textFilledRef.current.add(n);
       publishDocPlacementRev(filmScope, [n]);

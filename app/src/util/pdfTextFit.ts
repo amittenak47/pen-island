@@ -161,3 +161,38 @@ export function alignTextLayerToGlyphs(
   }
   return changed;
 }
+
+/**
+ * The same fit, a slice at a time, letting a frame through between slices.
+ *
+ * A dense page is a few thousand spans, and fitting them in one go was a
+ * 100-200 ms task each time a page's text arrived: the stutter that turned up
+ * a few hundred milliseconds into dragging onto a new page. Each slice still
+ * reads before it writes, so it costs one layout, and the scale is re-read per
+ * slice in case the page moved in between. Stops early when `cancelled` says
+ * the page went away; the caller refills it later.
+ */
+export async function alignTextLayerToGlyphsInSlices(
+  page: HTMLElement,
+  spans: readonly HTMLElement[],
+  items: readonly PdfTextItem[],
+  fit: number,
+  pause: () => Promise<void>,
+  cancelled: () => boolean,
+  slice = ALIGN_SLICE,
+): Promise<number> {
+  const strings = spannedItems(items);
+  const upto = Math.min(spans.length, strings.length);
+  let changed = 0;
+  for (let from = 0; from < upto; from += slice) {
+    if (from > 0) {
+      await pause();
+      if (cancelled()) return changed;
+    }
+    changed += alignTextLayerToGlyphs(page, spans.slice(from, from + slice), strings.slice(from, from + slice), fit);
+  }
+  return changed;
+}
+
+/** Spans fitted per slice: a few milliseconds of layout reads on the tablet. */
+export const ALIGN_SLICE = 250;

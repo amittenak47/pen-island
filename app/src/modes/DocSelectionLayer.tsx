@@ -543,7 +543,8 @@ export function DocSelectionLayer({
    * the board's transform, and their own boxes already answer in the viewport
    * coordinates a fixed-position card needs.
    */
-  const ribbonRects = useRef(new Map<string, DOMRect>());
+  // Chip elements by footnote id, measured only when one is tapped.
+  const ribbonNodes = useRef(new Map<string, HTMLButtonElement>());
   /** The edge auto-scroll's frame, null when the finger is not at an edge. */
   const edgeFrameRef = useRef<number | null>(null);
   /** Latest placement pass, so the window observer can re-run it. */
@@ -2686,7 +2687,7 @@ export function DocSelectionLayer({
                      */
                     const rect =
                       screenBoxOfLocalRects(bodyRef.current, paintBands) ??
-                      ribbonRects.current.get(footnote.id) ??
+                      ribbonNodes.current.get(footnote.id)?.getBoundingClientRect() ??
                       null;
                     onOpenFootnote?.(footnote, rect);
                   }}
@@ -2703,9 +2704,15 @@ export function DocSelectionLayer({
                   holdMs={HOLD_SENSITIVE_MS}
                   holdThrough
                   onConfirm={() => onRemoveFootnote?.(footnote)}
+                  /*
+                   * Keep the element, not its rect. This ref callback is new on
+                   * every render, so React re-runs it for every chip each time:
+                   * measuring here forced a layout per chip per render, about
+                   * 3 s in every 20 of scrolling on the tablet.
+                   */
                   onMeasure={(node: HTMLButtonElement | null) => {
-                    if (node) ribbonRects.current.set(footnote.id, node.getBoundingClientRect());
-                    else ribbonRects.current.delete(footnote.id);
+                    if (node) ribbonNodes.current.set(footnote.id, node);
+                    else ribbonNodes.current.delete(footnote.id);
                   }}
                 >
                   {footnote.pending ? (

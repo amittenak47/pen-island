@@ -73,6 +73,8 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
     onPlacementChange?.(key, rect);
   };
   useLayoutEffect(() => {
+    // Nothing to place: don't measure the canvas on every frame the page moves.
+    if (!entries.length) return;
     const place = () => {
       const box = getBounds();
       const view = window.visualViewport;
