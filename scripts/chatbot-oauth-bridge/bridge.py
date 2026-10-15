@@ -33,7 +33,7 @@ from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from pydantic import BaseModel, ConfigDict, Field
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_CONFIG = PROJECT_ROOT / ".tmp-current-grok-oauth-config.json"
+DEFAULT_CONFIG = PROJECT_ROOT / ".local" / "chatbot" / "config.json"
 BIND_HOST, BIND_PORT = "127.0.0.1", 7880
 BACKEND_URL = "http://127.0.0.1:7879/mcp"
 TOOLS = frozenset({

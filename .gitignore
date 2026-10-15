@@ -50,6 +50,8 @@ env/
 config.toml
 *.local.toml
 secrets.*
+# ChatBot bridge settings, tokens, venv and start scripts. Not scratch: keep it.
+/.local/
 
 # --- SQLite / session state (if copied into the repo) ---
 *.db
