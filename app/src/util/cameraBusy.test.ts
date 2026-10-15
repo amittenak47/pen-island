@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   CAMERA_BUSY_HOLD_MS_ANDROID,
+  CAMERA_PULSE_SETTLE_MS_ANDROID,
   CAMERA_BUSY_HOLD_MS_DESKTOP,
   CAMERA_IDLE_TEARDOWN_MS,
   CAMERA_PULSE_SETTLE_MS,
@@ -85,12 +86,13 @@ describe("cameraBusy", () => {
     expect(CAMERA_IDLE_TEARDOWN_MS).toBe(15_000);
   });
 
-  it("Android pulse settle matches the 900ms busy hold", () => {
+  it("Android pulse settles well before the busy hold that text waits for", () => {
     vi.stubGlobal("navigator", {
       userAgent:
         "Mozilla/5.0 (Linux; Android 14; SM-X910) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
     });
-    expect(cameraPulseSettleMs()).toBe(CAMERA_BUSY_HOLD_MS_ANDROID);
+    expect(cameraPulseSettleMs()).toBe(CAMERA_PULSE_SETTLE_MS_ANDROID);
+    expect(cameraPulseSettleMs()).toBeLessThan(cameraBusyHoldMs());
   });
 
   it("holds page-out until 15s after the last idle pulse", () => {

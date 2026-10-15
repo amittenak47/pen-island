@@ -36,14 +36,22 @@ export function cameraBusyHoldMs(): number {
 }
 
 /**
+ * Pulse timeout on Android WebView. It used to be the 900ms busy hold, so a
+ * page stayed blurred (and its marks hidden) for most of a second after every
+ * stop. A sharp paint is cancelled the moment a finger lands or the camera
+ * moves again, so a second flick no longer needs the long freeze; the text
+ * layer, which cannot be cut short, still waits for {@link cameraBusyHoldMs}.
+ */
+export const CAMERA_PULSE_SETTLE_MS_ANDROID = 350;
+
+/**
  * How long `setDocCameraLive` stays true after the last sample.
  *
  * 140ms lets neighbour paint sneak in between strong flicks (finger up ~200–
- * 500ms). Android uses the same 900ms window as {@link cameraBusyHoldMs} so
- * a same-direction burst stays frozen until it actually stops.
+ * 500ms). Android waits {@link CAMERA_PULSE_SETTLE_MS_ANDROID}.
  */
 export function cameraPulseSettleMs(): number {
-  return isAndroidDevice() ? CAMERA_BUSY_HOLD_MS_ANDROID : CAMERA_PULSE_SETTLE_MS;
+  return isAndroidDevice() ? CAMERA_PULSE_SETTLE_MS_ANDROID : CAMERA_PULSE_SETTLE_MS;
 }
 
 function nowMs(): number {
