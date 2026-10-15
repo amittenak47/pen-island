@@ -15318,13 +15318,13 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 /*
- * Home has no coach, so the Agent chip is gone — not an invisible spacer.
- * Keeping its width parked the globe/file/gear cluster off the trailing edge.
- * Tabs already flex in the 1fr track, so showing Agent on a problem only
- * shrinks that track; it does not jump the pad icons.
+ * Home has no coach, so the Agent chip is invisible there, but it keeps its
+ * slot: removing it shifted the globe/file/gear cluster sideways every time
+ * the reader moved between Home and a tab.
  */
 .lc-agent-toggle.is-vacant {
-  display: none;
+  visibility: hidden;
+  pointer-events: none;
 }
 
 .lc-agent-toggle .lc-agent-live-dot {
