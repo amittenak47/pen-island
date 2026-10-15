@@ -140,6 +140,8 @@ import {
   type PdfDocumentLease,
 } from "./pdfOpenDocs";
 import { alignTextLayerToGlyphs } from "../util/pdfTextFit";
+import { bindPdfTextGeometry, PdfTextGeometry } from "../util/pdfTextGeometry";
+import type { TextContent, PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { loadPdfPageSizes, savePdfPageSizes } from "./pdfPageSizeCache";
 
 /**
@@ -679,6 +681,8 @@ export function PdfDocument({
    * again.
    */
   const textFilledRef = useRef<Set<number>>(new Set());
+  const textContentRef = useRef(new Map<number, Promise<TextContent>>());
+  const textGeometryRef = useRef(new Map<number, PdfTextGeometry>());
   const panHiddenTextRef = useRef<Set<HTMLElement>>(new Set());
   const textHitRef = useRef<Set<HTMLElement>>(new Set());
   const quoteFillRef = useRef<(page: number) => Promise<boolean>>(async () => false);
@@ -780,7 +784,48 @@ export function PdfDocument({
     sessionRef.current.clear();
     pathFillRef.current = [];
     textFilledRef.current.clear();
+    textContentRef.current.clear();
+    textGeometryRef.current.clear();
   };
+
+  const pageText = async (n: number, pdfPage: PDFPageProxy): Promise<TextContent> => {
+    let pending = textContentRef.current.get(n);
+    if (!pending) {
+      pending = pdfPage.getTextContent();
+      textContentRef.current.set(n, pending);
+      void pending.catch(() => { if (textContentRef.current.get(n) === pending) textContentRef.current.delete(n); });
+    }
+    const content = await pending;
+    const entry = pagesRef.current.find(page => page.pageNumber === n);
+    const host = hostRef.current;
+    if (!disposedRef.current && entry && host) {
+      let geometry = textGeometryRef.current.get(n);
+      if (!geometry || geometry.content !== content || geometry.viewport.scale !== entry.fit) {
+        geometry = new PdfTextGeometry(content, pdfPage.getViewport({ scale: entry.fit }), textLayerRef.current?.fontFamilyMap);
+        textGeometryRef.current.set(n, geometry);
+        for (const slot of queryPageSlots(host, n)) bindPdfTextGeometry(slot, geometry);
+        publishDocPlacementRev(filmScope, [n]);
+      }
+    }
+    return content;
+  };
+
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    if (!host) return;
+    const changed: number[] = [];
+    for (const [n, previous] of textGeometryRef.current) {
+      const entry = pages.find(page => page.pageNumber === n);
+      if (!entry) continue;
+      const geometry = previous.viewport.scale === entry.fit ? previous : new PdfTextGeometry(
+        previous.content, previous.viewport.clone({ scale: entry.fit }), textLayerRef.current?.fontFamilyMap,
+      );
+      textGeometryRef.current.set(n, geometry);
+      for (const slot of queryPageSlots(host, n)) bindPdfTextGeometry(slot, geometry);
+      changed.push(n);
+    }
+    publishDocPlacementRev(filmScope, changed);
+  }, [pages, filmScope]);
 
   /**
    * Open the document once. Spread / column width only relayouts from
@@ -1493,7 +1538,7 @@ export function PdfDocument({
           claim.settle(false);
           return false;
         }
-        const content = await pdfPage.getTextContent();
+        const content = await pageText(n, pdfPage);
         if (disposedRef.current || (!ignoreLive && textBusy())) {
           claim.settle(false);
           return false;
@@ -1683,7 +1728,7 @@ export function PdfDocument({
             claim.settle(false);
             return;
           }
-          const content = await pdfPage.getTextContent();
+          const content = await pageText(n, pdfPage);
           if (disposedRef.current || textBusy()) {
             claim.settle(false);
             return;

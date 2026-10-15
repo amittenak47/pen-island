@@ -265,8 +265,24 @@ function streamOf(root: Node): DocStream {
 }
 
 /** The document's whole character stream, the thing offsets index into. */
+const suppliedText = new WeakMap<Node, string>();
+
+/** Fixed-layout renderers can keep their offset stream after dropping spans. */
+export function supplyDocText(root: Node, text: string): void {
+  suppliedText.set(root, text);
+}
+
 export function textOf(root: Node): string {
-  return streamOf(root).text;
+  return suppliedText.get(root) ?? streamOf(root).text;
+}
+
+/** The same quote veto/recovery for DOM ranges and fixed-layout geometry. */
+export function textAnchorOffsets(text: string, anchor: TextAnchor): { start: number; end: number } | null {
+  if (anchor.end <= anchor.start) return null;
+  if (!anchor.exact || text.slice(anchor.start, anchor.end) === anchor.exact) {
+    return { start: anchor.start, end: anchor.end };
+  }
+  return findQuote(text, anchor as TextAnchor & { exact: string });
 }
 
 /**
@@ -478,14 +494,9 @@ function quoteRangeOf(
   doc: Document,
 ): QuoteVerdict {
   if (!anchor.exact) return { kind: "offsets" };
-  const text = textOf(root);
-  if (text.slice(anchor.start, anchor.end) === anchor.exact) return { kind: "offsets" };
-  const found = findQuote(text, {
-    exact: anchor.exact,
-    ...(anchor.prefix ? { prefix: anchor.prefix } : {}),
-    ...(anchor.suffix ? { suffix: anchor.suffix } : {}),
-  });
+  const found = textAnchorOffsets(textOf(root), anchor);
   if (!found) return { kind: "gone" };
+  if (found.start === anchor.start && found.end === anchor.end) return { kind: "offsets" };
   const range = rangeAt(nodes, starts, found.start, found.end, doc);
   return range ? { kind: "found", range } : { kind: "gone" };
 }

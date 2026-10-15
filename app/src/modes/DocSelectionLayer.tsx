@@ -102,6 +102,7 @@ import { currentInkPalette } from "../util/inkPaletteHistory";
 import { footnoteThemeVars } from "../util/footnoteTheme";
 import { isAndroidDevice } from "../util/androidDevice";
 import { fillPdfQuoteText } from "./pdfQuoteText";
+import { anchorLocalRects, invalidatePdfTextGeometry, pdfTextColumnRight } from "../util/pdfTextGeometry";
 import {
   peekPdfIntersectingPages,
   peekPdfPlacementPages,
@@ -406,9 +407,7 @@ function rectForAnchor(
       height: anchor.h * markScale,
     };
   }
-  const range = rangeFromAnchor(root, anchor);
-  if (!range) return null;
-  return unionLocalRects(localRects(body, range));
+  return unionLocalRects(anchorLocalRects(body, root, anchor));
 }
 
 /**
@@ -421,7 +420,11 @@ function rectForAnchor(
 const textColumnRightCache = new WeakMap<Element, number>();
 function textColumnRight(body: HTMLElement | null, scope: string | undefined): number | null {
   if (!body) return null;
-  const layer = scopeRootIn(body, scope)?.querySelector(".textLayer");
+  const root = scopeRootIn(body, scope) as HTMLElement | null;
+  if (!root) return null;
+  const geometric = pdfTextColumnRight(body, root);
+  if (geometric != null) return geometric;
+  const layer = root.querySelector(".textLayer");
   if (!layer || layer.childElementCount === 0) return null;
   const cached = textColumnRightCache.get(layer);
   if (cached != null) return cached;
@@ -823,8 +826,7 @@ export function DocSelectionLayer({
           ? tightLocalRects(body, subMarkParent.bands)
           : [];
       const liveAnchor = liveFootnoteAnchor(root, subMarkParent);
-      const range = liveAnchor ? rangeFromAnchor(root, liveAnchor) : null;
-      const live = range ? tightLocalRects(body, localRects(body, range)) : [];
+      const live = liveAnchor ? tightLocalRects(body, anchorLocalRects(body, root, liveAnchor)) : [];
       if (live.length > 0) return live;
       if (stored.length > 0) return stored;
       const at = rectForAnchor(body, root, subMarkParent.anchor);
@@ -1896,8 +1898,7 @@ export function DocSelectionLayer({
         const live =
           liveAnchor
             ? (() => {
-                const range = rangeFromAnchor(root, liveAnchor);
-                return range ? tightLocalRects(body, localRects(body, range)) : [];
+                return tightLocalRects(body, anchorLocalRects(body, root, liveAnchor));
               })()
             : [];
         /*
@@ -2080,6 +2081,7 @@ export function DocSelectionLayer({
     };
     body.addEventListener("scroll", onHostScroll, { capture: true, passive: true });
     const onViewResize = () => {
+      invalidatePdfTextGeometry(body);
       if (isDocCameraLive(cameraScope)) {
         markDirty("all");
         return;
@@ -2184,6 +2186,7 @@ export function DocSelectionLayer({
 
     const unsubRev = cameraScope
       ? subscribeDocPlacementRev(cameraScope, (rev: DocPlacementRev) => {
+          invalidatePdfTextGeometry(body, rev);
           if (rev === "all") invalidateDocCoverGeometry();
           runOrDefer(rev === "all" ? "all" : new Set(rev));
         })
@@ -3334,12 +3337,12 @@ function collectPaintedSubMarks(
       if (anchor) {
         const root = scopeRootIn(body, anchor.scope) as HTMLElement | null;
         if (root) {
-          const range = rangeFromAnchor(root, anchor);
-          if (range) {
+          const rects = anchorLocalRects(body, root, anchor);
+          if (rects.length > 0) {
             out.push({
               id: mark.id,
               kind: mark.kind,
-              rects: localRects(body, range),
+              rects,
               color: mark.color ?? footnote.color,
               palette: mark.palette,
               scope: footnote.anchor.scope,
