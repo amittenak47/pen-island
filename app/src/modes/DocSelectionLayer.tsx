@@ -46,6 +46,7 @@ import {
 } from "../util/docFootnotes";
 import { AI_TAB_HEIGHT, AI_TAB_WIDTH, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "../util/aiBookTabs";
 import { useBooktabs } from "../util/booktabsPref";
+import { footnoteCaptionRoom } from "../util/footnoteCaption";
 import { useBooktabPages } from "../util/booktabPages";
 import { footnoteDisplayThemes, paletteForMarkIndex } from "../util/inkPaletteHistory";
 import { HoldButton } from "../components/HoldButton";
@@ -408,6 +409,33 @@ function rectForAnchor(
   const range = rangeFromAnchor(root, anchor);
   if (!range) return null;
   return unionLocalRects(localRects(body, range));
+}
+
+/**
+ * The right edge of a page's text column, in the layer's local units, or null
+ * when the page has no text layer (markdown, scans).
+ *
+ * Measured once per text layer and cached on it, so drawing titles costs one
+ * layout read per page, not one per footnote per render.
+ */
+const textColumnRightCache = new WeakMap<Element, number>();
+function textColumnRight(body: HTMLElement | null, scope: string | undefined): number | null {
+  if (!body) return null;
+  const layer = scopeRootIn(body, scope)?.querySelector(".textLayer");
+  if (!layer || layer.childElementCount === 0) return null;
+  const cached = textColumnRightCache.get(layer);
+  if (cached != null) return cached;
+  const box = body.getBoundingClientRect();
+  if (!(box.width > 0) || !(body.offsetWidth > 0)) return null;
+  let right = -Infinity;
+  for (const span of layer.querySelectorAll<HTMLElement>(":scope > span")) {
+    if (!span.textContent?.trim()) continue;
+    right = Math.max(right, span.getBoundingClientRect().right);
+  }
+  if (!Number.isFinite(right)) return null;
+  const local = ((right - box.left) * body.offsetWidth) / box.width;
+  textColumnRightCache.set(layer, local);
+  return local;
 }
 
 export function DocSelectionLayer({
@@ -2627,6 +2655,17 @@ export function DocSelectionLayer({
               ...tint,
             };
             const caption = footnote.title?.replace(/\s+/g, " ").trim() ?? "";
+            /*
+             * The title sits above its square and runs left, over the line
+             * above. Give it only the margin between the text column and the square, so it never
+             * lies over the page's text; too narrow to read, and it is left
+             * off (the footnote panel always shows it).
+             */
+            const textRight = booktabs.titles && caption
+              ? Math.max(block.right, textColumnRight(bodyRef.current, footnote.anchor.scope) ?? block.right)
+              : block.right;
+            const captionRoom = footnoteCaptionRoom(chipLeft + chipW, textRight);
+            const showCaption = booktabs.titles && caption && captionRoom > 0;
             return (
               <span
                 key={footnote.id}
@@ -2661,10 +2700,10 @@ export function DocSelectionLayer({
                     {number}
                   </span>,
                 ) : null}
-                {caption ? (
+                {showCaption ? (
                   <span
                     className="lc-doc-footnote-caption"
-                    style={{ left: chipLeft + chipW, top: chipTop }}
+                    style={{ left: chipLeft + chipW, top: chipTop, maxWidth: captionRoom }}
                   >
                     {caption}
                   </span>

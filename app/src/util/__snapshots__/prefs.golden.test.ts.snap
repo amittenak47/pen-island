@@ -2944,6 +2944,171 @@ exports[`frozen preference storage table > booktabsPref.loadShowBooktabs: exact 
 ]
 `;
 
+exports[`frozen preference storage table > booktabsPref.loadShowFootnoteTitles: exact reads, values and fallback 1`] = `
+[
+  {
+    "events": [],
+    "input": "unset",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": null,
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "valid",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": false,
+    "stored": "0",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "garbage",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "garbage",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "low",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "-100",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "high",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "1000000",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "NaN",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "NaN",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "empty",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "zero",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": false,
+    "stored": "0",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "one",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "1",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "Infinity",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "Infinity",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "-Infinity",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "-Infinity",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "structured low",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "{"penWidth":-100,"eraserWidth":-100,"inkFullness":-100}",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "structured high",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": "{"penWidth":1000000,"eraserWidth":1000000,"inkFullness":1000000}",
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "legacy only",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": null,
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "read throws",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": null,
+    "writes": [],
+  },
+  {
+    "events": [],
+    "input": "write throws",
+    "reads": [
+      "whiteboard.footnoteTitles.show.v1",
+    ],
+    "result": true,
+    "stored": null,
+    "writes": [],
+  },
+]
+`;
+
 exports[`frozen preference storage table > booktabsPref.saveBooktabFootnotes: exact stored bytes and write failure 1`] = `
 [
   {
@@ -3258,6 +3423,79 @@ exports[`frozen preference storage table > booktabsPref.saveShowBooktabs: exact 
     "writes": [
       [
         "whiteboard.booktabs.show.v1",
+        "0",
+      ],
+    ],
+  },
+]
+`;
+
+exports[`frozen preference storage table > booktabsPref.saveShowFootnoteTitles: exact stored bytes and write failure 1`] = `
+[
+  {
+    "events": [
+      [
+        "lc-booktabs",
+        undefined,
+      ],
+    ],
+    "failWrite": false,
+    "input": true,
+    "reads": [],
+    "writes": [
+      [
+        "whiteboard.footnoteTitles.show.v1",
+        "1",
+      ],
+    ],
+  },
+  {
+    "events": [
+      [
+        "lc-booktabs",
+        undefined,
+      ],
+    ],
+    "failWrite": true,
+    "input": true,
+    "reads": [],
+    "writes": [
+      [
+        "whiteboard.footnoteTitles.show.v1",
+        "1",
+      ],
+    ],
+  },
+  {
+    "events": [
+      [
+        "lc-booktabs",
+        undefined,
+      ],
+    ],
+    "failWrite": false,
+    "input": false,
+    "reads": [],
+    "writes": [
+      [
+        "whiteboard.footnoteTitles.show.v1",
+        "0",
+      ],
+    ],
+  },
+  {
+    "events": [
+      [
+        "lc-booktabs",
+        undefined,
+      ],
+    ],
+    "failWrite": true,
+    "input": false,
+    "reads": [],
+    "writes": [
+      [
+        "whiteboard.footnoteTitles.show.v1",
         "0",
       ],
     ],

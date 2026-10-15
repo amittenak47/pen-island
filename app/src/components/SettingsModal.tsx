@@ -29,7 +29,7 @@ import { countSettingsChanges } from "../util/settingsChanges";
 import "./settingsDialog.css";
 import { SettingsSlider } from "./SettingsSlider";
 import { SettingsChoices } from "./SettingsChoices";
-import { loadShowBooktabs, saveShowBooktabs, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes, type BooktabPosition, type BooktabFootnotes } from "../util/booktabsPref";
+import { loadShowBooktabs, saveShowBooktabs, loadShowFootnoteTitles, saveShowFootnoteTitles, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes, type BooktabPosition, type BooktabFootnotes } from "../util/booktabsPref";
 import { HoldButton } from "./HoldButton";
 import { HEADER_MODES, loadHeaderModes, saveHeaderModes, type HeaderModes } from "../util/headerModesPref";
 import { loadTestForwardMode, saveTestForwardMode, type TestForwardMode } from "../util/agentPrefs";
@@ -493,6 +493,7 @@ interface DevicePrefs {
   /** Pages reading: the whole page edge to edge, or with a margin. */
   pageFit: PageFitPref;
   showBooktabs: boolean;
+  showFootnoteTitles: boolean;
   booktabPosition: BooktabPosition;
   booktabFootnotes: BooktabFootnotes;
   handedness: InkHandedness;
@@ -567,6 +568,7 @@ function loadDevicePrefs(): DevicePrefs {
     readingMode: loadReadingMode(),
     pageFit: loadPageFit(),
     showBooktabs: loadShowBooktabs(),
+    showFootnoteTitles: loadShowFootnoteTitles(),
     booktabPosition: loadBooktabPosition(),
     booktabFootnotes: loadBooktabFootnotes(),
     handedness: loadInkHandedness(),
@@ -616,6 +618,7 @@ function prefsEqual(a: DevicePrefs, b: DevicePrefs): boolean {
     a.readingMode === b.readingMode &&
     a.pageFit === b.pageFit &&
     a.showBooktabs === b.showBooktabs &&
+    a.showFootnoteTitles === b.showFootnoteTitles &&
     a.booktabPosition === b.booktabPosition &&
     a.booktabFootnotes === b.booktabFootnotes &&
     a.handedness === b.handedness &&
@@ -992,6 +995,7 @@ export function SettingsModal({
   const [readingMode, setReadingMode] = useState<ReadingMode>(loadReadingMode);
   const [pageFit, setPageFit] = useState<PageFitPref>(loadPageFit);
   const [showBooktabs, setShowBooktabs] = useState(loadShowBooktabs);
+  const [showFootnoteTitles, setShowFootnoteTitles] = useState(loadShowFootnoteTitles);
   const [booktabPosition, setBooktabPosition] = useState(loadBooktabPosition);
   const [booktabFootnotes, setBooktabFootnotes] = useState(loadBooktabFootnotes);
   const [agentDisplay, setAgentDisplay] = useState(loadAgentDisplayPrefs);
@@ -1221,6 +1225,7 @@ export function SettingsModal({
     setReadingMode(prefs.readingMode);
     setPageFit(prefs.pageFit);
     setShowBooktabs(prefs.showBooktabs);
+    setShowFootnoteTitles(prefs.showFootnoteTitles);
     setBooktabPosition(prefs.booktabPosition);
     setBooktabFootnotes(prefs.booktabFootnotes);
     setAgentDisplay(prefs.agentDisplay);
@@ -1351,6 +1356,7 @@ export function SettingsModal({
     readingMode,
     pageFit,
     showBooktabs,
+    showFootnoteTitles,
     booktabPosition,
     booktabFootnotes,
     handedness,
@@ -1415,7 +1421,7 @@ export function SettingsModal({
     "ink-tools": ["tapOk", "colorWheelOnToolbar", "palettePrefs"],
     reading: ["pdfFlickMomentum"],
     storage: ["autosaveMs", "autosaveBanner", "hubAutoSync", "offlineMerge"],
-    ui: ["headerModes", "uiHandedness", "uiCorners", "startupTabs", "readingMode", "pageFit", "showBooktabs", "booktabPosition", "booktabFootnotes", "agentDisplay", "notificationCards"],
+    ui: ["headerModes", "uiHandedness", "uiCorners", "startupTabs", "readingMode", "pageFit", "showBooktabs", "booktabPosition", "booktabFootnotes", "showFootnoteTitles", "agentDisplay", "notificationCards"],
     diagnostics: ["inkDisplayHz", "inkPerfOverlay", "inkPerfBar", "pdfFlickHud", "hubSyncWindowPill"],
     tests: ["testForward"],
   };
@@ -1507,6 +1513,7 @@ export function SettingsModal({
         saveReadingMode(readingMode);
         savePageFit(pageFit);
         saveShowBooktabs(showBooktabs);
+        saveShowFootnoteTitles(showFootnoteTitles);
         saveBooktabPosition(booktabPosition);
         saveBooktabFootnotes(booktabFootnotes);
         saveAgentDisplayPrefs(agentDisplay);
@@ -2733,6 +2740,13 @@ export function SettingsModal({
                         onClick={() => setBooktabFootnotes(value)}><strong>{label}</strong></button>)}
                   </SettingsChoices>
                 </>}
+                <div className="lc-settings-subhead">Footnote titles</div>
+                <p className="lc-settings-hint">A footnote's title beside its square, kept in the margin so it never covers the page's text. Where the margin is too narrow it is left off; the footnote panel always shows it.</p>
+                <SettingsChoices className="lc-settings-choice" aria-label="Footnote titles">
+                  <button type="button" role="switch" aria-checked={showFootnoteTitles}
+                    className={showFootnoteTitles ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                    onClick={() => setShowFootnoteTitles(!showFootnoteTitles)}><strong>Show titles on the page</strong></button>
+                </SettingsChoices>
                 </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Assistant replies</div>
