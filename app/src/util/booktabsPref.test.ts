@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { BOOKTABS_EVENT, loadShowBooktabs, saveShowBooktabs, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes } from "./booktabsPref";
+import { BOOKTABS_EVENT, loadShowBooktabs, saveShowBooktabs, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes, shownBooktabPosition } from "./booktabsPref";
+import { savePageFit } from "./readingModePref";
 
 beforeEach(() => localStorage.clear());
 afterEach(() => { localStorage.clear(); vi.restoreAllMocks(); });
@@ -9,6 +10,15 @@ describe("booktab preferences", () => {
     expect(loadShowBooktabs()).toBe(true);
     expect(loadBooktabPosition()).toBe("beside");
     expect(loadBooktabFootnotes()).toBe("chatbot");
+  });
+  it("shows tabs in the footnote's row only when pages read slightly zoomed out", () => {
+    saveBooktabPosition("beside");
+    expect(shownBooktabPosition()).toBe("top");
+    savePageFit("margin");
+    expect(shownBooktabPosition()).toBe("beside");
+    saveBooktabPosition("bottom");
+    savePageFit("full");
+    expect(shownBooktabPosition()).toBe("bottom");
   });
   it("round trips every choice and announces each save", () => {
     const changed = vi.fn();

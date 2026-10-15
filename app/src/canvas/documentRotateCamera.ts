@@ -101,10 +101,12 @@ export function documentCameraAfterViewportChange(input: {
   prevScrollY: number;
   zoomMin: number;
   zoomMax: number;
+  /** Share of the width the page takes: 0.9 reads it slightly zoomed out. */
+  share?: number;
 }): { zoom: number; scrollX: number; scrollY: number } {
   const availW = Math.max(1, input.viewWidth - input.inset.left - input.inset.right);
   const boxW = Math.max(1, input.box.maxX - input.box.minX);
-  return cameraAfterViewportChange(input, availW / boxW);
+  return cameraAfterViewportChange(input, (availW * (input.share ?? 1)) / boxW);
 }
 
 /**

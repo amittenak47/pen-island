@@ -17,6 +17,18 @@ const inset = { top: 6, left: 2, right: 2, bottom: 12 };
 const box = { minX: 0, minY: 0, maxX: 342, maxY: 4000 };
 
 describe("documentCameraAfterViewportChange", () => {
+  it("reads a share of the width, centred, when slightly zoomed out", () => {
+    const full = documentCameraAfterViewportChange({
+      box, inset, viewWidth: 390, prevZoom: 1, prevScrollY: 0, zoomMin: 0.15, zoomMax: 1.75,
+    });
+    const out = documentCameraAfterViewportChange({
+      box, inset, viewWidth: 390, prevZoom: 1, prevScrollY: 0, zoomMin: 0.15, zoomMax: 1.75, share: 0.9,
+    });
+    expect(out.zoom).toBeCloseTo(full.zoom * 0.9, 6);
+    const availW = 390 - inset.left - inset.right;
+    const slack = availW - (box.maxX - box.minX) * out.zoom;
+    expect(out.scrollX).toBeCloseTo((inset.left + slack / 2) / out.zoom - box.minX, 5);
+  });
   it("centers X when zoom hits the cap and leftover slack appears", () => {
     const prev = documentCameraAfterViewportChange({
       box,

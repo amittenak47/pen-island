@@ -997,6 +997,8 @@ export function SettingsModal({
   const [showBooktabs, setShowBooktabs] = useState(loadShowBooktabs);
   const [showFootnoteTitles, setShowFootnoteTitles] = useState(loadShowFootnoteTitles);
   const [booktabPosition, setBooktabPosition] = useState(loadBooktabPosition);
+  // "Same row as footnote" needs the margin; edge to edge the tabs sit on top.
+  const shownPosition = booktabPosition === "beside" && pageFit !== "margin" ? "top" : booktabPosition;
   const [booktabFootnotes, setBooktabFootnotes] = useState(loadBooktabFootnotes);
   const [agentDisplay, setAgentDisplay] = useState(loadAgentDisplayPrefs);
   const [colorWheelOnToolbar, setColorWheelOnToolbar] = useState(
@@ -2704,18 +2706,17 @@ export function SettingsModal({
                     <strong>{label}</strong>{hint && <span className="lc-muted">{hint}</span>}
                   </button>)}
                 </SettingsChoices>
-                {readingMode === "pages" && (
+                <div className="lc-settings-subhead">Page size</div>
                   <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Page size">
                     {([
                       ["full", "Full screen", ""],
-                      ["margin", "With margin", ""],
+                      ["margin", "Slightly zoomed out", "Leaves a margin around the page, with room for booktabs beside their footnotes."],
                     ] as const).map(([value, label, hint]) => <button key={value} type="button" role="radio"
                       aria-checked={pageFit === value} className={pageFit === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                       onClick={() => setPageFit(value)}>
                       <strong>{label}</strong>{hint && <span className="lc-muted">{hint}</span>}
                     </button>)}
                   </SettingsChoices>
-                )}
                 </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Booktabs</div>
@@ -2728,9 +2729,10 @@ export function SettingsModal({
                 {showBooktabs && <>
                   <div className="lc-settings-subhead">Position</div>
                   <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Booktab position">
-                    {([["beside", "Beside the footnote"], ["top", "Top edge"], ["bottom", "Bottom edge"]] as const).map(([value, label]) =>
-                      <button key={value} type="button" role="radio" aria-checked={booktabPosition === value}
-                        className={booktabPosition === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                    {([["beside", "Same row as footnote"], ["top", "Top edge"], ["bottom", "Bottom edge"]] as const)
+                      .filter(([value]) => value !== "beside" || pageFit === "margin").map(([value, label]) =>
+                      <button key={value} type="button" role="radio" aria-checked={shownPosition === value}
+                        className={shownPosition === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                         onClick={() => setBooktabPosition(value)}><strong>{label}</strong></button>)}
                   </SettingsChoices>
                   <div className="lc-settings-subhead">Which footnotes</div>

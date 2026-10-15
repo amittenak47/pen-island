@@ -1365,6 +1365,12 @@ export interface BoardProps {
   /** Only PDF documents can wait for a saved PDF page to finish laying out. */
   pdfDocument?: boolean;
   /**
+   * Share of the view's width a document page takes when reading by scroll:
+   * 1 is edge to edge, 0.9 slightly zoomed out with a margin either side.
+   * Pages reading fits its own page and ignores this.
+   */
+  readingShare?: number;
+  /**
    * Two-up / spread: each scanned sheet becomes two stacked reading slots.
    * Shown for any PDF, including one page. Off by default.
    */
@@ -1451,6 +1457,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     chatBot = null,
     pdfFilmPublish = true,
     pdfDocument = false,
+    readingShare = 1,
     pageSpread = null,
   },
   ref,
@@ -2275,6 +2282,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const pdfFilmPublishRef = useRef(pdfFilmPublish);
   pdfFilmPublishRef.current = pdfFilmPublish;
   const pdfDocumentRef = useRef(pdfDocument);
+  const readingShareRef = useRef(readingShare);
+  readingShareRef.current = readingShare;
   /**
    * The layout the ink's coordinates are in, when that is known to differ
    * from — or not yet be checked against — the page layout on screen. Null
@@ -7206,12 +7215,16 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
          * stays at the authored student column (not readingColumnWidth): shrinking
          * it made fillHeight ≈ viewport and killed vertical scroll.
          */
+        const documentPage = focus.some(
+          (element) =>
+            (element as { customData?: { lcDocumentPage?: boolean } }).customData
+              ?.lcDocumentPage === true,
+        );
+        // Only a document reads slightly zoomed out; code and drawing pages
+        // keep filling the hole.
+        const share = documentPage ? readingShareRef.current : 1;
         const widthOnly =
-          focus.some(
-            (element) =>
-              (element as { customData?: { lcDocumentPage?: boolean } }).customData
-                ?.lcDocumentPage === true,
-          ) ||
+          documentPage ||
           page === "code" ||
           page === "agent" ||
           isDrawPageRegion(page);
@@ -7238,6 +7251,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           prevScrollY: riding?.live ? riding.scrollY : (prevCamera.scrollY ?? 0),
           zoomMin: FIT_ZOOM_MIN,
           zoomMax: ZOOM_MAX,
+          share,
         };
         const rotated = keepDocumentY
           ? drawPage
@@ -7253,7 +7267,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
             : Math.min(fitWidth / boxWidth, availHeight / boxHeight),
           FIT_ZOOM_MIN,
         );
-        const zoom = rotated?.zoom ?? readingFit;
+        // The reading fit stays the width fit: text pages are cut by it, and
+        // a margin must not repack them.
+        const zoom = rotated?.zoom ?? clampZoom(readingFit * share, FIT_ZOOM_MIN);
         fitZoomMinRef.current = zoom;
         readingFitZoomRef.current = readingFit;
         // Notebooks lock zoom-out at the page fit on every device.
@@ -7375,6 +7391,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     },
     [runFit],
   );
+
+  // Slightly zoomed out or edge to edge: refit where the reader is.
+  const fittedShareRef = useRef(readingShare);
+  useEffect(() => {
+    if (fittedShareRef.current === readingShare) return;
+    fittedShareRef.current = readingShare;
+    runFit(undefined, "keepY");
+  }, [readingShare, runFit]);
 
   const fitView = useCallback(
     (regionId?: string | null) => {

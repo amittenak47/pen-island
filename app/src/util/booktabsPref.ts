@@ -1,6 +1,7 @@
 /** Device-local display choices; saves refresh every open document. */
 import { useEffect, useState } from "react";
 import { boolPref, enumPref } from "./prefStore";
+import { loadPageFit, READING_MODE_EVENT } from "./readingModePref";
 
 export type BooktabPosition = "beside" | "top" | "bottom";
 export type BooktabFootnotes = "chatbot" | "all";
@@ -23,18 +24,29 @@ export function saveBooktabFootnotes(value: BooktabFootnotes): void { footnotes.
 export function loadShowFootnoteTitles(): boolean { return titles.load(); }
 export function saveShowFootnoteTitles(value: boolean): void { titles.save(value); emit(); }
 
+/**
+ * Where tabs go on the page. "Beside" puts them in the row of their footnote,
+ * out in the margin, which only exists when pages read slightly zoomed out;
+ * edge to edge they go on the top edge instead.
+ */
+export function shownBooktabPosition(): BooktabPosition {
+  const chosen = loadBooktabPosition();
+  return chosen === "beside" && loadPageFit() !== "margin" ? "top" : chosen;
+}
 function loadBooktabs() {
-  return { show: loadShowBooktabs(), position: loadBooktabPosition(), footnotes: loadBooktabFootnotes(), titles: loadShowFootnoteTitles() };
+  return { show: loadShowBooktabs(), position: shownBooktabPosition(), footnotes: loadBooktabFootnotes(), titles: loadShowFootnoteTitles() };
 }
 export function useBooktabs() {
   const [prefs, setPrefs] = useState(loadBooktabs);
   useEffect(() => {
     const refresh = () => setPrefs(loadBooktabs());
     window.addEventListener(BOOKTABS_EVENT, refresh);
+    window.addEventListener(READING_MODE_EVENT, refresh);
     window.addEventListener("storage", refresh);
     refresh();
     return () => {
       window.removeEventListener(BOOKTABS_EVENT, refresh);
+      window.removeEventListener(READING_MODE_EVENT, refresh);
       window.removeEventListener("storage", refresh);
     };
   }, []);

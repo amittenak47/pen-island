@@ -165,10 +165,15 @@ it("keeps capture in Annotate and places all debug controls in Diagnostics", asy
 it("stages booktab choices with Display settings and hides dependents when off", async () => {
   const api = client(); await show(api);
   expect(switchButton("Show booktabs").getAttribute("aria-checked")).toBe("true");
-  expect(button("Beside the footnote").getAttribute("aria-checked")).toBe("true");
+  // Full screen leaves no margin, so "Same row as footnote" is not offered and
+  // its tabs show on the top edge.
+  expect(button("Same row as footnote")).toBeUndefined();
+  expect(button("Top edge").getAttribute("aria-checked")).toBe("true");
   expect(button("ChatBot footnotes").getAttribute("aria-checked")).toBe("true");
+  await act(async () => [...host.querySelectorAll<HTMLButtonElement>("button")].find(b => b.querySelector("strong")?.textContent === "Slightly zoomed out")!.click());
+  expect(button("Same row as footnote").getAttribute("aria-checked")).toBe("true");
   await act(async () => { button("Top edge").click(); button("All footnotes").click(); });
-  expect(count()).toBe("2 changes");
+  expect(count()).toBe("3 changes");
   expect(loadBooktabPosition()).toBe("beside"); expect(loadBooktabFootnotes()).toBe("chatbot");
   await act(async () => switchButton("Show booktabs").click());
   expect(host.querySelector('[aria-label="Booktab position"]')).toBeNull();

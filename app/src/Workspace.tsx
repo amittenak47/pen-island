@@ -11717,6 +11717,7 @@ export const Workspace = memo(function Workspace({
                 : null
             }
             pdfDocument={annotateSource?.docType === "pdf" && !footnoteBoardSession}
+            readingShare={pageFitShare(pageFit)}
             pageSpread={
               annotateSource?.docType === "pdf"
                 ? { on: pdfSpread, onToggle: togglePdfSpread, busy: pdfLayoutBusy }

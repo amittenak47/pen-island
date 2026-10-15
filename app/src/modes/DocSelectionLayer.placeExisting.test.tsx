@@ -7,6 +7,8 @@ import { act } from "react";
 
 import { saveShowBooktabs, saveBooktabPosition, saveBooktabFootnotes } from "../util/booktabsPref";
 import { publishBooktabPages } from "../util/booktabPages";
+import { savePageFit } from "../util/readingModePref";
+import { BOOKTAB_JITTER_RISE, edgeBookTabRects } from "../util/aiBookTabs";
 import { DocSelectionLayer } from "./DocSelectionLayer";
 import type { DocFootnote } from "../util/docFootnotes";
 import type { PageFrame } from "../canvas/inkPageIndex";
@@ -504,7 +506,12 @@ describe("booktab display choices", () => {
       expect(tabsSlot.querySelector(".lc-doc-footnote-tab")!.getAttribute("aria-hidden")).toBe("true");
     } finally { act(() => root.unmount()); }
   });
+  /** Edge tabs jitter by their id; within this of the plain edge line. */
+  const nearPx = (value: string, want: number) =>
+    expect(Math.abs(parseFloat(value) - want)).toBeLessThanOrEqual(BOOKTAB_JITTER_RISE + 1e-6);
   it("keeps today's beside placement and stacking, and includes other footnotes live", () => {
+    // In the footnote's row needs the margin of "Slightly zoomed out".
+    savePageFit("margin");
     const { host, root, tab } = mountTabs(true);
     try {
       expect(host.querySelectorAll(".lc-doc-footnote-tab")).toHaveLength(3);
@@ -532,16 +539,21 @@ describe("booktab display choices", () => {
     saveBooktabPosition(edge); saveBooktabFootnotes("all");
     const { root, tab } = mountTabs(true);
     try {
-      for (const [index, id] of ["left", "right", "late"].entries()) {
+      const order = ["left", "right", "late"];
+      const want = edgeBookTabRects({ left: 20, top: 100, width: 360, height: 600 }, edge, order.map(id => ({ id })), true);
+      let previous = -Infinity;
+      for (const id of order) {
         const element = tab(id)!;
-        expect(element.style.left).toBe(`${24 + index * 22}px`);
-        expect(element.style.top).toBe(`${edge === "top" ? 86 : 686}px`);
+        expect(parseFloat(element.style.left)).toBeCloseTo(want.get(id)!.left, 5);
+        expect(parseFloat(element.style.left)).toBeGreaterThan(previous);
+        previous = parseFloat(element.style.left);
+        nearPx(element.style.top, edge === "top" ? 86 : 686);
         expect(element.style.width).toBe("18px"); expect(element.style.height).toBe("28px");
       }
       expect(tab("next")!.style.left).toBe("24px");
-      expect(tab("next")!.style.top).toBe(`${edge === "top" ? 786 : 1386}px`);
+      nearPx(tab("next")!.style.top, edge === "top" ? 786 : 1386);
       act(() => saveBooktabPosition(edge === "top" ? "bottom" : "top"));
-      expect(tab("left")!.style.top).toBe(`${edge === "top" ? 686 : 86}px`);
+      nearPx(tab("left")!.style.top, edge === "top" ? 686 : 86);
     } finally { act(() => root.unmount()); }
   });
   it.each(["top", "bottom"] as const)("uses text page cuts for %s and falls back in continuous mode", edge => {
@@ -554,8 +566,8 @@ describe("booktab display choices", () => {
         { rect: { left: 0, top: 0, width: 400, height: 60 }, contentBottom: 60 },
         { rect: { left: 0, top: 60, width: 400, height: 60 }, contentBottom: 120 },
       ]));
-      expect(tab("left")!.style.top).toBe(`${edge === "top" ? -14 : 46}px`);
-      expect(tab("late")!.style.top).toBe(`${edge === "top" ? 46 : 106}px`);
+      nearPx(tab("left")!.style.top, edge === "top" ? -14 : 46);
+      nearPx(tab("late")!.style.top, edge === "top" ? 46 : 106);
       act(() => publishBooktabPages("booktabs-render", [
         { rect: { left: 0, top: 0, width: 400, height: 60 }, contentBottom: 60, visible: false },
         { rect: { left: 0, top: 60, width: 400, height: 60 }, contentBottom: 120, visible: true },
