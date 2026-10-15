@@ -102,6 +102,7 @@ import { currentInkPalette } from "../util/inkPaletteHistory";
 import { footnoteThemeVars } from "../util/footnoteTheme";
 import { isAndroidDevice } from "../util/androidDevice";
 import { fillPdfQuoteText } from "./pdfQuoteText";
+import { PdfMarkPage } from "./PdfMarkPage";
 import { anchorLocalRects, invalidatePdfTextGeometry, pdfTextColumnRight, pdfTextGeometry } from "../util/pdfTextGeometry";
 import {
   peekPdfIntersectingPages,
@@ -2535,6 +2536,28 @@ export function DocSelectionLayer({
     [paintedSubMarks, viewPages],
   );
 
+  const pageMarkGroups = useMemo(() => {
+    const groups = new Map<string, { scope?: string; page?: LocalRect; ribbons: RibbonPlacement[]; subMarks: PaintedSubMark[] }>();
+    const groupFor = (scope?: string) => {
+      const key = scope ?? "";
+      let group = groups.get(key);
+      if (!group) groups.set(key, group = { scope, ribbons: [], subMarks: [] });
+      return group;
+    };
+    for (const entry of visibleRibbons) {
+      const group = groupFor(entry.footnote.anchor.scope);
+      group.ribbons.push(entry);
+      group.page ??= entry.page;
+    }
+    const pdf = bodyRef.current && documentUsesPdfPlacement(bodyRef.current);
+    for (const entry of visibleSubMarks) {
+      const group = groupFor(entry.scope);
+      group.subMarks.push(entry);
+      if (pdf) group.page ??= unionLocalRects(entry.rects) ?? undefined;
+    }
+    return [...groups.entries()];
+  }, [visibleRibbons, visibleSubMarks]);
+
   const aiTabTops = useMemo(
     () =>
       stackAiTabTops(
@@ -2652,7 +2675,8 @@ export function DocSelectionLayer({
               />
             );
           })}
-          {visibleRibbons.map(({ footnote, at, bands, useBands, number }) => {
+          {pageMarkGroups.map(([key, group]) => <PdfMarkPage key={key} filmScope={cameraScope} scope={group.scope} page={group.page}>
+          {group.ribbons.map(({ footnote, at, bands, useBands, number }) => {
             /*
              * Tap opens the mark; hold fills left→right and deletes.
              *
@@ -2747,13 +2771,15 @@ export function DocSelectionLayer({
                   );
                 })}
                 {tabRect ? overlay(booktabsHost,
+                  <PdfMarkPage filmScope={cameraScope} scope={group.scope} page={booktabsHost && group.page ? tabRect : undefined}>
                   <span
                     className={`lc-doc-footnote lc-doc-footnote-${footnote.kind} lc-doc-footnote-tab`}
                     aria-hidden="true"
                     style={{ ...tabRect, ...tint }}
                   >
                     {number}
-                  </span>,
+                  </span>
+                  </PdfMarkPage>,
                 ) : null}
                 {showCaption ? (
                   <span
@@ -2819,7 +2845,7 @@ export function DocSelectionLayer({
             );
           })}
 
-          {visibleSubMarks.flatMap((entry) =>
+          {group.subMarks.flatMap((entry) =>
             entry.rects.map((rect, index) => {
               // A highlight is a wash and wants the same air as a mark band. An
               // underline is a rule sitting on the baseline: pad it and the rule
@@ -2844,6 +2870,7 @@ export function DocSelectionLayer({
               );
             }),
           )}
+          </PdfMarkPage>)}
           {subMarkLivePaint.map((rect, index) => (
             <div
               key={`sub-live-${index}`}

@@ -3,7 +3,7 @@
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import { blitSheetToSlots, forgetSlotBlit } from "./pdfSheetCache";
+import { blitSheetToSlots, blitSheetWithQuality, forgetSlotBlit } from "./pdfSheetCache";
 
 /**
  * jsdom has no 2D context, so each slot gets a stub that counts draws.
@@ -52,8 +52,8 @@ function makeSlot(half?: "left" | "right"): {
 }
 
 /** A write-once sheet: a distinct object stands for distinct pixels. */
-function sheet(): CanvasImageSource {
-  return {} as CanvasImageSource;
+function sheet(): HTMLCanvasElement {
+  return {} as HTMLCanvasElement;
 }
 
 describe("blitSheetToSlots", () => {
@@ -140,5 +140,50 @@ describe("blitSheetToSlots", () => {
     const drewAsRight = right.draws();
     blitSheetToSlots(src, 200, 400, [right.slot], 50, 200);
     expect(right.draws()).toBe(drewAsRight + 1);
+  });
+});
+
+describe("preview and sharp paint", () => {
+  function page() {
+    const preview = makeSlot(), sharp = makeSlot();
+    sharp.canvas.className = "lc-pdf-sharp-canvas";
+    preview.slot.append(sharp.canvas);
+    return { preview, sharp, slots: [preview.slot] };
+  }
+
+  it("retains the preview while sharp pixels arrive on their own canvas", () => {
+    const { preview, sharp, slots } = page();
+    const low = { bitmap: sheet(), width: 50, height: 100, pixelScale: 0.25 };
+    const high = { bitmap: sheet(), width: 400, height: 800, pixelScale: 2 };
+    expect(blitSheetWithQuality(low, 1, 0.25, slots)).toBe("preview");
+    expect(preview.canvas.width).toBe(50);
+    expect(blitSheetWithQuality(high, 1, 2, slots)).toBe("sharp");
+    expect(preview.canvas.width).toBe(50);
+    expect(preview.draws()).toBe(1);
+    expect(sharp.canvas.width).toBe(400);
+    expect(preview.slot.dataset.pdfQuality).toBe("sharp");
+    blitSheetWithQuality(high, 1, 2, slots);
+    expect(sharp.draws()).toBe(1);
+  });
+
+  it("derives quality from actual pixels and releases the sharp backing store on demotion", () => {
+    const { preview, sharp, slots } = page();
+    const low = { bitmap: sheet(), width: 50, height: 100, pixelScale: 0.25 };
+    expect(blitSheetWithQuality(low, 1, 2, slots)).toBe("preview");
+    expect(sharp.canvas.width).toBe(0);
+    const high = { bitmap: sheet(), width: 400, height: 800, pixelScale: 2 };
+    blitSheetWithQuality(high, 1, 2, slots);
+    expect(sharp.canvas.width).toBe(400);
+    blitSheetWithQuality(high, 1, 0.25, slots);
+    expect(sharp.canvas.width).toBe(0);
+    expect(preview.canvas.width).toBe(50);
+    expect(preview.slot.dataset.pdfQuality).toBe("preview");
+  });
+
+  it("seeds a preview when the first available sheet is sharp", () => {
+    const { preview, sharp, slots } = page();
+    blitSheetWithQuality({ bitmap: sheet(), width: 400, height: 800, pixelScale: 2 }, 1, 2, slots);
+    expect(preview.canvas.width).toBe(50);
+    expect(sharp.canvas.width).toBe(400);
   });
 });

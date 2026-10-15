@@ -143,14 +143,14 @@ it.skipIf(!browser)("matches laid-out DOM range rectangles within 1.5px at both 
   const css = readFileSync(resolve("src/styles.css"), "utf8");
   const textCss = css.slice(css.indexOf(".lc-pdf-text.textLayer {"), css.indexOf(".lc-pdf-text.textLayer ::selection"));
   const script = await build({ bundle: true, write: false, format: "iife", target: "es2022", stdin: {
-    resolveDir: process.cwd(), contents: `
+    resolveDir: process.cwd(), contents: String.raw`
       import { TextLayer } from "pdfjs-dist";
       import { PdfTextGeometry, bindPdfTextGeometry, anchorLocalRects } from "./src/util/pdfTextGeometry";
       import { alignTextLayerToGlyphs } from "./src/util/pdfTextFit";
       import { rangeFromAnchor, textOf, anchorFromRange, anchorFromUniqueQuote } from "./src/util/docAnchors";
-      import { localRects } from "./src/util/docMarquee";
+      import { localRects, mergeLineRuns } from "./src/util/docMarquee";
       (async function run(contents, dimensions, makeAnchors) {
-        const failures = []; let checked = 0;
+        const failures = [], composites = new Map(); let checked = 0;
         for (const fit of [1, 0.7]) for (const half of ["left", "right"]) for (let n = 0; n < contents.length; n++) {
           const content = contents[n], rawDims = dimensions[n];
           const viewport = { rawDims, scale: fit, rotation: 0, width: rawDims.pageWidth * fit, height: rawDims.pageHeight * fit };
@@ -180,10 +180,34 @@ it.skipIf(!browser)("matches laid-out DOM range rectangles within 1.5px at both 
           }
           const anchor = makeAnchors(geometry.text, geometry.runs)[0];
           const placed = anchorLocalRects(body, root, anchor);
+          const children = [...layer.childNodes];
           layer.replaceChildren();
           if (textOf(root) !== geometry.text || !anchorFromUniqueQuote(root, geometry.text)) throw Error("missing cached text");
           if (JSON.stringify(anchorLocalRects(body, root, anchor)) !== JSON.stringify(placed)) throw Error("marks moved after text eviction");
-          body.remove();
+          layer.append(...children);
+          const key = fit + half, pair = composites.get(key) || [];
+          pair.push({ body, root, geometry }); composites.set(key, pair);
+        }
+        for (const pair of composites.values()) {
+          const book = document.createElement("div");
+          Object.assign(book.style, { position: "relative", width: "800px", transform: "translate(11px, 7px) scale(0.85)", transformOrigin: "0 0" });
+          for (const entry of pair) { entry.body.style.transform = "none"; book.append(entry.body); }
+          document.body.append(book);
+          const stream = pair.map(entry => entry.geometry.text).join("\n"), seam = pair[0].geometry.text.length;
+          if (textOf(book) !== stream) throw Error("block separator mismatch");
+          const anchor = { kind: "text", start: seam - 4, end: seam + 5, exact: stream.slice(seam - 4, seam + 5) };
+          const range = rangeFromAnchor(book, anchor), domRects = localRects(book, range);
+          const rects = mergeLineRuns([
+            ...anchorLocalRects(book, pair[0].root, { kind: "text", start: seam - 4, end: seam }),
+            ...anchorLocalRects(book, pair[1].root, { kind: "text", start: 0, end: 4 }),
+          ]);
+          if (anchorFromRange(book, range).exact !== anchor.exact) throw Error("block anchor mismatch");
+          if (domRects.length !== rects.length) failures.push({ block: true, domRects, rects });
+          else for (let i = 0; i < rects.length; i++) for (const key of ["left", "top", "width", "height"]) {
+            if (Math.abs(rects[i][key] - domRects[i][key]) > 1.5) failures.push({ block: true, key, dom: domRects[i], geometry: rects[i] });
+          }
+          checked++;
+          book.remove();
         }
         document.body.textContent = JSON.stringify({ checked, failures });
       })(${JSON.stringify(contents)}, ${JSON.stringify(viewports.map(v => v.rawDims))}, ${anchors.toString()}).catch(error => { document.body.textContent = JSON.stringify({ error: String(error) }); });

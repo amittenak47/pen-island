@@ -79,6 +79,8 @@ import {
   pdfThumbViewportScale,
   publishPdfLayoutBusy,
   publishDocPlacementRev,
+  publishPdfPageQuality,
+  resetPdfPageQualities,
   rememberPdfThumb,
   openedPdfThumbHashes,
   hidePdfPanText,
@@ -115,8 +117,7 @@ import {
 import { registerPdfQuoteTextFill } from "./pdfQuoteText";
 import { pdfSelectablePages, PdfTextWindow } from "./pdfTextWindow";
 import {
-  blitSheetToSlots,
-  destSheetSize,
+  blitSheetWithQuality,
   forgetSlotBlit,
   PdfSheetLru,
   releaseSheet,
@@ -532,14 +533,15 @@ export function queryPageSlots(host: HTMLElement, n: number): HTMLElement[] {
 
 function zeroPageSlots(host: HTMLElement, n: number): void {
   for (const slot of queryPageSlots(host, n)) {
-    const canvas = slot.querySelector("canvas");
-    if (canvas) {
+    for (const canvas of slot.querySelectorAll("canvas")) {
       canvas.width = 0;
       canvas.height = 0;
       forgetSlotBlit(canvas);
     }
+    if (slot.dataset.pdfQuality !== "preview") slot.dataset.pdfQuality = "preview";
     slot.removeAttribute("data-painted");
   }
+  publishPdfPageQuality(host.dataset.pdfFilmScope ?? "", n, "preview");
 }
 
 function sharpPages(filmScope: string, lastPage: number): Set<number> {
@@ -557,15 +559,8 @@ function blitCachedSheet(
   targetScale: number,
 ): void {
   if (!(targetScale > 0)) return;
-  const dest = destSheetSize(sheet, page.fit, targetScale);
-  blitSheetToSlots(
-    sheet.bitmap,
-    sheet.width,
-    sheet.height,
-    queryPageSlots(host, n),
-    dest.width,
-    dest.height,
-  );
+  const quality = blitSheetWithQuality(sheet, page.fit, targetScale, queryPageSlots(host, n));
+  publishPdfPageQuality(host.dataset.pdfFilmScope ?? "", n, quality);
 }
 
 function releasePagePixels(
@@ -784,6 +779,7 @@ export function PdfDocument({
     textWindowRef.current?.clear();
     textContentRef.current.clear();
     textGeometryRef.current.clear();
+    resetPdfPageQualities(filmScope);
   };
 
   const pageText = async (n: number, pdfPage: PDFPageProxy): Promise<TextContent> => {
@@ -1556,18 +1552,19 @@ export function PdfDocument({
       const slots = queryPageSlots(host, n);
       if (slots.length === 0) return true;
       for (const slot of slots) {
-        const canvas = slot.querySelector("canvas");
-        if (canvas) {
+        for (const canvas of slot.querySelectorAll("canvas")) {
           canvas.width = 0;
           canvas.height = 0;
           forgetSlotBlit(canvas);
         }
+        if (slot.dataset.pdfQuality !== "preview") slot.dataset.pdfQuality = "preview";
         slot.removeAttribute("data-painted");
         if (!keepText) {
           const text = slot.querySelector<HTMLElement>(".lc-pdf-text");
           if (text) text.textContent = "";
         }
       }
+      publishPdfPageQuality(filmScope, n, "preview");
       if (!keepText) publishDocPlacementRev(filmScope, [n]);
       return true;
     };
@@ -2202,6 +2199,7 @@ export function PdfDocument({
             }
           >
             <canvas className="lc-pdf-canvas" width={0} height={0} />
+            <canvas className="lc-pdf-canvas lc-pdf-sharp-canvas" width={0} height={0} />
             {/*
               Each page's text layer is its own block, which is what puts a break
               between page one's last word and page two's first in the character
@@ -2228,6 +2226,7 @@ export function PdfDocument({
     <div
       ref={hostRef}
       className="lc-pdf-doc"
+      data-pdf-film-scope={filmScope}
       aria-hidden={selectable ? undefined : true}
       style={{ gap: PAGE_GAP }}
     >

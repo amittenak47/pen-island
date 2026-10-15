@@ -408,12 +408,13 @@ export function blitSheetToSlots(
   slots: HTMLElement[],
   destW: number,
   destH: number,
+  canvasSelector = "canvas",
 ): void {
   const halves = slots.length > 1;
   const mid = Math.max(1, Math.round(destW / 2));
   const key = blitKey(src);
   for (const slot of slots) {
-    const canvas = slot.querySelector("canvas");
+    const canvas = slot.querySelector<HTMLCanvasElement>(canvasSelector);
     if (!canvas) continue;
     const half = slot.dataset.pdfHalf === "right" ? "right" : "left";
     const width = halves ? (half === "right" ? destW - mid : mid) : destW;
@@ -443,6 +444,34 @@ export function blitSheetToSlots(
     canvas.dataset[BLIT_STAMP] = stamp;
     slot.setAttribute("data-painted", "");
   }
+}
+
+/** Keep the preview underneath a sharp canvas so CSS can fade it in. */
+export function blitSheetWithQuality(
+  sheet: SheetBitmap, fit: number, targetScale: number, slots: HTMLElement[],
+): "preview" | "sharp" {
+  const sharp = Math.min(targetScale, sheet.pixelScale / fit) > PDF_PREVIEW_SCALE + 1e-9;
+  const quality = sharp ? "sharp" : "preview";
+  const dest = destSheetSize(sheet, fit, targetScale);
+  if (sharp) {
+    if (slots.some(slot => !slot.querySelector("canvas")?.width)) {
+      const preview = destSheetSize(sheet, fit, PDF_PREVIEW_SCALE);
+      blitSheetToSlots(sheet.bitmap, sheet.width, sheet.height, slots, preview.width, preview.height);
+    }
+    blitSheetToSlots(sheet.bitmap, sheet.width, sheet.height, slots, dest.width, dest.height, ".lc-pdf-sharp-canvas");
+  } else {
+    blitSheetToSlots(sheet.bitmap, sheet.width, sheet.height, slots, dest.width, dest.height);
+    for (const slot of slots) {
+      const sharp = slot.querySelector<HTMLCanvasElement>(".lc-pdf-sharp-canvas");
+      if (sharp && (sharp.width || sharp.height)) {
+        sharp.width = 0;
+        sharp.height = 0;
+        forgetSlotBlit(sharp);
+      }
+    }
+  }
+  for (const slot of slots) if (slot.dataset.pdfQuality !== quality) slot.dataset.pdfQuality = quality;
+  return quality;
 }
 
 export async function snapshotSheet(

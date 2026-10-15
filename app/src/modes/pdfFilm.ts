@@ -186,6 +186,7 @@ export function trimThumbCache(
 
 /** Pages whose document geometry changed, or the whole stack. */
 export type DocPlacementRev = number[] | "all";
+export type PdfPageQuality = "preview" | "sharp";
 
 type FilmNav = {
   current: number;
@@ -217,6 +218,8 @@ type FilmNav = {
   viewPageListeners: Set<() => void>;
   /** Text fill / spread — annotation placement remasures these pages. */
   placementRevListeners: Set<(pages: DocPlacementRev) => void>;
+  pageQuality: Map<number, PdfPageQuality>;
+  pageQualityListeners: Map<number, Set<(quality: PdfPageQuality) => void>>;
   /** Strip cells the idle thumb pass should fill first. */
   thumbWanted: number[];
   /** The ring around the reading page the idle thumb pass fills next. */
@@ -250,6 +253,8 @@ function nav(scope: string): FilmNav {
       readAhead: 0,
       viewPageListeners: new Set(),
       placementRevListeners: new Set(),
+      pageQuality: new Map(),
+      pageQualityListeners: new Map(),
       thumbWanted: [],
       thumbRing: [],
     };
@@ -557,6 +562,37 @@ export function peekPdfIntersectingPages(scope: string): readonly number[] {
 
 export function peekPdfRestPages(scope: string): readonly number[] {
   return nav(scope).restPages;
+}
+
+/** Quality is local to one sheet; marks must never restyle the book for it. */
+export function publishPdfPageQuality(scope: string, page: number, quality: PdfPageQuality): void {
+  if (!scope || page < 1) return;
+  const state = nav(scope);
+  if ((state.pageQuality.get(page) ?? "preview") === quality) return;
+  state.pageQuality.set(page, quality);
+  for (const listener of state.pageQualityListeners.get(page) ?? []) listener(quality);
+}
+
+export function peekPdfPageQuality(scope: string, page: number): PdfPageQuality {
+  return nav(scope).pageQuality.get(page) ?? "preview";
+}
+
+export function subscribePdfPageQuality(scope: string, page: number, listener: (quality: PdfPageQuality) => void): () => void {
+  const state = nav(scope);
+  let listeners = state.pageQualityListeners.get(page);
+  if (!listeners) state.pageQualityListeners.set(page, listeners = new Set());
+  listeners.add(listener);
+  listener(peekPdfPageQuality(scope, page));
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) state.pageQualityListeners.delete(page);
+  };
+}
+
+export function resetPdfPageQualities(scope: string): void {
+  const state = nav(scope);
+  for (const page of state.pageQuality.keys()) publishPdfPageQuality(scope, page, "preview");
+  state.pageQuality.clear();
 }
 
 /**
