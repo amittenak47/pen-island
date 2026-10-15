@@ -2520,7 +2520,7 @@ export function DocSelectionLayer({
     if (booktabs.position !== "beside") for (const { page, tabs } of groups.values()) {
       tabs.sort((a, b) => a.at.top - b.at.top || a.at.left - b.at.left || a.number - b.number);
       const ordered = tabs.map(entry => ({ id: entry.footnote.id }));
-      for (const [id, rect] of edgeBookTabRects(page, booktabs.position, ordered)) rects.set(id, rect);
+      for (const [id, rect] of edgeBookTabRects(page, booktabs.position, ordered, true)) rects.set(id, rect);
     }
     return rects;
   }, [visibleRibbons, booktabs, booktabPages, aiTabTops]);

@@ -31,11 +31,33 @@ export type BooktabRect = { left: number; top: number; width: number; height: nu
 export const BOOKTAB_EDGE_GAP = 4;
 export const BOOKTAB_MIN_WIDTH = 12;
 
-/** Ordered tabs run left to right, with half their height outside the sheet. */
+/** Most extra space a jittered tab adds before itself, in px. */
+export const BOOKTAB_JITTER_GAP = 6;
+/** Most a jittered tab sits off the edge line, either way, in px. */
+export const BOOKTAB_JITTER_RISE = 1.5;
+
+/** A stable 0..1 from a footnote id (FNV-1a), so a tab's jitter never moves. */
+function idUnit(id: string, salt: number): number {
+  let hash = 0x811c9dc5 ^ salt;
+  for (let i = 0; i < id.length; i += 1) {
+    hash ^= id.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0) / 0x100000000;
+}
+
+/**
+ * Ordered tabs run left to right, with half their height outside the sheet.
+ *
+ * `jitter` spaces them a little unevenly and lifts each by a pixel or so, the
+ * way tabs stuck on by hand sit. It comes from each footnote's id, so a tab
+ * keeps its place between renders, and it only spends room the row has spare.
+ */
 export function edgeBookTabRects(
   page: BooktabRect,
   edge: "top" | "bottom",
   tabs: ReadonlyArray<{ id: string }>,
+  jitter = false,
 ): Map<string, BooktabRect> {
   const out = new Map<string, BooktabRect>();
   if (!tabs.length || page.width <= 0 || page.height <= 0) return out;
@@ -50,8 +72,15 @@ export function edgeBookTabRects(
     (available - width * count) / (count - 1))) : 0;
   const height = AI_TAB_WIDTH;
   const top = page.top + (edge === "bottom" ? page.height : 0) - height / 2;
-  tabs.forEach((tab, index) => out.set(tab.id, {
-    left: page.left + inset + index * (width + gap), top, width, height,
-  }));
+  const extras = tabs.map((tab, index) => jitter && index > 0 ? idUnit(tab.id, 1) * BOOKTAB_JITTER_GAP : 0);
+  const spare = Math.max(0, available - width * count - gap * (count - 1));
+  const wanted = extras.reduce((sum, extra) => sum + extra, 0);
+  const squeeze = wanted > spare ? spare / wanted : 1;
+  let left = page.left + inset;
+  tabs.forEach((tab, index) => {
+    if (index) left += width + gap + extras[index]! * squeeze;
+    const rise = jitter ? (idUnit(tab.id, 2) * 2 - 1) * BOOKTAB_JITTER_RISE : 0;
+    out.set(tab.id, { left, top: top + rise, width, height });
+  });
   return out;
 }

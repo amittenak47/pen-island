@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AI_TAB_WIDTH, AI_TAB_HEIGHT, BOOKTAB_EDGE_GAP, BOOKTAB_MIN_WIDTH, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "./aiBookTabs";
+import { AI_TAB_WIDTH, AI_TAB_HEIGHT, BOOKTAB_EDGE_GAP, BOOKTAB_MIN_WIDTH, BOOKTAB_JITTER_GAP, BOOKTAB_JITTER_RISE, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "./aiBookTabs";
 
 describe("aiBookTabLeft", () => {
   it("hangs half the bookmark outside the left edge", () => {
@@ -65,6 +65,27 @@ describe("edgeBookTabRects", () => {
         }
       });
     }
+  });
+  it("jitters spacing and height a little, stably, without overlap", () => {
+    const many = Array.from({ length: 8 }, (_, id) => ({ id: `note-${id}` }));
+    const a = [...edgeBookTabRects(page, "top", many, true).values()];
+    const b = [...edgeBookTabRects(page, "top", many, true).values()];
+    expect(a).toEqual(b);
+    const steps = a.slice(1).map((rect, index) => rect.left - a[index]!.left);
+    expect(new Set(steps.map(step => step.toFixed(3))).size).toBeGreaterThan(1);
+    steps.forEach(step => {
+      expect(step).toBeGreaterThanOrEqual(AI_TAB_HEIGHT + BOOKTAB_EDGE_GAP);
+      expect(step).toBeLessThanOrEqual(AI_TAB_HEIGHT + BOOKTAB_EDGE_GAP + BOOKTAB_JITTER_GAP);
+    });
+    a.forEach(rect => expect(Math.abs(rect.top + rect.height / 2 - page.top)).toBeLessThanOrEqual(BOOKTAB_JITTER_RISE));
+    expect(a[0]!.left).toBe(page.left + BOOKTAB_EDGE_GAP);
+  });
+  it("spends only spare room on jitter when the row is full", () => {
+    const crowd = Array.from({ length: 10 }, (_, id) => ({ id: String(id) }));
+    const rects = [...edgeBookTabRects({ ...page, width: 140 }, "bottom", crowd, true).values()];
+    const last = rects.at(-1)!;
+    expect(last.left + last.width).toBeLessThanOrEqual(page.left + 140);
+    rects.slice(1).forEach((rect, index) => expect(rect.left).toBeGreaterThanOrEqual(rects[index]!.left + rects[index]!.width));
   });
   it("still fits without overlap when gapless minimum widths physically cannot fit", () => {
     const rects = [...edgeBookTabRects({ ...page, width: 80 }, "top",
