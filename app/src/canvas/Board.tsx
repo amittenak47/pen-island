@@ -9547,9 +9547,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     // filling a large window needs well past 1.75, and the fit is arithmetic.
     let zoom = Math.min(PAGE_FIT_ZOOM_MAX, Math.max(FIT_ZOOM_MIN, Math.min(availW / bareW, availH / h) * fraction));
     /*
-     * A filmstrip lying over the board (Pages reading) covers its top. The
-     * page stays centred if it clears the strip; if not it moves down just
-     * clear of it, and shrinks only when the space below cannot hold it.
+     * A filmstrip lying over the board (Pages reading) covers its top, so the
+     * page is centred in the space below it: centring on the whole view left
+     * it sitting high, and moving it just clear of the strip left it top-
+     * aligned with the slack underneath. It shrinks only when that space
+     * cannot hold it.
      */
     const boardEl = boardRef.current;
     const wrap = boardEl?.parentElement;
@@ -9560,12 +9562,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       ? Math.max(0, strip.getBoundingClientRect().bottom - boardBoxOf(boardEl).top)
       : 0;
     let pageTop = inset.top + (availH - h * zoom) / 2;
-    if (stripBottom > 0 && pageTop < stripBottom + inset.top) {
-      const room = viewHeight - stripBottom - inset.top - inset.bottom;
-      if (h * zoom > room && room > 8) {
+    const room = viewHeight - stripBottom - inset.top - inset.bottom;
+    if (stripBottom > 0 && room > 8) {
+      if (h * zoom > room) {
         zoom = Math.max(FIT_ZOOM_MIN, Math.min(availW / bareW, room / h) * fraction);
       }
-      pageTop = Math.max(stripBottom + inset.top, inset.top + (availH - h * zoom) / 2);
+      pageTop = stripBottom + inset.top + Math.max(0, (room - h * zoom) / 2);
     }
     // A text page is as tall as the view and narrower than it: widen its
     // paper to the view's sides, less a sliver of desk for the page stack.
