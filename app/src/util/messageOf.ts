@@ -1,3 +1,4 @@
+import { noteOpenStep } from "./openStatus";
 /**
  * Turn anything thrown into a sentence a reader can act on.
  *
@@ -57,6 +58,8 @@ export function traceOpen(step: string, detail?: Record<string, unknown>): void 
   try {
     // eslint-disable-next-line no-console
     console.info(`[lc:open] ${step}`, detail ? JSON.stringify(detail) : "");
+    // The same steps, in words, above the loading spinner.
+    noteOpenStep(step);
   } catch {
     /* logging must never be the thing that breaks an open */
   }

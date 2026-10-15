@@ -118,6 +118,7 @@ import { markBootSettled } from "./util/bootSettled";
 import { wrapForDebug } from "./util/debugLog";
 import { followMatchDisplay } from "./util/displayRefresh";
 import { messageOf } from "./util/messageOf";
+import { useOpenStatus } from "./util/openStatus";
 
 /**
  * How many workspaces stay mounted at once.
@@ -193,6 +194,7 @@ export function App() {
   const serverLinkRef = useRef(serverLink);
   serverLinkRef.current = serverLink;
   const [bootPhase, setBootPhase] = useState<"enter" | "show" | "done" | "exit" | "gone">("enter");
+  const openStatus = useOpenStatus();
   /** The boot overlay is still on screen, so nothing else may open in front of it. */
   const bootOverlayPendingRef = useRef(true);
   const bootHoldRef = useRef(false);
@@ -1582,6 +1584,9 @@ export function App() {
           aria-label={bootPhase === "done" ? "Ready" : "Starting up"}
         >
           <LoadingDoodle themeId={themeId} nativeInput />
+          <p className="lc-load-status" aria-hidden="true">
+            {bootPhase === "done" ? "Ready" : openStatus ?? "Starting up…"}
+          </p>
           {bootPhase === "done" ? (
             <div className="lc-spinner-check" aria-hidden="true">
               <svg viewBox="0 0 24 24" width="22" height="22">

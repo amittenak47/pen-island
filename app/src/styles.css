@@ -15264,6 +15264,21 @@ button.lc-row-selected:hover:not(:disabled) {
   pointer-events: none;
 }
 
+/* What the open is doing, just above the spinner (see `useOpenStatus`). */
+.lc-load-status {
+  position: absolute;
+  left: 16px;
+  right: 16px;
+  top: calc(50% - 52px);
+  z-index: 2;
+  margin: 0;
+  text-align: center;
+  font-size: 13px;
+  line-height: 18px;
+  color: inherit;
+  pointer-events: none;
+}
+
 .lc-server-gate-boot > .lc-spinner,
 .lc-server-gate-boot > .lc-spinner-check,
 .lc-overlay-spinner > .lc-spinner,

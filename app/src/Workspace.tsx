@@ -480,6 +480,7 @@ import { renderAnnotation } from "./viz/render/annotation";
 import { renderHighlight } from "./viz/render/highlight";
 import { parseVizProgram, type VizProgram } from "./viz/schema";
 import { messageOf, traceOpen } from "./util/messageOf";
+import { useOpenStatus } from "./util/openStatus";
 import { loadChromeFate, mayClearParkedPreparing, BOOT_DONE_HOLD_MS, LOAD_FADE_MS, LOAD_SLIDE_MS } from "./util/workspaceLoad";
 
 import { saveCaptureToDevice, describeCaptureResult } from "./util/capturePrefs";
@@ -12913,6 +12914,7 @@ function ResumePictureLayer({ tabId, loading }: { tabId: string; loading: boolea
 
 /** Shared spinner → checkmark used by browse pick and ‹ › problem switch. */
 function WorkspaceLoadStatus({ done, themeId }: { done: boolean; themeId: string }) {
+  const status = useOpenStatus();
   return (
     <div
       className="lc-overlay-spinner"
@@ -12921,6 +12923,7 @@ function WorkspaceLoadStatus({ done, themeId }: { done: boolean; themeId: string
       aria-label={done ? "Workspace ready" : "Loading workspace"}
     >
       <LoadingDoodle themeId={themeId} nativeInput />
+      <p className="lc-load-status" aria-hidden="true">{done ? "Ready" : status ?? "Opening…"}</p>
       {done ? (
         <div className="lc-spinner-check" aria-hidden="true">
           <svg viewBox="0 0 24 24" width="22" height="22">
