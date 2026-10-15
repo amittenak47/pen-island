@@ -8,6 +8,7 @@ import { DialogPresence } from "../components/DialogMotion";
  */
 
 import { dedupeInkOps } from "./inkOpsDedupe";
+import { makeFingerRest } from "./fingerRest";
 import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
 import { touchPointersIn } from "./touchPointers";
@@ -986,6 +987,10 @@ const ZOOM_ANIM_MS = 220;
  * true — ride-only mid-gesture makes coast cheap again.
  */
 const PAN_INERTIA_ENABLED = true;
+/** A finger held this long without moving is resting: sharp pages may paint. */
+const FINGER_REST_MS = 250;
+/** Touch jitter a resting finger may show and still count as still. */
+const FINGER_REST_SLOP_PX = 3;
 /** Px before a mouse press-during-glide becomes a new drag (touch arms immediately). */
 const PAN_DRAG_THRESHOLD_PX = 3;
 /** Finger/wheel travel multiplier — 1:1 felt sluggish vs Obsidian. */
@@ -2379,6 +2384,26 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const clearPanOffsetsRef = useRef(clearPanOffsets);
   clearPanOffsetsRef.current = clearPanOffsets;
 
+  /**
+   * The camera has stopped: drop this board's share of the paint freeze.
+   *
+   * Run by the pulse's settle timer, or early when a finger holding the page
+   * has rested (see `FINGER_REST_MS`).
+   */
+  const settleCameraPulse = useCallback(() => {
+    if (cameraMotionTimerRef.current) window.clearTimeout(cameraMotionTimerRef.current);
+    cameraMotionTimerRef.current = 0;
+    cameraMotionActiveRef.current = false;
+    if (cameraLiveClassRafRef.current) {
+      cancelAnimationFrame(cameraLiveClassRafRef.current);
+      cameraLiveClassRafRef.current = 0;
+    }
+    if (!readingZoomRef.current) docFlags.camera(false);
+    setPanRideWillChange(false);
+  }, [docFlags, setPanRideWillChange]);
+  const settleCameraPulseRef = useRef(settleCameraPulse);
+  settleCameraPulseRef.current = settleCameraPulse;
+
   const pulseCameraMotion = useCallback(() => {
     noteCameraBusy();
     noteCameraIdlePulse();
@@ -2407,16 +2432,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     if (cameraIdleTeardownTimerRef.current) {
       window.clearTimeout(cameraIdleTeardownTimerRef.current);
     }
-    cameraMotionTimerRef.current = window.setTimeout(() => {
-      cameraMotionTimerRef.current = 0;
-      cameraMotionActiveRef.current = false;
-      if (cameraLiveClassRafRef.current) {
-        cancelAnimationFrame(cameraLiveClassRafRef.current);
-        cameraLiveClassRafRef.current = 0;
-      }
-      if (!readingZoomRef.current) docFlags.camera(false);
-      setPanRideWillChange(false);
-    }, cameraPulseSettleMs());
+    cameraMotionTimerRef.current = window.setTimeout(
+      () => settleCameraPulseRef.current(),
+      cameraPulseSettleMs(),
+    );
     // Commit / ink moving-mode drop wait for a real reading idle, not the
     // pulse settle. A 3–5s pause then a same-direction burst must still be
     // on the live cache with GPU canvases intact.
@@ -4622,6 +4641,25 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const unclaim = onSelectionGestureClaimed(dropPanForSelection);
 
     let heldPointerId: number | null = null;
+    /*
+     * A finger that holds the page still is a reader looking, not a gesture
+     * about to start: the freeze below kept every page blurred for as long as
+     * it stayed down. After `FINGER_REST_MS` within `FINGER_REST_SLOP_PX`,
+     * settle the camera and drop the hold so sharp pages paint; the next move
+     * raises it again, which cancels a sharp paint still in flight.
+     */
+    const fingerRest = makeFingerRest({
+      restMs: FINGER_REST_MS,
+      slopPx: FINGER_REST_SLOP_PX,
+      onRest: () => {
+        if (heldPointerId == null || inertiaFrameRef.current) return;
+        docFlags.pointer(false);
+        settleCameraPulseRef.current();
+      },
+      onResume: () => {
+        if (heldPointerId != null) docFlags.pointer(true);
+      },
+    });
     const holdPointer = (pointerId: number) => {
       heldPointerId = pointerId;
       docFlags.pointer(true);
@@ -4663,6 +4701,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const releaseHeldPointer = (pointerId: number) => {
       if (heldPointerId !== pointerId) return;
       heldPointerId = null;
+      fingerRest.stop();
       docFlags.pointer(false);
     };
 
@@ -4909,6 +4948,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       };
       // Freeze PDF inflate before pan arms (selectable docs wait 16px).
       holdPointer(event.pointerId);
+      fingerRest.start(event.clientX, event.clientY);
       if (!deferred) {
         try {
           root.setPointerCapture(event.pointerId);
@@ -4921,6 +4961,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const onPointerMove = (event: PointerEvent) => {
       const drag = panDragRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
+      if (heldPointerId === event.pointerId) fingerRest.move(event.clientX, event.clientY);
       if (!handPanningRef.current) return;
       if (!canOwnScroll()) return;
       if (rasterInkRef.current?.isDrawing()) {
@@ -5066,6 +5107,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     };
 
     const onPointerUp = (event: PointerEvent) => {
+      // Lifting a finger that had come to rest is not a flick: no coast, and
+      // no pulse to blur the sharp pages that just painted.
+      const restedLift = fingerRest.rested && heldPointerId === event.pointerId;
       releaseHeldPointer(event.pointerId);
       const drag = panDragRef.current;
       if (drag?.codeDockEl) {
@@ -5119,6 +5163,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
 
       event.preventDefault();
       event.stopPropagation();
+      if (restedLift) return;
 
       const rawY =
         Math.abs(panPeakVelYRef.current) > Math.abs(panVelocityRef.current.y)
@@ -5200,6 +5245,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     window.addEventListener("pointercancel", onWindowChromeUp, true);
     return () => {
       unclaim();
+      fingerRest.stop();
       if (heldPointerId != null) {
         heldPointerId = null;
         docFlags.pointer(false);
