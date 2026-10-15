@@ -4,7 +4,7 @@
 .lc-hub-pull-catalog .lc-hub-pull-reason { color: var(--muted); font-size: 11px; overflow-wrap: anywhere; }
 .lc-hub-pull-catalog button.lc-artifact-picker-source {
   display: inline-flex; align-items: center; gap: 5px;
-  min-height: 28px; padding: 0 6px; border: 0; border-radius: calc(var(--lc-r-block) * 3);
+  min-height: 28px; padding: 0 6px; border: 0; border-radius: max(6px, var(--lc-r-round));
   background: transparent; color: var(--hint); font-size: 12px; font-weight: 600; box-shadow: none;
 }
 .lc-hub-pull-catalog button.lc-artifact-picker-source.is-active { color: var(--accent); box-shadow: inset 0 -2px 0 currentColor; }
