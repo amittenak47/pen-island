@@ -264,7 +264,6 @@ function streamOf(root: Node): DocStream {
   return { text, nodes, starts };
 }
 
-/** The document's whole character stream, the thing offsets index into. */
 const suppliedText = new WeakMap<Node, string>();
 
 /** Fixed-layout renderers can keep their offset stream after dropping spans. */
@@ -272,6 +271,7 @@ export function supplyDocText(root: Node, text: string): void {
   suppliedText.set(root, text);
 }
 
+/** The document's whole character stream, the thing offsets index into. */
 export function textOf(root: Node): string {
   return suppliedText.get(root) ?? streamOf(root).text;
 }
@@ -538,6 +538,11 @@ function rangeAt(
 
 export function textForAnchor(root: Node, anchor: DocAnchor): string {
   if (!isTextAnchor(anchor)) return "";
+  const supplied = suppliedText.get(root);
+  if (supplied != null) {
+    const offsets = textAnchorOffsets(supplied, anchor);
+    return offsets ? supplied.slice(Math.max(0, offsets.start), Math.min(supplied.length, offsets.end)) : "";
+  }
   const { text } = streamOf(root);
   if (anchor.start >= text.length || anchor.end <= anchor.start) return "";
   return rangeFromAnchor(root, anchor)

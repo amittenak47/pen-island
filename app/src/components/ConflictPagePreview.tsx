@@ -15,11 +15,12 @@ import { makeDocFlagHolds, type DocFlagHolds } from "../canvas/docSelectionGestu
 import { AnnotateDocument } from "../modes/AnnotateDocument";
 import { EpubDocument } from "../modes/EpubDocument";
 import { rangeFromAnchor, scopeRootIn } from "../util/docAnchors";
+import { pdfAnchorRects } from "../util/pdfTextGeometry";
 import { DocSelectionLayer } from "../modes/DocSelectionLayer";
 import { PdfDocument, type PdfPageNatural } from "../modes/PdfDocument";
 import { conflictPdfFrames } from "./conflictDocumentLayout";
 import { locatePdfInkPoint, placePdfInkPoint, remapInkBetweenPdfLayouts } from "../modes/pdfInkSpread";
-import { publishPdfFilmCurrent, publishPdfViewPages } from "../modes/pdfFilm";
+import { publishPdfFilmCurrent, publishPdfViewPages, subscribeDocPlacementRev } from "../modes/pdfFilm";
 import { borrowPdfDocument } from "../modes/pdfOpenDocs";
 import { pdfVisibleFromSpans } from "../modes/pdfPaintWindow";
 import { cameraPulseSettleMs } from "../util/cameraBusy";
@@ -291,15 +292,22 @@ export function ConflictPagePreview({
       if (!node || node.getBoundingClientRect().height < 1) return false;
       const { focusNote: note, focusY: y, stablePageFrames: frames } = jumpTarget.current;
       const doc = node.querySelector<HTMLElement>(".lc-doc-selectable-body") ?? node;
-      const scope = note ? scopeRootIn(doc, note.anchor.scope) : null;
+      const scope = note ? (doc.dataset.docScope === note.anchor.scope ? doc : scopeRootIn(doc, note.anchor.scope)) : null;
       const scale = node.getBoundingClientRect().width / (sceneWidth || node.getBoundingClientRect().width || 1);
       let targetTop: number | undefined;
       if (note && scope) {
         if (note.anchor.kind === "region") targetTop = scope.getBoundingClientRect().top + note.anchor.y * scale;
         else {
-          const range = rangeFromAnchor(scope, note.anchor);
-          const box = range?.getBoundingClientRect?.();
-          if (box && box.height > 0) targetTop = box.top;
+          const rects = pdfAnchorRects(scope, note.anchor);
+          if (rects?.length) {
+            const scopeBox = scope.getBoundingClientRect();
+            const scale = scope instanceof HTMLElement && scope.offsetWidth > 0 ? scopeBox.width / scope.offsetWidth : 1;
+            targetTop = scopeBox.top + Math.min(...rects.map(rect => rect.top)) * scale;
+          } else if (rects == null) {
+            const range = rangeFromAnchor(scope, note.anchor);
+            const box = range?.getBoundingClientRect?.();
+            if (box && box.height > 0) targetTop = box.top;
+          }
         }
       }
       if (targetTop == null && y != null) {
@@ -320,7 +328,8 @@ export function ConflictPagePreview({
     // A PDF text layer or Markdown parse can arrive after its page slot.
     const observer = new MutationObserver(() => { if (jump()) observer.disconnect(); });
     if (!jump()) observer.observe(root, { childList: true, subtree: true });
-    return () => observer.disconnect();
+    const stop = filmScope ? subscribeDocPlacementRev(filmScope, () => { if (jump()) observer.disconnect(); }) : () => {};
+    return () => { stop(); observer.disconnect(); };
     // Rerun for newly decoded bounds, never for a pick or a scroll event.
   }, [page, focusKey, focusSceneY, useMarkdown, sceneWidth, stackH, hash]);
 

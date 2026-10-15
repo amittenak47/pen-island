@@ -31,6 +31,7 @@ import {
   snapToWords,
   streamOffsetAt,
   textForAnchor,
+  textAnchorOffsets,
   textOf,
   type DocAnchor,
 } from "../util/docAnchors";
@@ -80,7 +81,6 @@ import {
   pdfPageNumberOf,
   footnoteVisibleOnViewPages,
   localRectCoversHost,
-  localRects,
   pdfPageFromDocScope,
   invalidateDocCoverGeometry,
   scaleOf,
@@ -102,7 +102,7 @@ import { currentInkPalette } from "../util/inkPaletteHistory";
 import { footnoteThemeVars } from "../util/footnoteTheme";
 import { isAndroidDevice } from "../util/androidDevice";
 import { fillPdfQuoteText } from "./pdfQuoteText";
-import { anchorLocalRects, invalidatePdfTextGeometry, pdfTextColumnRight } from "../util/pdfTextGeometry";
+import { anchorLocalRects, invalidatePdfTextGeometry, pdfTextColumnRight, pdfTextGeometry } from "../util/pdfTextGeometry";
 import {
   peekPdfIntersectingPages,
   peekPdfPlacementPages,
@@ -479,6 +479,7 @@ export function DocSelectionLayer({
    * is therefore a sibling of this, not a child.
    */
   const bodyRef = useRef<HTMLDivElement | null>(null);
+  const commitNativeRef = useRef<((event?: Event) => void) | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const placeGeometryRef = useRef<{
     footnotes: readonly DocFootnote[];
@@ -664,6 +665,51 @@ export function DocSelectionLayer({
       setViewPages(peekPdfIntersectingPages(paletteScope));
     });
   }, [paletteScope]);
+
+  useEffect(() => {
+    const host = hostRef.current, body = bodyRef.current;
+    if (!host || !body || !paletteScope || (!enabled && !highlighting && !subMarkParent)) return;
+    let pending: { id: number; root: HTMLElement; x: number; y: number; ready: Promise<boolean> } | null = null;
+    const fillAt = (event: PointerEvent) => {
+      pending = null;
+      // Touch waits for the hold gate; a normal pan must never build spans.
+      if (event.pointerType === "touch" || event.button !== 0 || isDocChromeTarget(event.target)) return;
+      const { root } = scopeRootAtPoint(body, event.clientX, event.clientY);
+      const page = pdfPageNumberOf(root);
+      if (page != null && !root.querySelector(".lc-pdf-text")?.hasChildNodes()) {
+        pending = { id: event.pointerId, root, x: event.clientX, y: event.clientY, ready: fillPdfQuoteText(paletteScope, page) };
+      }
+    };
+    const finish = (event: PointerEvent) => {
+      const request = pending;
+      if (!request || request.id !== event.pointerId) return;
+      if (event.type === "pointercancel" || Math.hypot(event.clientX - request.x, event.clientY - request.y) < 2) { pending = null; return; }
+      // A mouse drag can start before any selectable nodes exist. Rebuild its
+      // range once on lift, after the requested layer lands, then use the same
+      // native selection actions. No text building or caret walks on move.
+      void request.ready.then(ok => {
+        if (!ok || pending !== request || !body.isConnected) return;
+        pending = null;
+        const start = caretPointIn(request.root, request.x, request.y);
+        const end = caretPointIn(request.root, event.clientX, event.clientY);
+        if (!start || !end) return;
+        window.getSelection()?.setBaseAndExtent(start.node, start.offset, end.node, end.offset);
+        commitNativeRef.current?.(event);
+      });
+    };
+    host.addEventListener("pointerdown", fillAt, true);
+    window.addEventListener("pointerup", finish, true);
+    window.addEventListener("pointercancel", finish, true);
+    const root = subMarkParent ? scopeRootIn(body, subMarkParent.anchor.scope) : null;
+    const page = root ? pdfPageNumberOf(root as HTMLElement) : null;
+    if (subMarkArmed && page != null) void fillPdfQuoteText(paletteScope, page);
+    return () => {
+      pending = null;
+      host.removeEventListener("pointerdown", fillAt, true);
+      window.removeEventListener("pointerup", finish, true);
+      window.removeEventListener("pointercancel", finish, true);
+    };
+  }, [enabled, highlighting, paletteScope, subMarkArmed, subMarkParent]);
 
   const paintMarquee = useCallback((rect: LocalRect, _root: HTMLElement) => {
     const body = bodyRef.current;
@@ -912,6 +958,7 @@ export function DocSelectionLayer({
       setPhase("actions");
     };
 
+    commitNativeRef.current = commitNative;
     const onPointerUp = (event: Event) => {
       window.requestAnimationFrame(() => commitNative(event));
     };
@@ -919,6 +966,7 @@ export function DocSelectionLayer({
     window.addEventListener("pointerup", onPointerUp, true);
     window.addEventListener("mouseup", onPointerUp, true);
     return () => {
+      commitNativeRef.current = null;
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("mouseup", onPointerUp, true);
     };
@@ -1052,6 +1100,10 @@ export function DocSelectionLayer({
             /* pointer may already be gone */
           }
           host.classList.add("lc-doc-selecting", "lc-doc-select-mode");
+          const body = bodyRef.current;
+          const page = body && paletteScope && documentUsesPdfPlacement(body)
+            ? pdfPageNumberOf(scopeRootAtPoint(body, hold.startX, hold.startY).root) : null;
+          if (page != null && paletteScope) void fillPdfQuoteText(paletteScope, page);
         }, SELECT_HOLD_ARM_MS),
         armed: false,
         held: false,
@@ -1895,6 +1947,7 @@ export function DocSelectionLayer({
             ? tightLocalRects(body, footnote.bands)
             : [];
         const liveAnchor = liveFootnoteAnchor(root, footnote);
+        if (liveAnchor?.kind === "text" && pdfTextGeometry(root) && !textAnchorOffsets(textOf(root), liveAnchor)) continue;
         const live =
           liveAnchor
             ? (() => {
@@ -2130,7 +2183,7 @@ export function DocSelectionLayer({
     const watchMutations = enabled || highlighting || placeExisting;
     const pdfBody = documentUsesPdfPlacement(body);
     let frame: number | null = null;
-    if (!watchMutations || typeof MutationObserver !== "function") {
+    if ((!watchMutations && !pdfBody) || typeof MutationObserver !== "function") {
       return () => {
         unbindView();
         body.removeEventListener("scroll", onHostScroll, true);
@@ -2156,6 +2209,7 @@ export function DocSelectionLayer({
       });
     });
     const startObserver = () => {
+      if (!watchMutations) return;
       if (observing) return;
       observer.observe(body, { childList: true, subtree: true, characterData: true });
       observing = true;
@@ -2451,14 +2505,12 @@ export function DocSelectionLayer({
   const subMarkLivePaint = useMemo(() => {
     const body = bodyRef.current;
     if (!body || !subMarkLive) return [];
-    const range = rangeFromAnchor(subMarkLive.root, {
+    return anchorLocalRects(body, subMarkLive.root, {
       kind: "text",
       start: subMarkLive.start,
       end: subMarkLive.end,
       ...(subMarkLive.scope ? { scope: subMarkLive.scope } : {}),
     });
-    if (!range) return [];
-    return localRects(body, range);
   }, [subMarkLive]);
 
   const subMarkTint = subMarkParent
@@ -3349,6 +3401,7 @@ function collectPaintedSubMarks(
             });
             continue;
           }
+          if (anchor.kind === "text" && pdfTextGeometry(root) && !textAnchorOffsets(textOf(root), anchor)) continue;
         }
       }
       if (mark.bands && mark.bands.length > 0) {

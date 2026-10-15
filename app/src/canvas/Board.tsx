@@ -1,4 +1,5 @@
 import { publishBooktabPages } from "../util/booktabPages";
+import { textOf } from "../util/docAnchors";
 import { DialogPresence } from "../components/DialogMotion";
 /**
  * The board surface: Ink lab pad plus Board chrome.
@@ -10173,7 +10174,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           }
           const box = node.getBoundingClientRect();
           return boardBox && box.bottom > boardBox.top && box.top < boardBox.bottom;
-        }).map(node => node.textContent ?? "").join("\n");
+        }).map(node => textOf(node)).join("\n");
         const scene = apiRef.current?.getSceneElements() as Array<{ id: string; version?: number }> | undefined;
         return { paneId: filmScope, viewport, pages, text, revision: JSON.stringify([
           scene?.map(e => [e.id, e.version]), rasterInkRef.current?.getRevision(),

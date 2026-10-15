@@ -5,6 +5,7 @@ import { paintSceneToExport, isDrawableSceneElement, type PaintSceneElement } fr
 import { scrollHostLookupFromSlot } from "../canvas/scrollHost";
 import { annotateDocKey, encodedFromRecord, getInkPageRecords } from "./inkPageStore";
 import { rangeFromAnchor, textOf } from "./docAnchors";
+import { pdfAnchorRects } from "./pdfTextGeometry";
 import type { DocFootnote } from "./docFootnotes";
 import type { DocType } from "./annotateStore";
 import type { AgentChatMessage } from "../modes/AgentSidePanel";
@@ -58,11 +59,18 @@ export async function snapshotDocumentExport(board: BoardHandle, source: ExportS
         const origin=saved ? bodyBounds:scope.bounds;
         rects=bands.map(r=>({minX:origin.minX+r.left,minY:origin.minY+r.top,maxX:origin.minX+r.left+r.width,maxY:origin.minY+r.top+r.height}));
       } else {
-        const range=rangeFromAnchor(node,note.anchor);
-        rects=range ? [...range.getClientRects()].filter(r=>r.width>0 && r.height>0).map(bounds) : [];
+        const geometry=pdfAnchorRects(node,note.anchor);
+        if(geometry) {
+          const scale=node.offsetWidth>0 ? (scope.bounds.maxX-scope.bounds.minX)/node.offsetWidth : 1;
+          rects=geometry.map(r=>({minX:scope.bounds.minX+r.left*scale,minY:scope.bounds.minY+r.top*scale,
+            maxX:scope.bounds.minX+(r.left+r.width)*scale,maxY:scope.bounds.minY+(r.top+r.height)*scale}));
+        } else {
+          const range=rangeFromAnchor(node,note.anchor);
+          rects=range ? [...range.getClientRects()].filter(r=>r.width>0 && r.height>0).map(bounds) : [];
+        }
         // PDF text layers are virtualized. Stored bands retain the mark on pages
         // the reader hasn't visited, without forcing every page to render.
-        if(!rects.length && source.docType==="pdf" && note.bands?.length) {
+        if(!rects.length && geometry==null && source.docType==="pdf" && note.bands?.length) {
           rects=note.bands.map(r=>({minX:bodyBounds.minX+r.left,minY:bodyBounds.minY+r.top,maxX:bodyBounds.minX+r.left+r.width,maxY:bodyBounds.minY+r.top+r.height}));
         }
       }

@@ -4,6 +4,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { DocSelectionLayer, type DocSelectionLayerProps } from "./DocSelectionLayer";
 import { selectionCaptureFailure, type SelectionActionContext, type SelectionActionResult } from "./selectionAction";
+import { registerPdfQuoteTextFill } from "./pdfQuoteText";
 
 let host: HTMLDivElement;
 let root: Root;
@@ -170,5 +171,50 @@ it("offers ChatBot for an Android quote marquee with a durable text anchor", asy
     if (originalHitTest) Object.defineProperty(document, "elementFromPoint", originalHitTest);
     else Reflect.deleteProperty(document, "elementFromPoint");
     vi.useRealTimers();
+  }
+});
+
+it("finishes a mouse quote after filling a PDF page that had no selectable text", async () => {
+  const changed = vi.fn();
+  let finish!: () => void;
+  const fill = vi.fn(async () => new Promise<boolean>(resolve => {
+    finish = () => {
+      host.querySelector(".lc-pdf-text")!.textContent = "Selected words for a question";
+      resolve(true);
+    };
+  }));
+  const stop = registerPdfQuoteTextFill("empty-pdf", fill);
+  const descriptors = ["elementFromPoint", "caretRangeFromPoint"].map(key => [key, Object.getOwnPropertyDescriptor(document, key)] as const);
+  const pointer = (type: string, x: number) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 60 });
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "mouse" } });
+    return event;
+  };
+  try {
+    act(() => root.render(<DocSelectionLayer paletteScope="empty-pdf" footnotes={footnotes} onSelectionChange={changed}>
+      <div data-doc-scope="p4" data-pdf-page="4"><div className="lc-pdf-text textLayer" /></div>
+    </DocSelectionLayer>));
+    const page = host.querySelector<HTMLElement>("[data-pdf-page]")!;
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => page });
+    Object.defineProperty(document, "caretRangeFromPoint", { configurable: true, value: (x: number) => {
+      const node = page.querySelector(".lc-pdf-text")!.firstChild!;
+      const range = document.createRange();
+      range.setStart(node, x < 100 ? 0 : node.textContent!.length); range.collapse(true); return range;
+    } });
+    act(() => page.dispatchEvent(pointer("pointerdown", 40)));
+    expect(fill).toHaveBeenCalledWith(4);
+    act(() => page.dispatchEvent(pointer("pointerup", 160)));
+    expect(document.querySelector('[role="menu"]')).toBeNull();
+    await act(async () => finish());
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({
+      text: "Selected words for a question", anchor: expect.objectContaining({ kind: "text", scope: "p4", start: 0, end: 29 }),
+    }));
+    expect(document.querySelector('[role="menu"]')).toBeTruthy();
+  } finally {
+    stop();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(document, key, descriptor);
+      else Reflect.deleteProperty(document, key);
+    }
   }
 });

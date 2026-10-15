@@ -1,10 +1,10 @@
 /** PDF mark placement without retaining pdf.js's selectable spans. */
-import type { TextContent, TextItem, TextStyle } from "pdfjs-dist/types/src/display/api";
-import type { PageViewport } from "pdfjs-dist/types/src/display/display_utils";
+import type { PDFPageProxy, TextContent, TextItem, TextStyle } from "pdfjs-dist/types/src/display/api";
 import { rangeFromAnchor, supplyDocText, textAnchorOffsets, type DocAnchor, type TextAnchor } from "./docAnchors";
 import { localRects, mergeLineRuns, scaleOf, type LocalRect } from "./docMarquee";
 
 type Run = { item: TextItem; start: number; end: number };
+type PageViewport = ReturnType<PDFPageProxy["getViewport"]>;
 type Font = { family: string; ascent: number; height: number; top: number };
 type Box = LocalRect & { angle: number; advance: number; font: string };
 
@@ -83,7 +83,9 @@ export class PdfTextGeometry {
     const { item } = run;
     const style = this.content.styles[item.fontName];
     const font = this.font(style);
-    const { pageWidth, pageHeight, pageX, pageY } = this.viewport.rawDims;
+    const { pageWidth, pageHeight, pageX, pageY } = this.viewport.rawDims as {
+      pageWidth: number; pageHeight: number; pageX: number; pageY: number;
+    };
     const fit = this.viewport.scale;
     const [a, b, c, d, x, y] = item.transform;
     // TextLayer uses rawDims, a flipped Y, and percentage positions rounded
@@ -190,7 +192,8 @@ export function invalidatePdfTextGeometry(body: HTMLElement, pages: readonly num
 export function pdfAnchorRects(root: Element, anchor: DocAnchor): LocalRect[] | null {
   const geometry = pageGeometry.get(root);
   if (!geometry || anchor.kind !== "text") return null;
-  const shift = root.getAttribute("data-pdf-half") === "right" ? -geometry.viewport.width / 2 : 0;
+  const shift = root.getAttribute("data-pdf-half") === "right"
+    ? -(Number.parseFloat((root as HTMLElement).style.width) || geometry.viewport.width / 2) : 0;
   return geometry.rects(anchor).map(rect => ({ ...rect, left: rect.left + shift }));
 }
 
@@ -213,6 +216,6 @@ export function pdfTextColumnRight(body: HTMLElement, root: HTMLElement): number
   const right = geometry?.columnRight();
   if (right == null) return null;
   const scale = scaleOf(body) || 1;
-  const shift = root.dataset.pdfHalf === "right" ? -geometry!.viewport.width / 2 : 0;
+  const shift = root.dataset.pdfHalf === "right" ? -(Number.parseFloat(root.style.width) || geometry!.viewport.width / 2) : 0;
   return right + shift + (root.getBoundingClientRect().left - body.getBoundingClientRect().left) / scale;
 }

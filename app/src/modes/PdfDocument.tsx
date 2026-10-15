@@ -28,9 +28,8 @@
  * overlap — it does not re-render. The flick-end HUD guess never feeds this
  * window.
  *
- * The text layer stays in the DOM while the bitmap pages out — footnotes and
- * quotes measure those spans, not the picture. Only an LRU drop from the
- * pagefile clears the spans (the bitmap is gone, so they would be a lie).
+ * Only the viewport hole keeps selectable spans (at most three pages).
+ * Marks use cached worker text geometry, independent of those spans.
  */
 
 import { waitForInkSettled } from "../canvas/inkSettled";
@@ -52,9 +51,11 @@ import { openBackgroundJob } from "../util/inputLatency";
 import {
   peekPdfFilmCurrent,
   peekPdfIntersectingPages,
+  peekPdfPlacementPages,
   peekPdfRestPages,
   peekPdfPreloadPages,
   publishPdfFilmCurrent,
+  publishPdfViewPages,
   resetPdfFilmCurrent,
   resetPdfFilmPredicted,
   resetPdfPreloadPages,
@@ -110,9 +111,9 @@ import {
   pdfWantedPages,
   pdfRestPages,
   pdfShouldPreempt,
-  startPdfTextFillClaim,
 } from "./pdfPaintWindow";
 import { registerPdfQuoteTextFill } from "./pdfQuoteText";
+import { pdfSelectablePages, PdfTextWindow } from "./pdfTextWindow";
 import {
   blitSheetToSlots,
   destSheetSize,
@@ -672,15 +673,12 @@ export function PdfDocument({
   const sessionRef = useRef(new PdfPageSession());
   const lastSettledPageRef = useRef(Math.max(1, initialPage));
   const pathFillRef = useRef<number[]>([]);
-  /**
-   * Pages whose text layer has been laid out over the picture.
-   *
-   * Not derivable from the DOM: a page with no strings in it fills to an
-   * empty layer, and "no spans" would send the pump back to it forever.
-   * Cleared wherever the spans are, so a page that comes back gets asked
-   * again.
-   */
-  const textFilledRef = useRef<Set<number>>(new Set());
+  const textWindowRef = useRef<PdfTextWindow | null>(null);
+  if (!textWindowRef.current) textWindowRef.current = new PdfTextWindow((n) => {
+    const host = hostRef.current;
+    if (!host) return;
+    for (const slot of queryPageSlots(host, n)) slot.querySelector(".lc-pdf-text")?.replaceChildren();
+  });
   const textContentRef = useRef(new Map<number, Promise<TextContent>>());
   const textGeometryRef = useRef(new Map<number, PdfTextGeometry>());
   const panHiddenTextRef = useRef<Set<HTMLElement>>(new Set());
@@ -783,7 +781,7 @@ export function PdfDocument({
     sheetLruRef.current.clear();
     sessionRef.current.clear();
     pathFillRef.current = [];
-    textFilledRef.current.clear();
+    textWindowRef.current?.clear();
     textContentRef.current.clear();
     textGeometryRef.current.clear();
   };
@@ -796,6 +794,7 @@ export function PdfDocument({
       void pending.catch(() => { if (textContentRef.current.get(n) === pending) textContentRef.current.delete(n); });
     }
     const content = await pending;
+    if (textContentRef.current.get(n) !== pending) return content;
     const entry = pagesRef.current.find(page => page.pageNumber === n);
     const host = hostRef.current;
     if (!disposedRef.current && entry && host) {
@@ -826,6 +825,19 @@ export function PdfDocument({
     }
     publishDocPlacementRev(filmScope, changed);
   }, [pages, filmScope]);
+
+  useLayoutEffect(() => {
+    textWindowRef.current?.clear();
+  }, [frameWidth, spread]);
+
+  useEffect(() => {
+    const sync = () => textWindowRef.current?.retain(paused || offscreen ? [] : pdfSelectablePages(
+      peekPdfFilmCurrent(filmScope), peekPdfIntersectingPages(filmScope),
+    ));
+    const stopView = subscribePdfViewPages(filmScope, sync);
+    const stopFilm = subscribePdfFilmCurrent(filmScope, sync);
+    return () => { stopView(); stopFilm(); };
+  }, [filmScope, paused, offscreen]);
 
   /**
    * Open the document once. Spread / column width only relayouts from
@@ -1112,6 +1124,7 @@ export function PdfDocument({
       visibleRef.current = nextPages;
       visibleRatioRef.current = nextRatios;
       if (!standaloneRef.current) return;
+      publishPdfViewPages(filmScope, [...nextPages], []);
       let bestPage = 0;
       let bestRatio = 0;
       for (const [n, ratio] of nextRatios) {
@@ -1145,7 +1158,7 @@ export function PdfDocument({
       },
       {
         root: standalone && scrollRoot ? scrollRoot : undefined,
-        rootMargin: PAGE_VISIBLE_MARGIN,
+        rootMargin: standalone ? "0px" : PAGE_VISIBLE_MARGIN,
       },
     );
     for (const slot of slots) observer.observe(slot);
@@ -1403,18 +1416,6 @@ export function PdfDocument({
     if (pdfPaintShouldWaitForLanding(peekPdfFilmCurrent(filmScope), lastLaidOut)) return;
     if (pumpRef.current) return;
 
-    const dropSessionText = (pagesToDrop: number[]) => {
-      for (const gone of pagesToDrop) {
-        textFilledRef.current.delete(gone);
-        for (const node of queryPageSlots(host, gone)) {
-          const text = node.querySelector<HTMLElement>(".lc-pdf-text");
-          if (text) text.textContent = "";
-          node.removeAttribute("data-painted");
-        }
-      }
-      if (pagesToDrop.length > 0) publishDocPlacementRev(filmScope, pagesToDrop);
-    };
-
     type PdfPageProxy = Awaited<ReturnType<typeof doc.getPage>>;
     type PdfTextContent = Awaited<ReturnType<PdfPageProxy["getTextContent"]>>;
     const renderBusy = () => isDocCameraLive(filmScope) || isPageTurnBusy(filmScope);
@@ -1443,10 +1444,11 @@ export function PdfDocument({
       entry: RenderedPage,
       pdfPage: PdfPageProxy,
       content: PdfTextContent,
+      signal: AbortSignal,
       ignoreLive = false,
     ): Promise<boolean> => {
       const blocked = () =>
-        disposedRef.current || (!ignoreLive && textBusy());
+        disposedRef.current || signal.aborted || (!ignoreLive && textBusy());
       for (const slot of queryPageSlots(host, n)) {
         if (blocked()) return false;
         await yieldToInput();
@@ -1479,8 +1481,10 @@ export function PdfDocument({
         });
         await yieldToInput();
         if (blocked()) return false;
-        await layer.render();
-        if (blocked()) return false;
+        const cancel = () => layer.cancel();
+        signal.addEventListener("abort", cancel, { once: true });
+        try { await layer.render(); }
+        finally { signal.removeEventListener("abort", cancel); }
         if (blocked()) return false;
         alignTextLayerToGlyphs(
           spreadHost,
@@ -1489,19 +1493,13 @@ export function PdfDocument({
           entry.fit,
         );
       }
-      textFilledRef.current.add(n);
       publishDocPlacementRev(filmScope, [n]);
       return true;
     };
 
     /** See {@link nextPdfPageMissingText} for what this is for. */
     const nextPageMissingText = (): number | null => {
-      const last = pagesRef.current.at(-1)?.pageNumber ?? 1;
-      const C = peekPdfFilmCurrent(filmScope);
-      const onScreen = new Set([
-        ...pdfPaintHole(C, peekPdfIntersectingPages(filmScope)),
-        ...sharpPages(filmScope, last),
-      ]);
+      const onScreen = textWindowRef.current!.pages();
       return nextPdfPageMissingText(onScreen, (n) => {
         const first = queryPageSlots(host, n)[0];
         const textHost = first?.querySelector(".lc-pdf-text");
@@ -1509,7 +1507,7 @@ export function PdfDocument({
           laidOut: pagesRef.current.some((page) => page.pageNumber === n),
           painted: Boolean(first?.hasAttribute("data-painted")),
           hasSpans: (textHost?.childNodes.length ?? 0) > 0,
-          filled: textFilledRef.current.has(n),
+          filled: textWindowRef.current!.has(n),
         };
       });
     };
@@ -1521,40 +1519,32 @@ export function PdfDocument({
       const entry = pagesRef.current.find((page) => page.pageNumber === n);
       if (!entry || disposedRef.current) return false;
       if (!ignoreLive && textBusy()) return false;
-      const claim = startPdfTextFillClaim(textFilledRef.current, n);
-      const closeJob = openBackgroundJob(`pdf-text:${n}`);
-      try {
-        // Ink first: the text layer measures every word on the UI thread
-        // (seconds on a dense page) and froze the screen before the
-        // handwriting showed. A selection the reader is making does not wait.
-        if (!ignoreLive) await waitForInkSettled(TEXT_AFTER_INK_CAP_MS);
-        await yieldToInput();
-        if (disposedRef.current || (!ignoreLive && textBusy())) {
-          claim.settle(false);
+      return textWindowRef.current!.ensure(n, async (signal) => {
+        const closeJob = openBackgroundJob(`pdf-text:${n}`);
+        try {
+          // Ink first; an explicit selection does not wait for background work.
+          if (!ignoreLive) await waitForInkSettled(TEXT_AFTER_INK_CAP_MS);
+          await yieldToInput();
+          if (disposedRef.current || signal.aborted || (!ignoreLive && textBusy())) return false;
+          const pdfPage = await doc.getPage(n);
+          if (disposedRef.current || signal.aborted || (!ignoreLive && textBusy())) return false;
+          const content = await pageText(n, pdfPage);
+          if (disposedRef.current || signal.aborted || (!ignoreLive && textBusy())) return false;
+          return await fillPageText(n, entry, pdfPage, content, signal, ignoreLive);
+        } catch {
           return false;
+        } finally {
+          closeJob();
         }
-        const pdfPage = await doc.getPage(n);
-        if (disposedRef.current || (!ignoreLive && textBusy())) {
-          claim.settle(false);
-          return false;
-        }
-        const content = await pageText(n, pdfPage);
-        if (disposedRef.current || (!ignoreLive && textBusy())) {
-          claim.settle(false);
-          return false;
-        }
-        const ok = await fillPageText(n, entry, pdfPage, content, ignoreLive);
-        claim.settle(ok);
-        return ok;
-      } catch {
-        claim.settle(false);
-        return false;
-      } finally {
-        closeJob();
-      }
+      }, ignoreLive);
     };
 
-    quoteFillRef.current = (page) => fillMissingText(page, true);
+    quoteFillRef.current = async (page) => {
+      // An idle fill already in flight may yield to this gesture. Retry it as
+      // an explicit quote after that shared promise releases its reservation.
+      if (await fillMissingText(page, true)) return true;
+      return fillMissingText(page, true);
+    };
 
     const pageOut = async (
       n: number,
@@ -1574,7 +1564,6 @@ export function PdfDocument({
         }
         slot.removeAttribute("data-painted");
         if (!keepText) {
-          textFilledRef.current.delete(n);
           const text = slot.querySelector<HTMLElement>(".lc-pdf-text");
           if (text) text.textContent = "";
         }
@@ -1611,7 +1600,7 @@ export function PdfDocument({
             const png = await captureSheetPng(item.sheet, () => renderBusy());
             releaseSheet(item.sheet);
             if (!png || disposedRef.current) return;
-            dropSessionText(sessionRef.current.put(item.page, png));
+            sessionRef.current.put(item.page, png);
           } finally {
             closeJob();
           }
@@ -1721,21 +1710,18 @@ export function PdfDocument({
         return sheet;
       };
       const fillTextFromPage = async (pdfPage: PdfPageProxy) => {
-        const claim = startPdfTextFillClaim(textFilledRef.current, n);
         try {
           // Opening: the reader's ink first; the text layer follows (`pdfOpenHold`).
           if (disposedRef.current || textBusy() || pdfExtrasHeld(filmScope)) {
-            claim.settle(false);
             return;
           }
           const content = await pageText(n, pdfPage);
           if (disposedRef.current || textBusy()) {
-            claim.settle(false);
             return;
           }
-          claim.settle(await fillPageText(n, entry, pdfPage, content));
+          await textWindowRef.current!.ensure(n, signal => fillPageText(n, entry, pdfPage, content, signal));
         } catch {
-          claim.settle(false);
+          // The next idle turn retries text content or an interrupted layer.
         }
       };
 
@@ -1968,8 +1954,19 @@ export function PdfDocument({
 
           if (holdDecodeRef.current) return;
 
-          if (renderBusy() || pdfExtrasHeld(filmScope)) {
-            await waitForPaintSignal(filmScope);
+          if (textBusy() || pdfExtrasHeld(filmScope)) {
+            await waitForPaintSignal(filmScope, 150);
+            continue;
+          }
+
+          // Marks on rest neighbours need worker geometry, never selectable
+          // spans. A preview painted during a gesture may not have fetched it.
+          const missingGeometry = peekPdfPlacementPages(filmScope).find(n =>
+            !textGeometryRef.current.has(n) && pagesRef.current.some(page => page.pageNumber === n),
+          );
+          if (missingGeometry != null) {
+            try { await pageText(missingGeometry, await doc.getPage(missingGeometry)); }
+            catch { return; } // A later paint wake can retry a worker failure.
             continue;
           }
 
