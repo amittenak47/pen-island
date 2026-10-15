@@ -584,6 +584,14 @@ export const PARKED_TRIM_MS = 5_000;
 
 /** Longest the text layer waits for ink to finish painting. */
 const TEXT_AFTER_INK_CAP_MS = 3000;
+/**
+ * Most a sharp paint waits for its page's text geometry before it lands.
+ *
+ * A page's marks are placed from that geometry and fade in with the sharp
+ * paint. Fetched only after the paint (and behind the 0.9 s text hold), the
+ * page sharpened and its marks followed a second later.
+ */
+const MARK_GEOMETRY_WAIT_MS = 200;
 
 export function PdfDocument({
   filmScope,
@@ -1605,6 +1613,27 @@ export function PdfDocument({
       }
     };
 
+    /**
+     * Start fetching a page's text geometry for its marks, unless it is here.
+     * pdf.js extracts the text in its worker, alongside the render.
+     */
+    const startMarkGeometry = (n: number, pdfPage: PdfPageProxy): Promise<boolean> | null =>
+      textGeometryRef.current.has(n) ? null : pageText(n, pdfPage).then(() => true, () => false);
+    /**
+     * Let the marks be placed (hidden) before the sharp paint lands, so the two
+     * fade in together. Bounded: a slow worker never holds the page back long.
+     */
+    const settleMarkGeometry = async (pending: Promise<boolean> | null): Promise<void> => {
+      if (!pending) return;
+      const fetched = await Promise.race([
+        pending,
+        new Promise<boolean>((resolve) => window.setTimeout(() => resolve(false), MARK_GEOMETRY_WAIT_MS)),
+      ]);
+      if (!fetched) return;
+      // Placement renders on the next frame; the paint lands on the one after.
+      await new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve())));
+    };
+
     const paintOne = async (n: number, targetOverride?: number): Promise<void> => {
       const entry = pagesRef.current.find((page) => page.pageNumber === n);
       const slots = queryPageSlots(host, n);
@@ -1728,6 +1757,10 @@ export function PdfDocument({
           cached &&
           !pageNeedsDecode(entry.fit, paintScale, sheetLruRef.current.lod(n))
         ) {
+          if (paintScale > PDF_PREVIEW_SCALE + 1e-9 && !textGeometryRef.current.has(n)) {
+            await settleMarkGeometry(startMarkGeometry(n, await doc.getPage(n)));
+            if (disposedRef.current || aborted) return;
+          }
           commitSheet(cached);
           if (renderBusy()) return;
           const firstText = slots[0]?.querySelector(".lc-pdf-text");
@@ -1771,6 +1804,7 @@ export function PdfDocument({
         const pdfPage = await doc.getPage(n);
         if (disposedRef.current || aborted) return;
         if (renderBusy() && paintScale > PDF_PREVIEW_SCALE + 1e-9) return;
+        const markGeometry = paintScale > PDF_PREVIEW_SCALE + 1e-9 ? startMarkGeometry(n, pdfPage) : null;
         const viewport = pdfPage.getViewport({ scale: entry.fit * paintScale });
         scratch = document.createElement("canvas");
         scratch.width = Math.round(viewport.width);
@@ -1797,6 +1831,8 @@ export function PdfDocument({
         await paint.promise;
         if (disposedRef.current || aborted) return;
         const sheet = await rememberScratch(scratch, entry.fit * paintScale);
+        if (disposedRef.current) return;
+        await settleMarkGeometry(markGeometry);
         if (disposedRef.current) return;
         commitSheet(sheet);
         if (!renderBusy()) {
