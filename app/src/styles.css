@@ -2469,9 +2469,12 @@ body[data-lc-sash-drag] .lc-board-chrome-slot {
 }
 
 /* PDF text is on a separate white-paper layer. Canvas multiply alone only
- * blends marker strokes with other ink; blend the overlay with the PDF too. */
+ * blends marker strokes with other ink; blend the overlay with the PDF too.
+ * The board says it holds a PDF with a class: `.lc-board:has(.lc-pdf-doc)`
+ * re-checked on every footnote square a scroll added or removed and
+ * restyled the whole book each time (~300 ms on the tablet). */
 .lc-hub-conflict-preview:has(.lc-pdf-doc) .lc-hub-conflict-ink-layer,
-.lc-board-doc-paper:has(.lc-pdf-doc) .lc-board-ink-lab-host {
+.lc-board-doc-paper.lc-board-pdf .lc-board-ink-lab-host {
   mix-blend-mode: multiply;
 }
 

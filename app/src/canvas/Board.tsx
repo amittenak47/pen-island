@@ -10697,6 +10697,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         interactive && activeTool === "text" && "lc-board-text-tool",
         transparentCanvas && "lc-board-paper",
         docPaper && "lc-board-doc-paper",
+        pdfDocument && "lc-board-pdf",
         (mobileRegion === "code" || mobileRegion === "constraints") && "lc-board-practice-paper",
         // Highlighting / text-mark tools hand the surface back to the document
         // for the length of the gesture — see the rules in styles.css.
