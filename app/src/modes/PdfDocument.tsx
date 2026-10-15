@@ -73,6 +73,7 @@ import {
   hydratePdfThumbs,
   nextMissingPdfThumb,
   peekPdfFilmThumbWanted,
+  publishPdfThumbRing,
   peekPdfThumb,
   pdfThumbViewportScale,
   publishPdfLayoutBusy,
@@ -2034,10 +2035,9 @@ export function PdfDocument({
       const mine = gen;
       if (busy() || !idleThumbsRef.current) return;
       const last = pagesRef.current.at(-1)?.pageNumber ?? 0;
-      const prefer = [
-        ...peekPdfFilmThumbWanted(filmScope),
-        ...pdfOuterPages(peekPdfFilmCurrent(filmScope), last, paintRadiusRef.current),
-      ];
+      const ring = pdfOuterPages(peekPdfFilmCurrent(filmScope), last, paintRadiusRef.current);
+      publishPdfThumbRing(filmScope, ring);
+      const prefer = [...peekPdfFilmThumbWanted(filmScope), ...ring];
       // Bounded to `prefer`: the strip's own window plus the reading ring.
       // The unbounded sweep decoded the whole book in the background of every
       // reading pause — see `nextMissingPdfThumb`. `armIdleTimer` runs again

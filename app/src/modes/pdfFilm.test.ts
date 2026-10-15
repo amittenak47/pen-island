@@ -33,6 +33,9 @@ import {
   subscribePdfThumbs,
   openedPdfThumbHashes,
   PDF_FILM_CACHE,
+  publishPdfFilmThumbWanted,
+  publishPdfThumbRing,
+  resetPdfFilmThumbWanted,
   peekPdfLayoutBusy,
   publishPdfLayoutBusy,
   pdfSpreadSlotCountChanged,
@@ -137,6 +140,28 @@ describe("session thumbs by document hash", () => {
     expect([...peekPdfThumbs("doc-a").keys()]).toEqual([1, 40]);
     resetPdfThumbs();
     expect(peekPdfThumb("doc-a", 1)).toBe(null);
+  });
+
+  it("never evicts a thumb the strip shows or the reading ring wants", () => {
+    // Strip scrolled to 66-85 while reading page 47: together more than the cap.
+    resetPdfThumbs();
+    const strip = Array.from({ length: 20 }, (_, i) => 66 + i);
+    const ring = [44, 45, 46, 47, 48, 49, 50];
+    expect(strip.length + ring.length).toBeGreaterThan(PDF_FILM_CACHE);
+    publishPdfFilmThumbWanted("evict-strip", strip);
+    publishPdfThumbRing("evict-reader", ring);
+    try {
+      for (const page of [...strip, ...ring, ...strip]) rememberPdfThumb("doc-evict", page, `url-${page}`);
+      for (const page of [...strip, ...ring]) expect(peekPdfThumb("doc-evict", page)).toBe(`url-${page}`);
+      // Pages nobody wants still go once the cap is passed.
+      for (let page = 200; page < 240; page += 1) rememberPdfThumb("doc-evict", page, `url-${page}`);
+      for (const page of [...strip, ...ring]) expect(peekPdfThumb("doc-evict", page)).toBe(`url-${page}`);
+      expect(peekPdfThumbs("doc-evict").size).toBe(strip.length + ring.length + 1);
+    } finally {
+      resetPdfFilmThumbWanted("evict-strip");
+      resetPdfFilmThumbWanted("evict-reader");
+      resetPdfThumbs();
+    }
   });
 
   it("ignores empty hash and invalid pages", () => {

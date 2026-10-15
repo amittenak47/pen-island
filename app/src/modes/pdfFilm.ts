@@ -219,6 +219,8 @@ type FilmNav = {
   placementRevListeners: Set<(pages: DocPlacementRev) => void>;
   /** Strip cells the idle thumb pass should fill first. */
   thumbWanted: number[];
+  /** The ring around the reading page the idle thumb pass fills next. */
+  thumbRing: number[];
 };
 
 const navByScope = new Map<string, FilmNav>();
@@ -249,6 +251,7 @@ function nav(scope: string): FilmNav {
       viewPageListeners: new Set(),
       placementRevListeners: new Set(),
       thumbWanted: [],
+      thumbRing: [],
     };
     navByScope.set(scope, found);
   }
@@ -708,6 +711,11 @@ export function peekPdfFilmThumbWanted(scope: string): readonly number[] {
 
 export function resetPdfFilmThumbWanted(scope: string): void {
   nav(scope).thumbWanted = [];
+  nav(scope).thumbRing = [];
+}
+
+export function publishPdfThumbRing(scope: string, pages: readonly number[]): void {
+  nav(scope).thumbRing = [...pages].filter((n) => n >= 1);
 }
 
 /** Session JPEG thumbs keyed by document content hash, then page number. */
@@ -722,9 +730,25 @@ function notifyThumbListeners(hash: string): void {
   for (const listener of thumbListenersAll) listener();
 }
 
+/*
+ * Never evict a thumb that a strip shows or the idle pass is about to fill.
+ *
+ * Two writers fill this map: the strip (its visible cells) and the document's
+ * idle pass (the strip's cells plus a ring around the reading page). With the
+ * strip scrolled away from the reading page, the two together wanted more than
+ * the cap, so each new thumb evicted one the other wanted, which was rendered
+ * again and evicted the next: a thumb flickering forever on desktop, and
+ * pdf.js rendering thumbnails nonstop. The cap grows to hold what is wanted.
+ */
 function capDocThumbs(hash: string, doc: Map<number, string>, around: number): Map<number, string> {
-  if (doc.size <= PDF_FILM_CACHE) return doc;
-  const next = trimThumbCache(doc, around, [around], PDF_FILM_CACHE);
+  const pinned = new Set<number>([around]);
+  for (const film of navByScope.values()) {
+    for (const page of film.thumbWanted) pinned.add(page);
+    for (const page of film.thumbRing) pinned.add(page);
+  }
+  const cap = Math.max(PDF_FILM_CACHE, pinned.size);
+  if (doc.size <= cap) return doc;
+  const next = trimThumbCache(doc, around, pinned, cap);
   thumbsByHash.set(hash, next);
   return next;
 }
