@@ -18827,15 +18827,27 @@ button.lc-row-selected:hover:not(:disabled) {
   overflow: visible;
 }
 
-/* Opacity only: blurring moving mark groups adds a scroll-time filter pass. */
+/*
+ * A page's marks show with its sharp paint and fade in with it. On a blurred
+ * page they are hidden, not dimmed: a reader scrolling past stared at faded
+ * squares and highlights. `visibility` keeps hidden squares from taking taps.
+ * Booktabs stay, so where the notes are is never lost (below).
+ * Opacity only: blurring moving mark groups adds a scroll-time filter pass.
+ */
 .lc-doc-page-marks {
   position: absolute;
   pointer-events: none;
-  opacity: 0.5;
+  opacity: 0;
+  visibility: hidden;
+}
+
+.lc-doc-page-marks[data-pdf-quality="sharp"],
+.lc-page-booktabs-slot .lc-doc-page-marks {
+  opacity: 1;
+  visibility: visible;
 }
 
 .lc-doc-page-marks[data-pdf-quality="sharp"] {
-  opacity: 1;
   transition: opacity 150ms ease-out;
 }
 
@@ -20733,7 +20745,8 @@ button.lc-row-selected:hover:not(:disabled) {
 
 @starting-style {
   .lc-pdf-page[data-pdf-quality="sharp"] > .lc-pdf-sharp-canvas { opacity: 0; }
-  .lc-doc-page-marks[data-pdf-quality="sharp"] { opacity: 0.5; }
+  .lc-doc-page-marks[data-pdf-quality="sharp"] { opacity: 0; }
+  .lc-page-booktabs-slot .lc-doc-page-marks[data-pdf-quality="sharp"] { opacity: 1; }
 }
 
 @media (prefers-reduced-motion: reduce) {
