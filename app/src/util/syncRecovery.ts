@@ -55,7 +55,42 @@ export async function retainRecoveryCopy(copy:RecoveryCopy):Promise<void> {
 
 export async function readRetainedByteCopies(hash:string):Promise<{current:unknown;alternatives:RecoveryCopy[]}> {
   const [current,copies]=await Promise.all([
-    run<unknown>(STORE_BYTES,"readonly",store=>store.get(hash)),listRecoveryCopies(),
+    run<unknown>(STORE_BYTES,"readonly",store=>store.get(hash)),recoveryCopiesThatMayClaim(hash),
   ]);
   return {current,alternatives:copies.filter(copy=>copy.type==="bytes"&&copy.claimedHash===hash)};
+}
+
+/*
+ * The retained copies that could be byte copies of `hash`, read by key first.
+ *
+ * Every document read checks for colliding byte copies, and this used to load
+ * the whole store to look: 300 retained books on the tablet, 0.5 s of
+ * deserializing on the main thread each time a book opened. Byte copies are
+ * keyed by `recoveryId(source, STORE_BYTES, key, hash)`, so the keys alone rule
+ * out every other copy. A key in any other shape is read and checked as before.
+ */
+async function recoveryCopiesThatMayClaim(hash:string):Promise<RecoveryCopy[]> {
+  const keys=await run<IDBValidKey[]>(STORE_SYNC_RECOVERY,"readonly",store=>store.getAllKeys());
+  const wanted=keys.filter(key=>mayClaimBytes(key,hash));
+  if(!wanted.length)return [];
+  const rows=await withTransaction<(RecoveryCopy|undefined)[]>([STORE_SYNC_RECOVERY],"readonly",(tx,setResult)=>{
+    const store=tx.objectStore(STORE_SYNC_RECOVERY),out:(RecoveryCopy|undefined)[]=[];
+    let left=wanted.length;
+    wanted.forEach((key,index)=>{
+      const request=store.get(key);
+      request.onsuccess=()=>{out[index]=request.result;if(--left===0)setResult(out);};
+    });
+  });
+  return rows.filter((row):row is RecoveryCopy=>row!==undefined);
+}
+
+function mayClaimBytes(key:IDBValidKey,hash:string):boolean {
+  if(typeof key!=="string"||!key.startsWith("recovery:"))return true;
+  try {
+    const parts:unknown=JSON.parse(key.slice("recovery:".length));
+    if(!Array.isArray(parts)||parts.length!==4)return true;
+    return parts[1]===STORE_BYTES&&parts[3]===hash;
+  } catch {
+    return true;
+  }
 }
