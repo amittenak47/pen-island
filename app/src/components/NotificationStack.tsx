@@ -45,23 +45,40 @@ export function NotificationStack() {
   }, [entries[0]?.id]);
   useEffect(() => setNotificationReducedMotion(Boolean(reduced)), [reduced]);
   const ref = useRef<HTMLDivElement>(null);
-  useLayoutEffect(() => {
+  /*
+   * Sit just under the header, measured from the live header each time.
+   * Measuring only on mount and on resize left the stack stranded where the
+   * header was while the on-screen keyboard had shifted the page (halfway
+   * down the screen on the tablet), so it re-measures when a notification
+   * arrives, when the viewport scrolls, and once more after a resize settles.
+   */
+  const place = () => {
     const header = document.querySelector(".lc-header");
-    const place = () => {
-      if (!ref.current || !header) return;
-      const box = header.getBoundingClientRect();
-      ref.current.style.top = `${box.bottom + 8}px`;
-      ref.current.style.left = `${box.left + 8}px`;
+    if (!ref.current || !header) return;
+    const box = header.getBoundingClientRect();
+    ref.current.style.top = `${box.bottom + 8}px`;
+    ref.current.style.left = `${box.left + 8}px`;
+  };
+  useLayoutEffect(place, [entries.length]);
+  useLayoutEffect(() => {
+    let frame = 0;
+    const settle = () => {
+      place();
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(place);
     };
-    place();
-    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(place) : null;
+    const header = document.querySelector(".lc-header");
+    const observer = typeof ResizeObserver === "function" ? new ResizeObserver(settle) : null;
     if (header) observer?.observe(header);
-    window.addEventListener("resize", place);
-    window.visualViewport?.addEventListener("resize", place);
+    window.addEventListener("resize", settle);
+    window.visualViewport?.addEventListener("resize", settle);
+    window.visualViewport?.addEventListener("scroll", settle);
     return () => {
+      cancelAnimationFrame(frame);
       observer?.disconnect();
-      window.removeEventListener("resize", place);
-      window.visualViewport?.removeEventListener("resize", place);
+      window.removeEventListener("resize", settle);
+      window.visualViewport?.removeEventListener("resize", settle);
+      window.visualViewport?.removeEventListener("scroll", settle);
     };
   }, []);
   const swipe = (info: PanInfo, id?: number) => {

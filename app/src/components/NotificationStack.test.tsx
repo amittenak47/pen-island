@@ -76,3 +76,22 @@ it("cancels long press when the pointer moves and folds with Escape", () => {
   act(() => top().dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Escape" })));
   expect(stack().classList.contains("is-folded")).toBe(true);
 });
+
+it("re-measures the header when a notification arrives, so a shifted page can't strand it", () => {
+  act(() => root.unmount());
+  act(() => { dismissNotificationDeck(); vi.advanceTimersByTime(0); });
+  const header = document.createElement("header");
+  header.className = "lc-header";
+  let bottom = 400;
+  header.getBoundingClientRect = () => ({ top: bottom - 60, bottom, left: 0, right: 700, width: 700, height: 60, x: 0, y: bottom - 60, toJSON: () => ({}) });
+  document.body.append(header);
+  root = createRoot(host);
+  act(() => root.render(<NotificationStack />));
+  act(() => { showNotification("Saved"); });
+  expect(stack().style.top).toBe("408px");
+  // The keyboard closed and the page settled: the header is back at the top.
+  bottom = 63;
+  act(() => { showNotification("Closed"); });
+  expect(stack().style.top).toBe("71px");
+  header.remove();
+});
