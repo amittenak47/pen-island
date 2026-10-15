@@ -433,6 +433,30 @@ export function freshWhiteboardId(
   }
 }
 
+/**
+ * A mark's words with their spaces.
+ *
+ * A PDF's text layer can run words together ("reveals aback edge"), and a
+ * mark sliced from it keeps that. `spaced` (the footnote's excerpt, or the
+ * quote ChatBot sent) usually has the same letters with the spaces, so take
+ * the words from there; otherwise the mark's own text, tidied.
+ */
+export function subMarkText(excerpt: string, spaced: string | undefined): string {
+  const own = excerpt.replace(/\s+/g, " ").trim();
+  const needle = own.replace(/ /g, "");
+  if (!needle || !spaced) return own;
+  const letters: number[] = [];
+  let squeezed = "";
+  for (let i = 0; i < spaced.length; i++) {
+    if (/\s/.test(spaced[i]!)) continue;
+    squeezed += spaced[i];
+    letters.push(i);
+  }
+  const at = squeezed.indexOf(needle);
+  if (at < 0) return own;
+  return spaced.slice(letters[at]!, letters[at + needle.length - 1]! + 1).replace(/\s+/g, " ").trim();
+}
+
 /** Ids for in-panel underline / highlight slices. */
 export function freshSubMarkId(existing: readonly DocFootnoteSubMark[], now = Date.now()): string {
   const base = `sm-${now.toString(36)}`;

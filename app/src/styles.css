@@ -22595,9 +22595,19 @@ html[data-corners="rounded"] {
 :is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="url"] { --lc-type: var(--lc-type-url); }
 :is(.lc-footnote-item-chip, .lc-footnote-type-chip)[data-type="file"] { --lc-type: var(--lc-type-file); }
 
-.lc-footnote-item-kind {
-  margin-right: 4px;
-  color: var(--lc-type);
+/* An annotation row shows its words the way the page marks them. */
+.lc-footnote-annotation-text.is-underline {
+  text-decoration: underline;
+  text-decoration-color: var(--lc-fn-color, var(--lc-type));
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
+.lc-footnote-annotation-text.is-highlight {
+  padding: 0 2px;
+  background: color-mix(in srgb, var(--lc-fn-color, var(--lc-type)) 35%, transparent);
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
 }
 
 .lc-footnote-overview .lc-artifact-line {

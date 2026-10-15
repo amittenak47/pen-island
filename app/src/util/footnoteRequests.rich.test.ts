@@ -81,6 +81,16 @@ describe("rich ChatBot answers", () => {
     expect(next!.subMarks).toEqual([own]);
   });
 
+  it("keeps the quote's spaces when the PDF text layer ran the words together", () => {
+    const runTogether = "The search reveals aback edge here.";
+    const [next] = applyFootnoteResult([mark({ excerpt: runTogether, blockText: runTogether, anchor: { kind: "text", start: 0, end: runTogether.length } })], {
+      id: "fr-1", notes: ["n"], marks: [{ kind: "underline", quote: "reveals a back edge" }],
+    });
+    const placed = next!.subMarks![0]!;
+    expect(runTogether.slice(placed.start, placed.end)).toBe("reveals aback edge");
+    expect(placed.excerpt).toBe("reveals a back edge");
+  });
+
   it("adds no marks to a region mark, which has no text offsets to place them", () => {
     const region = mark({ anchor: { kind: "region", page: 1, rect: { x: 0, y: 0, w: 1, h: 1 } } as unknown as DocFootnote["anchor"] });
     const [next] = applyFootnoteResult([region], { id: "fr-1", notes: ["n"], marks: [{ kind: "highlight", quote: "depth-first" }] });

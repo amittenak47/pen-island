@@ -14,6 +14,7 @@ import { getAnnotateDoc, mutateAnnotateFootnotes } from "./annotateStore";
 import {
   freshNoteId,
   freshSubMarkId,
+  subMarkText,
   type DocFootnote,
   type DocFootnoteNote,
   type DocFootnoteSubMark,
@@ -309,7 +310,8 @@ function mergeMarks(entry: DocFootnote, incoming: readonly FootnoteMarkDto[] | u
     out.push({
       id: freshSubMarkId(out),
       kind: mark.kind,
-      excerpt: text.slice(at.start, at.end),
+      // The quote keeps the spaces a PDF's text layer can drop.
+      excerpt: subMarkText(text.slice(at.start, at.end), mark.quote),
       start: at.start,
       end: at.end,
       ...(color ? { color } : {}),

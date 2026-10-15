@@ -46,7 +46,7 @@ import {
 import { HOLD_SENSITIVE_MS } from "../util/gesture";
 import { useFootnoteHistory } from "./footnoteHistory";
 import { pickPhotos } from "../util/photoAttach";
-import { ALL_NOTES_ID, NOTE_IMAGE_LIMIT, chipTitle, combinedNote, fieldChip, noteById, noteIsAi } from "../util/docFootnotes";
+import { ALL_NOTES_ID, NOTE_IMAGE_LIMIT, chipTitle, combinedNote, fieldChip, noteById, noteIsAi, subMarkText } from "../util/docFootnotes";
 import { loadNotesCombined, saveNotesCombined } from "../util/notesCombinedPref";
 export interface FootnoteOverviewProps {
   onOpenArtifact?: (ref: ArtifactRef) => void;
@@ -1115,7 +1115,9 @@ export function FootnoteOverview({
                   className={listClass(subMarks.length)}
                   aria-label="Sub-marks"
                 >
-                  {subMarks.map((mark) => (
+                  {subMarks.map((mark) => {
+                    const words = subMarkText(mark.excerpt, footnote.excerpt);
+                    return (
                     <li
                       key={mark.id}
                       className={`lc-footnote-overview-link-row${
@@ -1135,11 +1137,12 @@ export function FootnoteOverview({
                       <button
                         type="button"
                         className="lc-agent-scope-option"
+                        aria-label={`${mark.kind === "highlight" ? "Highlight" : "Underline"}: ${words}`}
                         onClick={() => selectSubMark(mark)}
                       >
+                        {/* Shown the way the page shows it: underlined or highlighted words. */}
                         <span className="lc-footnote-item-chip" data-type="annotation">
-                          <span className="lc-footnote-item-kind" aria-hidden>{mark.kind === "highlight" ? "▮" : "▁"}</span>
-                          {chipTitle(mark.excerpt) || mark.excerpt}
+                          <span className={`lc-footnote-annotation-text is-${mark.kind}`}>{chipTitle(words) || words}</span>
                         </span>
                       </button>
                       <button
@@ -1151,7 +1154,8 @@ export function FootnoteOverview({
                         ✕
                       </button>
                     </li>
-                  ))}
+                  );
+                  })}
                 </ul>
               </HubSection>
               )}

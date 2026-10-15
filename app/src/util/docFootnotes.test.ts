@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   addFootnote,
+  subMarkText,
   numberFootnotes,
   orderScopes,
   freshFootnoteId,
@@ -691,5 +692,17 @@ describe("pending answer mode", () => {
       expect(sanitizeFootnotes([footnote({ pending: "req-1", answerMode })])[0]?.answerMode).toBe(answerMode);
     }
     expect(sanitizeFootnotes([{ ...footnote(), answerMode: "unknown" }])[0]).not.toHaveProperty("answerMode");
+  });
+});
+
+describe("subMarkText", () => {
+  it("takes the spaced words from the footnote when the mark ran them together", () => {
+    expect(subMarkText("reveals aback edge", "Exploring reveals a back edge, which closes a cycle.")).toBe("reveals a back edge");
+  });
+
+  it("keeps the mark's own text, tidied, when the source has nothing better", () => {
+    expect(subMarkText("  depth-first\n search ", "unrelated words")).toBe("depth-first search");
+    expect(subMarkText("depth-first search", undefined)).toBe("depth-first search");
+    expect(subMarkText("", "anything")).toBe("");
   });
 });
