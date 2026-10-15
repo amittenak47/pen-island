@@ -266,7 +266,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
       }}
     >
       <DialogFrame ref={morphRef} exiting={exiting}
-        className="lc-attempt-modal lc-library-holds lc-library-menu lc-library-whiteboard lc-whiteboard-dialog"
+        className={`lc-attempt-modal lc-library-holds lc-library-menu lc-library-whiteboard lc-whiteboard-dialog${pickingRecovery ? " lc-library-tall" : ""}`}
         ariaLabel={isLeave ? "Leave whiteboard?" : "Open whiteboard"}
         titleId="lc-whiteboard-dialog-title"
         title={isLeave ? "Leave whiteboard?" : pickingRecovery ? "Retained copies" : pickingLoad ? "Load" : pickingSnapshots ? "Restore" : section === "open" ? "Open" : section === "export" ? "Export" : "Whiteboard"}

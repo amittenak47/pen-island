@@ -339,7 +339,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
       }}
     >
       <DialogFrame ref={morphRef} exiting={exiting}
-        className={`lc-attempt-modal lc-library-holds lc-library-menu lc-annotate-dialog ${isWeb ? "lc-library-web" : "lc-library-annotate"}`}
+        className={`lc-attempt-modal lc-library-holds lc-library-menu lc-annotate-dialog ${isWeb ? "lc-library-web" : "lc-library-annotate"}${pickingRecovery ? " lc-library-tall" : ""}`}
         titleId="lc-annotate-dialog-title"
         title={isLeave ? "Leave document?" : pickingRecovery ? "Retained copies" : section === "open" && !pickingRecent ? "Open" : section === "new" ? "New" : section === "export" ? "Export" : section === "sets" ? "Annotations" : pickingRecent ? "Recents" : isWeb ? "Web" : "Annotate"}
         subtitle={isWeb ? "Write onto a page snapshot" : "Ink for this document"}

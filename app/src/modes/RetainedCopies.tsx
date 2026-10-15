@@ -32,9 +32,10 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
   };
   return <>
     <p className="lc-muted">Retained copies stay on this device after restoration. Restoring keeps the current book as another retained copy.</p>
-    <div className="lc-settings-choice">
+    <div className="lc-settings-choice lc-retained-copies">
     {copies.map(copy => <div className="lc-scratch-load-entry lc-library-entry" key={copy.id}>
-      <strong className="lc-library-subtitle">{String(copy.record?.meta.label ?? copy.record?.meta.title ?? copy.record?.meta.name ?? "Retained local copy")}</strong>
+      {(() => { const name = String(copy.record?.meta.label ?? copy.record?.meta.title ?? copy.record?.meta.name ?? "Retained local copy"); return <strong className="lc-library-subtitle" title={name}>{name}</strong>; })()}
+      <span className="lc-retained-actions">
       <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => void perform(async () => exportValue(copy.bookId ?? "retained", await exportRecoveryCopy(copy.id)))}>Export copy</button>
       {copy.type === "record" && <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => {
         if (selected !== copy.id) { setSelected(copy.id); return; }
@@ -44,9 +45,11 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
         if (selected !== copy.id) { setSelected(copy.id); return; }
         void perform(async () => { await chooseRetainedFallbackBranch(copy.id); onRestored(); setNotice("The saved branch was chosen locally. Other copies are retained."); setSelected(null); });
       }}>{selected === copy.id ? "Confirm saved branch" : "Choose saved branch"}</button>}
+      </span>
     </div>)}
     {snapshots.map(snapshot => <div className="lc-scratch-load-entry lc-library-entry" key={snapshot.snapshotId ?? `${snapshot.kind}:${snapshot.key}:${snapshot.tier}`}>
       <div className="lc-library-subtitle"><strong title={snapshot.name}>{snapshot.name}</strong><span className="lc-muted">{snapshot.tier} · {new Date(snapshot.writtenAt).toLocaleString()}</span></div>
+      <span className="lc-retained-actions">
       <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => void perform(async () => {
         const row = await getPadSnapshot(snapshot.kind, snapshot.key, snapshot.tier, snapshot.snapshotId);
         if (!row) throw new Error("This backup cannot be read. Its stored copy was kept.");
@@ -63,6 +66,7 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
           onRestored(); setNotice("The book was restored locally. Sync it when ready."); setSelected(null);
         });
       }}>{selected === (snapshot.snapshotId ?? `${snapshot.kind}:${snapshot.key}:${snapshot.tier}`) ? "Confirm restore" : "Restore locally"}</button>
+      </span>
     </div>)}
     </div>
     {!copies.length && !snapshots.length && !error && <p className="lc-muted">No retained copies on this device.</p>}

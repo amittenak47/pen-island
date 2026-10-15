@@ -44,12 +44,19 @@
   box-shadow: none;
 }
 .lc-library-menu .lc-scratch-load-entry { align-items: center; gap: 4px; padding: 6px 0; }
-/* Entries with several local actions keep their title above the controls. */
-.lc-library-menu .lc-library-entry { flex-wrap: wrap; gap: 8px; }
-.lc-library-menu .lc-library-entry > .lc-library-subtitle { flex: 1 0 100%; min-width: 0; font-size: 13px; }
-.lc-library-menu .lc-library-entry .lc-library-subtitle strong { display: block; overflow: hidden; text-overflow: ellipsis; }
+/*
+ * Retained copies: a copy's title and its actions share a row while they fit,
+ * and the title takes its own line only on a narrow screen, so a list of
+ * copies reads at a glance. The menu grows taller while it shows them.
+ */
+.lc-settings-modal.lc-library-menu.lc-library-tall { max-height: min(88dvh, 860px); }
+.lc-retained-copies .lc-library-entry { flex-wrap: wrap; align-items: center; gap: 6px 8px; }
+.lc-retained-copies .lc-library-entry > .lc-library-subtitle { flex: 1 1 160px; min-width: 0; font-size: 13px; }
+/* A copy's actions stay together: beside the title, or below it as one row. */
+.lc-retained-copies .lc-retained-actions { display: flex; flex: 0 0 auto; gap: 6px; }
+.lc-retained-copies .lc-library-entry .lc-library-subtitle strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .lc-library-menu .lc-library-entry .lc-muted { display: block; font-size: 11px; line-height: 1.4; }
-.lc-library-menu .lc-library-entry .lc-dialog-action { min-width: 0; }
+.lc-retained-copies .lc-library-entry .lc-dialog-action { min-width: 0; }
 .lc-library-menu .lc-scratch-load-entry:hover,
 .lc-library-menu .lc-document-menu > button:hover:not(:disabled),
 .lc-library-menu .lc-document-menu > .lc-hold-choice:hover:not(:disabled),
