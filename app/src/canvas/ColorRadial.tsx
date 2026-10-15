@@ -1,9 +1,9 @@
 /**
  * Ink colour control — radial wheel (SVG donut wedges).
  *
- * Toolbar: tap cycles the next palette (fetch past the end); hold opens the
+ * Toolbar: tap loads a new palette; hold opens the
  * wheel. Open hub: tap cycles palettes already in history, no fetch.
- * Embedded (preset sheet) hub: same as the toolbar tap — next, including fetch.
+ * Embedded (preset sheet) hub: same as the toolbar tap — a new palette.
  * Wedge: tap/drag picks; hold opens a colour editor for that slot.
  *
  * Portaled with `position: fixed` so the toolbar scroller cannot clip the ring.
@@ -52,7 +52,7 @@ interface ColorRadialProps {
   colors: readonly string[];
   value: string;
   onPick: (color: string) => void;
-  /** Quick tap on the toolbar swatch — next palette (parent may fetch). */
+  /** Quick tap on the toolbar swatch — load a new palette. */
   onCycleNext?: () => void;
   /** Quick tap on the open hub — previous palette in history. */
   onCyclePrev?: () => void;
@@ -517,8 +517,8 @@ export function ColorRadial({
           onClick={() => {
             if (slotEditLock.current) return;
             cancelEditHold();
-            // Embedded ring is always open — same as the toolbar tap: next
-            // palette, which is the ColorHunt fetch at the end of history.
+            // Embedded ring is always open — same as the toolbar tap:
+            // ask for a new ColorHunt palette.
             // The flyout hub still walks backward first so a mis-tap on the
             // open disc does not spend a network round-trip.
             if (embedded && onCycleNext) {

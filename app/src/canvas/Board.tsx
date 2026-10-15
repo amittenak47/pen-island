@@ -98,11 +98,9 @@ import {
 import { BackgroundPalette } from "../components/BackgroundPalette";
 import { resolveInkColor } from "./inkColors";
 import { useIsMobile } from "../util/mobile";
-import { fetchNextColorHuntPalette } from "../util/colorHunt";
+import { useInkPaletteAdvance } from "./useInkPaletteAdvance";
 import {
-  appendInkPalette,
   currentInkPalette,
-  cycleInkPaletteNext,
   cycleInkPalettePrev,
   normalizeInkPaletteHistory,
   seedInkPaletteHistory,
@@ -1667,7 +1665,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   );
   const inkPaletteHistoryRef = useRef(inkPaletteHistory);
   inkPaletteHistoryRef.current = inkPaletteHistory;
-  const inkPaletteFetchRef = useRef(false);
   const inkPalette = useMemo(
     () => currentInkPalette(inkPaletteHistory),
     [inkPaletteHistory],
@@ -1685,25 +1682,17 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     },
     [themeId],
   );
-  const cycleInkPaletteForward = useCallback(() => {
-    const { history, needsFetch } = cycleInkPaletteNext(inkPaletteHistoryRef.current);
-    if (!needsFetch) {
-      applyInkPaletteHistory(history);
-      return;
-    }
-    if (inkPaletteFetchRef.current) return;
-    inkPaletteFetchRef.current = true;
-    const paper = pdfDocumentRef.current ? "#ffffff" : docPaper ? "#0a0a0b"
-      : (BOARD_THEMES.find(theme => theme.id === themeId) ?? BOARD_THEMES[0]).background;
-    void fetchNextColorHuntPalette(inkPaletteHistoryRef.current, undefined, paper)
-      .then((palette) => {
-        applyInkPaletteHistory(appendInkPalette(inkPaletteHistoryRef.current, palette));
-      })
-      .catch(error => console.warn("[lc:palette]", error))
-      .finally(() => {
-        inkPaletteFetchRef.current = false;
-      });
-  }, [applyInkPaletteHistory, docPaper, themeId]);
+  const palettePaper = useCallback(() => pdfDocumentRef.current ? "#ffffff" : docPaper ? "#0a0a0b"
+    : (BOARD_THEMES.find(theme => theme.id === themeId) ?? BOARD_THEMES[0]).background, [docPaper, themeId]);
+  const onPaletteError = useCallback((error: unknown) => {
+    console.warn("[lc:palette]", error);
+    captureFeedbackRef.current?.toast(`Could not load a palette — ${error instanceof Error ? error.message : String(error)}`, "error");
+  }, []);
+  const applyFetchedInkPalette = useCallback((history: InkPaletteHistory) => {
+    applyInkPaletteHistory(history);
+    captureFeedbackRef.current?.toast("Palette loaded");
+  }, [applyInkPaletteHistory]);
+  const cycleInkPaletteForward = useInkPaletteAdvance(inkPaletteHistoryRef, applyFetchedInkPalette, palettePaper, onPaletteError);
   const cycleInkPaletteBackward = useCallback(() => {
     applyInkPaletteHistory(cycleInkPalettePrev(inkPaletteHistoryRef.current));
   }, [applyInkPaletteHistory]);
