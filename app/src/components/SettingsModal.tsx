@@ -1285,7 +1285,8 @@ export function SettingsModal({
     setBaselineHubToken(hub?.token ?? "");
     setHubCheck({ kind: "idle" });
     if (initialTab) setTab(initialTab);
-    setPage("writing");
+    // Open with every section folded; it used to open on Annotate every time.
+    setPage("root");
     setSettingsQuery("");
     void (async () => {
       try {

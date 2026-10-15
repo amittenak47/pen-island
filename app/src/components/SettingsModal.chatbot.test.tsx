@@ -94,3 +94,10 @@ it("lets an assistant bot hand the writing to an app on this PC, off by default"
   expect(api.putAssistantRunnerConfig).toHaveBeenCalledWith({ app: "codex", model: "desktop-model", effort: "high", allow_bots: true });
   expect(loadChatBotAnswerMode()).toBe("bot");
 });
+
+it("opens with every section folded", async () => {
+  await act(async () => root.render(<SettingsModal open client={client()} onClose={() => {}} />));
+  const folds = [...document.querySelectorAll<HTMLButtonElement>(".lc-settings-fold-summary")];
+  expect(folds.length).toBeGreaterThan(0);
+  expect(folds.filter((fold) => fold.getAttribute("aria-expanded") === "true")).toEqual([]);
+});
