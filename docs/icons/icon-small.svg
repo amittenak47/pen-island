@@ -1,5 +1,8 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="114" fill="#0c0a08"></rect>
-  <rect x="68" y="68" width="376" height="376" rx="48" fill="#f8fafc"></rect>
-  <path d="M132 264 L216 348 L376 164" fill="none" stroke="#c2410c" stroke-width="62" stroke-linecap="round" stroke-linejoin="round"></path>
+  <title>Pen Island: small icon (16-32 px)</title>
+  <rect width="512" height="512" rx="16" fill="#0c0a08"/>
+  <path fill-rule="evenodd" d="M90 179H310V349H158V362L142 384H106L90 362ZM158 237H252V291H158Z" fill="#f8fafc"/>
+  <path d="M106 384H142V394A18 18 0 0 1 106 394Z" fill="#4a6280"/>
+  <rect x="354" y="179" width="68" height="170" fill="#f8fafc"/>
+  <path d="M338 85H438V151H388L362 175V151H338Z" fill="#c2410c"/>
 </svg>

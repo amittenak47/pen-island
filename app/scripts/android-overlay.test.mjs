@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { withBuildSrcJvm17, withDebugSigning, withExecOperations, withGradleJavaHome, withNetworkSecurityConfig, isUsableGradleJdk, javaMajorFromRelease } from "./android-overlay.mjs";
+import { withBuildSrcJvm17, withDebugSigning, withExecOperations, withGradleJavaHome, withMainActivityTitle, withNetworkSecurityConfig, isUsableGradleJdk, javaMajorFromRelease } from "./android-overlay.mjs";
 
 const MANIFEST = `<?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
@@ -165,5 +165,26 @@ describe("withDebugSigning", () => {
 
   it("refuses a file it cannot sign rather than building unsigned", () => {
     expect(() => withDebugSigning("android {}\n", "/k")).toThrow(/buildTypes/);
+  });
+});
+
+describe("withMainActivityTitle", () => {
+  const STRINGS = `<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">"Pen Island"</string>
+    <string name="main_activity_title">"Whiteboard"</string>
+</resources>
+`;
+  it("renames the launcher entry and leaves the rest alone", () => {
+    const patched = withMainActivityTitle(STRINGS, "Pen Island");
+    expect(patched).toContain('<string name="main_activity_title">"Pen Island"</string>');
+    expect(patched).toContain('<string name="app_name">"Pen Island"</string>');
+  });
+  it("is idempotent", () => {
+    const once = withMainActivityTitle(STRINGS, "Pen Island");
+    expect(withMainActivityTitle(once, "Pen Island")).toBe(once);
+  });
+  it("refuses strings it does not recognise", () => {
+    expect(() => withMainActivityTitle("<resources/>", "Pen Island")).toThrow(/main_activity_title/);
   });
 });

@@ -1,4 +1,14 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
-  <rect x="128" y="128" width="256" height="256" rx="34" fill="#f8fafc"></rect>
-  <path d="M172 262 L228 318 L340 190" fill="none" stroke="#c2410c" stroke-width="42" stroke-linecap="round" stroke-linejoin="round"></path>
+  <g transform="translate(256 256) scale(0.8) translate(-265 -266)">
+    <path d="M108 182H152A4 4 0 0 1 156 186V318H104V186A4 4 0 0 1 108 182Z" fill="#f8fafc"/>
+    <rect x="104" y="318" width="52" height="14" fill="#3f4f63"/>
+    <path d="M104 332H156L141 362H119Z" fill="#cbd5e1"/>
+    <path d="M121 362H139V378A9 9 0 0 1 121 378Z" fill="#4a6280"/>
+    <path fill-rule="evenodd" d="M174 182H310A6 6 0 0 1 316 188V320A6 6 0 0 1 310 326H174A6 6 0 0 1 168 320V188A6 6 0 0 1 174 182ZM216 230H268V278H216Z" fill="#f8fafc"/>
+    <path d="M186 202H298M186 214H272M186 296H298M186 308H256" fill="none" stroke="#94a3b8" stroke-width="6" stroke-linecap="square"/>
+    <rect x="356" y="182" width="52" height="144" rx="4" fill="#f8fafc"/>
+    <path d="M342 104H422A4 4 0 0 1 426 108V154A4 4 0 0 1 422 158H374L356 176V158H342A4 4 0 0 1 338 154V108A4 4 0 0 1 342 104Z" fill="#c2410c"/>
+    <path d="M352 123H412M352 139H394" fill="none" stroke="#fbd5bd" stroke-width="7" stroke-linecap="square"/>
+    <path d="M346 358C360 348 368 368 382 358S404 348 418 358" fill="none" stroke="#94a3b8" stroke-width="12" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
 </svg>

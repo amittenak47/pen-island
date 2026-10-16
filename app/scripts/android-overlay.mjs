@@ -38,6 +38,9 @@ const SOURCE = join(APP_DIR, "src-tauri", "android-overlay", "network_security_c
 const PROJECT = join(APP_DIR, "src-tauri", "gen", "android");
 const RES_XML = join(PROJECT, "app", "src", "main", "res", "xml");
 const MANIFEST = join(PROJECT, "app", "src", "main", "AndroidManifest.xml");
+const STRINGS = join(PROJECT, "app", "src", "main", "res", "values", "strings.xml");
+/** The name under the launcher icon. */
+const LAUNCHER_TITLE = "Pen Island";
 
 const ATTRIBUTE = 'android:networkSecurityConfig="@xml/network_security_config"';
 
@@ -58,6 +61,27 @@ export function withNetworkSecurityConfig(manifest) {
   }
   const at = opening.index + opening[0].length;
   return `${manifest.slice(0, at)}\n        ${ATTRIBUTE}${manifest.slice(at)}`;
+}
+
+/**
+ * Name the launcher entry `title`.
+ *
+ * The launcher shows the main activity's label, `main_activity_title`, not the
+ * app name; `tauri android init` fills it from the name the project had when it
+ * was generated, so the tablet kept showing "Whiteboard" after the rebrand.
+ * The file lives under gitignored `gen/android`, so this runs before every build.
+ * Unchanged when the title is already set.
+ *
+ * @param {string} strings raw res/values/strings.xml
+ * @param {string} title
+ * @returns {string}
+ */
+export function withMainActivityTitle(strings, title) {
+  const pattern = /(<string name="main_activity_title">)([^<]*)(<\/string>)/;
+  if (!pattern.test(strings)) {
+    throw new Error("strings.xml has no main_activity_title: is the project generated?");
+  }
+  return strings.replace(pattern, (_, open, _old, close) => `${open}"${title}"${close}`);
 }
 
 /**
@@ -296,6 +320,13 @@ async function main() {
   } else {
     await writeFile(MANIFEST, patched);
     console.log("android overlay: config copied and referenced from <application>");
+  }
+
+  const strings = await readFile(STRINGS, "utf8");
+  const titled = withMainActivityTitle(strings, LAUNCHER_TITLE);
+  if (titled !== strings) {
+    await writeFile(STRINGS, titled);
+    console.log(`android overlay: launcher title "${LAUNCHER_TITLE}"`);
   }
 
   const buildTask = findBuildTaskKt();
