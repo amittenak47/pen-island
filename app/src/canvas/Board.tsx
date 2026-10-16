@@ -2818,18 +2818,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     }
     // Committed camera: the title rides a live pan on the shared translate —
     // see the note in `reportLinedSlot`.
-    const state = api.getAppState() as {
-      scrollX?: number;
-      scrollY?: number;
-      zoom?: { value?: number };
-    };
-    const zoom = state.zoom?.value ?? 1;
+    const state = api.getCamera();
+    const zoom = state.zoom;
     const anchor = scratchTitleAnchor(index);
     // Rides the page, but never shrinks below a pressable size: a scratch page
     // fits the viewport at ~0.2 zoom, where authored 20px chrome is 4px tall.
     const next = {
-      left: roundPx((anchor.x + (state.scrollX ?? 0)) * zoom),
-      top: roundPx((anchor.y + (state.scrollY ?? 0)) * zoom),
+      left: roundPx((anchor.x + state.scrollX) * zoom),
+      top: roundPx((anchor.y + state.scrollY) * zoom),
       fontPx: Math.max(12, Math.round(20 * zoom)),
     };
     const prev = lastTitleSlotRef.current;
@@ -2975,15 +2971,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     if (shouldSkipFrozenContentSlotReport(false, pan.x, pan.y)) {
       return;
     }
-    const app = api.getAppState() as {
-      scrollX?: number;
-      scrollY?: number;
-      zoom?: { value?: number };
-    };
+    const app = api.getCamera();
     const camera = {
-      scrollX: app.scrollX ?? 0,
-      scrollY: app.scrollY ?? 0,
-      zoom: app.zoom?.value ?? 1,
+      scrollX: app.scrollX,
+      scrollY: app.scrollY,
+      zoom: app.zoom,
     };
     const last = lastContentSlotRef.current;
     const next = placeContentSlotAtRef.current(camera.scrollX, camera.scrollY, camera.zoom);
@@ -3209,13 +3201,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
      */
     const live = liveCameraRef.current;
     const api = apiRef.current;
-    const state = (api?.getAppState() ?? {}) as {
-      scrollX?: number;
-      scrollY?: number;
-      zoom?: { value?: number };
-    };
-    const zoom = Math.max(0.05, live?.zoom ?? state.zoom?.value ?? 1);
-    const scrollY = live?.scrollY ?? state.scrollY ?? 0;
+    const state = api?.getCamera() ?? { scrollX: 0, scrollY: 0, zoom: 1 };
+    const zoom = Math.max(0.05, live?.zoom ?? state.zoom);
+    const scrollY = live?.scrollY ?? state.scrollY;
     const panY = live != null ? 0 : panOffsetRef.current.y;
     ensureLinedPair(zoom);
     const visibleRule: LinedRuling =
@@ -3623,11 +3611,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       captureUpdate: CaptureUpdateAction.NEVER,
     });
     syncPageVisibility();
-    const state = apiRef.current?.getAppState() as
-      | { scrollX?: number; scrollY?: number }
-      | undefined;
+    const state = apiRef.current?.getCamera();
     if (state && scrollModeRef.current) {
-      lockedScrollXRef.current = state.scrollX ?? 0;
+      lockedScrollXRef.current = state.scrollX;
     }
     scheduleSlotReports();
   }, [scheduleSlotReports, syncPageVisibility]);
@@ -3775,8 +3761,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       // refuses to run under any other tool. The placement effect owns the
       // gesture; upstream only ever sees the hand-off.
       const zoom =
-        (apiRef.current?.getAppState() as { zoom?: { value?: number } } | undefined)?.zoom
-          ?.value ?? 1;
+        apiRef.current?.getCamera().zoom ?? 1;
       const size = Math.min(
         TEXT_FONT_MAX,
         Math.max(TEXT_FONT_MIN, Math.round(DEFAULT_FONT_SIZE / Math.max(zoom, 0.35))),
@@ -4185,16 +4170,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
 
   /** Scene coords from a pointer event over the Excalidraw viewport. */
   const clientToScene = useCallback((clientX: number, clientY: number) => {
-    const state = apiRef.current?.getAppState() as
-      | {
-          zoom?: { value?: number };
-          scrollX?: number;
-          scrollY?: number;
-          offsetLeft?: number;
-          offsetTop?: number;
-        }
-      | undefined;
-    const zoom = state?.zoom?.value ?? 1;
+    const state = apiRef.current?.getCamera();
+    const zoom = state?.zoom ?? 1;
     return {
       x: (clientX - (state?.offsetLeft ?? 0)) / zoom - (state?.scrollX ?? 0),
       y: (clientY - (state?.offsetTop ?? 0)) / zoom - (state?.scrollY ?? 0),
@@ -4721,13 +4698,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const readScroll = () => {
       const live = liveCameraRef.current;
       if (live?.live) return { scrollX: live.scrollX, scrollY: live.scrollY, zoom: live.zoom };
-      const state = apiRef.current?.getAppState() as
-        | { scrollX?: number; scrollY?: number; zoom?: { value?: number } }
-        | undefined;
+      const state = apiRef.current?.getCamera();
       return {
         scrollX: state?.scrollX ?? 0,
         scrollY: state?.scrollY ?? 0,
-        zoom: state?.zoom?.value ?? 1,
+        zoom: state?.zoom ?? 1,
       };
     };
 
@@ -6088,17 +6063,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     let frame = 0;
 
     const readViewport = (): TextPlaceViewport => {
-      const state = apiRef.current?.getAppState() as
-        | {
-            zoom?: { value?: number };
-            scrollX?: number;
-            scrollY?: number;
-            offsetLeft?: number;
-            offsetTop?: number;
-          }
-        | undefined;
+      const state = apiRef.current?.getCamera();
       return {
-        zoom: state?.zoom?.value ?? 1,
+        zoom: state?.zoom ?? 1,
         scrollX: state?.scrollX ?? 0,
         scrollY: state?.scrollY ?? 0,
         offsetLeft: state?.offsetLeft ?? 0,
@@ -6346,8 +6313,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [themeId]);
 
   const readZoom = useCallback(() => {
-    const state = apiRef.current?.getAppState() as { zoom?: { value?: number } } | undefined;
-    return state?.zoom?.value ?? 1;
+    const state = apiRef.current?.getCamera();
+    return state?.zoom ?? 1;
   }, []);
 
   /*
@@ -6664,10 +6631,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         event.stopPropagation();
         flushVisualScrollRef.current();
         const cam = readScrollRef.current();
-        const state = api.getAppState() as { offsetLeft?: number; offsetTop?: number };
+        const state = api.getCamera();
         const anchor = {
-          x: (event.clientX - (state.offsetLeft ?? 0)) / cam.zoom - cam.scrollX,
-          y: (event.clientY - (state.offsetTop ?? 0)) / cam.zoom - cam.scrollY,
+          x: (event.clientX - state.offsetLeft) / cam.zoom - cam.scrollX,
+          y: (event.clientY - state.offsetTop) / cam.zoom - cam.scrollY,
         };
         const lines = event.deltaMode === 1 ? 16 : 1;
         const delta = Math.max(-30, Math.min(30, event.deltaY * lines));
@@ -7045,8 +7012,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                */
               const prevZoom =
                 liveCameraRef.current?.zoom ??
-                (api.getAppState() as { zoom?: { value?: number } }).zoom?.value ??
-                1;
+                api.getCamera().zoom;
               const basePageH = Math.max(1, availHeight / Math.max(prevZoom, 1e-6));
               drawBasePageHRef.current = basePageH;
               nextH = Math.max(
