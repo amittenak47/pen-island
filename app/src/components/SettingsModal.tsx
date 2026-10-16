@@ -238,6 +238,11 @@ function SettingsFold({id,title,children}: {id:string;title:string;children:Reac
 }
 
 const PROVIDERS = ["local", "ollama", "openai", "groq"] as const;
+const COACH_PROVIDERS = [...PROVIDERS, "app", "bot"] as const;
+const AGENT_PROVIDER_HINTS = {
+  app: "Uses the app chosen for ChatBot on this PC",
+  bot: "Answered by the assistant chosen for ChatBot; can take a few minutes",
+};
 
 const VOICE_ENGINES: { id: VoiceConfig["engine"]; label: string; blurb: string }[] = [
   { id: "android", label: "Android", blurb: "Built into the tablet. Text appears as you speak." },
@@ -348,11 +353,13 @@ const MODE_LABELS: Record<(typeof MODES)[number], string> = {
   viz: "Diagrams",
   planner: "Planner",
 };
-const PROVIDER_LABELS: Record<(typeof PROVIDERS)[number], string> = {
+const PROVIDER_LABELS: Record<(typeof COACH_PROVIDERS)[number], string> = {
   local: "Local",
   ollama: "Ollama",
   openai: "OpenAI",
   groq: "Groq",
+  app: "AI application",
+  bot: "AI assistant",
 };
 
 /**
@@ -1446,13 +1453,14 @@ export function SettingsModal({
   changes.storage = (changes.storage ?? 0) + Number(hubUrl.trim() !== baselineHubUrl) + Number(hubToken.trim() !== baselineHubToken);
   changes.diagnostics = (changes.diagnostics ?? 0) + Number(debugLog !== baselineDebugLog);
   changes.llm = (changes.llm ?? 0) + Number(Boolean(openaiKeyDraft.trim()) || clearOpenaiKey) + Number(Boolean(groqKeyDraft.trim()) || clearGroqKey);
+  changes.llm += coachChanges(["agent_send_board_image"]);
   changes.chatbot = Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode)
     + countSettingsChanges(runnerConfig ?? {}, baselineRunnerConfig ?? {});
   changes.voice = (changes.voice ?? 0) + Number(Boolean(deepgramKeyDraft.trim()) || clearDeepgramKey);
   const resetGroup = (id: string) => {
     if (saving) return;
     restoreDeviceDraft({...draftPrefs, ...select(baselinePrefs, prefGroups[id] ?? [])});
-    const coachFields = id === "ui" ? sharedUiFlags : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
+    const coachFields = id === "ui" ? sharedUiFlags : id === "llm" ? ["agent_send_board_image"] as (keyof CoachFlags)[] : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
     setDraft(prev => ({...prev, ...select(baselineConfig, configGroups[id] ?? []),
       coach: {...DEFAULT_COACH_FLAGS, ...prev.coach, ...select({...DEFAULT_COACH_FLAGS, ...baselineConfig.coach}, coachFields)}}));
     if (id === "chatbot") { setChatBotClient(baselineChatBotClient); setChatBotAnswerMode(baselineChatBotAnswerMode); setRunnerConfig(baselineRunnerConfig); }
@@ -3402,6 +3410,7 @@ export function SettingsModal({
                 <label key={mode}>
                   <span>{MODE_LABELS[mode]}</span>
                   <select
+                    aria-label={`${MODE_LABELS[mode]} provider`}
                     value={draft.modes[mode]}
                     onChange={(e) =>
                       setDraft((prev) => ({
@@ -3410,16 +3419,27 @@ export function SettingsModal({
                       }))
                     }
                   >
-                    {PROVIDERS.map((p) => (
+                    {COACH_PROVIDERS.map((p) => (
                       <option key={p} value={p}>
                         {PROVIDER_LABELS[p]}
                       </option>
                     ))}
                   </select>
                   <p className="lc-settings-hint">{MODE_HINTS[mode]}</p>
+                  {(draft.modes[mode] === "app" || draft.modes[mode] === "bot") &&
+                    <p className="lc-settings-hint">{AGENT_PROVIDER_HINTS[draft.modes[mode] as "app" | "bot"]}</p>}
                 </label>
               ))}
-
+              <p className="lc-settings-hint">AI application: {AGENT_PROVIDER_HINTS.app}.<br />AI assistant: {AGENT_PROVIDER_HINTS.bot}.</p>
+              <button type="button" className="lc-secondary" onClick={() => { setSettingsQuery(""); setPage("chatbot"); }}>
+                Choose application or assistant in ChatBot
+              </button>
+              <button type="button" role="switch" aria-checked={draft.coach?.agent_send_board_image ?? true}
+                className={(draft.coach?.agent_send_board_image ?? true) ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                onClick={() => setDraft(prev => ({ ...prev, coach: { ...DEFAULT_COACH_FLAGS, ...prev.coach,
+                  agent_send_board_image: !(prev.coach?.agent_send_board_image ?? true) } }))}>
+                Send the board image to agents
+              </button>
               </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Built-in model</div>
