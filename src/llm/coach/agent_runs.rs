@@ -142,8 +142,8 @@ impl AgentRunInput {
         })
     }
 
-    fn allowed_tools(&self) -> Vec<String> {
-        let schemas = match self.action {
+    pub fn tool_schemas(&self) -> Vec<Value> {
+        let mut schemas = match self.action {
             AgentAction::Ask => {
                 let surface = parse_surface(
                     self.payload["surface"].as_str(),
@@ -173,15 +173,18 @@ impl AgentRunInput {
                 .collect(),
             AgentAction::Review | AgentAction::Lazy => Vec::new(),
         };
-        let mut names: Vec<_> = schemas
+        // Every Ask path appends the document runner's attachment schema.
+        if self.action == AgentAction::Ask {
+            schemas.extend(attachment_tools());
+        }
+        schemas
+    }
+
+    fn allowed_tools(&self) -> Vec<String> {
+        self.tool_schemas()
             .into_iter()
             .filter_map(|tool| tool["function"]["name"].as_str().map(str::to_owned))
-            .collect();
-        // Every Ask path appends the private document runner attachment schema.
-        if self.action == AgentAction::Ask {
-            names.push("create_attachment".into());
-        }
-        names
+            .collect()
     }
 }
 
@@ -196,6 +199,7 @@ pub struct AgentRequest {
     pub payload: Value,
     pub context: AgentTaskContext,
     pub allowed_tools: Vec<String>,
+    pub tool_schemas: Vec<Value>,
     pub envelope: ToolEnvelope,
     pub status: AgentRunStatus,
     pub created_at: u64,
@@ -282,6 +286,7 @@ impl AgentRunRegistry {
         let id = format!("agent-{:032x}", rand::random::<u128>());
         let (completion, receiver) = watch::channel(None);
         let allowed_tools = input.allowed_tools();
+        let tool_schemas = input.tool_schemas();
         let document = input.document();
         let request = AgentRequest {
             id: id.clone(),
@@ -291,6 +296,7 @@ impl AgentRunRegistry {
             payload: input.payload,
             context: input.context,
             allowed_tools,
+            tool_schemas,
             envelope: ToolEnvelope::default(),
             status: AgentRunStatus::Waiting,
             created_at: now,
@@ -380,6 +386,13 @@ impl AgentRunRegistry {
     }
 
     pub fn apply_tool(&self, id: &str, call: &ToolCall) -> Result<Option<String>> {
+        self.apply_tool_outcome(id, call)
+            .map(|outcome| outcome.feedback)
+    }
+
+    /// MCP needs to distinguish rejected calls from successful tool feedback.
+    /// Observe the shared executor's event, preserving its validation and frames.
+    pub fn apply_tool_outcome(&self, id: &str, call: &ToolCall) -> Result<AgentToolOutcome> {
         let run = self.active(id)?;
         let mut run = run.lock().unwrap_or_else(|e| e.into_inner());
         run.ensure_active((self.clock)())?;
@@ -418,7 +431,17 @@ impl AgentRunRegistry {
         // The socket can cancel while an I/O tool is blocked. Drop its late
         // accepted/rejected events, just as the task boundary drops late results.
         let parent = run.events.clone();
+        let rejection = Arc::new(Mutex::new(None));
+        let observed = rejection.clone();
         let filtered_events = EventSink::new(move |event| {
+            if let crate::llm::coach::CoachEvent::Tool {
+                status: ToolStatus::Rejected,
+                reason,
+                ..
+            } = &event
+            {
+                *observed.lock().unwrap_or_else(|e| e.into_inner()) = reason.clone();
+            }
             if !parent.is_cancelled() {
                 parent.emit(event);
             }
@@ -429,7 +452,7 @@ impl AgentRunRegistry {
             document,
             ..
         } = &mut *run;
-        if request.action == AgentAction::Ask {
+        let feedback = if request.action == AgentAction::Ask {
             let empty = AskContext {
                 document_hash: None,
                 page: None,
@@ -458,7 +481,12 @@ impl AgentRunRegistry {
                 &mut request.envelope,
                 &filtered_events,
             )
-        }
+        }?;
+        let rejection = rejection.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        Ok(AgentToolOutcome {
+            feedback,
+            rejection,
+        })
     }
 
     /// Agent reasoning stays private. The existing stage frame accepts custom
@@ -641,3 +669,36 @@ impl AgentRun {
 #[cfg(test)]
 #[path = "agent_runs_tests.rs"]
 mod tests;
+
+/// Attachment schemas mirror the private API runner; the MCP parity test
+/// captures the actual API request so changes cannot silently diverge.
+pub(crate) fn attachment_tools() -> Vec<serde_json::Value> {
+    let program_schemas: Vec<_> = ask_draw_tools()
+        .into_iter()
+        .filter(|schema| {
+            matches!(
+                schema["function"]["name"].as_str(),
+                Some("draw_structure" | "animate_trace")
+            )
+        })
+        .map(|schema| schema["function"]["parameters"].clone())
+        .collect();
+    vec![attachment_tool("create_attachment", "Only when the user explicitly asks to create/save a separate whiteboard, code file or Markdown note. Propose app-owned content attached to this chat or its annotations. The client saves it; never claim a disk file was written. Ordinary Draw uses draw_structure/animate_trace instead.", serde_json::json!({
+        "type":"object", "additionalProperties":false,
+        "properties": {
+            "kind":{"type":"string","enum":["whiteboard","code","markdown"]},
+            "title":{"type":"string","maxLength":256},
+            "source":{"type":"string","description":"Complete code/Markdown source; empty for a whiteboard","maxLength":512000},
+            "programs":{"type":"array","maxItems":8,"items":{"anyOf":program_schemas},"description":"Validated draw_structure/animate_trace programs; empty for text files"}
+        }, "required":["kind","title"]
+    }))]
+}
+
+fn attachment_tool(name: &str, description: &str, parameters: Value) -> Value {
+    json!({"type":"function", "function":{"name":name,"description":description,"parameters":parameters}})
+}
+
+pub struct AgentToolOutcome {
+    pub feedback: Option<String>,
+    pub rejection: Option<String>,
+}

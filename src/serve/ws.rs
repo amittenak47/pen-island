@@ -41,8 +41,7 @@ use crate::llm::coach::{
 };
 use crate::llm::{make_provider_for_mode, ChatMessage, ChatRequest, LlmProvider};
 
-#[path = "../llm/coach/agent_socket.rs"]
-mod agent_socket;
+use super::agent_socket;
 
 pub use crate::llm::agent_runs::AgentAction as RunAction;
 use crate::llm::agent_runs::AgentResponder;
@@ -862,5 +861,4 @@ mod tests {
 }
 
 #[cfg(test)]
-#[path = "../llm/coach/agent_socket_tests.rs"]
 mod agent_tests;

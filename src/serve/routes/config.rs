@@ -48,6 +48,11 @@ pub struct CoachFlagsDto {
     pub planner_enabled: bool,
     pub draw_review_enabled: bool,
     pub approach_commitment: bool,
+    /// Missing on PUT leaves these settings intact for older clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_mcp_tools: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_send_board_image: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -170,6 +175,8 @@ fn config_dto(cfg: &Config) -> ConfigDto {
             planner_enabled: cfg.coach.planner_enabled,
             draw_review_enabled: cfg.coach.draw_review_enabled,
             approach_commitment: cfg.coach.approach_commitment,
+            agent_mcp_tools: Some(cfg.coach.agent_mcp_tools),
+            agent_send_board_image: Some(cfg.coach.agent_send_board_image),
         },
         token_set: cfg
             .serve
@@ -292,6 +299,12 @@ fn apply_config_dto(cfg: &mut Config, dto: &ConfigDto) -> anyhow::Result<()> {
     cfg.coach.planner_enabled = dto.coach.planner_enabled;
     cfg.coach.draw_review_enabled = dto.coach.draw_review_enabled;
     cfg.coach.approach_commitment = dto.coach.approach_commitment;
+    if let Some(enabled) = dto.coach.agent_mcp_tools {
+        cfg.coach.agent_mcp_tools = enabled;
+    }
+    if let Some(enabled) = dto.coach.agent_send_board_image {
+        cfg.coach.agent_send_board_image = enabled;
+    }
     if let Some(voice) = &dto.voice {
         cfg.set("voice.engine", voice.engine.trim())?;
         let defaults = VoiceConfig::default();
@@ -615,5 +628,36 @@ mod agent_provider_tests {
                 format!("{provider} answers agent runs and has no API model catalog")
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod agent_mcp_settings_tests {
+    use super::*;
+
+    #[test]
+    fn coach_mcp_settings_round_trip_and_older_clients_preserve_them() {
+        let mut cfg = Config::default();
+        let dto = config_dto(&cfg);
+        assert_eq!(dto.coach.agent_mcp_tools, Some(true));
+        assert_eq!(dto.coach.agent_send_board_image, Some(true));
+        let mut wire = serde_json::to_value(dto).unwrap();
+        wire["coach"]["agent_mcp_tools"] = serde_json::json!(false);
+        wire["coach"]["agent_send_board_image"] = serde_json::json!(false);
+        let dto = serde_json::from_value(wire.clone()).unwrap();
+        apply_config_dto(&mut cfg, &dto).unwrap();
+        assert!(!cfg.coach.agent_mcp_tools && !cfg.coach.agent_send_board_image);
+
+        let coach = wire["coach"].as_object_mut().unwrap();
+        coach.remove("agent_mcp_tools");
+        coach.remove("agent_send_board_image");
+        let dto = serde_json::from_value(wire).unwrap();
+        apply_config_dto(&mut cfg, &dto).unwrap();
+        assert!(!cfg.coach.agent_mcp_tools && !cfg.coach.agent_send_board_image);
+
+        let dto = config_dto(&cfg);
+        let mut reloaded = Config::default();
+        apply_config_dto(&mut reloaded, &dto).unwrap();
+        assert!(!reloaded.coach.agent_mcp_tools && !reloaded.coach.agent_send_board_image);
     }
 }

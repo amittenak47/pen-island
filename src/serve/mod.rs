@@ -18,6 +18,7 @@ pub mod board_session;
 pub mod session;
 pub mod viz;
 pub mod ws;
+mod agent_socket;
 
 use std::sync::{Arc, RwLock};
 
@@ -260,6 +261,7 @@ pub fn router(state: Shared) -> Router {
         .route("/coach/scaffold", post(coach::scaffold))
         .route("/coach/capabilities", get(coach::capabilities))
         .route("/coach/session", get(ws::session))
+        .route("/coach/agent-mcp", post(crate::mcp::coach::route))
         .route(
             "/workspace/:id/solution",
             get(routes::get_solution).put(routes::put_solution),

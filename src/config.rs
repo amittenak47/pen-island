@@ -65,6 +65,10 @@ pub struct CoachConfig {
     /// Freeze one approach per board session and require an explicit,
     /// reasoned transition to leave it.
     pub approach_commitment: bool,
+    /// Coach tools are available only to explicitly app/bot-scoped MCP clients.
+    pub agent_mcp_tools: bool,
+    /// Include a board image already supplied by the panel; never render here.
+    pub agent_send_board_image: bool,
 }
 
 impl Default for CoachConfig {
@@ -75,6 +79,8 @@ impl Default for CoachConfig {
             planner_enabled: false,
             draw_review_enabled: false,
             approach_commitment: true,
+            agent_mcp_tools: true,
+            agent_send_board_image: true,
         }
     }
 }
@@ -679,6 +685,8 @@ impl Config {
             "coach.planner_enabled" => self.coach.planner_enabled = parse_bool(value)?,
             "coach.draw_review_enabled" => self.coach.draw_review_enabled = parse_bool(value)?,
             "coach.approach_commitment" => self.coach.approach_commitment = parse_bool(value)?,
+            "coach.agent_mcp_tools" => self.coach.agent_mcp_tools = parse_bool(value)?,
+            "coach.agent_send_board_image" => self.coach.agent_send_board_image = parse_bool(value)?,
             "voice.engine" => {
                 validate_voice_engine(value)?;
                 self.voice.engine = value.to_string();
