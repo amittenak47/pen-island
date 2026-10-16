@@ -21,7 +21,8 @@ it("changes only that page's quality attribute and preserves body-local child ge
     const page = host.querySelector<HTMLElement>('[data-mark-page="4"]')!;
     const other = host.querySelector<HTMLElement>('[data-mark-page="5"]')!;
     const child = page.querySelector("span")!, style = child.getAttribute("style");
-    expect(page.dataset.pdfQuality).toBe("preview");
+    // Nothing painted yet: not even its booktabs show.
+    expect(page.dataset.pdfQuality).toBe("blank");
     expect(page.querySelector<HTMLElement>(".lc-doc-page-marks-origin")!.style.top).toBe("-900px");
     const mutations: MutationRecord[] = [];
     const observer = new MutationObserver(records => mutations.push(...records));
@@ -33,11 +34,26 @@ it("changes only that page's quality attribute and preserves body-local child ge
     observer.disconnect();
     expect(mutations.map(m => [m.target, m.attributeName])).toEqual([[page, "data-pdf-quality"]]);
     expect(page.dataset.pdfQuality).toBe("sharp");
-    expect(other.dataset.pdfQuality).toBe("preview");
+    expect(other.dataset.pdfQuality).toBe("blank");
     expect(page.querySelector("span")).toBe(child);
     expect(child.getAttribute("style")).toBe(style);
     resetPdfPageQualities("book");
-    expect(page.dataset.pdfQuality).toBe("preview");
+    expect(page.dataset.pdfQuality).toBe("blank");
     expect(peekPdfPageQuality("different-book", 4)).toBe("sharp");
+  } finally { act(() => root.unmount()); }
+});
+
+it("groups a PDF page's marks before its box is known, so they wait for the page", () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  act(() => root.render(<PdfMarkPage filmScope="book" scope="p7"><span style={{ position: "absolute", left: 90, top: 950 }}>mark</span></PdfMarkPage>));
+  try {
+    const page = host.querySelector<HTMLElement>('[data-mark-page="7"]')!;
+    expect(page).not.toBeNull();
+    expect(page.dataset.pdfQuality).toBe("blank");
+    expect(page.querySelector("span")!.style.left).toBe("90px");
+    act(() => publishPdfPageQuality("book", 7, "sharp"));
+    expect(page.dataset.pdfQuality).toBe("sharp");
   } finally { act(() => root.unmount()); }
 });

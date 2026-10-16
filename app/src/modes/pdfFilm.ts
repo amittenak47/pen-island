@@ -186,7 +186,11 @@ export function trimThumbCache(
 
 /** Pages whose document geometry changed, or the whole stack. */
 export type DocPlacementRev = number[] | "all";
-export type PdfPageQuality = "preview" | "sharp";
+/**
+ * What a sheet shows: nothing yet, its blurred preview, or its sharp paint.
+ * Marks show with "sharp"; booktabs with anything painted.
+ */
+export type PdfPageQuality = "blank" | "preview" | "sharp";
 
 type FilmNav = {
   current: number;
@@ -568,13 +572,13 @@ export function peekPdfRestPages(scope: string): readonly number[] {
 export function publishPdfPageQuality(scope: string, page: number, quality: PdfPageQuality): void {
   if (!scope || page < 1) return;
   const state = nav(scope);
-  if ((state.pageQuality.get(page) ?? "preview") === quality) return;
+  if ((state.pageQuality.get(page) ?? "blank") === quality) return;
   state.pageQuality.set(page, quality);
   for (const listener of state.pageQualityListeners.get(page) ?? []) listener(quality);
 }
 
 export function peekPdfPageQuality(scope: string, page: number): PdfPageQuality {
-  return nav(scope).pageQuality.get(page) ?? "preview";
+  return nav(scope).pageQuality.get(page) ?? "blank";
 }
 
 export function subscribePdfPageQuality(scope: string, page: number, listener: (quality: PdfPageQuality) => void): () => void {
@@ -591,7 +595,7 @@ export function subscribePdfPageQuality(scope: string, page: number, listener: (
 
 export function resetPdfPageQualities(scope: string): void {
   const state = nav(scope);
-  for (const page of state.pageQuality.keys()) publishPdfPageQuality(scope, page, "preview");
+  for (const page of state.pageQuality.keys()) publishPdfPageQuality(scope, page, "blank");
   state.pageQuality.clear();
 }
 

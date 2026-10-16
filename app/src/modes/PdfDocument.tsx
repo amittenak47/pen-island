@@ -538,10 +538,10 @@ function zeroPageSlots(host: HTMLElement, n: number): void {
       canvas.height = 0;
       forgetSlotBlit(canvas);
     }
-    if (slot.dataset.pdfQuality !== "preview") slot.dataset.pdfQuality = "preview";
+    if (slot.dataset.pdfQuality !== "blank") slot.dataset.pdfQuality = "blank";
     slot.removeAttribute("data-painted");
   }
-  publishPdfPageQuality(host.dataset.pdfFilmScope ?? "", n, "preview");
+  publishPdfPageQuality(host.dataset.pdfFilmScope ?? "", n, "blank");
 }
 
 function sharpPages(filmScope: string, lastPage: number): Set<number> {
@@ -1565,14 +1565,14 @@ export function PdfDocument({
           canvas.height = 0;
           forgetSlotBlit(canvas);
         }
-        if (slot.dataset.pdfQuality !== "preview") slot.dataset.pdfQuality = "preview";
+        if (slot.dataset.pdfQuality !== "blank") slot.dataset.pdfQuality = "blank";
         slot.removeAttribute("data-painted");
         if (!keepText) {
           const text = slot.querySelector<HTMLElement>(".lc-pdf-text");
           if (text) text.textContent = "";
         }
       }
-      publishPdfPageQuality(filmScope, n, "preview");
+      publishPdfPageQuality(filmScope, n, "blank");
       if (!keepText) publishDocPlacementRev(filmScope, [n]);
       return true;
     };

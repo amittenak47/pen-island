@@ -8,7 +8,10 @@ export function PdfMarkPage({ filmScope, scope, page, children }: {
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const number = pdfPageFromDocScope(scope);
-  const grouped = Boolean(filmScope && page && number != null);
+  // A PDF page's marks are always grouped, even before the page's box is
+  // known (just after start-up): ungrouped, they showed before the page did.
+  const grouped = Boolean(filmScope && number != null);
+  const box = page ?? { left: 0, top: 0, width: 0, height: 0 };
   useLayoutEffect(() => {
     const node = ref.current;
     if (!node || !filmScope || number == null || !grouped) return;
@@ -16,9 +19,9 @@ export function PdfMarkPage({ filmScope, scope, page, children }: {
       if (node.dataset.pdfQuality !== quality) node.dataset.pdfQuality = quality;
     });
   }, [filmScope, number, grouped]);
-  if (!grouped || !page) return <>{children}</>;
+  if (!grouped) return <>{children}</>;
   return <div ref={ref} className="lc-doc-page-marks" data-mark-page={number!}
-    style={{ left: page.left, top: page.top, width: page.width, height: page.height }}>
-    <div className="lc-doc-page-marks-origin" style={{ left: -page.left, top: -page.top }}>{children}</div>
+    style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
+    <div className="lc-doc-page-marks-origin" style={{ left: -box.left, top: -box.top }}>{children}</div>
   </div>;
 }
