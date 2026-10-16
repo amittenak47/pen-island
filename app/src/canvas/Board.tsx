@@ -19,7 +19,7 @@ import {
   exportToBlob,
   exportToCanvas,
   getCommonBounds,
-  type ExcalidrawApi,
+  type BoardSceneApi,
 } from "./boardScene";
 import { convertToExcalidrawElements } from "./convertSkeletons";
 import {
@@ -452,7 +452,7 @@ function paintExportInk(
 }
 
 async function exportBoardBlob(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   /**
    * Pixels per scene unit. One — Excalidraw's default — for anything that is
@@ -591,7 +591,7 @@ async function exportBoardBlob(
  * alone, so pen work looked like a sparse "delta" of shapes only.
  */
 async function exportRegionBlob(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   elements: readonly SceneElementLike[],
   frame: { x: number; y: number; width: number; height: number },
@@ -707,7 +707,7 @@ async function exportRegionBlob(
  * raster ink. Works even when the rect contains only ink / empty background.
  */
 async function exportSceneFrameBlob(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   frame: { x: number; y: number; width: number; height: number },
   /** See {@link exportBoardBlob}. Sets the composite scale here, not just Excalidraw's. */
@@ -730,7 +730,7 @@ async function exportSceneFrameBlob(
  * are, every turn, and encoding would cost more than drawing.
  */
 async function renderSceneFrameCanvas(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   frame: { x: number; y: number; width: number; height: number },
   exportScale = 2,
@@ -1467,7 +1467,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const splitPausedRef = useRef(false);
   splitPausedRef.current = splitPaused && !preparing;
   const splitFitRef = useRef(false);
-  const apiRef = useRef<ExcalidrawApi | null>(null);
+  const apiRef = useRef<BoardSceneApi | null>(null);
   if (apiRef.current == null) {
     const scene = createBoardScene();
     const updateScene = scene.updateScene;
@@ -2174,9 +2174,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   /**
    * Live camera while reading-scroll is in flight.
    *
-   * `updateScene` every pointer/wheel frame is what caps us at ~30fps — Excalidraw
-   * reconciles a full scene. During a gesture we drive markdown + ink from this
-   * ref and commit scroll to Excalidraw once on settle (Obsidian-style).
+   * The scene store keeps the painted camera while this ref drives the live
+   * camera during pans (the translate ride). Commit the live camera to the
+   * store when the pan settles.
    */
   const liveCameraRef = useRef<{
     scrollX: number;
@@ -2189,7 +2189,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     live: boolean;
   } | null>(null);
   /**
-   * Excalidraw scroll the layers were last painted for during a live gesture.
+   * Scene-store camera the layers were last painted for during a live gesture.
    * Updated on the first live sample and after each mid-gesture rebase — so
    * `applyVisualScrollNow` can skip `getAppState` on every coalesced frame.
    */
@@ -2302,8 +2302,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   /**
    * How far the page has been dragged from the camera everything was painted at.
    *
-   * Reading scroll leaves Excalidraw's camera alone (see `applyVisualScrollNow`),
-   * so the ink bitmap, Excalidraw's own canvases, the scene overlay, the
+   * Reading scroll leaves the scene store's painted camera alone until settle
+   * (see `applyVisualScrollNow`), so the ink bitmap, the scene overlay, the
    * selection chrome, the lined paper and the page title are all still correct
    * *relative to the page* and wrong only by this translation. Writing
    * `translate3d` on those few nodes (not a custom property on the board root)
@@ -2497,7 +2497,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const drawBasePageHRef = useRef<number | null>(null);
   const lastCodeSourceRef = useRef<string>("");
   const lastCodeSlotRef = useRef<ScreenRect | null>(null);
-  /** Skip full scene reconcile when Excalidraw only moved the camera. */
+  /** Skip scene work for camera changes; live pans ride the painted camera until settle. */
   const lastSceneElementsRevRef = useRef<number>(-1);
   const lastSelectionSigRef = useRef<string>("");
   const lastElementsArgRef = useRef<readonly unknown[] | null>(null);
@@ -4235,9 +4235,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * Move the page for one scroll sample — no `updateScene`, no reblit.
    *
    * Everything on the board is bound to page coordinates for the duration of
-   * the gesture: the markdown slot takes its absolute transform, and the ink,
-   * Excalidraw's canvases and the overlays take the delta from the camera they
-   * were painted at. That is one compositor translate per layer per frame,
+   * the gesture: the markdown slot takes its absolute transform, and the ink
+   * and overlays take the delta from the camera they were painted at.
+   * That is one compositor translate per layer per frame,
    * against the clear-and-blit of the whole ink layer this used to do — the
    * difference between a coast that costs `Board.step` and one that costs
    * `Board.step` plus a full raster pass.
@@ -4327,8 +4327,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
      * Ride, or rebase.
      *
      * The ink measures the delta against its own last paint and the overlays
-     * against Excalidraw's appState — the same camera in the ordinary case, and
-     * each one right on its own terms when a mid-gesture repaint has moved one
+     * against the scene store's painted camera — the same in the ordinary case,
+     * and each one right on its own terms when a mid-gesture repaint has moved one
      * of them. Either can veto: a zoom (no translate expresses a rescale) or a
      * drag past half a viewport (the painted screenful has run out). Rebase
      * then: one `updateScene` + ink reblit, then ride again from zero.
@@ -4394,8 +4394,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    *
    * A translate can only borrow against a screenful that has already been
    * painted, so a long flick has to stop and pay for a real one somewhere. Do
-   * it as a normal settle — push the camera into Excalidraw, repaint the ink
-   * once, re-report the slots — except that the gesture stays live, so the next
+   * it as a normal settle — commit the live camera to the scene store, repaint
+   * the ink once, re-report the slots — except that the gesture stays live, so the next
    * sample starts riding again from zero.
    */
   const rebaseVisualScroll = useCallback(() => {
@@ -4436,7 +4436,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [flushVisualScroll, landPanOffset]);
 
   /**
-   * Push live camera into Excalidraw once the gesture settles.
+   * Commit the live camera to the scene store once the pan settles.
    *
    * Clear the ride translate in this turn, then remesh. Landing that remesh
    * a frame later left the page at the live camera with the old translate still
@@ -7202,18 +7202,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
          * A full reset jumps to page 1; skipping the camera leaves portrait
          * scrollX in a landscape hole.
          */
-        const prevCamera = api.getAppState() as {
-          scrollX?: number;
-          scrollY?: number;
-          zoom?: { value?: number };
-        };
+        const prevCamera = api.getCamera();
         const riding = liveCameraRef.current;
         const keepDocumentY = mode === "keepY" || mode === "recentre";
         const keepYInput = {
           box: { minX, minY, maxX, maxY },
           inset,
           viewWidth,
-          prevZoom: riding?.live ? riding.zoom : (prevCamera.zoom?.value ?? 1),
+          prevZoom: riding?.live ? riding.zoom : (prevCamera.zoom ?? 1),
           prevScrollX: riding?.live ? riding.scrollX : (prevCamera.scrollX ?? 0),
           prevScrollY: riding?.live ? riding.scrollY : (prevCamera.scrollY ?? 0),
           zoomMin: FIT_ZOOM_MIN,
@@ -7306,10 +7302,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
          * the previous orientation — so the file slot stayed on the old zoom
          * until spread toggle rewrote C. Stamp the fitted camera here.
          */
-        const offsets = api.getAppState() as {
-          offsetLeft?: number;
-          offsetTop?: number;
-        };
+        const offsets = api.getCamera();
         committedPanCameraRef.current = {
           scrollX: nextScrollX,
           scrollY: nextScrollY,
@@ -7757,8 +7750,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         handPanningRef.current;
       const sashLive = sashDragActive();
       /*
-       * Sash drag: CSS already resized the panes. updateScene here is the
-       * Excalidraw 30fps cap on both halves. Camera waits for settle.
+       * Sash drag: CSS already resized the panes. Keep the painted camera in
+       * the scene store while the live view changes; commit when the drag settles.
        */
       if (sashLive) return true;
       /*
@@ -9911,7 +9904,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         const boxes = [...ops.filter(op => op.kind === "draw").map(op => inkOpsBounds([op])).filter((box): box is SceneBounds => Boolean(box)),
           ...authored.map(el => ({minX:el.x,minY:el.y,maxX:el.x+el.width,maxY:el.y+el.height}))];
         if (!boxes.length) return [];
-        const frozen = {getSceneElements:()=>snapshot.elements,getAppState:()=>({...snapshot.appState,viewBackgroundColor:"#ffffff"}),getFiles:()=>snapshot.files ?? {}} as unknown as ExcalidrawApi;
+        const frozen = {getSceneElements:()=>snapshot.elements,getAppState:()=>({...snapshot.appState,viewBackgroundColor:"#ffffff"}),getFiles:()=>snapshot.files ?? {}} as unknown as BoardSceneApi;
         const minX=Math.min(...boxes.map(b=>b.minX)), minY=Math.min(...boxes.map(b=>b.minY));
         const maxX=Math.max(...boxes.map(b=>b.maxX)), maxY=Math.max(...boxes.map(b=>b.maxY));
         const shots:Array<{label:string;png:string}>=[];
@@ -9935,7 +9928,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           getSceneElements: () => snapshot.elements,
           getAppState: () => ({ ...snapshot.appState, zoom: {value: snapshot.appState.zoom}, viewBackgroundColor: "#ffffff" }),
           getFiles: () => snapshot.files ?? {},
-        } as unknown as ExcalidrawApi;
+        } as unknown as BoardSceneApi;
         return exportSceneFrameBlob(frozen, ink, {x:bounds.minX-16,y:bounds.minY-16,
           width:bounds.maxX-bounds.minX+32,height:bounds.maxY-bounds.minY+32}, 2);
       },
@@ -11223,8 +11216,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                           const zoom = Math.max(
                             0.05,
                             live?.zoom ??
-                              (apiRef.current?.getAppState() as { zoom?: { value?: number } } | undefined)
-                                ?.zoom?.value ??
+                              apiRef.current?.getCamera().zoom ??
                               1,
                           );
                           ensureLinedPair(zoom);

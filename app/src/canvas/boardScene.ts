@@ -28,11 +28,16 @@ export type BoardChangeHandler = (
   appState: Record<string, unknown>,
 ) => void;
 
-export interface ExcalidrawApi {
+export interface BoardSceneApi {
   getSceneElements(): readonly unknown[];
   getAppState(): Record<string, unknown>;
   getCamera(): Camera & Viewport;
   setCamera(next: Partial<Camera>): void;
+  camera: {
+    get(): Camera & Viewport;
+    set(next: Partial<Camera>): void;
+    subscribe(listener: BoardScrollHandler): () => void;
+  };
   getFiles(): Record<string, unknown>;
   addFiles?(files: Array<{
     id: string;
@@ -66,6 +71,9 @@ export interface ExcalidrawApi {
   };
   refresh?(): void;
 }
+
+/** @deprecated use BoardSceneApi */
+export type ExcalidrawApi = BoardSceneApi;
 
 type SceneEl = {
   x?: number;
@@ -204,7 +212,7 @@ export async function exportToBlob(opts: {
 export function createBoardScene(initial?: {
   elements?: unknown[];
   appState?: Record<string, unknown>;
-}): ExcalidrawApi {
+}): BoardSceneApi {
   let elements: unknown[] = initial?.elements ? [...initial.elements] : [];
   let files: Record<string, unknown> = {};
   let appState: Record<string, unknown> = {
@@ -255,7 +263,7 @@ export function createBoardScene(initial?: {
     for (const listener of scrollListeners) listener(x, y, zoom);
   };
 
-  const api: ExcalidrawApi = {
+  const api: BoardSceneApi = {
     getSceneElements() {
       return liveElements();
     },
@@ -279,6 +287,17 @@ export function createBoardScene(initial?: {
         appState: { ...scroll, ...(zoom === undefined ? {} : { zoom: { value: zoom } }) },
         captureUpdate: CaptureUpdateAction.NEVER,
       });
+    },
+    camera: {
+      get() {
+        return api.getCamera();
+      },
+      set(next) {
+        api.setCamera(next);
+      },
+      subscribe(listener) {
+        return api.onScrollChange!(listener);
+      },
     },
     getFiles() {
       return files;
