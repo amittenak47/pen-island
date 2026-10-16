@@ -505,3 +505,53 @@ fn providers_round_trip_without_changing_existing_defaults_or_api_values() {
         assert_eq!(action.provider_mode(), "viz");
     }
 }
+
+#[test]
+fn configured_bot_deadline_uses_the_clock_and_only_applies_to_new_bot_runs() {
+    let clock = Arc::new(AtomicU64::new(1000));
+    let registry = AgentRunRegistry::with_clock({
+        let clock = clock.clone();
+        move || clock.load(Ordering::SeqCst)
+    });
+    let mut task = input(AgentAction::Ask, json!({"surface":"whiteboard"}));
+    let old = registry.create(
+        "old".into(),
+        AgentResponder::Bot,
+        input(AgentAction::Ask, json!({})),
+        EventSink::none(),
+        None,
+    );
+    task.cfg.set("coach.agent_bot_timeout_secs", "60").unwrap();
+    let new = registry.create(
+        "new".into(),
+        AgentResponder::Bot,
+        task,
+        EventSink::none(),
+        None,
+    );
+    let app = registry.create(
+        "app".into(),
+        AgentResponder::App,
+        input(AgentAction::Ask, json!({})),
+        EventSink::none(),
+        None,
+    );
+    assert_eq!(registry.get_request(&old.id).unwrap().deadline, 601_000);
+    assert_eq!(registry.get_request(&new.id).unwrap().deadline, 61_000);
+    assert_eq!(registry.get_request(&app.id).unwrap().deadline, 301_000);
+    clock.store(60_999, Ordering::SeqCst);
+    assert_eq!(
+        registry.get_request(&new.id).unwrap().status,
+        AgentRunStatus::Waiting
+    );
+    clock.store(61_000, Ordering::SeqCst);
+    assert_eq!(
+        registry.get_request(&new.id).unwrap().status,
+        AgentRunStatus::Failed
+    );
+    assert!(registry.reply(&new.id, "Too late").is_err());
+    assert_eq!(
+        registry.get_request(&old.id).unwrap().status,
+        AgentRunStatus::Waiting
+    );
+}

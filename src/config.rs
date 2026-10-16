@@ -80,10 +80,13 @@ pub struct CoachConfig {
     /// Freeze one approach per board session and require an explicit,
     /// reasoned transition to leave it.
     pub approach_commitment: bool,
-    /// Coach tools are available only to explicitly app/bot-scoped MCP clients.
+    /// Enable scoped coach MCP tools and the general inbox when a mode uses bot.
     pub agent_mcp_tools: bool,
     /// Include a board image already supplied by the panel; never render here.
     pub agent_send_board_image: bool,
+    /// Maximum wait for a new bot run; bounded below the panel socket watchdog.
+    #[serde(deserialize_with = "deserialize_agent_bot_timeout")]
+    pub agent_bot_timeout_secs: u64,
 }
 
 impl Default for CoachConfig {
@@ -96,8 +99,25 @@ impl Default for CoachConfig {
             approach_commitment: true,
             agent_mcp_tools: true,
             agent_send_board_image: true,
+            agent_bot_timeout_secs: 600,
         }
     }
+}
+
+fn deserialize_agent_bot_timeout<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> std::result::Result<u64, D::Error> {
+    let seconds = u64::deserialize(deserializer)?;
+    validate_agent_bot_timeout(seconds).map_err(serde::de::Error::custom)?;
+    Ok(seconds)
+}
+
+pub fn validate_agent_bot_timeout(seconds: u64) -> Result<()> {
+    anyhow::ensure!(
+        (60..=600).contains(&seconds),
+        "coach.agent_bot_timeout_secs must be between 60 and 600"
+    );
+    Ok(())
 }
 
 /// Voice dictation in the agent composer. `android` is the device's own
@@ -702,6 +722,11 @@ impl Config {
             "coach.approach_commitment" => self.coach.approach_commitment = parse_bool(value)?,
             "coach.agent_mcp_tools" => self.coach.agent_mcp_tools = parse_bool(value)?,
             "coach.agent_send_board_image" => self.coach.agent_send_board_image = parse_bool(value)?,
+            "coach.agent_bot_timeout_secs" => {
+                let seconds = value.parse::<u64>().context("coach.agent_bot_timeout_secs must be an integer between 60 and 600")?;
+                validate_agent_bot_timeout(seconds)?;
+                self.coach.agent_bot_timeout_secs = seconds;
+            }
             "voice.engine" => {
                 validate_voice_engine(value)?;
                 self.voice.engine = value.to_string();
@@ -776,7 +801,7 @@ impl Config {
                  llm.ollama.{{base_url,model,vision_model,vision}}, \
                  llm.openai.{{base_url,model,vision_model,vision,api_key}}, \
                  llm.groq.{{base_url,model,vision_model,vision,api_key}}, llm.modes.<{}>, serve.port, serve.token, serve.searxng_url, \
-                 coach.{{ws_runs,process_events_ui,planner_enabled,draw_review_enabled,approach_commitment}}, \
+                 coach.{{ws_runs,process_events_ui,planner_enabled,draw_review_enabled,approach_commitment,agent_bot_timeout_secs}}, \
                  voice.{{engine,openai_model,groq_model,deepgram_model,local_base_url,local_model,vocabulary,deepgram_api_key,cleanup}}",
                 crate::dataset::DATASETS
                     .iter()
@@ -800,6 +825,7 @@ impl Config {
             "coach.planner_enabled" => self.coach.planner_enabled.to_string(),
             "coach.draw_review_enabled" => self.coach.draw_review_enabled.to_string(),
             "coach.approach_commitment" => self.coach.approach_commitment.to_string(),
+            "coach.agent_bot_timeout_secs" => self.coach.agent_bot_timeout_secs.to_string(),
             "voice.engine" => self.voice.engine.clone(),
             "voice.openai_model" => self.voice.openai_model.clone(),
             "voice.groq_model" => self.voice.groq_model.clone(),

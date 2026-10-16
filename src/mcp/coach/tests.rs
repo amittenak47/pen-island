@@ -16,6 +16,9 @@ use crate::problem::IoCase;
 struct FakeClient(Shared);
 
 impl FootnoteHub for FakeClient {
+    fn bot_inbox_tools(&self) -> Vec<Value> {
+        general_tools(self)
+    }
     fn list_pending(&self) -> Result<Value, String> {
         Ok(json!([]))
     }
@@ -806,13 +809,27 @@ impl LlmProvider for Api {
 
 #[tokio::test]
 async fn socket_run_driven_by_mcp_matches_real_api_tool_events_stages_and_result() {
+    socket_mcp_contract(false).await;
+}
+
+#[tokio::test]
+async fn socket_bot_run_answered_through_general_mcp_matches_api_frames() {
+    socket_mcp_contract(true).await;
+}
+
+async fn socket_mcp_contract(general: bool) {
     use crate::serve::ws::{drive_channels, ServerFrame};
     use std::time::Duration;
     use tokio::sync::mpsc;
     let mut cfg = Config::default();
     cfg.llm.modes.review = "bot".into();
     let state = crate::serve::new_state(cfg);
-    let hub = bots(&state);
+    let hub: Box<dyn FootnoteHub> = if general {
+        Box::new(FakeClient(state.clone()))
+    } else {
+        Box::new(bots(&state))
+    };
+    let hub = hub.as_ref();
     let (incoming, rx) = mpsc::unbounded_channel();
     let (tx, mut frames) = mpsc::unbounded_channel::<ServerFrame>();
     let driver = tokio::spawn(drive_channels(state.clone(), rx, tx));
@@ -826,13 +843,13 @@ async fn socket_run_driven_by_mcp_matches_real_api_tool_events_stages_and_result
             .unwrap();
         assert_eq!(serde_json::to_value(frame).unwrap()["stage"], stage);
     }
-    let run_id = data(&call_tool(&hub, "list_agent_requests", json!({})))[0]["id"]
+    let run_id = data(&call_tool(hub, "list_agent_requests", json!({})))[0]["id"]
         .as_str()
         .unwrap()
         .to_owned();
     assert_eq!(
         data(&call_tool(
-            &hub,
+            hub,
             "get_agent_request",
             json!({"run_id":run_id})
         ))["request_id"],
@@ -840,7 +857,7 @@ async fn socket_run_driven_by_mcp_matches_real_api_tool_events_stages_and_result
     );
     assert_ne!(
         call_tool(
-            &hub,
+            hub,
             "report_step",
             json!({"run_id":run_id,"text":"Reading your board"})
         )["isError"],
@@ -884,7 +901,7 @@ async fn socket_run_driven_by_mcp_matches_real_api_tool_events_stages_and_result
         ),
     ] {
         args["run_id"] = json!(run_id);
-        let result = call_tool(&hub, name, args);
+        let result = call_tool(hub, name, args);
         assert_eq!(result["isError"] == true, !success);
     }
     let expected_events = events.lock().unwrap().clone();
@@ -908,7 +925,7 @@ async fn socket_run_driven_by_mcp_matches_real_api_tool_events_stages_and_result
             .unwrap();
         assert_eq!(serde_json::to_value(actual).unwrap(), expected);
     }
-    call_tool(&hub, "reply", json!({"run_id":run_id,"text":outcome.reply}));
+    call_tool(hub, "reply", json!({"run_id":run_id,"text":outcome.reply}));
     assert_eq!(
         serde_json::to_value(frames.recv().await.unwrap()).unwrap(),
         json!({"type":"stage","request_id":"mcp","stage":"done","detail":""})
@@ -929,6 +946,266 @@ async fn socket_run_driven_by_mcp_matches_real_api_tool_events_stages_and_result
         json!({"type":"result","request_id":"mcp","action":"ask","body":expected})
     );
     assert!(frames.try_recv().is_err(), "no reasoning or extra frames");
+    drop(incoming);
+    tokio::time::timeout(Duration::from_secs(3), driver)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
+#[test]
+fn general_inbox_gate_is_live_bot_only_and_restores_the_exact_original_list() {
+    let state = crate::serve::new_state(Config::default());
+    let hub = FakeClient(state.clone());
+    let original = rpc(&hub, "tools/list", json!({}));
+    assert_eq!(original, json!({"tools":super::super::tool_list()}));
+    let bot_id = create(&state, AgentResponder::Bot, AgentAction::Viz, json!({}));
+    let app_id = create(&state, AgentResponder::App, AgentAction::Viz, json!({}));
+    let closed = call_tool(&hub, "list_agent_requests", json!({}));
+    assert_eq!(closed["isError"], true);
+    assert!(closed["content"][0]["text"]
+        .as_str()
+        .unwrap()
+        .contains("inbox is disabled"));
+    for mode in crate::config::COACH_MODES {
+        state
+            .cfg
+            .write()
+            .unwrap()
+            .set(&format!("llm.modes.{mode}"), "bot")
+            .unwrap();
+        let offered = rpc(&hub, "tools/list", json!({}));
+        let bot_tools = rpc(&bots(&state), "tools/list", json!({}));
+        let mut expected = super::super::tool_list();
+        expected.extend(bot_tools["tools"].as_array().unwrap().clone());
+        assert_eq!(offered, json!({"tools":expected}));
+        for tool in bot_tools["tools"].as_array().unwrap() {
+            assert!(COACH_TOOLS.contains(&tool["name"].as_str().unwrap()));
+        }
+        let waiting = data(&call_tool(&hub, "list_agent_requests", json!({})));
+        assert_eq!(waiting.as_array().unwrap().len(), 1);
+        assert_eq!(waiting[0]["id"], bot_id);
+        assert_eq!(
+            call_tool(&hub, "get_agent_request", json!({"run_id":app_id}))["isError"],
+            true
+        );
+        state.cfg.write().unwrap().coach.agent_mcp_tools = false;
+        assert_eq!(rpc(&hub, "tools/list", json!({})), original);
+        assert_eq!(
+            call_tool(
+                &hub,
+                "report_step",
+                json!({"run_id":bot_id,"text":"Reading"})
+            )["isError"],
+            true
+        );
+        state.cfg.write().unwrap().coach.agent_mcp_tools = true;
+        state
+            .cfg
+            .write()
+            .unwrap()
+            .set(&format!("llm.modes.{mode}"), "local")
+            .unwrap();
+        assert_eq!(rpc(&hub, "tools/list", json!({})), original);
+        assert_eq!(
+            call_tool(&hub, "reply", json!({"run_id":bot_id,"text":"Late"}))["isError"],
+            true
+        );
+    }
+    // Enforce the provider gate inside the hub too, even if it closed after discovery.
+    let result = general_request(
+        &hub,
+        "tools/call",
+        json!({"name":"get_agent_request","arguments":{"run_id":bot_id}}),
+    )
+    .unwrap();
+    assert_eq!(result["isError"], true);
+}
+
+#[test]
+fn general_inbox_instructions_and_prompts_follow_the_gate_without_changing_old_wording() {
+    let state = crate::serve::new_state(Config::default());
+    let hub = FakeClient(state.clone());
+    let instructions = super::super::server_instructions();
+    let prompts = rpc(&hub, "prompts/list", json!({}));
+    for open in [false, true, false] {
+        state.cfg.write().unwrap().llm.modes.review = if open { "bot" } else { "local" }.into();
+        let init = rpc(&hub, "initialize", json!({}));
+        assert_eq!(
+            init["instructions"],
+            if open {
+                format!("{instructions}\n\n{}", super::super::COACH_WORKFLOW)
+            } else {
+                instructions.clone()
+            }
+        );
+        let listed = rpc(&hub, "prompts/list", json!({}));
+        if open {
+            assert_eq!(listed["prompts"].as_array().unwrap().len(), 3);
+        } else {
+            assert_eq!(listed, prompts);
+        }
+        for (name, _, _, text) in super::super::PROMPTS {
+            let prompt = rpc(&hub, "prompts/get", json!({"name":name}));
+            assert_eq!(
+                prompt["messages"][0]["content"]["text"],
+                if open {
+                    format!("{text}\n\n{}", super::super::COACH_WORKFLOW)
+                } else {
+                    text.to_string()
+                }
+            );
+        }
+        let coach = super::super::dispatch(
+            &hub,
+            &message("prompts/get", json!({"name":"answer_coach_requests"})),
+        )
+        .unwrap();
+        if open {
+            let text = coach["result"]["messages"][0]["content"]["text"]
+                .as_str()
+                .unwrap();
+            for word in [
+                "once",
+                "list_agent_requests",
+                "get_agent_request",
+                "allowed tools",
+                "report_step",
+                "reply",
+                "full solution",
+            ] {
+                assert!(text.contains(word), "{word}");
+            }
+        } else {
+            assert_eq!(coach["error"]["code"], -32602);
+        }
+    }
+    let id = create(&state, AgentResponder::Bot, AgentAction::Ask, json!({}));
+    state.cfg.write().unwrap().llm.modes.review = "bot".into();
+    let request = data(&call_tool(&hub, "get_agent_request", json!({"run_id":id})));
+    assert_eq!(
+        request["answer_guidance"],
+        crate::llm::coach::ASK_SYSTEM_PROMPT
+    );
+}
+
+#[tokio::test]
+async fn general_http_adapter_observes_provider_changes_without_a_listener() {
+    use axum::{
+        body::{to_bytes, Body},
+        http::Request,
+    };
+    use tower::ServiceExt;
+    let state = crate::serve::new_state(Config::default());
+    let router = super::super::http_router(
+        Arc::new(FakeClient(state.clone())),
+        "127.0.0.1:7879".parse().unwrap(),
+        "test-token-with-at-least-32-characters".into(),
+    );
+    let id = create(&state, AgentResponder::Bot, AgentAction::Ask, json!({}));
+    for open in [false, true, false] {
+        state.cfg.write().unwrap().llm.modes.review = if open { "bot" } else { "local" }.into();
+        for (method, params) in [
+            ("tools/list", json!({})),
+            (
+                "tools/call",
+                json!({"name":"get_agent_request","arguments":{"run_id":id}}),
+            ),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::post("/mcp")
+                        .header(
+                            "authorization",
+                            "Bearer test-token-with-at-least-32-characters",
+                        )
+                        .header("content-type", "application/json")
+                        .body(Body::from(message(method, params).to_string()))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), 200);
+            let body = to_bytes(response.into_body(), 1024 * 1024).await.unwrap();
+            let result = &serde_json::from_slice::<Value>(&body).unwrap()["result"];
+            if method == "tools/list" {
+                assert_eq!(
+                    result["tools"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .any(|tool| tool["name"] == "list_agent_requests"),
+                    open
+                );
+            } else {
+                assert_eq!(result["isError"] == true, !open);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn socket_bot_deadline_uses_the_setting_and_refuses_late_general_mcp_replies() {
+    use crate::serve::ws::{drive_channels, ServerFrame};
+    use std::time::Duration;
+    use tokio::sync::mpsc;
+    let clock = Arc::new(AtomicU64::new(1000));
+    let mut cfg = Config::default();
+    cfg.llm.modes.review = "bot".into();
+    cfg.set("coach.agent_bot_timeout_secs", "60").unwrap();
+    let mut state = crate::serve::new_state(cfg);
+    Arc::get_mut(&mut state).unwrap().agent_runs = Arc::new(AgentRunRegistry::with_clock({
+        let clock = clock.clone();
+        move || clock.load(Ordering::SeqCst)
+    }));
+    let hub = FakeClient(state.clone());
+    let (incoming, rx) = mpsc::unbounded_channel();
+    let (tx, mut frames) = mpsc::unbounded_channel::<ServerFrame>();
+    let driver = tokio::spawn(drive_channels(state.clone(), rx, tx));
+    incoming
+        .send(
+            json!({"type":"run","request_id":"deadline","action":"ask","payload":{
+        "surface":"whiteboard","question":"A hint?"}})
+            .to_string(),
+        )
+        .unwrap();
+    for stage in ["received", "ask"] {
+        let frame = tokio::time::timeout(Duration::from_secs(3), frames.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(serde_json::to_value(frame).unwrap()["stage"], stage);
+    }
+    let waiting = data(&call_tool(&hub, "list_agent_requests", json!({})));
+    let id = waiting[0]["id"].as_str().unwrap();
+    assert_eq!(waiting[0]["created_at"], 1000);
+    assert_eq!(waiting[0]["deadline"], 61_000);
+    state.cfg.write().unwrap().coach.agent_bot_timeout_secs = 600;
+    assert_eq!(state.agent_runs.get_request(id).unwrap().deadline, 61_000);
+    clock.store(61_000, Ordering::SeqCst);
+    // A call observes the deadline itself, even before the socket's timer wakes.
+    assert_eq!(
+        call_tool(&hub, "reply", json!({"run_id":id,"text":"Late answer"}))["isError"],
+        true
+    );
+    let frame = serde_json::to_value(
+        tokio::time::timeout(Duration::from_secs(3), frames.recv())
+            .await
+            .unwrap()
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(frame["type"], "error");
+    assert_eq!(frame["request_id"], "deadline");
+    assert!(frame["message"]
+        .as_str()
+        .unwrap()
+        .contains("deadline expired"));
+    assert!(data(&call_tool(&hub, "list_agent_requests", json!({})))
+        .as_array()
+        .unwrap()
+        .is_empty());
     drop(incoming);
     tokio::time::timeout(Duration::from_secs(3), driver)
         .await

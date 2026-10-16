@@ -53,6 +53,8 @@ pub struct CoachFlagsDto {
     pub agent_mcp_tools: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_send_board_image: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_bot_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -177,6 +179,7 @@ fn config_dto(cfg: &Config) -> ConfigDto {
             approach_commitment: cfg.coach.approach_commitment,
             agent_mcp_tools: Some(cfg.coach.agent_mcp_tools),
             agent_send_board_image: Some(cfg.coach.agent_send_board_image),
+            agent_bot_timeout_secs: Some(cfg.coach.agent_bot_timeout_secs),
         },
         token_set: cfg
             .serve
@@ -304,6 +307,9 @@ fn apply_config_dto(cfg: &mut Config, dto: &ConfigDto) -> anyhow::Result<()> {
     }
     if let Some(enabled) = dto.coach.agent_send_board_image {
         cfg.coach.agent_send_board_image = enabled;
+    }
+    if let Some(seconds) = dto.coach.agent_bot_timeout_secs {
+        cfg.set("coach.agent_bot_timeout_secs", &seconds.to_string())?;
     }
     if let Some(voice) = &dto.voice {
         cfg.set("voice.engine", voice.engine.trim())?;
@@ -659,5 +665,52 @@ mod agent_mcp_settings_tests {
         let mut reloaded = Config::default();
         apply_config_dto(&mut reloaded, &dto).unwrap();
         assert!(!reloaded.coach.agent_mcp_tools && !reloaded.coach.agent_send_board_image);
+    }
+}
+
+#[cfg(test)]
+mod bot_deadline_settings_tests {
+    use super::*;
+
+    #[test]
+    fn bot_timeout_defaults_validates_and_round_trips_with_older_clients() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.coach.agent_bot_timeout_secs, 600);
+        assert_eq!(config_dto(&cfg).coach.agent_bot_timeout_secs, Some(600));
+        for seconds in [59, 601] {
+            assert!(cfg
+                .set("coach.agent_bot_timeout_secs", &seconds.to_string())
+                .is_err());
+            let mut dto = config_dto(&cfg);
+            dto.coach.agent_bot_timeout_secs = Some(seconds);
+            assert!(apply_config_dto(&mut cfg, &dto).is_err());
+            assert!(toml::from_str::<Config>(&format!(
+                "[coach]\nagent_bot_timeout_secs = {seconds}"
+            ))
+            .is_err());
+            assert_eq!(cfg.coach.agent_bot_timeout_secs, 600);
+        }
+        for seconds in [60, 120, 300, 600] {
+            let mut dto = config_dto(&cfg);
+            dto.coach.agent_bot_timeout_secs = Some(seconds);
+            apply_config_dto(&mut cfg, &dto).unwrap();
+            assert_eq!(
+                cfg.get("coach.agent_bot_timeout_secs").unwrap(),
+                seconds.to_string()
+            );
+            let saved = toml::to_string(&cfg).unwrap();
+            let reloaded: Config = toml::from_str(&saved).unwrap();
+            assert_eq!(reloaded.coach.agent_bot_timeout_secs, seconds);
+            dto.coach.agent_bot_timeout_secs = None;
+            apply_config_dto(&mut cfg, &dto).unwrap();
+            assert_eq!(cfg.coach.agent_bot_timeout_secs, seconds);
+        }
+        assert_eq!(
+            toml::from_str::<Config>("[coach]")
+                .unwrap()
+                .coach
+                .agent_bot_timeout_secs,
+            600
+        );
     }
 }

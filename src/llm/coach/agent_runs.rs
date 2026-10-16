@@ -79,10 +79,10 @@ impl AgentResponder {
         }
     }
 
-    fn timeout(self) -> Duration {
+    fn timeout(self, cfg: &Config) -> Duration {
         match self {
             Self::App => APP_RUN_TIMEOUT,
-            Self::Bot => BOT_RUN_TIMEOUT,
+            Self::Bot => Duration::from_secs(cfg.coach.agent_bot_timeout_secs),
         }
     }
 }
@@ -291,6 +291,7 @@ impl AgentRunRegistry {
         timeout: Option<Duration>,
     ) -> AgentRunHandle {
         let now = (self.clock)();
+        let timeout = timeout.unwrap_or_else(|| responder.timeout(&input.cfg));
         let id = format!("agent-{:032x}", rand::random::<u128>());
         let (completion, receiver) = watch::channel(None);
         let allowed_tools = input.allowed_tools();
@@ -311,7 +312,7 @@ impl AgentRunRegistry {
             updated_at: now,
             started_at: None,
             finished_at: None,
-            deadline: now.saturating_add(timeout.unwrap_or(responder.timeout()).as_millis() as u64),
+            deadline: now.saturating_add(timeout.as_millis() as u64),
             error: None,
         };
         self.runs.lock().unwrap_or_else(|e| e.into_inner()).insert(

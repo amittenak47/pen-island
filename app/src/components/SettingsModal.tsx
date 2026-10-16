@@ -289,11 +289,12 @@ const MODES = ["ambient", "review", "bridge", "viz", "planner"] as const;
  * because there are three questions: what does it know going in, how does it
  * hold its ground, and how does it talk back.
  */
+type CoachToggle = Exclude<keyof CoachFlags, "agent_bot_timeout_secs">;
 const COACH_FLAG_GROUPS: Array<{
   id: string;
   title: string;
   blurb: string;
-  flags: Array<[keyof CoachFlags, string, string]>;
+  flags: Array<[CoachToggle, string, string]>;
 }> = [
   {
     id: "coach-knows",
@@ -322,7 +323,7 @@ const COACH_FLAG_GROUPS: Array<{
   },
 ];
 
-const SHARED_AGENT_FLAGS: Array<[keyof CoachFlags, string, string]> = [
+const SHARED_AGENT_FLAGS: Array<[CoachToggle, string, string]> = [
       [
         "ws_runs",
         "Show replies as they’re written",
@@ -1453,16 +1454,17 @@ export function SettingsModal({
   changes.storage = (changes.storage ?? 0) + Number(hubUrl.trim() !== baselineHubUrl) + Number(hubToken.trim() !== baselineHubToken);
   changes.diagnostics = (changes.diagnostics ?? 0) + Number(debugLog !== baselineDebugLog);
   changes.llm = (changes.llm ?? 0) + Number(Boolean(openaiKeyDraft.trim()) || clearOpenaiKey) + Number(Boolean(groqKeyDraft.trim()) || clearGroqKey);
-  changes.llm += coachChanges(["agent_send_board_image"]);
+  changes.llm += coachChanges(["agent_send_board_image"]) + countSettingsChanges(
+    { timeout: draft.coach?.agent_bot_timeout_secs ?? 600 }, { timeout: baselineConfig.coach?.agent_bot_timeout_secs ?? 600 });
   changes.chatbot = Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode)
     + countSettingsChanges(runnerConfig ?? {}, baselineRunnerConfig ?? {});
   changes.voice = (changes.voice ?? 0) + Number(Boolean(deepgramKeyDraft.trim()) || clearDeepgramKey);
   const resetGroup = (id: string) => {
     if (saving) return;
     restoreDeviceDraft({...draftPrefs, ...select(baselinePrefs, prefGroups[id] ?? [])});
-    const coachFields = id === "ui" ? sharedUiFlags : id === "llm" ? ["agent_send_board_image"] as (keyof CoachFlags)[] : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
+    const coachFields = id === "ui" ? sharedUiFlags : id === "llm" ? ["agent_send_board_image", "agent_bot_timeout_secs"] as (keyof CoachFlags)[] : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
     setDraft(prev => ({...prev, ...select(baselineConfig, configGroups[id] ?? []),
-      coach: {...DEFAULT_COACH_FLAGS, ...prev.coach, ...select({...DEFAULT_COACH_FLAGS, ...baselineConfig.coach}, coachFields)}}));
+      coach: {...DEFAULT_COACH_FLAGS, ...prev.coach, ...select({...DEFAULT_COACH_FLAGS, agent_bot_timeout_secs: 600, ...baselineConfig.coach}, coachFields)}}));
     if (id === "chatbot") { setChatBotClient(baselineChatBotClient); setChatBotAnswerMode(baselineChatBotAnswerMode); setRunnerConfig(baselineRunnerConfig); }
     if (id === "storage") { setHubUrl(baselineHubUrl); setHubToken(baselineHubToken); }
     if (id === "diagnostics") setDebugLog(baselineDebugLog);
@@ -3431,6 +3433,14 @@ export function SettingsModal({
                 </label>
               ))}
               <p className="lc-settings-hint">AI application: {AGENT_PROVIDER_HINTS.app}.<br />AI assistant: {AGENT_PROVIDER_HINTS.bot}.</p>
+              <label>
+                <span>Give the assistant up to</span>
+                <select aria-label="Give the assistant up to" value={draft.coach?.agent_bot_timeout_secs ?? 600}
+                  onChange={e => setDraft(prev => ({ ...prev, coach: { ...DEFAULT_COACH_FLAGS, ...prev.coach,
+                    agent_bot_timeout_secs: Number(e.target.value) } }))}>
+                  {[1, 2, 5, 10].map(minutes => <option key={minutes} value={minutes * 60}>{minutes} {minutes === 1 ? "minute" : "minutes"}</option>)}
+                </select>
+              </label>
               <button type="button" className="lc-secondary" onClick={() => { setSettingsQuery(""); setPage("chatbot"); }}>
                 Choose application or assistant in ChatBot
               </button>

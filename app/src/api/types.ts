@@ -253,6 +253,7 @@ export interface CoachFlags {
   /** Include the rendered board with application / assistant requests. */
   agent_send_board_image?: boolean;
   agent_mcp_tools?: boolean;
+  agent_bot_timeout_secs?: number;
 }
 
 export const DEFAULT_COACH_FLAGS: CoachFlags = {

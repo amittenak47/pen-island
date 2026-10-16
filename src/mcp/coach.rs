@@ -13,7 +13,48 @@ use crate::serve::{blocking, AppError, Shared};
 pub const RUN_ENV: &str = "LC_AGENT_RUN_ID";
 pub const BOTS_ENV: &str = "LC_AGENT_BOT_INBOX";
 pub const BOTS_JOB: &str = "agent-bots";
-const ROUTE: &str = "/coach/agent-mcp";
+pub(super) const ROUTE: &str = "/coach/agent-mcp";
+
+/// The fixed boundary shared by general MCP dispatch and the OAuth bridge.
+/// Actual schemas (including optional document tools) still come from the hub.
+pub const COACH_TOOLS: &[&str] = &[
+    "list_agent_requests",
+    "get_agent_request",
+    "report_step",
+    "reply",
+    "draw_structure",
+    "animate_trace",
+    "annotate_region",
+    "cite_test_case",
+    "highlight_student_work",
+    "create_attachment",
+    "query_document_vectors",
+    "query_library_vectors",
+    "get_document_section",
+    "lookup_reference",
+    "get_current_page",
+    "get_highlight",
+    "list_document_marks",
+    "save_annotation",
+    "search_web",
+];
+
+pub(super) fn general_tools(hub: &dyn FootnoteHub) -> Vec<Value> {
+    general_request(hub, "tools/list", json!({}))
+        .ok()
+        .and_then(|result| result["tools"].as_array().cloned())
+        .unwrap_or_default()
+}
+
+pub(super) fn general_request(
+    hub: &dyn FootnoteHub,
+    method: &str,
+    params: Value,
+) -> Result<Value, String> {
+    hub.call("POST", ROUTE, Some(json!({
+        "scope": AgentScope::BotInbox, "require_bot_provider": true, "method": method, "params": params,
+    })))
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -206,6 +247,9 @@ pub(super) fn dispatch(hub: &dyn FootnoteHub, scope: AgentScope, message: &Value
 #[serde(deny_unknown_fields)]
 pub(crate) struct AgentMcpRequest {
     scope: AgentScope,
+    /// General MCP connections must also have a coach mode assigned to bot.
+    #[serde(default)]
+    require_bot_provider: bool,
     method: String,
     #[serde(default)]
     params: Value,
@@ -221,13 +265,28 @@ pub(crate) async fn route(
 /// Also used by the in-process fake transport; this never starts a CLI/listener.
 pub(crate) fn handle(state: &Shared, request: AgentMcpRequest) -> Result<Value> {
     let cfg = state.cfg_snapshot();
-    if !cfg.coach.agent_mcp_tools {
+    let bot_provider = crate::config::COACH_MODES.iter().any(|mode| {
+        cfg.llm
+            .modes
+            .get(mode)
+            .is_ok_and(|provider| provider == "bot")
+    });
+    if !cfg.coach.agent_mcp_tools || (request.require_bot_provider && !bot_provider) {
         return if request.method == "tools/list" {
             Ok(json!({"tools":[]}))
         } else {
-            Ok(tool_text("coach MCP tools are disabled", true))
+            let message = if request.require_bot_provider {
+                "coach bot inbox is disabled: enable coach MCP tools and choose AI assistant for a coach mode"
+            } else {
+                "coach MCP tools are disabled"
+            };
+            Ok(tool_text(message, true))
         };
     }
+    ensure!(
+        !request.require_bot_provider || request.scope == AgentScope::BotInbox,
+        "general coach MCP connections are bot-only"
+    );
     match request.method.as_str() {
         "tools/list" => {
             let schemas = match &request.scope {
@@ -339,6 +398,29 @@ fn call(state: &Shared, scope: &AgentScope, params: &Value, send_image: bool) ->
                 "get_agent_request takes only run_id"
             );
             let mut value = serde_json::to_value(&run)?;
+            // Reuse the API action prompts, including their practice-solution
+            // rules and structured reply formats, rather than a new bot policy.
+            use crate::llm::coach::*;
+            value["answer_guidance"] = json!(match run.action {
+                crate::llm::agent_runs::AgentAction::Ask => {
+                    let surface = crate::pad::parse_surface(
+                        run.payload["surface"].as_str(),
+                        run.payload["dataset"].as_str(),
+                        run.payload["task_id"].as_str().unwrap_or(""),
+                    );
+                    match surface {
+                        crate::pad::AgentSurface::Annotate => {
+                            crate::llm::docs::preset_system(run.payload["preset"].as_str())
+                        }
+                        crate::pad::AgentSurface::Whiteboard => PAD_ASK_SYSTEM_PROMPT,
+                        _ => ASK_SYSTEM_PROMPT,
+                    }
+                }
+                crate::llm::agent_runs::AgentAction::Review => REVIEW_SYSTEM_PROMPT,
+                crate::llm::agent_runs::AgentAction::Viz => VIZ_SYSTEM_PROMPT,
+                crate::llm::agent_runs::AgentAction::Lazy => LAZY_FILL_SYSTEM_PROMPT,
+                crate::llm::agent_runs::AgentAction::DrawReview => DRAW_REVIEW_SYSTEM_PROMPT,
+            });
             // Images are MCP image content, never duplicated inside text JSON.
             let image = run
                 .context

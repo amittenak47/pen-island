@@ -106,3 +106,35 @@ it("keeps different providers independent across modes when saving and reloading
   expect(picker("Diagrams").value).toBe("bot");
   for (const mode of ["Background check", "Reveal", "Planner"]) expect(picker(mode).value).toBe("local");
 });
+
+it.each([1, 2, 5, 10])("shows, saves and reloads a %i minute assistant deadline", async minutes => {
+  const api = client(); await open(api);
+  const deadline = () => host.querySelector<HTMLSelectElement>('[aria-label="Give the assistant up to"]')!;
+  expect(deadline().value).toBe("600");
+  expect([...deadline().options].map(option => option.textContent)).toEqual(["1 minute", "2 minutes", "5 minutes", "10 minutes"]);
+  await choose("Review and Ask", "bot");
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(deadline(), String(minutes * 60));
+    deadline().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(api.putConfig).not.toHaveBeenCalled();
+  await act(async () => button("Save").click());
+  expect(api.putConfig).toHaveBeenCalledWith(expect.objectContaining({
+    coach: expect.objectContaining({ agent_bot_timeout_secs: minutes * 60 }),
+  }), expect.any(Object));
+  await reopen(api);
+  expect(deadline().value).toBe(String(minutes * 60));
+});
+
+it("counts and resets the assistant deadline with AI model settings", async () => {
+  const api = client(); await open(api);
+  const deadline = () => host.querySelector<HTMLSelectElement>('[aria-label="Give the assistant up to"]')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(deadline(), "60");
+    deadline().dispatchEvent(new Event("change", { bubbles: true }));
+  });
+  expect(host.querySelector('.lc-settings-change-count')?.textContent).toBe("1 change");
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Reset AI model"]')!.click());
+  expect(deadline().value).toBe("600");
+  expect(api.putConfig).not.toHaveBeenCalled();
+});
