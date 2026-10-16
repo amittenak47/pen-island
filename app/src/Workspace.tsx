@@ -480,6 +480,7 @@ import { renderAnnotation } from "./viz/render/annotation";
 import { renderHighlight } from "./viz/render/highlight";
 import { parseVizProgram, type VizProgram } from "./viz/schema";
 import { messageOf, traceOpen } from "./util/messageOf";
+import { useAsyncDialog } from "./util/useAsyncDialog";
 import { useOpenStatus } from "./util/openStatus";
 import { loadChromeFate, mayClearParkedPreparing, BOOT_DONE_HOLD_MS, LOAD_FADE_MS, LOAD_SLIDE_MS } from "./util/workspaceLoad";
 
@@ -2423,13 +2424,15 @@ export const Workspace = memo(function Workspace({
   const [leavingPhase, setLeavingPhase] = useState<"open" | "exit">("open");
 
   /** "Reset the practice session?" — our own modal, held to confirm. */
-  const [resetOpen, setResetOpen] = useState(false);
-  const [resetPending, setResetPending] = useState(false);
-  const [resetError, setResetError] = useState<string | null>(null);
+  const {
+    open: resetOpen, pending: resetPending, error: resetError,
+    show: showReset, cancel: cancelReset, run: runReset,
+  } = useAsyncDialog();
 
-  const [revealOpen, setRevealOpen] = useState(false);
-  const [revealPending, setRevealPending] = useState(false);
-  const [revealError, setRevealError] = useState<string | null>(null);
+  const {
+    open: revealOpen, pending: revealPending, error: revealError,
+    show: showReveal, cancel: cancelReveal,
+  } = useAsyncDialog();
   /** Coach message that offered Hint — bridge nests under that turn. */
   const revealForMessageIdRef = useRef<string | null>(null);
 
@@ -8003,19 +8006,13 @@ export const Workspace = memo(function Workspace({
 
 
   /** Confirmed by a short hold in `ConfirmDialog`, never by `window.confirm`. */
-  const resetSession = useCallback(async () => {
-    setResetPending(true);
-    setResetError(null);
-    try {
-      setSession(await client.resetSession());
+  const resetSession = useCallback(() => runReset(
+    () => client.resetSession(),
+    (session) => {
+      setSession(session);
       setNavigateBySession(false);
-      setResetOpen(false);
-    } catch (cause) {
-      setResetError(messageOf(cause));
-    } finally {
-      setResetPending(false);
-    }
-  }, [client]);
+    },
+  ), [client, runReset]);
 
 
   // Problem deep link: ?task=<id>[&dataset=<slug>] loads the problem once.
@@ -8139,9 +8136,8 @@ export const Workspace = memo(function Workspace({
     const board = boardRef.current;
     if (!problem) return;
     const targetId = revealForMessageIdRef.current;
-    setRevealOpen(false);
-    setRevealPending(false);
-    setRevealError(null);
+    // Reveal closes before the request; pending/errors belong to the coach turn.
+    cancelReveal();
     markPadDirty();
     setAgentMessages((current) => {
       const attachTo =
@@ -8201,7 +8197,7 @@ export const Workspace = memo(function Workspace({
         );
       });
     }
-  }, [client, problem, applyFilledCode, markPadDirty]);
+  }, [client, problem, applyFilledCode, markPadDirty, cancelReveal]);
 
   const showDrawingFrame = useCallback(
     (programId: string, frameIndex: number) => {
@@ -11789,10 +11785,7 @@ export const Workspace = memo(function Workspace({
                     onThemePick={setThemeId}
                     onReady={onBrowseTableReady}
                     onStartSession={(ids, bank) => void startFreshSession(ids, bank)}
-                    onResetSession={() => {
-                      setResetError(null);
-                      setResetOpen(true);
-                    }}
+                    onResetSession={showReset}
                     onRandomSession={(filters) => void startRandomSession(filters)}
                   />
                 ) : tab.kind === "explore" ? (
@@ -12037,8 +12030,7 @@ export const Workspace = memo(function Workspace({
             onDeleteMessage={deleteCoachMessage}
             onRequestBridge={(messageId) => {
               revealForMessageIdRef.current = messageId;
-              setRevealError(null);
-              setRevealOpen(true);
+              showReveal();
             }}
             onToggleDrawing={toggleDrawing}
             onDrawingFrame={showDrawingFrame}
@@ -12180,11 +12172,7 @@ export const Workspace = memo(function Workspace({
           pending={resetPending}
           error={resetError}
           onConfirm={() => void resetSession()}
-          onCancel={() => {
-            if (resetPending) return;
-            setResetOpen(false);
-            setResetError(null);
-          }}
+          onCancel={cancelReset}
         />
       )}</DialogPresence>
 
@@ -12195,7 +12183,7 @@ export const Workspace = memo(function Workspace({
           onConfirmLazy={() => void confirmReveal("lazy")}
           onCancel={() => {
             if (revealPending) return;
-            setRevealOpen(false);
+            cancelReveal();
             revealForMessageIdRef.current = null;
           }}
           pending={revealPending}
