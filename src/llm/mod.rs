@@ -1,5 +1,7 @@
 pub mod catalog;
 pub mod coach;
+#[path = "coach/agent_runs.rs"]
+pub mod agent_runs;
 #[path = "coach/tools.rs"]
 pub mod coach_tools;
 pub mod docs;

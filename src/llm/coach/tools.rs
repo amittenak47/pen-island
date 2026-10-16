@@ -32,7 +32,7 @@ pub enum ToolContext<'a> {
 }
 
 /// Accepted proposals and rejection reasons, adapted into the caller's envelope.
-#[derive(Default)]
+#[derive(Debug, Clone, Default, serde::Serialize)]
 pub struct ToolEnvelope {
     pub programs: Vec<VizProgram>,
     pub annotations: Vec<Annotation>,
@@ -492,7 +492,7 @@ fn search_web_snippets(base: &str, query: &str, n: usize) -> Result<String> {
         .cloned()
         .unwrap_or_default();
     let mut lines = Vec::new();
-    for item in results.iter().take(n.max(1).min(5)) {
+    for item in results.iter().take(n.clamp(1, 5)) {
         let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
         let content = item
             .get("content")

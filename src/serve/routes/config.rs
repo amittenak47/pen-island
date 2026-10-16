@@ -353,6 +353,11 @@ pub async fn llm_models(
             crate::config::LLM_PROVIDERS.join(", ")
         )));
     }
+    if matches!(provider.as_str(), "app" | "bot") {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "{provider} answers agent runs and has no API model catalog"
+        )));
+    }
     Ok(Json(
         blocking(move || crate::llm::catalog::catalog(&cfg, &provider)).await?,
     ))
@@ -569,5 +574,46 @@ mod tests {
         assert!(err.contains("openai"), "{err}");
         assert!(err.contains("groq"), "{err}");
         assert_eq!(cfg.voice.cleanup, "off");
+    }
+}
+
+#[cfg(test)]
+mod agent_provider_tests {
+    use super::*;
+
+    #[test]
+    fn config_dto_accepts_agent_providers_per_mode_and_preserves_api_settings() {
+        let mut cfg = Config::default();
+        let mut dto = config_dto(&cfg);
+        dto.modes.review = "app".into();
+        dto.modes.viz = "bot".into();
+        apply_config_dto(&mut cfg, &dto).unwrap();
+        let result = config_dto(&cfg);
+        assert_eq!(result.modes.review, "app");
+        assert_eq!(result.modes.viz, "bot");
+        assert_eq!(result.modes.ambient, dto.modes.ambient);
+        assert_eq!(result.default_provider, dto.default_provider);
+        assert_eq!(result.local.base_url, dto.local.base_url);
+        assert_eq!(result.openai.model, dto.openai.model);
+    }
+
+    #[tokio::test]
+    async fn agent_providers_have_no_api_model_catalog_or_network_lookup() {
+        let state = crate::serve::new_state(Config::default());
+        for provider in ["app", "bot"] {
+            let error = llm_models(
+                State(state.clone()),
+                Query(ModelsQuery {
+                    provider: Some(provider.into()),
+                }),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.status_code(), axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(
+                error.message(),
+                format!("{provider} answers agent runs and has no API model catalog")
+            );
+        }
     }
 }

@@ -285,8 +285,12 @@ impl LlmModes {
         Ok(ModeCapability {
             mode: mode.to_string(),
             provider: provider.to_string(),
-            model: endpoint.model.to_string(),
-            vision: endpoint.vision == Some(true),
+            model: if matches!(provider, "app" | "bot") {
+                String::new()
+            } else {
+                endpoint.model.to_string()
+            },
+            vision: matches!(provider, "app" | "bot") || endpoint.vision == Some(true),
         })
     }
 
@@ -307,7 +311,7 @@ impl LlmModes {
     }
 }
 
-pub const LLM_PROVIDERS: [&str; 4] = ["local", "ollama", "openai", "groq"];
+pub const LLM_PROVIDERS: [&str; 6] = ["local", "ollama", "openai", "groq", "app", "bot"];
 
 /// `lc config set` hands everything over as a string, so booleans arrive in
 /// whichever spelling the caller reached for.
