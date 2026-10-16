@@ -27,19 +27,34 @@ pub struct AssistantAppConfig {
     pub model: String,
     pub effort: String,
     pub allow_bots: bool,
+    /// JSON argv template for app="custom". Include {prompt}, {mcp_config}, and
+    /// optionally {model}; supply the application's headless/lockdown flags.
+    pub custom_command: String,
 }
 
 impl Default for AssistantAppConfig {
     fn default() -> Self {
-        Self { app: "codex".into(), model: String::new(), effort: "high".into(), allow_bots: false }
+        Self { app: "codex".into(), model: String::new(), effort: "high".into(), allow_bots: false, custom_command: String::new() }
     }
 }
 
 impl AssistantAppConfig {
     pub fn validate(&self) -> Result<()> {
-        anyhow::ensure!(matches!(self.app.as_str(), "codex" | "claude"), "Choose Codex or Claude Code.");
+        anyhow::ensure!(matches!(self.app.as_str(), "codex" | "claude" | "custom"), "Choose Codex, Claude Code or a custom command.");
         anyhow::ensure!(matches!(self.effort.as_str(), "low" | "medium" | "high"), "Choose low, medium or high effort.");
         anyhow::ensure!(self.model.chars().count() <= 200 && !self.model.chars().any(char::is_control), "The model name is too long or contains invalid characters.");
+        if self.app == "custom" {
+            anyhow::ensure!(self.custom_command.len() <= 32_768, "The custom command is too long.");
+            let args: Vec<String> = serde_json::from_str(&self.custom_command)
+                .context("The custom command must be a JSON array of arguments.")?;
+            anyhow::ensure!(!args.is_empty() && !args[0].trim().is_empty()
+                && !args[0].contains('{') && !args.iter().any(|arg| arg.contains('\0')),
+                "Choose a literal executable for the custom command.");
+            for placeholder in ["{prompt}", "{mcp_config}"] {
+                anyhow::ensure!(args.iter().skip(1).any(|arg| arg.contains(placeholder)),
+                    "The custom command must include {placeholder}.");
+            }
+        }
         Ok(())
     }
 }

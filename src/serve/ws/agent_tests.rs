@@ -1,5 +1,6 @@
 //! Fake agents use the same channel driver as WS /coach/session and Tauri.
-//! No CLI, HTTP provider, network listener or image renderer is used.
+//! Only the custom-adapter test helper subprocess is used; no real AI CLI,
+//! HTTP provider, network listener or image renderer is used.
 
 use super::*;
 use std::cell::Cell;
@@ -713,4 +714,36 @@ async fn other_actions_route_by_their_existing_mode_and_use_their_http_results()
         );
         socket.close().await;
     }
+}
+
+#[tokio::test]
+async fn custom_cli_mcp_run_emits_exact_steps_tool_events_and_result_frame() {
+    use crate::serve::assistant_runner::agent_cli::tests::{assert_gone, Fixture};
+    let fixture = Fixture::new("success");
+    let state = fixture.state();
+    let mut socket = Socket::new(state.clone());
+    socket.send(json!({"type":"run","request_id":"cli","action":"ask","payload":ask()}));
+    fixture.pump(&state).await;
+    let program: crate::llm::VizProgram = serde_json::from_value(
+        json!({"viz":"array","id":"pair","title":"Pair","frames":[{"cells":[2,7]}]}),
+    ).unwrap();
+    let body = serde_json::to_value(coach::AskEnvelope {
+        task_id: crate::pad::WHITEBOARD_TASK_ID.into(), provider: "app".into(),
+        reply: "A pair.".into(), programs: vec![program], artifacts: vec![],
+        reasoning: String::new(), proposed_annotations: vec![], process_events: vec![],
+    }).unwrap();
+    let expected = vec![
+        json!({"type":"stage","request_id":"cli","stage":"received","detail":"got question"}),
+        json!({"type":"stage","request_id":"cli","stage":"ask","detail":"Waiting for the AI application"}),
+        json!({"type":"stage","request_id":"cli","stage":"agent_step","detail":"Reading your board"}),
+        tool_frame("cli", "draw_structure", "proposed", "drawing a structure", None),
+        tool_frame("cli", "draw_structure", "accepted", "Pair", None),
+        json!({"type":"stage","request_id":"cli","stage":"done","detail":""}),
+        json!({"type":"result","request_id":"cli","action":"ask","body":body}),
+    ];
+    for frame in expected { assert_eq!(socket.next().await, frame); }
+    assert!(socket.outgoing.try_recv().is_err(), "no CLI reasoning or extra frames");
+    fixture.idle().await;
+    assert_gone(fixture.ready().await["pid"].as_u64().unwrap() as u32);
+    socket.close().await;
 }

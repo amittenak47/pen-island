@@ -222,8 +222,8 @@ pub struct AgentRunHandle {
     pub completion: watch::Receiver<Option<AgentCompletion>>,
 }
 
-/// Step 4 installs this hook to launch a scoped CLI and stop its process tree.
-/// No hook is installed by default: app runs wait without starting anything.
+/// Launch a scoped CLI and stop its process tree. Production defaults install
+/// the shared CLI hook; unit tests and injected clocks explicitly choose hooks.
 pub trait AppAgentHook: Send + Sync {
     fn start(&self, run_id: &str, runs: Arc<AgentRunRegistry>) -> Result<()>;
     fn cancel(&self, run_id: &str);
@@ -247,12 +247,20 @@ pub struct AgentRunRegistry {
 
 impl Default for AgentRunRegistry {
     fn default() -> Self {
-        Self::with_clock(|| {
+        let registry = Self::with_clock(|| {
             SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis() as u64
-        })
+        });
+        // Unit tests explicitly install fake hooks; never discover or launch a
+        // real subscribed CLI from the library suite. Production installs once
+        // per hub registry and shares the application's global process slot.
+        #[cfg(not(test))]
+        registry.set_app_hook(Arc::new(
+            crate::serve::assistant_runner::agent_cli::AppCliHook::default(),
+        ));
+        registry
     }
 }
 
@@ -338,6 +346,21 @@ impl AgentRunRegistry {
             hook.start(id, self.clone())?;
         }
         Ok(())
+    }
+
+    pub(crate) fn app_launch_context(
+        &self,
+        id: &str,
+    ) -> Result<(Config, AgentRequest, watch::Receiver<Option<AgentCompletion>>)> {
+        let request = self.get_request(id)?;
+        ensure!(
+            request.responder == AgentResponder::App && request.status.active(),
+            "agent run is not an active app request"
+        );
+        let run = self.find(id)?;
+        let run = run.lock().unwrap_or_else(|e| e.into_inner());
+        ensure!(run.request.status.active(), "agent run has already finished");
+        Ok((run.cfg.clone(), run.request.clone(), run.completion.subscribe()))
     }
 
     fn find(&self, id: &str) -> Result<Arc<Mutex<AgentRun>>> {
