@@ -1,11 +1,17 @@
 pub mod catalog;
 pub mod coach;
+#[path = "coach/tools.rs"]
+pub mod coach_tools;
 pub mod docs;
 pub mod helpers;
 pub mod lifecycle;
 pub mod providers;
 pub mod reasoning;
 pub mod viz;
+
+#[cfg(test)]
+#[path = "coach/tool_characterization.rs"]
+pub(crate) mod tool_characterization;
 
 /// Deprecated alias — prefer [`viz`]. Kept so `crate::llm::tools` imports keep working.
 pub mod tools {

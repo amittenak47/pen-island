@@ -1,0 +1,800 @@
+{
+  "envelope": {
+    "annotations": [
+      {
+        "region": "approach",
+        "text": "Check the pair",
+        "tone": "hint"
+      }
+    ],
+    "citations": [
+      {
+        "case_index": 0,
+        "case_number": 1,
+        "expected": "[0,1]",
+        "input": "[2,7], 9",
+        "why": "Uses the real sample"
+      }
+    ],
+    "highlights": [
+      {
+        "ids": [
+          "student"
+        ],
+        "note": "Check this step",
+        "tone": "warning"
+      },
+      {
+        "ids": [
+          "student",
+          "student-longer",
+          "stud",
+          "student",
+          "student",
+          "student"
+        ],
+        "note": "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+        "tone": "warning"
+      }
+    ],
+    "message": "Drawing.",
+    "programs": [
+      {
+        "frames": [
+          {
+            "cells": [
+              2,
+              7
+            ],
+            "entries": [],
+            "highlight": [],
+            "label": "start",
+            "note": "",
+            "pointers": {}
+          }
+        ],
+        "id": "nums",
+        "title": "  Numbers  ",
+        "viz": "array"
+      },
+      {
+        "frames": [
+          {
+            "cells": [
+              2,
+              7
+            ],
+            "entries": [],
+            "highlight": [],
+            "label": "first",
+            "note": "",
+            "pointers": {
+              "i": 0
+            }
+          },
+          {
+            "cells": [
+              2,
+              7
+            ],
+            "entries": [],
+            "highlight": [],
+            "label": "next",
+            "note": "",
+            "pointers": {
+              "i": 1
+            }
+          }
+        ],
+        "id": "walk",
+        "title": "",
+        "viz": "array"
+      }
+    ],
+    "provider": "characterization",
+    "rejected": [
+      "unreadable draw_structure call: invalid type: string \"bad\", expected a sequence",
+      "dropped a diagram: no renderer for a \"hypercube\" — expected one of array, grid, hashmap, tree, linkedlist, heap, stack, queue, graph, trie, unionfind, dplist, dptable, segtree, calltree, composite, bits",
+      "dropped a diagram: the diagram had no frames",
+      "dropped a diagram: a trace may have at most 40 frames — split the rest into another animate_trace",
+      "dropped a diagram: every frame of the \"hashmap\" was empty — `cells`/`entries` carry the contents, `pointers` only holds indices",
+      "dropped an empty annotation",
+      "dropped an empty annotation",
+      "dropped a citation: no such case (this problem has 1 sample cases)",
+      "dropped a citation: no such case (this problem has 1 sample cases)",
+      "dropped a citation: no such case (this problem has 1 sample cases)",
+      "dropped a highlight: no matching element ids on the board",
+      "dropped a highlight: no matching element ids on the board",
+      "dropped a highlight: no matching element ids on the board",
+      "ignored an unknown tool call \"teleport\"",
+      "ignored an unknown tool call \"get_current_page\"",
+      "ignored an unknown tool call \"get_highlight\"",
+      "ignored an unknown tool call \"list_document_marks\"",
+      "ignored an unknown tool call \"save_annotation\"",
+      "ignored an unknown tool call \"save_annotation\"",
+      "ignored an unknown tool call \"search_web\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\"",
+      "ignored an unknown tool call \"create_attachment\""
+    ],
+    "task_id": "sample"
+  },
+  "events": [
+    {
+      "name": "draw_structure",
+      "reason": null,
+      "status": "proposed",
+      "summary": "draw_structure",
+      "type": "tool_event"
+    },
+    {
+      "name": "draw_structure",
+      "reason": null,
+      "status": "accepted",
+      "summary": "Numbers",
+      "type": "tool_event"
+    },
+    {
+      "name": "animate_trace",
+      "reason": null,
+      "status": "proposed",
+      "summary": "animate_trace",
+      "type": "tool_event"
+    },
+    {
+      "name": "animate_trace",
+      "reason": null,
+      "status": "accepted",
+      "summary": "walk",
+      "type": "tool_event"
+    },
+    {
+      "name": "annotate_region",
+      "reason": null,
+      "status": "proposed",
+      "summary": "annotate_region",
+      "type": "tool_event"
+    },
+    {
+      "name": "annotate_region",
+      "reason": null,
+      "status": "accepted",
+      "summary": "note on approach",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": null,
+      "status": "proposed",
+      "summary": "cite_test_case",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": null,
+      "status": "accepted",
+      "summary": "case 1",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": null,
+      "status": "proposed",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": null,
+      "status": "accepted",
+      "summary": "1 element(s)",
+      "type": "tool_event"
+    },
+    {
+      "name": "draw_structure",
+      "reason": null,
+      "status": "proposed",
+      "summary": "draw_structure",
+      "type": "tool_event"
+    },
+    {
+      "name": "draw_structure",
+      "reason": "unreadable draw_structure call: invalid type: string \"bad\", expected a sequence",
+      "status": "rejected",
+      "summary": "draw_structure",
+      "type": "tool_event"
+    },
+    {
+      "name": "draw_structure",
+      "reason": null,
+      "status": "proposed",
+      "summary": "draw_structure",
+      "type": "tool_event"
+    },
+    {
+      "name": "draw_structure",
+      "reason": "dropped a diagram: no renderer for a \"hypercube\" — expected one of array, grid, hashmap, tree, linkedlist, heap, stack, queue, graph, trie, unionfind, dplist, dptable, segtree, calltree, composite, bits",
+      "status": "rejected",
+      "summary": "draw_structure",
+      "type": "tool_event"
+    },
+    {
+      "name": "draw_structure",
+      "reason": null,
+      "status": "proposed",
+      "summary": "draw_structure",
+      "type": "tool_event"
+    },
+    {
+      "name": "draw_structure",
+      "reason": "dropped a diagram: the diagram had no frames",
+      "status": "rejected",
+      "summary": "draw_structure",
+      "type": "tool_event"
+    },
+    {
+      "name": "animate_trace",
+      "reason": null,
+      "status": "proposed",
+      "summary": "animate_trace",
+      "type": "tool_event"
+    },
+    {
+      "name": "animate_trace",
+      "reason": "dropped a diagram: a trace may have at most 40 frames — split the rest into another animate_trace",
+      "status": "rejected",
+      "summary": "animate_trace",
+      "type": "tool_event"
+    },
+    {
+      "name": "animate_trace",
+      "reason": null,
+      "status": "proposed",
+      "summary": "animate_trace",
+      "type": "tool_event"
+    },
+    {
+      "name": "animate_trace",
+      "reason": "dropped a diagram: every frame of the \"hashmap\" was empty — `cells`/`entries` carry the contents, `pointers` only holds indices",
+      "status": "rejected",
+      "summary": "animate_trace",
+      "type": "tool_event"
+    },
+    {
+      "name": "annotate_region",
+      "reason": null,
+      "status": "proposed",
+      "summary": "annotate_region",
+      "type": "tool_event"
+    },
+    {
+      "name": "annotate_region",
+      "reason": "dropped an empty annotation",
+      "status": "rejected",
+      "summary": "annotate_region",
+      "type": "tool_event"
+    },
+    {
+      "name": "annotate_region",
+      "reason": null,
+      "status": "proposed",
+      "summary": "annotate_region",
+      "type": "tool_event"
+    },
+    {
+      "name": "annotate_region",
+      "reason": "dropped an empty annotation",
+      "status": "rejected",
+      "summary": "annotate_region",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": null,
+      "status": "proposed",
+      "summary": "cite_test_case",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": "dropped a citation: no such case (this problem has 1 sample cases)",
+      "status": "rejected",
+      "summary": "cite_test_case",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": null,
+      "status": "proposed",
+      "summary": "cite_test_case",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": "dropped a citation: no such case (this problem has 1 sample cases)",
+      "status": "rejected",
+      "summary": "cite_test_case",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": null,
+      "status": "proposed",
+      "summary": "cite_test_case",
+      "type": "tool_event"
+    },
+    {
+      "name": "cite_test_case",
+      "reason": "dropped a citation: no such case (this problem has 1 sample cases)",
+      "status": "rejected",
+      "summary": "cite_test_case",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": null,
+      "status": "proposed",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": "dropped a highlight: no matching element ids on the board",
+      "status": "rejected",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": null,
+      "status": "proposed",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": "dropped a highlight: no matching element ids on the board",
+      "status": "rejected",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": null,
+      "status": "proposed",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": "dropped a highlight: no matching element ids on the board",
+      "status": "rejected",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": null,
+      "status": "proposed",
+      "summary": "highlight_student_work",
+      "type": "tool_event"
+    },
+    {
+      "name": "highlight_student_work",
+      "reason": null,
+      "status": "accepted",
+      "summary": "6 element(s)",
+      "type": "tool_event"
+    },
+    {
+      "name": "teleport",
+      "reason": null,
+      "status": "proposed",
+      "summary": "teleport",
+      "type": "tool_event"
+    },
+    {
+      "name": "teleport",
+      "reason": "ignored an unknown tool call \"teleport\"",
+      "status": "rejected",
+      "summary": "teleport",
+      "type": "tool_event"
+    },
+    {
+      "name": "get_current_page",
+      "reason": null,
+      "status": "proposed",
+      "summary": "get_current_page",
+      "type": "tool_event"
+    },
+    {
+      "name": "get_current_page",
+      "reason": "ignored an unknown tool call \"get_current_page\"",
+      "status": "rejected",
+      "summary": "get_current_page",
+      "type": "tool_event"
+    },
+    {
+      "name": "get_highlight",
+      "reason": null,
+      "status": "proposed",
+      "summary": "get_highlight",
+      "type": "tool_event"
+    },
+    {
+      "name": "get_highlight",
+      "reason": "ignored an unknown tool call \"get_highlight\"",
+      "status": "rejected",
+      "summary": "get_highlight",
+      "type": "tool_event"
+    },
+    {
+      "name": "list_document_marks",
+      "reason": null,
+      "status": "proposed",
+      "summary": "list_document_marks",
+      "type": "tool_event"
+    },
+    {
+      "name": "list_document_marks",
+      "reason": "ignored an unknown tool call \"list_document_marks\"",
+      "status": "rejected",
+      "summary": "list_document_marks",
+      "type": "tool_event"
+    },
+    {
+      "name": "save_annotation",
+      "reason": null,
+      "status": "proposed",
+      "summary": "save_annotation",
+      "type": "tool_event"
+    },
+    {
+      "name": "save_annotation",
+      "reason": "ignored an unknown tool call \"save_annotation\"",
+      "status": "rejected",
+      "summary": "save_annotation",
+      "type": "tool_event"
+    },
+    {
+      "name": "save_annotation",
+      "reason": null,
+      "status": "proposed",
+      "summary": "save_annotation",
+      "type": "tool_event"
+    },
+    {
+      "name": "save_annotation",
+      "reason": "ignored an unknown tool call \"save_annotation\"",
+      "status": "rejected",
+      "summary": "save_annotation",
+      "type": "tool_event"
+    },
+    {
+      "name": "search_web",
+      "reason": null,
+      "status": "proposed",
+      "summary": "search_web",
+      "type": "tool_event"
+    },
+    {
+      "name": "search_web",
+      "reason": "ignored an unknown tool call \"search_web\"",
+      "status": "rejected",
+      "summary": "search_web",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": null,
+      "status": "proposed",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    },
+    {
+      "name": "create_attachment",
+      "reason": "ignored an unknown tool call \"create_attachment\"",
+      "status": "rejected",
+      "summary": "create_attachment",
+      "type": "tool_event"
+    }
+  ]
+}

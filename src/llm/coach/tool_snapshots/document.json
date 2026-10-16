@@ -1,0 +1,1707 @@
+[
+  {
+    "draw": true,
+    "envelope": {
+      "artifacts": [
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "print(1)",
+          "title": "answer.py"
+        },
+        {
+          "kind": "markdown",
+          "programs": [],
+          "source": "# Pair",
+          "title": "Note"
+        },
+        {
+          "kind": "whiteboard",
+          "programs": [
+            {
+              "frames": [
+                {
+                  "cells": [
+                    2,
+                    7
+                  ],
+                  "entries": [],
+                  "highlight": [],
+                  "label": "start",
+                  "note": "",
+                  "pointers": {}
+                }
+              ],
+              "id": "nums",
+              "title": "  Numbers  ",
+              "viz": "array"
+            }
+          ],
+          "source": "",
+          "title": "Board"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-0"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-1"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-2"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-3"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-4"
+        }
+      ],
+      "programs": [
+        {
+          "frames": [
+            {
+              "cells": [
+                2,
+                7
+              ],
+              "entries": [],
+              "highlight": [],
+              "label": "start",
+              "note": "",
+              "pointers": {}
+            }
+          ],
+          "id": "nums",
+          "title": "  Numbers  ",
+          "viz": "array"
+        },
+        {
+          "frames": [
+            {
+              "cells": [
+                2,
+                7
+              ],
+              "entries": [],
+              "highlight": [],
+              "label": "first",
+              "note": "",
+              "pointers": {
+                "i": 0
+              }
+            },
+            {
+              "cells": [
+                2,
+                7
+              ],
+              "entries": [],
+              "highlight": [],
+              "label": "next",
+              "note": "",
+              "pointers": {
+                "i": 1
+              }
+            }
+          ],
+          "id": "walk",
+          "title": "",
+          "viz": "array"
+        }
+      ],
+      "proposed": [
+        {
+          "excerpt": "pair",
+          "links": [
+            "local"
+          ],
+          "note": "Check both",
+          "page": 3,
+          "tags": [
+            "test"
+          ]
+        },
+        {
+          "excerpt": "",
+          "links": [],
+          "note": "",
+          "page": null,
+          "tags": []
+        }
+      ],
+      "reasoning": "",
+      "reply": "Finished."
+    },
+    "events": [
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "accepted",
+        "summary": "  Numbers  ",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "proposed",
+        "summary": "animating a trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "accepted",
+        "summary": "walk",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "proposed",
+        "summary": "annotating a region",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "accepted",
+        "summary": "this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": "unreadable draw_structure call: invalid type: string \"bad\", expected a sequence",
+        "status": "rejected",
+        "summary": "draw_structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": "no renderer for a \"hypercube\" — expected one of array, grid, hashmap, tree, linkedlist, heap, stack, queue, graph, trie, unionfind, dplist, dptable, segtree, calltree, composite, bits",
+        "status": "rejected",
+        "summary": "draw_structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": "the diagram had no frames",
+        "status": "rejected",
+        "summary": "draw_structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "proposed",
+        "summary": "animating a trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": "a trace may have at most 40 frames — split the rest into another animate_trace",
+        "status": "rejected",
+        "summary": "animate_trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "proposed",
+        "summary": "animating a trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": "every frame of the \"hashmap\" was empty — `cells`/`entries` carry the contents, `pointers` only holds indices",
+        "status": "rejected",
+        "summary": "animate_trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "proposed",
+        "summary": "annotating a region",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "accepted",
+        "summary": "this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "proposed",
+        "summary": "annotating a region",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "accepted",
+        "summary": "this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "teleport",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "teleport",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool teleport",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_current_page",
+        "reason": null,
+        "status": "proposed",
+        "summary": "reading this page",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_current_page",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Page text",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_highlight",
+        "reason": null,
+        "status": "proposed",
+        "summary": "re-reading the highlight",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_highlight",
+        "reason": null,
+        "status": "accepted",
+        "summary": "pair",
+        "type": "tool_event"
+      },
+      {
+        "name": "list_document_marks",
+        "reason": null,
+        "status": "proposed",
+        "summary": "listing annotations",
+        "type": "tool_event"
+      },
+      {
+        "name": "list_document_marks",
+        "reason": null,
+        "status": "accepted",
+        "summary": "ink and notes",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "proposed",
+        "summary": "pinning a tab",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "accepted",
+        "summary": "queued an AI book-tab; the tablet will place it",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "proposed",
+        "summary": "pinning a tab",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "accepted",
+        "summary": "queued an AI book-tab; the tablet will place it",
+        "type": "tool_event"
+      },
+      {
+        "name": "search_web",
+        "reason": null,
+        "status": "proposed",
+        "summary": "searching the web",
+        "type": "tool_event"
+      },
+      {
+        "name": "search_web",
+        "reason": null,
+        "status": "accepted",
+        "summary": "web search is not configured",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "unsupported attachment kind",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment title must be 1–256 bytes",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment title must be 1–256 bytes",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment is too large",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment is too large",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "document attachments use source, not diagram programs",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "whiteboard attachments use programs, not source",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "duplicate diagram ID",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "the diagram had no frames",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "unknown field `path`, expected one of `kind`, `title`, `source`, `programs`",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "missing field `title`",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing answer.py",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing Note",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing Board",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-0",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-1",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-2",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-3",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-4",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "too many attachments in one answer",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment title must be 1–256 bytes",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      }
+    ],
+    "feedback": [
+      "Tool results:\ndraw_structure: queued a diagram (  Numbers  ) for the board\nanimate_trace: queued a diagram (walk) for the board\nannotate_region: this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\nhighlight_student_work: unknown tool highlight_student_work\ndraw_structure: unreadable draw_structure call: invalid type: string \"bad\", expected a sequence\ndraw_structure: dropped a diagram: no renderer for a \"hypercube\" — expected one of array, grid, hashmap, tree, linkedlist, heap, stack, queue, graph, trie, unionfind, dplist, dptable, segtree, calltree, composite, bits\ndraw_structure: dropped a diagram: the diagram had no frames\nanimate_trace: dropped a diagram: a trace may have at most 40 frames — split the rest into another animate_trace\nanimate_trace: dropped a diagram: every frame of the \"hashmap\" was empty — `cells`/`entries` carry the contents, `pointers` only holds indices\nannotate_region: this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.\nannotate_region: this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\nhighlight_student_work: unknown tool highlight_student_work\nhighlight_student_work: unknown tool highlight_student_work\nhighlight_student_work: unknown tool highlight_student_work\nhighlight_student_work: unknown tool highlight_student_work\nteleport: unknown tool teleport\nget_current_page: Page text\nget_highlight:   pair  \nlist_document_marks: ink and notes\nsave_annotation: queued an AI book-tab; the tablet will place it\nsave_annotation: queued an AI book-tab; the tablet will place it\nsearch_web: web search is not configured\ncreate_attachment: rejected: unsupported attachment kind\ncreate_attachment: rejected: attachment title must be 1–256 bytes\ncreate_attachment: rejected: attachment title must be 1–256 bytes\ncreate_attachment: rejected: attachment is too large\ncreate_attachment: rejected: attachment is too large\ncreate_attachment: rejected: document attachments use source, not diagram programs\ncreate_attachment: rejected: whiteboard attachments use programs, not source\ncreate_attachment: rejected: duplicate diagram ID\ncreate_attachment: rejected: the diagram had no frames\ncreate_attachment: rejected: unknown field `path`, expected one of `kind`, `title`, `source`, `programs`\ncreate_attachment: rejected: missing field `title`\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\n\nContinue. Call another tool only if needed, otherwise answer.",
+      "Tool results:\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: rejected: too many attachments in one answer\ncreate_attachment: rejected: attachment title must be 1–256 bytes\n\nContinue. Call another tool only if needed, otherwise answer."
+    ],
+    "offered": [
+      [
+        "query_document_vectors",
+        "query_library_vectors",
+        "get_document_section",
+        "lookup_reference",
+        "get_current_page",
+        "get_highlight",
+        "list_document_marks",
+        "save_annotation",
+        "draw_structure",
+        "animate_trace",
+        "annotate_region",
+        "create_attachment"
+      ],
+      [
+        "query_document_vectors",
+        "query_library_vectors",
+        "get_document_section",
+        "lookup_reference",
+        "get_current_page",
+        "get_highlight",
+        "list_document_marks",
+        "save_annotation",
+        "draw_structure",
+        "animate_trace",
+        "annotate_region",
+        "create_attachment"
+      ],
+      [
+        "query_document_vectors",
+        "query_library_vectors",
+        "get_document_section",
+        "lookup_reference",
+        "get_current_page",
+        "get_highlight",
+        "list_document_marks",
+        "save_annotation",
+        "draw_structure",
+        "animate_trace",
+        "annotate_region",
+        "create_attachment"
+      ]
+    ]
+  },
+  {
+    "draw": false,
+    "envelope": {
+      "artifacts": [
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "print(1)",
+          "title": "answer.py"
+        },
+        {
+          "kind": "markdown",
+          "programs": [],
+          "source": "# Pair",
+          "title": "Note"
+        },
+        {
+          "kind": "whiteboard",
+          "programs": [
+            {
+              "frames": [
+                {
+                  "cells": [
+                    2,
+                    7
+                  ],
+                  "entries": [],
+                  "highlight": [],
+                  "label": "start",
+                  "note": "",
+                  "pointers": {}
+                }
+              ],
+              "id": "nums",
+              "title": "  Numbers  ",
+              "viz": "array"
+            }
+          ],
+          "source": "",
+          "title": "Board"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-0"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-1"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-2"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-3"
+        },
+        {
+          "kind": "code",
+          "programs": [],
+          "source": "",
+          "title": "extra-4"
+        }
+      ],
+      "programs": [
+        {
+          "frames": [
+            {
+              "cells": [
+                2,
+                7
+              ],
+              "entries": [],
+              "highlight": [],
+              "label": "start",
+              "note": "",
+              "pointers": {}
+            }
+          ],
+          "id": "nums",
+          "title": "  Numbers  ",
+          "viz": "array"
+        },
+        {
+          "frames": [
+            {
+              "cells": [
+                2,
+                7
+              ],
+              "entries": [],
+              "highlight": [],
+              "label": "first",
+              "note": "",
+              "pointers": {
+                "i": 0
+              }
+            },
+            {
+              "cells": [
+                2,
+                7
+              ],
+              "entries": [],
+              "highlight": [],
+              "label": "next",
+              "note": "",
+              "pointers": {
+                "i": 1
+              }
+            }
+          ],
+          "id": "walk",
+          "title": "",
+          "viz": "array"
+        }
+      ],
+      "proposed": [
+        {
+          "excerpt": "pair",
+          "links": [
+            "local"
+          ],
+          "note": "Check both",
+          "page": 3,
+          "tags": [
+            "test"
+          ]
+        },
+        {
+          "excerpt": "",
+          "links": [],
+          "note": "",
+          "page": null,
+          "tags": []
+        }
+      ],
+      "reasoning": "",
+      "reply": "Finished."
+    },
+    "events": [
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "accepted",
+        "summary": "  Numbers  ",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "proposed",
+        "summary": "animating a trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "accepted",
+        "summary": "walk",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "proposed",
+        "summary": "annotating a region",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "accepted",
+        "summary": "this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": "unreadable draw_structure call: invalid type: string \"bad\", expected a sequence",
+        "status": "rejected",
+        "summary": "draw_structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": "no renderer for a \"hypercube\" — expected one of array, grid, hashmap, tree, linkedlist, heap, stack, queue, graph, trie, unionfind, dplist, dptable, segtree, calltree, composite, bits",
+        "status": "rejected",
+        "summary": "draw_structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": null,
+        "status": "proposed",
+        "summary": "drawing a structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "draw_structure",
+        "reason": "the diagram had no frames",
+        "status": "rejected",
+        "summary": "draw_structure",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "proposed",
+        "summary": "animating a trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": "a trace may have at most 40 frames — split the rest into another animate_trace",
+        "status": "rejected",
+        "summary": "animate_trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": null,
+        "status": "proposed",
+        "summary": "animating a trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "animate_trace",
+        "reason": "every frame of the \"hashmap\" was empty — `cells`/`entries` carry the contents, `pointers` only holds indices",
+        "status": "rejected",
+        "summary": "animate_trace",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "proposed",
+        "summary": "annotating a region",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "accepted",
+        "summary": "this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "proposed",
+        "summary": "annotating a region",
+        "type": "tool_event"
+      },
+      {
+        "name": "annotate_region",
+        "reason": null,
+        "status": "accepted",
+        "summary": "this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "cite_test_case",
+        "reason": null,
+        "status": "accepted",
+        "summary": "cite_test_case is only for corpus problems with sample cases.",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "highlight_student_work",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool highlight_student_work",
+        "type": "tool_event"
+      },
+      {
+        "name": "teleport",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "teleport",
+        "reason": null,
+        "status": "accepted",
+        "summary": "unknown tool teleport",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_current_page",
+        "reason": null,
+        "status": "proposed",
+        "summary": "reading this page",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_current_page",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Page text",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_highlight",
+        "reason": null,
+        "status": "proposed",
+        "summary": "re-reading the highlight",
+        "type": "tool_event"
+      },
+      {
+        "name": "get_highlight",
+        "reason": null,
+        "status": "accepted",
+        "summary": "pair",
+        "type": "tool_event"
+      },
+      {
+        "name": "list_document_marks",
+        "reason": null,
+        "status": "proposed",
+        "summary": "listing annotations",
+        "type": "tool_event"
+      },
+      {
+        "name": "list_document_marks",
+        "reason": null,
+        "status": "accepted",
+        "summary": "ink and notes",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "proposed",
+        "summary": "pinning a tab",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "accepted",
+        "summary": "queued an AI book-tab; the tablet will place it",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "proposed",
+        "summary": "pinning a tab",
+        "type": "tool_event"
+      },
+      {
+        "name": "save_annotation",
+        "reason": null,
+        "status": "accepted",
+        "summary": "queued an AI book-tab; the tablet will place it",
+        "type": "tool_event"
+      },
+      {
+        "name": "search_web",
+        "reason": null,
+        "status": "proposed",
+        "summary": "searching the web",
+        "type": "tool_event"
+      },
+      {
+        "name": "search_web",
+        "reason": null,
+        "status": "accepted",
+        "summary": "web search is not configured",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "unsupported attachment kind",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment title must be 1–256 bytes",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment title must be 1–256 bytes",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment is too large",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment is too large",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "document attachments use source, not diagram programs",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "whiteboard attachments use programs, not source",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "duplicate diagram ID",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "the diagram had no frames",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "unknown field `path`, expected one of `kind`, `title`, `source`, `programs`",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "missing field `title`",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing answer.py",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing Note",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing Board",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-0",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-1",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-2",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-3",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "accepted",
+        "summary": "Preparing extra-4",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "too many attachments in one answer",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": null,
+        "status": "proposed",
+        "summary": "calling a tool",
+        "type": "tool_event"
+      },
+      {
+        "name": "create_attachment",
+        "reason": "attachment title must be 1–256 bytes",
+        "status": "rejected",
+        "summary": "Invalid attachment",
+        "type": "tool_event"
+      }
+    ],
+    "feedback": [
+      "Tool results:\ndraw_structure: queued a diagram (  Numbers  ) for the board\nanimate_trace: queued a diagram (walk) for the board\nannotate_region: this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\nhighlight_student_work: unknown tool highlight_student_work\ndraw_structure: unreadable draw_structure call: invalid type: string \"bad\", expected a sequence\ndraw_structure: dropped a diagram: no renderer for a \"hypercube\" — expected one of array, grid, hashmap, tree, linkedlist, heap, stack, queue, graph, trie, unionfind, dplist, dptable, segtree, calltree, composite, bits\ndraw_structure: dropped a diagram: the diagram had no frames\nanimate_trace: dropped a diagram: a trace may have at most 40 frames — split the rest into another animate_trace\nanimate_trace: dropped a diagram: every frame of the \"hashmap\" was empty — `cells`/`entries` carry the contents, `pointers` only holds indices\nannotate_region: this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.\nannotate_region: this pad has no named regions (approach/walkthrough/…). skip annotate_region rather than inventing Practice board pages.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\ncite_test_case: cite_test_case is only for corpus problems with sample cases.\nhighlight_student_work: unknown tool highlight_student_work\nhighlight_student_work: unknown tool highlight_student_work\nhighlight_student_work: unknown tool highlight_student_work\nhighlight_student_work: unknown tool highlight_student_work\nteleport: unknown tool teleport\nget_current_page: Page text\nget_highlight:   pair  \nlist_document_marks: ink and notes\nsave_annotation: queued an AI book-tab; the tablet will place it\nsave_annotation: queued an AI book-tab; the tablet will place it\nsearch_web: web search is not configured\ncreate_attachment: rejected: unsupported attachment kind\ncreate_attachment: rejected: attachment title must be 1–256 bytes\ncreate_attachment: rejected: attachment title must be 1–256 bytes\ncreate_attachment: rejected: attachment is too large\ncreate_attachment: rejected: attachment is too large\ncreate_attachment: rejected: document attachments use source, not diagram programs\ncreate_attachment: rejected: whiteboard attachments use programs, not source\ncreate_attachment: rejected: duplicate diagram ID\ncreate_attachment: rejected: the diagram had no frames\ncreate_attachment: rejected: unknown field `path`, expected one of `kind`, `title`, `source`, `programs`\ncreate_attachment: rejected: missing field `title`\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\n\nContinue. Call another tool only if needed, otherwise answer.",
+      "Tool results:\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: prepared attachment content for the client to save; persistence is not yet confirmed\ncreate_attachment: rejected: too many attachments in one answer\ncreate_attachment: rejected: attachment title must be 1–256 bytes\n\nContinue. Call another tool only if needed, otherwise answer."
+    ],
+    "offered": [
+      [
+        "query_document_vectors",
+        "query_library_vectors",
+        "get_document_section",
+        "lookup_reference",
+        "get_current_page",
+        "get_highlight",
+        "list_document_marks",
+        "save_annotation",
+        "create_attachment"
+      ],
+      [
+        "query_document_vectors",
+        "query_library_vectors",
+        "get_document_section",
+        "lookup_reference",
+        "get_current_page",
+        "get_highlight",
+        "list_document_marks",
+        "save_annotation",
+        "create_attachment"
+      ],
+      [
+        "query_document_vectors",
+        "query_library_vectors",
+        "get_document_section",
+        "lookup_reference",
+        "get_current_page",
+        "get_highlight",
+        "list_document_marks",
+        "save_annotation",
+        "create_attachment"
+      ]
+    ]
+  }
+]

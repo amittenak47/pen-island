@@ -9,6 +9,10 @@
 //! - a `cite_test_case` / `highlight_student_work` call is resolved against real
 //!   data, so a fabricated index or id never reaches the board.
 
+#[cfg(test)]
+#[path = "../llm/coach/viz_tools_characterization.rs"]
+mod tool_characterization;
+
 use anyhow::{anyhow, Result};
 use axum::extract::State;
 use axum::Json;
@@ -17,10 +21,11 @@ use serde::{Deserialize, Serialize};
 use super::common::{description_for, load_meta, resolve_dataset};
 use super::{blocking, AppError, Shared};
 use crate::llm::coach::{
-    build_draw_fix_prompt, build_draw_review_prompt, build_viz_prompt, parse_draw_review,
-    validate_citation, validate_highlight, Annotation, BoardSnapshot, Citation, CoachContext,
-    DrawReview, EventSink, Highlight, ToolStatus, DRAW_REVIEW_SYSTEM_PROMPT, VIZ_SYSTEM_PROMPT,
+    build_draw_fix_prompt, build_draw_review_prompt, build_viz_prompt, parse_draw_review, Annotation,
+    BoardSnapshot, Citation, CoachContext, DrawReview, EventSink, Highlight, ToolStatus,
+    DRAW_REVIEW_SYSTEM_PROMPT, VIZ_SYSTEM_PROMPT,
 };
+use crate::llm::coach_tools::{execute_tool, ToolContext, ToolEnvelope};
 use crate::llm::tools::{parse_tool_calls, viz_tools, viz_tools_as_prompt, VizProgram};
 use crate::llm::{make_provider_for_mode, ChatMessage, ChatRequest, ChatReply, ToolCall};
 
@@ -452,123 +457,23 @@ fn collect_envelope(
     board: &BoardSnapshot,
     events: &EventSink,
 ) -> VizEnvelope {
-    let mut envelope = VizEnvelope {
+    let context = ToolContext::ProblemViz { cases, board };
+    let mut envelope = ToolEnvelope::default();
+    for call in &reply.tool_calls {
+        // ProblemViz only validates in-memory proposals; Ask's I/O errors do
+        // not occur in this context.
+        execute_tool(call, &context, &mut envelope, events)
+            .expect("problem visualization tools do not perform fallible I/O");
+    }
+    VizEnvelope {
         task_id: task_id.to_string(),
         provider,
         message: reply.content.clone(),
-        ..Default::default()
-    };
-
-    /// Accepting is quiet — the drawing itself is the evidence — but a drop
-    /// gets its reason, which is the same string the envelope carries.
-    fn drop_call(envelope: &mut VizEnvelope, events: &EventSink, name: &str, why: String) {
-        events.tool(name, ToolStatus::Rejected, name.to_string(), Some(why.clone()));
-        envelope.rejected.push(why);
-    }
-
-    for call in &reply.tool_calls {
-        events.tool(&call.name, ToolStatus::Proposed, call.name.clone(), None);
-        match call.name.as_str() {
-            "draw_structure" | "animate_trace" => {
-                match serde_json::from_value::<VizProgram>(call.arguments.clone()) {
-                    Ok(program) => match program.rejection() {
-                        None => {
-                            events.tool(
-                                &call.name,
-                                ToolStatus::Accepted,
-                                summarize_program(&program),
-                                None,
-                            );
-                            envelope.programs.push(program);
-                        }
-                        Some(why) => drop_call(
-                            &mut envelope,
-                            events,
-                            &call.name,
-                            format!("dropped a diagram: {why}"),
-                        ),
-                    },
-                    Err(err) => drop_call(
-                        &mut envelope,
-                        events,
-                        &call.name,
-                        format!("unreadable {} call: {err}", call.name),
-                    ),
-                }
-            }
-            "annotate_region" => {
-                match serde_json::from_value::<Annotation>(call.arguments.clone()) {
-                    Ok(annotation) if !annotation.text.trim().is_empty() => {
-                        events.tool(
-                            &call.name,
-                            ToolStatus::Accepted,
-                            format!("note on {}", annotation.region),
-                            None,
-                        );
-                        envelope.annotations.push(annotation);
-                    }
-                    _ => drop_call(
-                        &mut envelope,
-                        events,
-                        &call.name,
-                        "dropped an empty annotation".to_string(),
-                    ),
-                }
-            }
-            "cite_test_case" => match validate_citation(&call.arguments, cases) {
-                Some(citation) => {
-                    events.tool(
-                        &call.name,
-                        ToolStatus::Accepted,
-                        format!("case {}", citation.case_number),
-                        None,
-                    );
-                    envelope.citations.push(citation);
-                }
-                None => drop_call(
-                    &mut envelope,
-                    events,
-                    &call.name,
-                    format!(
-                        "dropped a citation: no such case (this problem has {} sample cases)",
-                        cases.len()
-                    ),
-                ),
-            },
-            "highlight_student_work" => match validate_highlight(&call.arguments, board) {
-                Some(highlight) => {
-                    events.tool(
-                        &call.name,
-                        ToolStatus::Accepted,
-                        format!("{} element(s)", highlight.ids.len()),
-                        None,
-                    );
-                    envelope.highlights.push(highlight);
-                }
-                None => drop_call(
-                    &mut envelope,
-                    events,
-                    &call.name,
-                    "dropped a highlight: no matching element ids on the board".to_string(),
-                ),
-            },
-            other => drop_call(
-                &mut envelope,
-                events,
-                &call.name,
-                format!("ignored an unknown tool call {other:?}"),
-            ),
-        }
-    }
-    envelope
-}
-
-fn summarize_program(program: &VizProgram) -> String {
-    let title = program.title.trim();
-    if title.is_empty() {
-        program.id.clone()
-    } else {
-        title.to_string()
+        programs: envelope.programs,
+        annotations: envelope.annotations,
+        citations: envelope.citations,
+        highlights: envelope.highlights,
+        rejected: envelope.rejected,
     }
 }
 
