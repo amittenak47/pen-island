@@ -7,6 +7,8 @@
   "license": "PolyForm-Noncommercial-1.0.0",
   "scripts": {
     "dev": "vite",
+    "device:perf": "node scripts/device-perf.mjs",
+    "device:precheck": "node scripts/device-precheck.mjs",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "test": "vitest run",
