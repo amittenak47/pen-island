@@ -3,6 +3,7 @@
  * Frames / text / stamps stay as data. The visible pad is Ink lab.
  */
 
+import type { Camera, Viewport } from "./camera";
 import { paintSceneToExport } from "./paintScene";
 
 export const CaptureUpdateAction = {
@@ -30,6 +31,8 @@ export type BoardChangeHandler = (
 export interface ExcalidrawApi {
   getSceneElements(): readonly unknown[];
   getAppState(): Record<string, unknown>;
+  getCamera(): Camera & Viewport;
+  setCamera(next: Partial<Camera>): void;
   getFiles(): Record<string, unknown>;
   addFiles?(files: Array<{
     id: string;
@@ -258,6 +261,24 @@ export function createBoardScene(initial?: {
     },
     getAppState() {
       return appState;
+    },
+    getCamera() {
+      return {
+        scrollX: typeof appState.scrollX === "number" ? appState.scrollX : 0,
+        scrollY: typeof appState.scrollY === "number" ? appState.scrollY : 0,
+        zoom: zoomValue(appState),
+        width: typeof appState.width === "number" ? appState.width : 1,
+        height: typeof appState.height === "number" ? appState.height : 1,
+        offsetLeft: typeof appState.offsetLeft === "number" ? appState.offsetLeft : 0,
+        offsetTop: typeof appState.offsetTop === "number" ? appState.offsetTop : 0,
+      };
+    },
+    setCamera(next) {
+      const { zoom, ...scroll } = next;
+      api.updateScene({
+        appState: { ...scroll, ...(zoom === undefined ? {} : { zoom: { value: zoom } }) },
+        captureUpdate: CaptureUpdateAction.NEVER,
+      });
     },
     getFiles() {
       return files;

@@ -15,7 +15,7 @@ const updateCamera = (api: Scene, next: CameraPatch) => {
 // The candidate uses the old path until the typed API exists.
 const adapters = {
   updateScene: updateCamera,
-  typedCamera: updateCamera,
+  typedCamera: (api: Scene, next: CameraPatch) => api.setCamera(next),
 };
 const subscribe = (api: Scene, listener: (x: number, y: number, zoom: { value: number }) => void) =>
   api.onScrollChange!(listener);
