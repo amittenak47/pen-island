@@ -48,6 +48,13 @@ pub struct CoachFlagsDto {
     pub planner_enabled: bool,
     pub draw_review_enabled: bool,
     pub approach_commitment: bool,
+    /// Missing on PUT leaves these settings intact for older clients.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_mcp_tools: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_send_board_image: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_bot_timeout_secs: Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -170,6 +177,9 @@ fn config_dto(cfg: &Config) -> ConfigDto {
             planner_enabled: cfg.coach.planner_enabled,
             draw_review_enabled: cfg.coach.draw_review_enabled,
             approach_commitment: cfg.coach.approach_commitment,
+            agent_mcp_tools: Some(cfg.coach.agent_mcp_tools),
+            agent_send_board_image: Some(cfg.coach.agent_send_board_image),
+            agent_bot_timeout_secs: Some(cfg.coach.agent_bot_timeout_secs),
         },
         token_set: cfg
             .serve
@@ -292,6 +302,15 @@ fn apply_config_dto(cfg: &mut Config, dto: &ConfigDto) -> anyhow::Result<()> {
     cfg.coach.planner_enabled = dto.coach.planner_enabled;
     cfg.coach.draw_review_enabled = dto.coach.draw_review_enabled;
     cfg.coach.approach_commitment = dto.coach.approach_commitment;
+    if let Some(enabled) = dto.coach.agent_mcp_tools {
+        cfg.coach.agent_mcp_tools = enabled;
+    }
+    if let Some(enabled) = dto.coach.agent_send_board_image {
+        cfg.coach.agent_send_board_image = enabled;
+    }
+    if let Some(seconds) = dto.coach.agent_bot_timeout_secs {
+        cfg.set("coach.agent_bot_timeout_secs", &seconds.to_string())?;
+    }
     if let Some(voice) = &dto.voice {
         cfg.set("voice.engine", voice.engine.trim())?;
         let defaults = VoiceConfig::default();
@@ -351,6 +370,11 @@ pub async fn llm_models(
         return Err(AppError::bad_request(anyhow::anyhow!(
             "provider must be one of {}, got {provider:?}",
             crate::config::LLM_PROVIDERS.join(", ")
+        )));
+    }
+    if matches!(provider.as_str(), "app" | "bot") {
+        return Err(AppError::bad_request(anyhow::anyhow!(
+            "{provider} answers agent runs and has no API model catalog"
         )));
     }
     Ok(Json(
@@ -569,5 +593,124 @@ mod tests {
         assert!(err.contains("openai"), "{err}");
         assert!(err.contains("groq"), "{err}");
         assert_eq!(cfg.voice.cleanup, "off");
+    }
+}
+
+#[cfg(test)]
+mod agent_provider_tests {
+    use super::*;
+
+    #[test]
+    fn config_dto_accepts_agent_providers_per_mode_and_preserves_api_settings() {
+        let mut cfg = Config::default();
+        let mut dto = config_dto(&cfg);
+        dto.modes.review = "app".into();
+        dto.modes.viz = "bot".into();
+        apply_config_dto(&mut cfg, &dto).unwrap();
+        let result = config_dto(&cfg);
+        assert_eq!(result.modes.review, "app");
+        assert_eq!(result.modes.viz, "bot");
+        assert_eq!(result.modes.ambient, dto.modes.ambient);
+        assert_eq!(result.default_provider, dto.default_provider);
+        assert_eq!(result.local.base_url, dto.local.base_url);
+        assert_eq!(result.openai.model, dto.openai.model);
+    }
+
+    #[tokio::test]
+    async fn agent_providers_have_no_api_model_catalog_or_network_lookup() {
+        let state = crate::serve::new_state(Config::default());
+        for provider in ["app", "bot"] {
+            let error = llm_models(
+                State(state.clone()),
+                Query(ModelsQuery {
+                    provider: Some(provider.into()),
+                }),
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.status_code(), axum::http::StatusCode::BAD_REQUEST);
+            assert_eq!(
+                error.message(),
+                format!("{provider} answers agent runs and has no API model catalog")
+            );
+        }
+    }
+}
+
+#[cfg(test)]
+mod agent_mcp_settings_tests {
+    use super::*;
+
+    #[test]
+    fn coach_mcp_settings_round_trip_and_older_clients_preserve_them() {
+        let mut cfg = Config::default();
+        let dto = config_dto(&cfg);
+        assert_eq!(dto.coach.agent_mcp_tools, Some(true));
+        assert_eq!(dto.coach.agent_send_board_image, Some(true));
+        let mut wire = serde_json::to_value(dto).unwrap();
+        wire["coach"]["agent_mcp_tools"] = serde_json::json!(false);
+        wire["coach"]["agent_send_board_image"] = serde_json::json!(false);
+        let dto = serde_json::from_value(wire.clone()).unwrap();
+        apply_config_dto(&mut cfg, &dto).unwrap();
+        assert!(!cfg.coach.agent_mcp_tools && !cfg.coach.agent_send_board_image);
+
+        let coach = wire["coach"].as_object_mut().unwrap();
+        coach.remove("agent_mcp_tools");
+        coach.remove("agent_send_board_image");
+        let dto = serde_json::from_value(wire).unwrap();
+        apply_config_dto(&mut cfg, &dto).unwrap();
+        assert!(!cfg.coach.agent_mcp_tools && !cfg.coach.agent_send_board_image);
+
+        let dto = config_dto(&cfg);
+        let mut reloaded = Config::default();
+        apply_config_dto(&mut reloaded, &dto).unwrap();
+        assert!(!reloaded.coach.agent_mcp_tools && !reloaded.coach.agent_send_board_image);
+    }
+}
+
+#[cfg(test)]
+mod bot_deadline_settings_tests {
+    use super::*;
+
+    #[test]
+    fn bot_timeout_defaults_validates_and_round_trips_with_older_clients() {
+        let mut cfg = Config::default();
+        assert_eq!(cfg.coach.agent_bot_timeout_secs, 600);
+        assert_eq!(config_dto(&cfg).coach.agent_bot_timeout_secs, Some(600));
+        for seconds in [59, 601] {
+            assert!(cfg
+                .set("coach.agent_bot_timeout_secs", &seconds.to_string())
+                .is_err());
+            let mut dto = config_dto(&cfg);
+            dto.coach.agent_bot_timeout_secs = Some(seconds);
+            assert!(apply_config_dto(&mut cfg, &dto).is_err());
+            assert!(toml::from_str::<Config>(&format!(
+                "[coach]\nagent_bot_timeout_secs = {seconds}"
+            ))
+            .is_err());
+            assert_eq!(cfg.coach.agent_bot_timeout_secs, 600);
+        }
+        for seconds in [60, 120, 300, 600] {
+            let mut dto = config_dto(&cfg);
+            dto.coach.agent_bot_timeout_secs = Some(seconds);
+            apply_config_dto(&mut cfg, &dto).unwrap();
+            assert_eq!(
+                cfg.get("coach.agent_bot_timeout_secs").unwrap(),
+                seconds.to_string()
+            );
+            let saved = toml::to_string(&cfg).unwrap();
+            let reloaded: Config = toml::from_str(&saved).unwrap();
+            assert_eq!(reloaded.coach.agent_bot_timeout_secs, seconds);
+            dto.coach.agent_bot_timeout_secs = None;
+            apply_config_dto(&mut cfg, &dto).unwrap();
+            assert_eq!(cfg.coach.agent_bot_timeout_secs, seconds);
+        }
+        assert_eq!(
+            toml::from_str::<Config>("[coach]")
+                .unwrap()
+                .coach
+                .agent_bot_timeout_secs,
+            600
+        );
     }
 }

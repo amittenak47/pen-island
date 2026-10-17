@@ -607,6 +607,30 @@ describe("AmbientCoach.run — a run always settles", () => {
     vi.useRealTimers();
   });
 
+  it("gives an agent run the bot's budget instead of the API one", async () => {
+    vi.useFakeTimers();
+    const { socket, coach } = ready();
+    const promise = coach.run("ask", { question: "hi" });
+    const requestId = requestIdOf(socket);
+    let settled = false;
+    const expectation = expect(promise.finally(() => { settled = true; })).rejects.toThrow();
+
+    socket.onmessage?.({
+      data: JSON.stringify({
+        type: "stage", request_id: requestId, stage: "ask", detail: "Waiting for the AI assistant",
+      }),
+    });
+    // An API run would be cancelled at 210s; a bot can take its full 10 minutes.
+    await vi.advanceTimersByTimeAsync(9 * 60_000);
+    expect(settled).toBe(false);
+    expect(coach.busy).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(3 * 60_000);
+    await expectation;
+    coach.stop();
+    vi.useRealTimers();
+  });
+
   it("blames the failed step when a stall follows one", async () => {
     vi.useFakeTimers();
     const { socket, coach } = ready();

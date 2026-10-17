@@ -1,6 +1,8 @@
 """Optional GitHub OAuth front end for Pen Island's bearer-protected MCP.
 
-Only the three footnote tools are exposed. The public tunnel must target
+Footnote and annotation tools are exposed, plus hand-off and bot-only coach
+inbox tools while the backend offers them. Coach action schemas come from the
+backend through a fixed coach-name allow-list. The public tunnel must target
 127.0.0.1:7880; the normal, authenticated lc adapter remains on 127.0.0.1:7879.
 Credentials are read from an ignored local JSON file, never command arguments.
 """
@@ -26,8 +28,9 @@ from fastmcp.client.transports import StreamableHttpTransport
 from fastmcp.server.auth import AuthContext
 from fastmcp.server.auth.providers.github import GitHubProvider
 from fastmcp.server.middleware import AuthMiddleware, Middleware
+from fastmcp.server.providers import Provider
 from fastmcp.server.providers.proxy import ProxyClient
-from fastmcp.tools import ToolResult
+from fastmcp.tools import Tool, ToolResult
 from key_value.aio.stores.filetree import FileTreeStore
 from key_value.aio.wrappers.encryption import FernetEncryptionWrapper
 from pydantic import BaseModel, ConfigDict, Field
@@ -42,7 +45,15 @@ TOOLS = frozenset({
     "submit_page_annotations", "finish_annotation_job",
 })
 HANDOFF_TOOLS = frozenset({"start_assistant_app", "assistant_app_status"})
-TOOLS = TOOLS | HANDOFF_TOOLS
+COACH_INBOX_TOOLS = frozenset({"list_agent_requests", "get_agent_request", "report_step", "reply"})
+COACH_ACTION_TOOLS = frozenset({
+    "draw_structure", "animate_trace", "annotate_region", "cite_test_case",
+    "highlight_student_work", "create_attachment", "query_document_vectors",
+    "query_library_vectors", "get_document_section", "lookup_reference",
+    "get_current_page", "get_highlight", "list_document_marks", "save_annotation", "search_web",
+})
+COACH_TOOLS = COACH_INBOX_TOOLS | COACH_ACTION_TOOLS
+TOOLS = TOOLS | HANDOFF_TOOLS | COACH_TOOLS
 # Keep in step with WORKFLOW and INSTRUCTIONS in src/mcp.rs: the bridge sends
 # these when an assistant connects, before any call reaches `lc mcp`.
 WORKFLOW = (
@@ -84,6 +95,7 @@ JOB_GUIDE = (
     "Highlight the key words; underline the phrase the explanation hinges on."
 )
 INSTRUCTIONS = f"{WORKFLOW}\n\nHow to write each footnote: {FOOTNOTE_GUIDE}"
+COACH_WORKFLOW = 'Also check the coach inbox: call list_agent_requests; for each request call get_agent_request, use only its allowed tools, optionally report_step with a short status, and finish with reply, a short answer for the panel. Pass run_id on every per-run call. Keep reasoning private. Never solve a practice problem for the reader unless the request asks for a full solution; follow the API coach prompt for that action in answer_guidance, including its solution rules and reply format.'
 
 
 class SetupError(ValueError):
@@ -193,6 +205,20 @@ def backend_http_client(token: str, *, transport=None, **_kwargs) -> httpx2.Asyn
     )
 
 
+async def relay(backend: ProxyClient, name: str, arguments: dict[str, Any]) -> ToolResult:
+    """Relay only this bridge's fixed tool set; recheck live gates on each call."""
+    if name not in TOOLS:
+        raise ValueError("Unknown bridge tool")
+    async with backend.new() as client:
+        if name in COACH_TOOLS | HANDOFF_TOOLS:
+            offered = {tool.name for tool in await client.list_tools()}
+            if name not in offered:
+                raise ValueError("This tool is disabled in Pen Island Settings")
+        result = await client.call_tool_mcp(name, arguments, timeout=30.0)
+        return ToolResult(content=result.content, structured_content=result.structured_content,
+                          meta=result.meta, is_error=result.is_error)
+
+
 def github_auth(config: BridgeConfig) -> GitHubProvider:
     store = FileTreeStore(data_directory=config.state_dir / "oauth")
     encrypted = FernetEncryptionWrapper(key_value=store, fernet=Fernet(config.storage_key))
@@ -258,36 +284,78 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
         mode="legacy",
         timeout=30.0,
     )
-    class HandoffGate(Middleware):
-        """Offer the hand-off tools only while `lc mcp` does (the reader's Settings switch)."""
+    async def backend_tools():
+        async with backend.new() as client:
+            return await client.list_tools()
+
+    async def offered_names() -> set[str]:
+        try:
+            return {tool.name for tool in await backend_tools()}
+        except Exception:
+            return set()
+
+    class CoachRelayTool(Tool):
+        async def run(self, arguments: dict[str, Any]) -> ToolResult:
+            return await relay(backend, self.name, arguments)
+
+    class CoachActions(Provider):
+        """Resolve only currently offered coach action schemas, including for auth."""
+
+        async def _list_tools(self):
+            try:
+                tools = await backend_tools()
+            except Exception:
+                return []
+            return [CoachRelayTool(name=tool.name, description=tool.description,
+                                   parameters=tool.input_schema, annotations=tool.annotations)
+                    for tool in tools if tool.name in COACH_ACTION_TOOLS]
+
+        async def _get_tool(self, name, version=None):
+            if name not in COACH_ACTION_TOOLS:
+                return None
+            return next((tool for tool in await self._list_tools() if tool.name == name), None)
+
+    class InboxGate(Middleware):
+        """Follow the backend's live hand-off and coach gates; fail closed."""
+
+        async def on_initialize(self, context, call_next):
+            result = await call_next(context)
+            if result is None:
+                return result
+            result.instructions = INSTRUCTIONS + (
+                f"\n\n{COACH_WORKFLOW}" if "list_agent_requests" in await offered_names() else "")
+            return result
+
+        async def on_discover(self, context, call_next):
+            return await self.on_initialize(context, call_next)
 
         async def on_list_tools(self, context, call_next):
             tools = await call_next(context)
             try:
-                async with backend.new() as client:
-                    offered = {tool.name for tool in await client.list_tools()}
+                offered = {tool.name: tool for tool in await backend_tools()}
             except Exception:
-                offered = set()
-            return [tool for tool in tools if tool.name not in HANDOFF_TOOLS or tool.name in offered]
+                offered = {}
+            tools = [tool for tool in tools
+                     if tool.name not in HANDOFF_TOOLS | COACH_TOOLS or tool.name in offered]
+            return tools
+
+        async def on_list_prompts(self, context, call_next):
+            prompts = await call_next(context)
+            if "list_agent_requests" not in await offered_names():
+                prompts = [prompt for prompt in prompts if prompt.name != "answer_coach_requests"]
+            return prompts
 
     bridge = FastMCP(
         "Pen Island ChatBot", instructions=INSTRUCTIONS, version="1.0.0",
-        auth=auth, middleware=[AuthMiddleware(auth=owner_check(config.github_owner_id)), HandoffGate()],
+        auth=auth, providers=[CoachActions()],
+        middleware=[AuthMiddleware(auth=owner_check(config.github_owner_id)), InboxGate()],
         mask_error_details=True,
     )
 
-    async def relay(name: str, arguments: dict[str, Any]) -> ToolResult:
-        if name not in TOOLS:
-            raise ValueError("Unknown footnote tool")
-        async with backend.new() as client:
-            result = await client.call_tool_mcp(name, arguments, timeout=30.0)
-            return ToolResult(
-                content=result.content, structured_content=result.structured_content,
-                meta=result.meta, is_error=result.is_error,
-            )
-
     async def relay_prompt(name: str) -> str:
         # The prompt wording lives in `lc mcp`; the bridge only passes it on.
+        if name == "answer_coach_requests" and "list_agent_requests" not in await offered_names():
+            raise ValueError("The coach inbox is disabled in Pen Island Settings")
         async with backend.new() as client:
             result = await client.get_prompt_mcp(name)
         return "\n\n".join(m.content.text for m in result.messages if getattr(m.content, "text", None))
@@ -302,17 +370,57 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
     async def watch_footnotes() -> str:
         return await relay_prompt("watch_footnotes")
 
+    @bridge.prompt(name="answer_coach_requests", title="Answer my coach requests",
+                   description="Answer every pending coach request once.")
+    async def answer_coach_requests() -> str:
+        return await relay_prompt("answer_coach_requests")
+
+    @bridge.tool(name="list_agent_requests", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def list_agent_requests() -> ToolResult:
+        """List waiting bot coach requests, oldest first; excludes app runs and claimed work."""
+        return await relay(backend, "list_agent_requests", {})
+
+    @bridge.tool(name="get_agent_request", output_schema=None,
+                 annotations={"readOnlyHint": True, "openWorldHint": False})
+    async def get_agent_request(
+        run_id: Annotated[str, Field(description="An id from list_agent_requests.")],
+    ) -> ToolResult:
+        """Read this bot request's question, action, board, allowed tools and API answer guidance."""
+        return await relay(backend, "get_agent_request", {"run_id": run_id})
+
+    @bridge.tool(name="report_step", output_schema=None,
+                 annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+    async def report_step(
+        run_id: Annotated[str, Field(description="An id from list_agent_requests.")],
+        text: Annotated[str, Field(min_length=1, max_length=1000,
+                                  description="Short status for the panel; keep reasoning private.")],
+    ) -> ToolResult:
+        """Show an optional short progress step for this request."""
+        return await relay(backend, "report_step", {"run_id": run_id, "text": text})
+
+    @bridge.tool(name="reply", output_schema=None,
+                 annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
+    async def reply(
+        run_id: Annotated[str, Field(description="An id from list_agent_requests.")],
+        text: Annotated[str, Field(min_length=1, description=(
+            "Final answer for the panel, following answer_guidance. Ask/Draw take prose; "
+            "Review/Lazy/DrawReview take their existing JSON reply format."))],
+    ) -> ToolResult:
+        """Finish this bot request with the final answer."""
+        return await relay(backend, "reply", {"run_id": run_id, "text": text})
+
     @bridge.tool(name="list_footnote_requests", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def list_footnote_requests() -> ToolResult:
         """List pending footnote requests, oldest first, including excerpt and context."""
-        return await relay("list_footnote_requests", {})
+        return await relay(backend, "list_footnote_requests", {})
 
     @bridge.tool(name="get_footnote_request", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def get_footnote_request(id: str) -> ToolResult:
         """Read one footnote request: wide context, existing page notes, and extras (palette, exact mark text, library items, focus, per_page note limit, and attached files or PDF pages in references with their text). Infer whether attachments contain problems, solved homework or notes; never solve problems or quote solutions."""
-        return await relay("get_footnote_request", {"id": id})
+        return await relay(backend, "get_footnote_request", {"id": id})
 
     @bridge.tool(name="submit_footnote", output_schema=None,
                  annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
@@ -345,13 +453,13 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
             arguments["marks"] = [mark.model_dump(exclude_none=True) for mark in marks]
         if workspace_links:
             arguments["workspace_links"] = workspace_links
-        return await relay("submit_footnote", arguments)
+        return await relay(backend, "submit_footnote", arguments)
 
     @bridge.tool(name="list_annotation_jobs", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def list_annotation_jobs() -> ToolResult:
         """List page ranges (such as a chapter) the reader wants annotated, oldest first."""
-        return await relay("list_annotation_jobs", {})
+        return await relay(backend, "list_annotation_jobs", {})
 
     @bridge.tool(name="get_annotation_pages", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
@@ -362,7 +470,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
             arguments["from_page"] = from_page
         if to_page is not None:
             arguments["to_page"] = to_page
-        return await relay("get_annotation_pages", arguments)
+        return await relay(backend, "get_annotation_pages", arguments)
 
     @bridge.tool(name="get_annotation_reference", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
@@ -371,7 +479,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
         arguments: dict[str, Any] = {"job_id": job_id, "index": index}
         if offset is not None:
             arguments["offset"] = offset
-        return await relay("get_annotation_reference", arguments)
+        return await relay(backend, "get_annotation_reference", arguments)
 
     @bridge.tool(name="submit_page_annotations", output_schema=None,
                  description=(
@@ -384,7 +492,7 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
         job_id: str, page: int, annotations: Annotated[list[PageAnnotation], Field(min_length=1, max_length=8)],
     ) -> ToolResult:
         """Add footnotes to one page: each quotes the exact words it is about; the reader's app places it there."""
-        return await relay("submit_page_annotations", {
+        return await relay(backend, "submit_page_annotations", {
             "job_id": job_id, "page": page,
             "annotations": [annotation.model_dump(exclude_none=True) for annotation in annotations],
         })
@@ -393,19 +501,19 @@ def build_bridge(config: BridgeConfig, *, auth_provider=None, backend_transport=
                  annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
     async def finish_annotation_job(job_id: str, summary: str = "") -> ToolResult:
         """Mark an annotation job finished, with a short summary for the reader."""
-        return await relay("finish_annotation_job", {"job_id": job_id, "summary": summary})
+        return await relay(backend, "finish_annotation_job", {"job_id": job_id, "summary": summary})
 
     @bridge.tool(name="start_assistant_app", output_schema=None,
                  annotations={"readOnlyHint": False, "destructiveHint": False, "openWorldHint": False})
     async def start_assistant_app(job_id: str | None = None) -> ToolResult:
         """Hand the writing to the assistant app on the reader's PC (Codex or Claude Code, on their own subscription) instead of writing the footnotes yourself. Without job_id it takes every pending footnote request; with job_id it takes that page run. It runs in the background and takes minutes: call assistant_app_status every 30-60 seconds until state is done or failed, then tell the reader how it went. Use it when the reader asks you to use Codex, Claude Code or their PC."""
-        return await relay("start_assistant_app", {} if job_id is None else {"job_id": job_id})
+        return await relay(backend, "start_assistant_app", {} if job_id is None else {"job_id": job_id})
 
     @bridge.tool(name="assistant_app_status", output_schema=None,
                  annotations={"readOnlyHint": True, "openWorldHint": False})
     async def assistant_app_status() -> ToolResult:
         """Progress of the assistant app on the reader's PC: state (idle, running, done or failed), start and finish times, the page run, requests answered, and any error."""
-        return await relay("assistant_app_status", {})
+        return await relay(backend, "assistant_app_status", {})
 
     return bridge
 

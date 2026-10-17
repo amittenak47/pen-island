@@ -18,6 +18,7 @@ pub mod board_session;
 pub mod session;
 pub mod viz;
 pub mod ws;
+mod agent_socket;
 
 use std::sync::{Arc, RwLock};
 
@@ -43,6 +44,8 @@ pub struct AppState {
     /// `runner` records each run to a single `last_run.json`; serialize test
     /// runs so two clients can't interleave and read each other's results.
     pub test_lock: tokio::sync::Mutex<()>,
+    /// Ephemeral coach jobs; shared by all sockets and future agent adapters.
+    pub agent_runs: Arc<crate::llm::agent_runs::AgentRunRegistry>,
 }
 
 impl AppState {
@@ -69,6 +72,7 @@ pub fn new_state_with_token(cfg: Config, token: Option<String>) -> Shared {
         sessions: tokio::sync::Mutex::new(SessionStore::default()),
         board_sessions: tokio::sync::Mutex::new(board_session::BoardSessionStore::default()),
         test_lock: tokio::sync::Mutex::new(()),
+        agent_runs: Arc::new(crate::llm::agent_runs::AgentRunRegistry::default()),
     })
 }
 
@@ -257,6 +261,7 @@ pub fn router(state: Shared) -> Router {
         .route("/coach/scaffold", post(coach::scaffold))
         .route("/coach/capabilities", get(coach::capabilities))
         .route("/coach/session", get(ws::session))
+        .route("/coach/agent-mcp", post(crate::mcp::coach::route))
         .route(
             "/workspace/:id/solution",
             get(routes::get_solution).put(routes::put_solution),

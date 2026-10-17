@@ -33,8 +33,8 @@ export function useWordReveal(text: string, animate = true, animateInitial = fal
 }
 
 export const AgentRichText = memo(function AgentRichText({
-  text, animate = false, animateInitial = false, className = "",
-}: { text: string; animate?: boolean; animateInitial?: boolean; className?: string }) {
+  text, animate = false, animateInitial = false, className = "", reveal = "word",
+}: { text: string; animate?: boolean; animateInitial?: boolean; className?: string; reveal?: "word" | "paragraph" }) {
   const prepared = useMemo(() => formatAgentProse(text), [text]);
   const html = useMemo(() => renderMarkdown(prepared), [prepared]);
   const host = useRef<HTMLDivElement>(null);
@@ -44,6 +44,15 @@ export const AgentRichText = memo(function AgentRichText({
     const changed = previous.current !== html;
     previous.current = html;
     if (!node || !animate || !changed || document.hidden || window.matchMedia?.("(prefers-reduced-motion: reduce)").matches) return;
+    if (reveal === "paragraph") {
+      // Keep complete Markdown (including lists, code and math) and its layout intact.
+      // Each top-level paragraph/block enters in order when the final result lands.
+      [...node.children].forEach((child, index) => {
+        child.classList.add("lc-agent-paragraph-reveal");
+        (child as HTMLElement).style.animationDelay = `${index * 180}ms`;
+      });
+      return;
+    }
     // Parse the complete Markdown once. Revealing partial Markdown repeatedly
     // opens/closes lists, math and code blocks, making the bubble shrink/grow.
     // Opacity animation leaves line wrapping and scroll height unchanged.
@@ -65,7 +74,7 @@ export const AgentRichText = memo(function AgentRichText({
       }
       textNode.replaceWith(fragment);
     }
-  }, [html, animate]);
+  }, [html, animate, reveal]);
   return <div ref={host} className={`lc-agent-markdown ${className}`}
     // renderMarkdown shares the document renderer's Markdown/KaTeX sanitization.
     dangerouslySetInnerHTML={{ __html: html }} />;

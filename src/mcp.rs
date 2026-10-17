@@ -3,6 +3,8 @@
 //! JSON-RPC messages are the only bytes on stdout. The hub is the only writer
 //! of the inbox; this process just calls it over HTTP.
 
+pub mod coach;
+
 use std::io::{BufRead, Write};
 
 use anyhow::{Context, Result};
@@ -40,6 +42,7 @@ const SUPPORTED_PROTOCOLS: &[&str] = &["2024-11-05", "2025-03-26", "2025-06-18"]
 const FALLBACK_PROTOCOL: &str = "2025-06-18";
 
 pub trait FootnoteHub {
+    fn agent_scope(&self) -> Option<coach::AgentScope> { None }
     fn list_pending(&self) -> Result<Value, String>;
     fn get(&self, id: &str) -> Result<Value, String>;
     fn submit(&self, id: &str, submission: &FootnoteSubmission) -> Result<Value, String>;
@@ -48,6 +51,8 @@ pub trait FootnoteHub {
     fn automatic_inbox(&self) -> bool { false }
     /// Whether the reader lets an assistant bot hand work to the app on this PC.
     fn bot_handoff_allowed(&self) -> bool { false }
+    /// Freshly gated bot schemas; scoped automatic footnote connections keep none.
+    fn bot_inbox_tools(&self) -> Vec<Value> { vec![] }
 }
 
 /// Automatic runs cannot consume bot-mode requests or another page run.
@@ -55,12 +60,14 @@ pub struct AppFootnoteHub<H> {
     hub: H,
     job_id: Option<String>,
     read_only: bool,
+    agent_scope: Option<coach::AgentScope>,
 }
 
 impl<H: FootnoteHub> AppFootnoteHub<H> {
     pub fn new(hub: H, job_id: Option<String>, read_only: bool) -> Result<Self> {
         anyhow::ensure!(job_id.as_deref().is_none_or(footnotes::valid_id), "Invalid annotation job id.");
-        Ok(Self { hub, job_id, read_only })
+        let agent_scope = coach::AgentScope::from_job(job_id.as_deref())?;
+        Ok(Self { hub, job_id, read_only, agent_scope })
     }
 
     fn app_request(&self, id: &str) -> Result<Value, String> {
@@ -78,6 +85,7 @@ impl<H: FootnoteHub> AppFootnoteHub<H> {
 }
 
 impl<H: FootnoteHub> FootnoteHub for AppFootnoteHub<H> {
+    fn agent_scope(&self) -> Option<coach::AgentScope> { self.agent_scope.clone() }
     fn automatic_inbox(&self) -> bool { true }
     fn list_pending(&self) -> Result<Value, String> {
         let rows = self.hub.list_pending()?;
@@ -90,6 +98,14 @@ impl<H: FootnoteHub> FootnoteHub for AppFootnoteHub<H> {
         self.hub.submit(id, submission)
     }
     fn call(&self, method: &str, path: &str, body: Option<Value>) -> Result<Value, String> {
+        if let Some(scope) = &self.agent_scope {
+            coach::check_transport_scope(scope, method, path, body.as_ref())?;
+            if self.read_only && !body.as_ref().is_some_and(|body|
+                body["method"] == "tools/list" || (body["method"] == "tools/call" && body["params"]["name"] == "get_agent_request")) {
+                return Err("This is a read-only connection test.".into());
+            }
+            return self.hub.call(method, path, body);
+        }
         if method == "GET" && path == "/annotation-jobs" {
             let rows = self.hub.call(method, path, body)?;
             return Ok(Value::Array(rows.as_array().into_iter().flatten().filter(|row|
@@ -160,6 +176,8 @@ impl FootnoteHub for HttpFootnoteHub {
         self.send(self.client.get(format!("{}/footnote-requests/{id}", self.base)))
     }
 
+    fn bot_inbox_tools(&self) -> Vec<Value> { coach::general_tools(self) }
+
     fn bot_handoff_allowed(&self) -> bool {
         self.call("GET", "/assistant-runner/config", None).is_ok_and(|config| config["allow_bots"] == true)
     }
@@ -190,11 +208,23 @@ pub fn serve_from_config(hub: Option<String>) -> Result<()> {
     let cfg = Config::load()?;
     let base = hub.unwrap_or_else(|| format!("http://127.0.0.1:{}", cfg.serve.port));
     let client = HttpFootnoteHub::new(base, cfg.serve.token)?;
-    serve(&client)
+    match agent_scope_from_env()? {
+        Some(scope) => serve(&coach::AgentHub::new(client, scope)?),
+        None => serve(&client),
+    }
+}
+
+fn agent_scope_from_env() -> Result<Option<coach::AgentScope>> {
+    let read = |key| match std::env::var(key) {
+        Ok(value) => Ok(Some(value)),
+        Err(std::env::VarError::NotPresent) => Ok(None),
+        Err(error) => Err(anyhow::anyhow!("invalid {key}: {error}")),
+    };
+    coach::scope_from_values(read(coach::RUN_ENV)?, read(coach::BOTS_ENV)?)
 }
 
 /// A private HTTP adapter for clients/tunnels that do not launch stdio servers.
-/// Only footnote tools are exposed; the LAN hub's other routes stay private.
+/// Footnote tools and gated handoff/coach inbox tools; other hub routes stay private.
 pub fn serve_http_from_config(hub: Option<String>, address: std::net::SocketAddr, token_file: Option<&std::path::Path>) -> Result<()> {
     anyhow::ensure!(address.ip().is_loopback(), "MCP HTTP must listen on a loopback address; use an authenticated private tunnel for cloud assistants");
     let token_file = token_file.context("MCP HTTP requires --auth-token-file with a separate strong bearer token; do not use the LAN pairing code")?;
@@ -205,7 +235,11 @@ pub fn serve_http_from_config(hub: Option<String>, address: std::net::SocketAddr
     let cfg = Config::load()?;
     let base = hub.unwrap_or_else(|| format!("http://127.0.0.1:{}", cfg.serve.port));
     // Construct/drop reqwest's blocking client outside the async runtime.
-    let client = std::sync::Arc::new(HttpFootnoteHub::new(base, cfg.serve.token)?);
+    let client = HttpFootnoteHub::new(base, cfg.serve.token)?;
+    let client: std::sync::Arc<dyn FootnoteHub + Send + Sync> = match agent_scope_from_env()? {
+        Some(scope) => std::sync::Arc::new(coach::AgentHub::new(client, scope)?),
+        None => std::sync::Arc::new(client),
+    };
     tokio::runtime::Runtime::new()?.block_on(async {
         let listener = tokio::net::TcpListener::bind(address).await?;
         eprintln!("ChatBot MCP: http://{}/mcp", listener.local_addr()?);
@@ -296,6 +330,7 @@ pub fn serve(hub: &dyn FootnoteHub) -> Result<()> {
 
 /// `None` when the message is a notification and must not be answered.
 pub fn dispatch(hub: &dyn FootnoteHub, message: &Value) -> Option<Value> {
+    if let Some(scope) = hub.agent_scope() { return coach::dispatch(hub, scope, message); }
     let id = message.get("id").filter(|id| !id.is_null());
     let method = message.get("method").and_then(Value::as_str);
     let Some(method) = method else {
@@ -306,22 +341,63 @@ pub fn dispatch(hub: &dyn FootnoteHub, message: &Value) -> Option<Value> {
     };
     let params = message.get("params").cloned().unwrap_or_else(|| json!({}));
     Some(match method {
-        "initialize" => result_reply(id, initialize_result(&params)),
+        "initialize" => {
+            let mut result = initialize_result(&params);
+            if bot_inbox_open(hub) { result["instructions"] = json!(format!("{}\n\n{COACH_WORKFLOW}", server_instructions())); }
+            result_reply(id, result)
+        },
         "ping" => result_reply(id, json!({})),
         "tools/list" => {
             let mut tools = tool_list();
             if hub.automatic_inbox() { tools.retain(|tool| crate::serve::assistant_runner::MCP_TOOLS.contains(&tool["name"].as_str().unwrap_or(""))); }
-            else if hub.bot_handoff_allowed() { tools.extend(handoff_tools()); }
+            else {
+                if hub.bot_handoff_allowed() { tools.extend(handoff_tools()); }
+                tools.extend(hub.bot_inbox_tools());
+            }
             result_reply(id, json!({ "tools": tools }))
         },
-        "prompts/list" => result_reply(id, json!({ "prompts": prompt_list() })),
-        "prompts/get" => match get_prompt(&params) {
+        "prompts/list" => {
+            let mut prompts = prompt_list();
+            if bot_inbox_open(hub) { prompts.push(coach_prompt()); }
+            result_reply(id, json!({ "prompts": prompts }))
+        },
+        "prompts/get" => match gated_prompt(hub, &params) {
             Some(prompt) => result_reply(id, prompt),
             None => error_reply(id, -32602, "Unknown prompt"),
         },
         "tools/call" => result_reply(id, call_tool(hub, &params)),
         _ => error_reply(id, -32601, "Method not found"),
     })
+}
+
+/// Appending this only when the inbox is offered keeps the old wording exact.
+pub const COACH_WORKFLOW: &str = "Also check the coach inbox: call list_agent_requests; for each request call get_agent_request, use only its allowed tools, optionally report_step with a short status, and finish with reply, a short answer for the panel. Pass run_id on every per-run call. Keep reasoning private. Never solve a practice problem for the reader unless the request asks for a full solution; follow the API coach prompt for that action in answer_guidance, including its solution rules and reply format.";
+
+fn bot_inbox_open(hub: &dyn FootnoteHub) -> bool {
+    !hub.automatic_inbox()
+        && hub
+            .bot_inbox_tools()
+            .iter()
+            .any(|tool| tool["name"] == "list_agent_requests")
+}
+
+fn coach_prompt() -> Value {
+    json!({"name":"answer_coach_requests", "title":"Answer my coach requests",
+        "description":"Answer every pending coach request once.", "arguments":[]})
+}
+
+fn gated_prompt(hub: &dyn FootnoteHub, params: &Value) -> Option<Value> {
+    let open = bot_inbox_open(hub);
+    if params["name"] == "answer_coach_requests" {
+        return open.then(|| json!({"description":"Answer every pending coach request once.",
+            "messages":[{"role":"user","content":{"type":"text","text":format!("Answer my pending Pen Island coach requests once. {COACH_WORKFLOW}")}}]}));
+    }
+    let mut prompt = get_prompt(params)?;
+    if open {
+        let text = prompt["messages"][0]["content"]["text"].as_str()?;
+        prompt["messages"][0]["content"]["text"] = json!(format!("{text}\n\n{COACH_WORKFLOW}"));
+    }
+    Some(prompt)
 }
 
 fn initialize_result(params: &Value) -> Value {
@@ -578,6 +654,15 @@ fn handoff_tools() -> Vec<Value> {
 fn call_tool(hub: &dyn FootnoteHub, params: &Value) -> Value {
     let name = params.get("name").and_then(Value::as_str).unwrap_or("");
     let arguments = params.get("arguments").cloned().unwrap_or_else(|| json!({}));
+    if coach::COACH_TOOLS.contains(&name) && !hub.automatic_inbox() {
+        if !bot_inbox_open(hub) {
+            return tool_text("coach bot inbox is disabled: enable coach MCP tools and choose AI assistant for a coach mode", true);
+        }
+        return match coach::general_request(hub, "tools/call", params.clone()) {
+            Ok(result) => result,
+            Err(error) => tool_text(&error, true),
+        };
+    }
     let outcome = match name {
         "list_footnote_requests" => hub.list_pending(),
         "get_footnote_request" => match arguments.get("id").and_then(Value::as_str) {
