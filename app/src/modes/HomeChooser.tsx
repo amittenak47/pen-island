@@ -40,6 +40,8 @@ export interface HomeChooserProps {
   covered?: boolean;
   tabsRef?: MutableRefObject<TabState>;
   onOpenRecent?: (tab: TabRecord) => void;
+  /** Right side of the Start row: library sync, when a hub is set. */
+  startAction?: ReactNode;
 }
 
 /**
@@ -710,6 +712,7 @@ export function HomeChooser({
   covered = false,
   tabsRef,
   onOpenRecent,
+  startAction,
 }: HomeChooserProps) {
   const [recent, setRecent] = useState<TabRecord[]>([]);
   const [recentsOpen, setRecentsOpen] = useState(loadRecentsOpen);
@@ -993,7 +996,10 @@ export function HomeChooser({
         </div>}
       </section>}
       {/* "Start" only separates the tiles from Recently opened; alone it is noise. */}
-      {recent.length > 0 && <h2 className="lc-home-section-title">Start</h2>}
+      {(recent.length > 0 || startAction) && <div className="lc-home-start-row">
+        <h2 className="lc-home-section-title">Start</h2>
+        {startAction}
+      </div>}
       <div className="lc-home-chooser-grid">
         {[...modes].sort((a,b) => HOME_ORDER.indexOf(a.id) - HOME_ORDER.indexOf(b.id)).map((mode,index) => (
           <HomeCard key={mode.id} mode={mode} busy={busy} active={visible} delay={index*.035}/>

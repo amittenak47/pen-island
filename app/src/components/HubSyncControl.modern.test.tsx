@@ -15,6 +15,7 @@ import { savePadHub, setHostLoopback } from "../util/padHub";
 import { refreshPadHubStatus } from "../util/padHubStatus";
 import { recordHash } from "../util/syncContent";
 import { HubSyncCancelled } from "../util/hubConflictStash";
+import * as bookPass from "../util/bookSyncPass";
 
 vi.mock("../util/padSnapshotStore", async original => ({ ...await original<typeof import("../util/padSnapshotStore")>(), listAllPadSnapshots: async()=>[] }));
 vi.mock("../util/inkSync", async original => ({ ...await original<typeof import("../util/inkSync")>(), syncEdges: async()=>{} }));
@@ -50,12 +51,22 @@ function mount(){
 const dock=()=>element.querySelector(".lc-hub-sync") as HTMLButtonElement;
 const header=()=>element.querySelector(".lc-doc-index-sync") as HTMLButtonElement;
 async function waitForChoice(){await vi.waitFor(()=>expect(host.onConflict).toHaveBeenCalledOnce());}
+it("the tab walk requests only its open book and leaves a dirty second book alone", async () => {
+  await saveWhiteboardNotebook({ id: "other", title: "Other", pageCount: 1, board });
+  const before = await captureBook({ kind: "whiteboard", id: "other" });
+  const pass = vi.spyOn(bookPass, "syncBookPass");
+  vi.mocked(host.onConflict).mockImplementation(async (_conflict, lifecycle) => { lifecycle!.onMounted(); return { pick: "server" }; });
+  mount(); await act(async () => dock().click());
+  await vi.waitFor(() => expect(dock().dataset.stage).toBe("synced"));
+  expect(pass).toHaveBeenCalledWith(api, expect.objectContaining({ only: true, selected: { kind: "whiteboard", id: "book" } }));
+  expect(await captureBook({ kind: "whiteboard", id: "other" })).toEqual(before);
+});
 it("missing merge mount ends both controls at 3000ms; a single header tap starts a fresh successful sync",async()=>{
   localStorage.setItem("whiteboard.offlineMerge.v1","prefer-local");
   mount();const before=await captureBook({kind:"whiteboard",id:"book"});
   await act(async()=>dock().click());await waitForChoice();
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,3100));});
-  const reason="Synced 0 books. 1 failed: Algorithms: couldn't open the merge window.";
+  const reason="Algorithms: couldn't open the merge window.";
   expect(dock().getAttribute("aria-label")).toBe("Sync failed");expect(dock().getAttribute("aria-busy")).toBe("false");expect(dock().title).toBe(reason);
   expect(header().textContent).toBe("!Sync failed");expect(header().title).toBe(reason);
   expect(await captureBook({kind:"whiteboard",id:"book"})).toEqual(before);

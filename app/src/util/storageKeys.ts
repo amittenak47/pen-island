@@ -10,6 +10,7 @@ export const MIGRATED_MARKER = "whiteboard.migrated.v1";
 
 /** Theme used to live at `lc-app-theme` (hyphen, not `lc.`). */
 export const THEME_KEY = "whiteboard.app-theme";
+export const LIBRARY_SYNC_RESULT_KEY = "whiteboard.library-sync-result.v1";
 export const LEGACY_THEME_KEY = "lc-app-theme";
 
 /**
