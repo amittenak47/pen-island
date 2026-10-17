@@ -181,6 +181,8 @@ export function ExploreWorkspace({
   const hostRef = useRef<HTMLDivElement | null>(null);
   const legendRef = useRef<HTMLElement | null>(null);
   const labelElsRef = useRef(new Map<NodeType, HTMLSpanElement>());
+  /** One ring per kind around its group while clustered (glow + core, like the edges). */
+  const ringElsRef = useRef(new Map<NodeType, { glow: SVGEllipseElement | null; core: SVGEllipseElement | null }>());
   const labelSpotsRef = useRef(frozenLabels);
   labelSpotsRef.current = frozenLabels;
   /** Edges by id, for the paint loop, which must not depend on React state. */
@@ -389,6 +391,41 @@ export function ExploreWorkspace({
       const { x, y } = graphPoint(body.x, body.y);
       at.set(body.key,{x,y,vx:0,vy:0});
       if(renderer)positions.push({id:body.key,x,y});
+    }
+    /*
+     * Cluster rings follow their groups every frame (drift, drags, the
+     * gather itself); whether they show is CSS (`data-on`), so they fade
+     * while the nodes drift apart.
+     */
+    for (const [type, ring] of ringElsRef.current) {
+      let sx = 0, sy = 0, n = 0;
+      for (const body of bodiesRef.current) {
+        if (body.node.type !== type) continue;
+        const p = at.get(body.key);
+        if (p) { sx += p.x; sy += p.y; n += 1; }
+      }
+      let cx = 0, cy = 0, rx = 0, ry = 0;
+      if (n > 0) {
+        cx = sx / n; cy = sy / n;
+        let dx = 0, dy = 0;
+        for (const body of bodiesRef.current) {
+          if (body.node.type !== type) continue;
+          const p = at.get(body.key);
+          if (p) { dx = Math.max(dx, Math.abs(p.x - cx)); dy = Math.max(dy, Math.abs(p.y - cy)); }
+        }
+        // An oval around the group's box, padded for each node's glow and the
+        // title under it (wider than tall, as titles run sideways). Scaling
+        // the half-sizes by sqrt(2) keeps the box's corners inside the oval.
+        rx = (dx + 60) * Math.SQRT2;
+        ry = (dy + 30) * Math.SQRT2;
+      }
+      for (const shape of [ring.glow, ring.core]) {
+        if (!shape) continue;
+        shape.setAttribute("cx", cx.toFixed(1));
+        shape.setAttribute("cy", cy.toFixed(1));
+        shape.setAttribute("rx", rx.toFixed(1));
+        shape.setAttribute("ry", ry.toFixed(1));
+      }
     }
     for (const spot of labelSpotsRef.current) {
       const el = labelElsRef.current.get(spot.type);
@@ -880,6 +917,26 @@ export function ExploreWorkspace({
               HTML buttons preserve keyboard/screen-reader interaction; SVG
               and visible HTML take over if WebGL is unavailable or lost.
             */}
+            {/*
+              Cluster rings, under everything else: each kind's group gets a
+              faint ring in its colour, drawn like the edges (a wide faint
+              copy and a thin core, no blur). They grow in once the groups
+              have gathered and fade as Cluster is switched off.
+            */}
+            <svg className="lc-explore-beams lc-explore-rings" data-on={clustered && clusterReady ? "" : undefined} aria-hidden>
+              {CLUSTERS.map((cluster) => (
+                <g key={cluster.type} style={{ color: TINT[cluster.type] }}>
+                  <ellipse className="lc-explore-ring-glow" ref={(el) => {
+                    const ring = ringElsRef.current.get(cluster.type) ?? { glow: null, core: null };
+                    ring.glow = el; ringElsRef.current.set(cluster.type, ring);
+                  }} />
+                  <ellipse className="lc-explore-ring-core" ref={(el) => {
+                    const ring = ringElsRef.current.get(cluster.type) ?? { glow: null, core: null };
+                    ring.core = el; ringElsRef.current.set(cluster.type, ring);
+                  }} />
+                </g>
+              ))}
+            </svg>
             <canvas className="lc-explore-beams lc-explore-webgl" ref={graphCanvasRef} hidden={!webglGraph} aria-hidden
               onContextMenu={event=>event.preventDefault()}
               onPointerDown={event=>{

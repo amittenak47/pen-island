@@ -9722,6 +9722,33 @@ body[data-lc-sash-drag="horizontal"] {
   visibility: hidden;
 }
 
+/* Cluster rings: under the nodes and edges, styled like the edges' bloom. */
+.lc-explore-rings {
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.lc-explore-rings[data-on] {
+  opacity: 1;
+  transition: opacity 360ms ease;
+}
+.lc-explore-rings ellipse {
+  fill: none;
+  stroke: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.9);
+  transition: transform 260ms ease-in;
+}
+.lc-explore-rings[data-on] ellipse {
+  transform: scale(1);
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lc-explore-ring-glow { stroke-width: 4; opacity: 0.16; }
+.lc-explore-ring-core { stroke-width: 0.8; opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) {
+  .lc-explore-rings, .lc-explore-rings ellipse { transition: none; }
+}
+
 .lc-explore-webgl {
   pointer-events: auto;
   touch-action: none;
