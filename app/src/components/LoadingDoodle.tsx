@@ -56,7 +56,7 @@ const NATIVE_PLACE_MS = 400;
 
 let nextNativeId = 1;
 
-function loadLiveInk(themeId: string): DoodleInk {
+function loadLiveInk(themeId: string, inkOverride?: string): DoodleInk {
   const prefs = loadInkToolPrefs();
   const pressureSensitive = prefs.pressureSensitive;
   return {
@@ -64,7 +64,7 @@ function loadLiveInk(themeId: string): DoodleInk {
     baseWidth: inkBaseWidthForZoom(prefs.penWidth, 1),
     maxFullness: pressureSensitive ? Math.min(prefs.inkFullness, 0.999) : 1,
     pressureSensitive,
-    inkColor: resolveInkColor(themeId, prefs.inkColor),
+    inkColor: inkOverride ?? resolveInkColor(themeId, prefs.inkColor),
     pressureClip: loadInkPressureClip(),
     boldness: loadInkBoldness(),
     speedInk: loadInkSpeed(),
@@ -82,6 +82,7 @@ export function LoadingDoodle({
   themeId,
   nativeInput = false,
   nativeExclude,
+  ink,
 }: {
   className?: string;
   /** App theme — defaults to stored theme when omitted (status dialogs). */
@@ -93,12 +94,16 @@ export function LoadingDoodle({
    * starts on one goes to the page as ever, not to the native pen.
    */
   nativeExclude?: string;
+  /** Pen colour regardless of theme and saved pen: the dark boot screen. */
+  ink?: string;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const nativeRef = useRef<HTMLCanvasElement | null>(null);
   const doodleTokenRef = useRef<object>({});
   const themeIdRef = useRef(themeId ?? loadThemeId());
   themeIdRef.current = themeId ?? loadThemeId();
+  const inkRef = useRef(ink);
+  inkRef.current = ink;
   const reloadRef = useRef<() => void>(() => {});
   const nativeInkRef = useRef<() => void>(() => {});
   const [native, setNative] = useState(false);
@@ -110,11 +115,11 @@ export function LoadingDoodle({
     const engine = createDoodleEngine(
       canvas,
       () => document.createElement("canvas"),
-      loadLiveInk(themeIdRef.current),
+      loadLiveInk(themeIdRef.current, inkRef.current),
       (active) => (active ? beginLoadingDoodle(token) : endLoadingDoodle(token)),
     );
     if (!engine) return;
-    const reloadInk = () => engine.setInk(loadLiveInk(themeIdRef.current));
+    const reloadInk = () => engine.setInk(loadLiveInk(themeIdRef.current, inkRef.current));
     reloadRef.current = reloadInk;
     for (const name of INK_EVENTS) window.addEventListener(name, reloadInk);
 
@@ -260,7 +265,7 @@ export function LoadingDoodle({
       if (msg.active) beginLoadingDoodle(token);
       else endLoadingDoodle(token);
     };
-    const sendInk = () => worker?.postMessage({ type: "ink", id, ink: loadLiveInk(themeIdRef.current) });
+    const sendInk = () => worker?.postMessage({ type: "ink", id, ink: loadLiveInk(themeIdRef.current, inkRef.current) });
 
     void nativeDoodleHost().then((host) => {
       if (disposed || !host) return;
@@ -274,7 +279,7 @@ export function LoadingDoodle({
       const first = place();
       last = JSON.stringify(first);
       host.addEventListener("message", onWorker);
-      host.postMessage({ type: "attach", id, canvas: offscreen, ink: loadLiveInk(themeIdRef.current), ...first }, [offscreen]);
+      host.postMessage({ type: "attach", id, canvas: offscreen, ink: loadLiveInk(themeIdRef.current, inkRef.current), ...first }, [offscreen]);
       timer = window.setInterval(sendPlace, NATIVE_PLACE_MS);
       nativeInkRef.current = sendInk;
       for (const name of INK_EVENTS) window.addEventListener(name, sendInk);

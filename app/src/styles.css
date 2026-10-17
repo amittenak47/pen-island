@@ -15219,12 +15219,28 @@ button.lc-row-selected:hover:not(:disabled) {
   z-index: 135;
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--overlay-bg) 55%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  /*
+   * Dark whatever the palette: it follows Android's splash (the icon on its
+   * own near-black), so a launch is one dark screen with the mark, then a fade
+   * into the palette, never black, white, then the palette.
+   */
+  background: #0c0a08;
+  color: rgb(237 237 240 / 62%);
   overflow: hidden;
   touch-action: none;
+}
+
+/* The icon's mark, where the splash left it: centred, above the status line. */
+.lc-boot-mark {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 230px);
+  width: 160px;
+  height: 160px;
+  translate: -50% 0;
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
 }
 
 /*
@@ -15382,7 +15398,8 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 .lc-server-gate-boot-exit {
-  animation: lc-server-gate-out 160ms ease-in both;
+  /* Long enough to read as dark fading into the palette, not a cut. */
+  animation: lc-server-gate-out 320ms ease-in both;
   pointer-events: none;
 }
 

@@ -156,6 +156,9 @@ function doneHoldMs(): number {
   return prefersReducedMotion() ? 0 : BOOT_DONE_HOLD_MS;
 }
 
+/** The boot doodle draws on the dark boot screen, whatever the palette or saved pen. */
+const BOOT_DOODLE_INK = "#ededf0";
+
 function serverGateExitMs(): number {
   return prefersReducedMotion() ? 0 : BOOT_EXIT_MS;
 }
@@ -194,6 +197,11 @@ export function App() {
   const serverLinkRef = useRef(serverLink);
   serverLinkRef.current = serverLink;
   const [bootPhase, setBootPhase] = useState<"enter" | "show" | "done" | "exit" | "gone">("enter");
+  // index.html starts the page dark to match the boot screen; the palette's
+  // own background shows through as that screen fades.
+  useEffect(() => {
+    if (bootPhase === "exit" || bootPhase === "gone") document.documentElement.classList.remove("lc-booting");
+  }, [bootPhase]);
   const openStatus = useOpenStatus();
   /** The boot overlay is still on screen, so nothing else may open in front of it. */
   const bootOverlayPendingRef = useRef(true);
@@ -1583,7 +1591,8 @@ export function App() {
           aria-live="polite"
           aria-label={bootPhase === "done" ? "Ready" : "Starting up"}
         >
-          <LoadingDoodle themeId={themeId} nativeInput />
+          <img className="lc-boot-mark" src="/boot-mark.svg" alt="" aria-hidden="true" draggable={false} />
+          <LoadingDoodle themeId={themeId} ink={BOOT_DOODLE_INK} nativeInput />
           <p className="lc-load-status" aria-hidden="true">
             {bootPhase === "done" ? "Ready" : openStatus ?? "Starting up…"}
           </p>
