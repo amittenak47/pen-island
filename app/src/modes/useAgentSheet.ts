@@ -132,7 +132,11 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
       // Commit the unclipped style while transitions are still off: dropping
       // both at once let the sheet's clip-path transition replay the drag
       // clip back to zero, a 240ms wipe (a flash) after every lift-off.
+      // The sessions column rides the clip; settle it to zero now too, or it
+      // eases back up from the drag offset once its transition returns.
       void getComputedStyle(panel.current).clipPath;
+      const col = panel.current.querySelector(".lc-agent-sessions-col");
+      if (col) void getComputedStyle(col).transform;
       panel.current.style.removeProperty("transition");
     }
     document.documentElement.classList.remove("lc-agent-dragging");

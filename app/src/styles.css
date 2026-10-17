@@ -11069,6 +11069,10 @@ body[data-lc-sash-drag="horizontal"] {
 
 .lc-agent-dragging .lc-mobile :is(.lc-agent-pane-expand-row, .lc-agent-sessions-col) {
   transform: translateY(var(--lc-sheet-clip, 0px));
+  /* The sessions column eases its transform (for hide/show). Under the
+     finger that easing made it trail the sheet, sliding up from below on
+     every frame of a drag and again after lift-off. */
+  transition: none;
 }
 
 .lc-agent-dragging .lc-mobile .lc-agent-pane-expand-row {
