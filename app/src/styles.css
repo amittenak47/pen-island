@@ -9462,26 +9462,32 @@ body[data-lc-sash-drag="horizontal"] {
   border: 0;
 }
 
+/* Every theme as a small round dot; they wrap, so there is never a scrollbar. */
+.lc-explore-legend .lc-bg-palette-inline { flex-wrap: wrap; row-gap: 4px; }
 .lc-explore-legend .lc-bg-palette-swatches {
-  flex: 1;
-  flex-wrap: nowrap;
-  gap: 0;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  gap: 2px;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  overflow: visible;
 }
 
-/* All theme choices remain available by scrolling; the dots keep full targets. */
 .lc-explore-legend .lc-bg-palette .lc-swatch {
-  width: var(--lc-explore-hit);
-  height: var(--lc-explore-hit);
-  min-width: var(--lc-explore-hit);
-  min-height: var(--lc-explore-hit) !important;
-  padding: calc((var(--lc-explore-hit) - 16px) / 2);
+  --lc-explore-swatch: 22px;
+  width: var(--lc-explore-swatch);
+  height: var(--lc-explore-swatch);
+  min-width: var(--lc-explore-swatch);
+  min-height: var(--lc-explore-swatch) !important;
+  padding: 3px;
   background-clip: content-box;
-  border: 1px solid transparent;
-  border-radius: var(--lc-r-block);
-  transition: border-color 160ms ease, background-color 160ms ease;
+  /* A faint ring so the pale themes still read on a light key. */
+  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+  border-radius: 50%;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+.lc-explore-legend .lc-bg-palette .lc-swatch:hover { transform: scale(1.12); }
+@media (prefers-reduced-motion: reduce) {
+  .lc-explore-legend .lc-bg-palette .lc-swatch { transition: none; }
 }
 
 .lc-explore-legend .lc-bg-palette .lc-swatch-active {
@@ -9524,6 +9530,7 @@ body[data-lc-sash-drag="horizontal"] {
 
 /* Container width also handles Explore in a narrow desktop split pane. */
 @container (max-width: 839px) {
+  .lc-explore-legend .lc-bg-palette .lc-swatch { --lc-explore-swatch: 32px; padding: 6px; }
   .lc-explore-stage {
     --lc-explore-hit: 44px;
     --lc-explore-columns: minmax(0, 1fr);
