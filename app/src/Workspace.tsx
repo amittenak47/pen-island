@@ -10231,7 +10231,7 @@ export const Workspace = memo(function Workspace({
               <span className="lc-live-web-focus-host">
                 {hostLabelFromUrl(annotateSource.name)}
               </span>
-              <span className="lc-live-web-focus-hint">Tap to use this pane</span>
+              <span className="lc-live-web-focus-hint">Tap to use.</span>
             </button>
           )}
           {canBrowseLive && webLive && annotateSource?.docType === "web" && (

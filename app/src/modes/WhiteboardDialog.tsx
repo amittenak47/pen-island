@@ -291,7 +291,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
 
           {saveTitle !== null ? (
             <div className="lc-settings-choice">
-              <p className="lc-muted lc-whiteboard-name-hint">Name this notebook. Hold Save to keep the suggested name.</p>
+              <p className="lc-muted lc-whiteboard-name-hint">Hold to save.</p>
               <PadNameField
                 value={saveTitle}
                 placeholder={defaultName || "Untitled"}

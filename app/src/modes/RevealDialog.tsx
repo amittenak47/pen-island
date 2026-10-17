@@ -63,7 +63,7 @@ export function RevealDialog({
                 {previousReveals === 1 ? "time" : "times"}.
               </p>
             )}
-            <p className="lc-muted lc-reveal-hold-hint">Hold Reveal or Lazy briefly to confirm.</p>
+            <p className="lc-muted lc-reveal-hold-hint">Hold to confirm.</p>
 
             {error && <p className="lc-warning">{error}</p>}
 

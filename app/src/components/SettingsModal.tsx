@@ -2141,7 +2141,7 @@ export function SettingsModal({
                   </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Countdown</div>
-              <p className="lc-settings-hint">Wait a few seconds before capturing. Tap the countdown to capture right away.</p>
+              <p className="lc-settings-hint">Tap the countdown to skip it.</p>
                   <SettingsChoices
                     className="lc-settings-choice lc-settings-choice-compact"
                     role="radiogroup"

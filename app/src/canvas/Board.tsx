@@ -11542,7 +11542,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
             setCaptureRegion(null);
           }}
         >
-          <div className="lc-capture-hint">Drag a rectangle to capture · Esc cancels</div>
+          <div className="lc-capture-hint">Drag to capture. Press Esc to cancel.</div>
           {captureRegion && (() => {
             const board = boardBoxOf(boardRef.current);
             if (!board) return null;

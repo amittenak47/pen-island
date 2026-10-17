@@ -1349,7 +1349,6 @@ export function BoardToolbar({
                   ← {modifierTitle}
                 </button>
                 <ShapePreview shape={configuring} mods={mods} large />
-                <p className="lc-muted lc-shape-mod-hint">Adjust the preview, then place your shape.</p>
                 {configuring.fields.map((field) => (
                   <label key={field.key} className="lc-shape-field">
                     <span>{field.label}</span>

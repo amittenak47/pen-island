@@ -93,8 +93,8 @@ export function WhiteboardLibraryDialog({
           <p className="lc-muted">
             At most {WHITEBOARD_LIBRARY_LIMIT} notebooks.{" "}
             {tapArmed
-              ? "Tap a notebook to delete it."
-              : "Hold to delete one."}{" "}
+              ? "Tap to delete."
+              : "Hold to delete."}{" "}
             Trash on this device lasts three days.
           </p>
         </div>
