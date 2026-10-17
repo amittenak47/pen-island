@@ -24,7 +24,7 @@ import { prefersReducedMotion } from "../util/reducedMotion";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 
-import { BackgroundPalette } from "../components/BackgroundPalette";
+import { BackgroundSwatchButton } from "../components/BackgroundPalette";
 import { MorphBar } from "../components/MorphBar";
 import { INK_DISPLAY_HZ_EVENT, loadInkMatchDisplay } from "../util/inkDisplayHzPref";
 import { useShell } from "../shellContext";
@@ -861,7 +861,7 @@ export function ExploreWorkspace({
               <span>Cluster</span>
               <span className="lc-explore-switch" aria-hidden><span /></span>
             </button>
-            <BackgroundPalette variant="inline" label="Background" themeId={themeId} onPick={onThemePick} />
+            <BackgroundSwatchButton themeId={themeId} onPick={onThemePick} prefer="above" />
           </div>
         </aside>
         <form className="lc-explore-find" role="search" onSubmit={(event) => event.preventDefault()}>

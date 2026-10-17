@@ -9262,6 +9262,12 @@ body[data-lc-sash-drag="horizontal"] {
  * can be half a split pane with a sash moving beside it, so `100%` and `flex`
  * do the work and no rule reads `vw` or `vh`.
  */
+/* Explore reads in the system UI face (Segoe UI, Roboto, San Francisco). */
+.lc-explore,
+.lc-palette-swatch-pop {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
 .lc-explore {
   display: flex;
   flex-direction: column;
@@ -9282,7 +9288,7 @@ body[data-lc-sash-drag="horizontal"] {
   --lc-explore-map-row: 2 / 4;
   --lc-explore-key-column: 1;
   --lc-explore-key-columns: minmax(0, 1fr);
-  --lc-explore-option-columns: minmax(0, 1fr);
+  --lc-explore-option-columns: minmax(0, 1fr) auto;
   --lc-explore-key-animation: lc-explore-key-in;
   --lc-explore-map-animation: lc-explore-map-in;
   position: relative;
@@ -9326,11 +9332,11 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 .lc-explore-legend-caption {
-  padding: 0 8px 8px;
+  padding: 0 9px 6px;
   color: var(--hint);
   font-size: 10px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
 }
 
@@ -9345,17 +9351,17 @@ body[data-lc-sash-drag="horizontal"] {
 .lc-explore-group {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 9px;
   min-width: 0;
   min-height: var(--lc-explore-hit);
-  padding: 0 8px;
+  padding: 0 9px;
   border: 0;
   border-radius: var(--lc-r-block);
   background: transparent;
   box-shadow: inset 2px 0 0 transparent;
   color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: 12.5px;
   white-space: nowrap;
   cursor: pointer;
   transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
@@ -9372,7 +9378,8 @@ body[data-lc-sash-drag="horizontal"] {
   color: var(--ink);
 }
 
-.lc-explore-legend :is(button, .lc-swatch):focus-visible {
+.lc-explore-legend button:focus-visible,
+.lc-palette-swatch-pop .lc-swatch:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
 }
@@ -9415,6 +9422,7 @@ body[data-lc-sash-drag="horizontal"] {
   grid-template-columns: var(--lc-explore-option-columns);
   align-items: center;
   gap: 2px;
+  justify-content: space-between;
   margin-top: 8px;
   padding-top: 4px;
   border-top: 1px solid var(--chrome-edge);
@@ -9453,45 +9461,143 @@ body[data-lc-sash-drag="horizontal"] {
   background: var(--accent);
 }
 
-.lc-explore-legend .lc-bg-palette-inline {
-  width: auto;
-  min-width: 0;
-  gap: 4px;
-  margin: 0;
-  padding: 0 0 0 8px;
-  border: 0;
+/* Background: one swatch of the current theme that opens every theme. */
+.lc-palette-swatch-trigger {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: var(--lc-explore-hit, 30px);
+  height: var(--lc-explore-hit, 30px);
+  min-height: var(--lc-explore-hit, 30px) !important;
+  padding: 0;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease;
 }
 
-/* Every theme as a small round dot; they wrap, so there is never a scrollbar. */
-.lc-explore-legend .lc-bg-palette-inline { flex-wrap: wrap; row-gap: 4px; }
-.lc-explore-legend .lc-bg-palette-swatches {
-  flex: 1 1 100%;
-  flex-wrap: wrap;
-  gap: 2px;
-  min-width: 0;
-  overflow: visible;
+/* The corner notch says it opens something. */
+.lc-palette-swatch-trigger::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border: 3px solid transparent;
+  border-top-color: var(--hint);
+  border-right-color: var(--hint);
+  transition: border-color 160ms ease;
 }
 
-.lc-explore-legend .lc-bg-palette .lc-swatch {
-  --lc-explore-swatch: 22px;
-  width: var(--lc-explore-swatch);
-  height: var(--lc-explore-swatch);
-  min-width: var(--lc-explore-swatch);
-  min-height: var(--lc-explore-swatch) !important;
-  padding: 3px;
-  background-clip: content-box;
-  /* A faint ring so the pale themes still read on a light key. */
-  border: 1px solid color-mix(in srgb, var(--line) 85%, transparent);
+.lc-palette-swatch-trigger:hover,
+.lc-palette-swatch-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+.lc-palette-swatch-trigger[aria-expanded="true"]::after {
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+}
+
+.lc-palette-swatch-chip {
+  width: 16px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--ink) 38%, transparent);
   border-radius: 50%;
+  transition: background-color 220ms ease;
+}
+
+.lc-palette-swatch-pop {
+  position: fixed;
+  z-index: 110;
+  display: grid;
+  gap: 8px;
+  padding: 9px 9px 8px;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+  color: var(--ink);
+  animation: lc-palette-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.lc-palette-swatch-pop.is-leaving {
+  animation: lc-palette-pop-out 140ms ease-in both;
+  pointer-events: none;
+}
+
+@keyframes lc-palette-pop-in { from { opacity: 0; transform: translateY(4px) scale(0.97); } }
+@keyframes lc-palette-pop-out { to { opacity: 0; transform: translateY(4px) scale(0.97); } }
+
+.lc-palette-swatch-cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--hint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.lc-palette-swatch-cap em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  animation: lc-explore-count-in 160ms ease both;
+}
+
+.lc-palette-swatch-pop .lc-palette-group-label {
+  color: var(--hint);
+  letter-spacing: 0.14em;
+}
+
+.lc-palette-swatch-pop .lc-palette-group-swatches {
+  grid-template-columns: repeat(6, auto);
+  justify-content: start;
+  gap: 2px;
+}
+
+.lc-palette-swatch-pop .lc-swatch {
+  --lc-palette-swatch: 26px;
+  width: var(--lc-palette-swatch);
+  height: var(--lc-palette-swatch);
+  min-width: var(--lc-palette-swatch);
+  min-height: var(--lc-palette-swatch) !important;
+  padding: 4px;
+  background-clip: content-box;
+  /* The ring moves to the picked theme; pale themes keep a faint edge. */
+  border: 1px solid transparent;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 4px var(--panel), inset 0 0 0 5px color-mix(in srgb, var(--ink) 22%, transparent);
+  cursor: pointer;
   transition: border-color 160ms ease, transform 160ms ease;
 }
-.lc-explore-legend .lc-bg-palette .lc-swatch:hover { transform: scale(1.12); }
-@media (prefers-reduced-motion: reduce) {
-  .lc-explore-legend .lc-bg-palette .lc-swatch { transition: none; }
+
+.lc-palette-swatch-pop .lc-swatch:hover { transform: scale(1.1); }
+
+.lc-palette-swatch-pop .lc-swatch-active {
+  border-color: var(--accent);
 }
 
-.lc-explore-legend .lc-bg-palette .lc-swatch-active {
-  border-color: var(--accent);
+.lc-mobile .lc-palette-swatch-pop .lc-swatch { --lc-palette-swatch: 44px; padding: 10px; }
+.lc-mobile .lc-palette-swatch-pop .lc-swatch { box-shadow: inset 0 0 0 10px var(--panel), inset 0 0 0 11px color-mix(in srgb, var(--ink) 22%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-palette-swatch-trigger,
+  .lc-palette-swatch-trigger::after,
+  .lc-palette-swatch-chip,
+  .lc-palette-swatch-pop,
+  .lc-palette-swatch-pop *,
+  .lc-palette-swatch-pop.is-leaving {
+    animation: none !important;
+    transition: none !important;
+  }
 }
 
 .lc-explore.is-showing .lc-explore-legend {
@@ -9530,7 +9636,6 @@ body[data-lc-sash-drag="horizontal"] {
 
 /* Container width also handles Explore in a narrow desktop split pane. */
 @container (max-width: 839px) {
-  .lc-explore-legend .lc-bg-palette .lc-swatch { --lc-explore-swatch: 32px; padding: 6px; }
   .lc-explore-stage {
     --lc-explore-hit: 44px;
     --lc-explore-columns: minmax(0, 1fr);
@@ -9538,7 +9643,7 @@ body[data-lc-sash-drag="horizontal"] {
     --lc-explore-map-row: 2;
     --lc-explore-key-column: 1;
     --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
-    --lc-explore-option-columns: minmax(140px, 0.4fr) minmax(0, 1fr);
+    --lc-explore-option-columns: minmax(160px, 220px) auto;
     --lc-explore-key-animation: lc-explore-strip-in;
     --lc-explore-map-animation: lc-explore-strip-map-in;
     grid-template-rows: 46px minmax(0, 1fr) auto;
@@ -9552,7 +9657,7 @@ body[data-lc-sash-drag="horizontal"] {
   --lc-explore-map-row: 2;
   --lc-explore-key-column: 1;
   --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
-  --lc-explore-option-columns: minmax(140px, 0.4fr) minmax(0, 1fr);
+  --lc-explore-option-columns: minmax(160px, 220px) auto;
   --lc-explore-key-animation: lc-explore-strip-in;
   --lc-explore-map-animation: lc-explore-strip-map-in;
   grid-template-rows: 46px minmax(0, 1fr) auto;
@@ -9653,7 +9758,7 @@ body[data-lc-sash-drag="horizontal"] {
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   outline: none;
 }
 
@@ -9790,9 +9895,9 @@ body[data-lc-sash-drag="horizontal"] {
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
   pointer-events: none;
@@ -10141,10 +10246,10 @@ body[data-lc-sash-drag="horizontal"] {
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  max-width: 122px;
+  max-width: 140px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12.5px;
   line-height: 1.3;
   text-align: center;
   text-overflow: ellipsis;

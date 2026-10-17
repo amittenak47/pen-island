@@ -4,8 +4,11 @@
  */
 
 import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 
 import { APP_THEMES, type AppTheme } from "../theme/appThemes";
+import { usePopPlacement } from "./usePopPlacement";
+import { usePresence } from "./usePresence";
 
 export interface BackgroundPaletteProps {
   themeId: string;
@@ -144,6 +147,85 @@ export function BackgroundPalette({ themeId, onPick, variant = "compact", label 
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * One swatch showing the current background; tapping it opens every theme in
+ * a small card beside it. The card stays open while you try themes, and
+ * closes on a second tap, a tap outside or Escape. It fades in and out, the
+ * chip's colour slides to the new theme, and the ring moves between swatches.
+ */
+export function BackgroundSwatchButton({
+  themeId,
+  onPick,
+  prefer = "above",
+}: {
+  themeId: string;
+  onPick: (id: string) => void;
+  prefer?: "above" | "below";
+}) {
+  const [open, setOpen] = useState(false);
+  const trigger = useRef<HTMLButtonElement | null>(null);
+  const pop = useRef<HTMLDivElement | null>(null);
+  const current = APP_THEMES.find((theme) => theme.id === themeId) ?? APP_THEMES[0];
+  const presence = usePresence(open);
+  const placed = usePopPlacement(trigger, pop, presence.mounted, themeId, prefer);
+
+  useEffect(() => {
+    if (!open) return;
+    const onPointer = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (trigger.current?.contains(target) || pop.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setOpen(false);
+      trigger.current?.focus();
+    };
+    // pointerdown: see BackgroundPalette.
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={trigger}
+        type="button"
+        className="lc-palette-swatch-trigger"
+        aria-label={`Background: ${current.label}`}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className="lc-palette-swatch-chip" style={{ background: current.background }} aria-hidden />
+      </button>
+      {presence.mounted &&
+        createPortal(
+          <div
+            ref={pop}
+            className={`lc-palette-swatch-pop${presence.leaving ? " is-leaving" : ""}`}
+            data-side={prefer}
+            style={placed}
+            role="listbox"
+            aria-label="Background"
+          >
+            <div className="lc-palette-swatch-cap">
+              <span>Background</span>
+              <em key={current.id}>{current.label}</em>
+            </div>
+            <ThemeGroup label="Light" themes={LIGHT_THEMES} themeId={themeId} onPick={onPick} tipPlacement="top" />
+            <ThemeGroup label="Dark" themes={DARK_THEMES} themeId={themeId} onPick={onPick} tipPlacement="top" />
+          </div>,
+          document.body,
+        )}
+    </>
   );
 }
 

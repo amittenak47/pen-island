@@ -229,16 +229,26 @@ it("searches titles immediately and clears with the button or Escape", async () 
   expect(clear.classList.contains("is-visible")).toBe(false);
 });
 
-it("keeps all background choices inline and calls the theme picker", async () => {
+it("opens every background from one swatch, keeps it open while picking, and closes on Escape", async () => {
   const onThemePick = vi.fn();
   render(true, { onThemePick, themeId: APP_THEMES[0].id });
   await act(async () => {});
-  const palette = host.querySelector('[role="group"][aria-label="Background"]')!;
+  const trigger = host.querySelector<HTMLButtonElement>(".lc-palette-swatch-trigger")!;
+  expect(trigger.getAttribute("aria-label")).toBe(`Background: ${APP_THEMES[0].label}`);
+  expect(document.querySelector('[role="listbox"][aria-label="Background"]')).toBeNull();
+  act(() => trigger.click());
+  expect(trigger.getAttribute("aria-expanded")).toBe("true");
+  const palette = document.querySelector('[role="listbox"][aria-label="Background"]')!;
   const swatches = palette.querySelectorAll<HTMLButtonElement>(".lc-swatch");
   expect(swatches.length).toBe(APP_THEMES.length);
-  expect(swatches[0].getAttribute("aria-selected")).toBe("true");
-  act(() => swatches[1].click());
+  expect(palette.querySelector('[aria-selected="true"]')?.getAttribute("aria-label")).toBe(`${APP_THEMES[0].label} background`);
+  const second = [...swatches].find((swatch) => swatch.getAttribute("aria-label") === `${APP_THEMES[1].label} background`)!;
+  act(() => second.click());
   expect(onThemePick).toHaveBeenCalledWith(APP_THEMES[1].id);
+  expect(document.querySelector('[role="listbox"][aria-label="Background"]')).not.toBeNull();
+  act(() => document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  expect(trigger.getAttribute("aria-expanded")).toBe("false");
+  expect(document.querySelector('[role="listbox"][aria-label="Background"]')).toBeNull();
 });
 
 it("keeps a compact Cluster control in the board stack and removes its portal while parked", async () => {
