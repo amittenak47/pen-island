@@ -133,6 +133,20 @@ function inlineImages(
     const type = media.get(path) || "image/jpeg";
     image.setAttribute("src", `data:${type};base64,${base64Of(bytes)}`);
   }
+  // Covers usually come wrapped in an SVG <image xlink:href>, not an <img>.
+  for (const image of Array.from(holder.querySelectorAll("image"))) {
+    const src = image.getAttribute("href") ?? image.getAttribute("xlink:href");
+    if (!src || /^(https?:|data:)/i.test(src)) continue;
+    const path = resolveHref(chapterHref, src);
+    const bytes = files[path];
+    if (!bytes) {
+      image.remove();
+      continue;
+    }
+    const type = media.get(path) || "image/jpeg";
+    image.removeAttribute("xlink:href");
+    image.setAttribute("href", `data:${type};base64,${base64Of(bytes)}`);
+  }
   return holder.innerHTML;
 }
 
