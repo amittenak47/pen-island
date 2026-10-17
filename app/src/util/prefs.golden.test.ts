@@ -20,6 +20,7 @@ import * as inkSmoothingPref from "./inkSmoothingPref";
 import * as inkSpeedPref from "./inkSpeedPref";
 import * as inkToolPrefs from "./inkToolPrefs";
 import * as linedPaperPref from "./linedPaperPref";
+import * as llmStartupPref from "./llmStartupPref";
 import * as notesCombinedPref from "./notesCombinedPref";
 import * as notificationCardsPref from "./notificationCardsPref";
 import * as palettePref from "./palettePref";
@@ -50,6 +51,7 @@ const entries: Entry[] = [
   { name: "inkSpeedPref", module: inkSpeedPref, keys: ["whiteboard.inkSpeed", "whiteboard.inkSpeedBlotBlend", "whiteboard.inkSpeedFade", "whiteboard.inkGrain"], loads: [["loadInkSpeed", "0.5"], ["loadInkSpeedBlotBlend", "0.5"], ["loadInkSpeedFade", "0.5"], ["loadInkGrain", "0.5"]], saves: [["saveInkSpeed", [-100, -0, 0, 0.5, 1, 2, 1000000, NaN, Infinity, -Infinity]], ["saveInkSpeedBlotBlend", [-100, -0, 0, 0.5, 1, 2, 1000000, NaN, Infinity, -Infinity]], ["saveInkSpeedFade", [-100, -0, 0, 0.5, 1, 2, 1000000, NaN, Infinity, -Infinity]], ["saveInkGrain", [-100, -0, 0, 0.5, 1, 2, 1000000, NaN, Infinity, -Infinity]]], events: ["lc-ink-speed-blot-blend", "lc-ink-speed-fade", "lc-ink-grain"] },
   { name: "inkToolPrefs", module: inkToolPrefs, keys: ["whiteboard.inkToolPrefs.v1"], loads: [["loadInkToolPrefs", "{\"penWidth\":2,\"eraserWidth\":3,\"inkFullness\":0.5,\"pressureSensitive\":false,\"inkColor\":\"#123456\",\"straightInk\":true}"]], saves: [["saveInkToolPrefs", [{ penWidth: 2, eraserWidth: 3, inkFullness: 0.5, pressureSensitive: false, inkColor: "#123456", straightInk: true }, { penWidth: -100, eraserWidth: 1000000, inkFullness: 2, pressureSensitive: true, inkColor: null, straightInk: false }, {}]]], events: ["lc-ink-tool-prefs"] },
   { name: "linedPaperPref", module: linedPaperPref, keys: ["whiteboard.linedPaper.v1"], loads: [["loadLinedPaperMode", "college"]], saves: [["saveLinedPaperMode", ["college", "garbage", "", "NaN", "-100", "1000000"]]], events: [] },
+  { name: "llmStartupPref", module: llmStartupPref, keys: ["whiteboard.llm.askAtStartup.v1", "whiteboard.llm.firstRunAsked.v1"], loads: [["loadLlmAskAtStartup", "0"], ["llmFirstRunAsked", "1"]], saves: [["saveLlmAskAtStartup", [true, false]]], events: [] },
   { name: "notesCombinedPref", module: notesCombinedPref, keys: ["whiteboard.footnoteNotesCombined.v1"], loads: [["loadNotesCombined", "1"]], saves: [["saveNotesCombined", [true, false]]], events: [] },
   { name: "notificationCardsPref", module: notificationCardsPref, keys: ["whiteboard.notificationCards"], loads: [["loadNotificationCards", "1"]], saves: [["saveNotificationCards", [true, false]]], events: [] },
   { name: "palettePref", module: palettePref, keys: ["whiteboard.palette.tag", "whiteboard.palette.v1"], loads: [["loadPaletteTag", "\"pastel\""], ["loadPalettePrefs", "{\"tags\":[\"pastel\",\"dark\"],\"matchAll\":true,\"mixColours\":true}"]], saves: [["savePaletteTag", ["pastel", "garbage", "", "NaN", "-100", "1000000"]], ["savePalettePrefs", [{ tags: ["pastel", "dark"], matchAll: true, mixColours: true }, { tags: ["garbage"], matchAll: false, mixColours: false }, {}]]], events: [] },
