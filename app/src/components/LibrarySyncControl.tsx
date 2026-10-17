@@ -5,6 +5,7 @@ import type { BookIdentity } from "../util/syncState";
 import { BOOK_PASS_ACTIVITY_EVENT, BOOK_PASS_STATUS_EVENT, getBookPassActivity, syncBookPass } from "../util/bookSyncPass";
 import { WorkRing } from "./DocIndexChip";
 import { usePopPlacement } from "./usePopPlacement";
+import { usePresence } from "./usePresence";
 import { bookSyncFailed, librarySyncSummary, loadLibrarySyncResults } from "./LibrarySyncResults";
 
 /** How long a clean finish stays on screen, as the tab's Sync does. */
@@ -113,10 +114,13 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
    * from the old one, transition. CSS cannot transition between two
    * content-sized widths by itself.
    */
+  // Opens and closes with motion: the card stays mounted while it fades out.
+  const presence = usePresence(visible);
   const lastWidth = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = pop.current;
-    if (!visible || !el) { lastWidth.current = null; return; }
+    if (!presence.mounted || !el) { lastWidth.current = null; return; }
+    if (presence.leaving) return;
     el.style.transition = "none";
     el.style.width = "";
     const target = el.getBoundingClientRect().width;
@@ -128,8 +132,8 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
     void el.offsetWidth;
     el.style.transition = "width 200ms cubic-bezier(0.22, 1, 0.36, 1)";
     el.style.width = `${target}px`;
-  }, [visible, line, books.length, groupOpen, syncing]);
-  const placed = usePopPlacement(trigger, pop, visible, `${line}|${books.length}`, "above");
+  }, [presence.mounted, presence.leaving, line, books.length, groupOpen, syncing]);
+  const placed = usePopPlacement(trigger, pop, presence.mounted, `${line}|${books.length}`, "above");
   const status = syncing ? `syncing, ${synced} synced so far` : failures.length && result ? librarySyncSummary({ time: 0, books: failures }) : result ? "all books synced" : "not synced yet";
 
   return <>
@@ -139,16 +143,16 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
       aria-busy={syncing} aria-expanded={open} aria-haspopup="dialog"
       onClick={tap} onPointerEnter={enter} onPointerLeave={leave}>
       {syncing
-        ? <WorkRing progress={activity.progress} count={synced} />
-        : <svg className="lc-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+        ? <span className="lc-library-sync-face" key="ring"><WorkRing progress={activity.progress} count={synced} /></span>
+        : <svg key="icon" className="lc-icon-svg lc-library-sync-face" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
             strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M20 7a9 9 0 0 0-15-2L2 8m0-6v6h6M4 17a9 9 0 0 0 15 2l3-3m0 6v-6h-6" />
           </svg>}
       {!syncing && failures.length > 0 && <span className="lc-library-sync-dot" aria-hidden="true" />}
     </button>
-    {visible && createPortal(
+    {presence.mounted && createPortal(
       // The tab's Sync notification (`.lc-doc-sync-pop`), so both read the same.
-      <div ref={pop} className="lc-doc-sync-pop lc-library-sync-pop" role="status" aria-live="polite"
+      <div ref={pop} className={`lc-doc-sync-pop lc-library-sync-pop${presence.leaving ? " is-leaving" : ""}`} role="status" aria-live="polite"
         style={placed} onPointerEnter={enter} onPointerLeave={leave}>
         <div className="lc-doc-sync-line">{line}</div>
         {!syncing && books.length > 0 && <div className="lc-library-sync-groups">

@@ -4,6 +4,7 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import { usePopPlacement } from "./usePopPlacement";
+import { usePresence } from "./usePresence";
 import { createPortal } from "react-dom";
 
 import type { DocIndexStatus } from "../api/client";
@@ -275,7 +276,9 @@ export function DocIndexChip({
           : onIndex ? "not indexed" : null;
   const indexRing = status === "indexing" || embedding;
   const syncShown = syncOpen || syncHover;
-  const syncPlaced = usePopPlacement(buttonRef, syncPopRef, Boolean(onSync) && syncShown, `${syncText}|${indexText}`);
+  // Opens and closes with motion: mounted until the fade-out has played.
+  const syncPresence = usePresence(Boolean(onSync) && syncShown);
+  const syncPlaced = usePopPlacement(buttonRef, syncPopRef, syncPresence.mounted, `${syncText}|${indexText}`);
   const working = !walkError && walkWaiting !== "conflict" && (walking || indexRing);
   const workProgress = walking ? walkProgress : status === "indexing" ? indexProgress : embedProgress;
   const syncBtn = onSync ? (
@@ -492,10 +495,10 @@ export function DocIndexChip({
       </button>,
       syncBtn,
       )}
-      {onSync && syncShown && typeof document !== "undefined" && createPortal(
+      {onSync && syncPresence.mounted && typeof document !== "undefined" && createPortal(
         <div
           ref={syncPopRef}
-          className="lc-doc-sync-pop"
+          className={syncPresence.leaving ? "lc-doc-sync-pop is-leaving" : "lc-doc-sync-pop"}
           role="status"
           aria-live="polite"
           // Placed next to Sync on any screen: below or above, never off the edge.

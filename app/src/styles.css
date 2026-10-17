@@ -1731,6 +1731,15 @@ html[data-theme="dark"] .lc-web-doc {
   line-height: 1.45;
 }
 
+/* Sync notifications (tab and Home) fade and scale in, and out when they close. */
+.lc-doc-sync-pop { animation: lc-sync-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.lc-doc-sync-pop.is-leaving { animation: lc-sync-pop-out 140ms ease-in both; pointer-events: none; }
+@keyframes lc-sync-pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+@keyframes lc-sync-pop-out { to { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+@media (prefers-reduced-motion: reduce) {
+  .lc-doc-sync-pop, .lc-doc-sync-pop.is-leaving { animation: none; }
+}
+
 .lc-doc-sync-index {
   display: inline-flex;
   align-items: center;
@@ -10808,7 +10817,15 @@ body[data-lc-sash-drag="horizontal"] {
   border-radius: 50%;
   background: var(--bad);
 }
+.lc-library-sync-trigger { transition: color 160ms ease; }
 .lc-library-sync-trigger.is-bad { color: var(--bad); }
+/* Icon and progress ring trade places with a quick scale and fade. */
+.lc-library-sync-face { animation: lc-sync-face-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes lc-sync-face-in { from { opacity: 0; transform: scale(0.6) rotate(-30deg); } }
+.lc-library-sync-dot { animation: lc-sync-face-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .lc-library-sync-face, .lc-library-sync-dot { animation: none; }
+}
 /* Running: the tab's progress ring, big enough to hold the count of books
    synced so far inside it (the tab's 14px ring puts its % beside it). */
 .lc-library-sync-trigger .lc-doc-index-ring { width: 22px; height: 22px; }
