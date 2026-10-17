@@ -527,6 +527,9 @@ const WHITEBOARD_PROBLEM: ProblemDetail = {
   cases: [],
 };
 
+/** The Agent chip as the last header on screen left it (see `agentChipShown`). */
+let lastAgentChipShown = false;
+
 /** Names for the parts of `syncWorkingRevisionRef`, in the order it lists them. */
 const SYNC_REVISION_PARTS = ["notebook", "document", "ink", "footnotes", "chat", "text", "paper"];
 
@@ -2175,6 +2178,31 @@ export const Workspace = memo(function Workspace({
   /** Home chooser vs today's problem browser when no board is open. */
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
+  /*
+   * Whether this tab's header shows the Agent chip, one frame behind `problem`.
+   *
+   * Every tab draws its own header buttons and only the active tab's are on
+   * screen, so going back to Home swapped a header with the chip for one that
+   * never had it: nothing changed, so nothing animated. A header now starts
+   * as the last one on screen left the chip, then moves to its own state on
+   * the next frames, so the chip unfolds into a document and folds away on
+   * the way back to Home.
+   */
+  const [agentChipShown, setAgentChipShown] = useState(() => (active ? lastAgentChipShown : Boolean(problem)));
+  // A tab coming back on screen (Home after a document) starts from what the
+  // previous header showed, before paint, so its own state can animate in.
+  useLayoutEffect(() => {
+    if (active) setAgentChipShown(lastAgentChipShown);
+  }, [active]);
+  useEffect(() => {
+    if (!active) return;
+    const want = Boolean(problem);
+    lastAgentChipShown = want;
+    if (agentChipShown === want) return;
+    let second = 0;
+    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setAgentChipShown(want)); });
+    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
+  }, [active, problem, agentChipShown]);
   const problemRef = useRef<ProblemDetail | null>(null);
   useEffect(() => {
     const id = problem && !isLocalPad(problem) ? problemPadId(problem.dataset, problem.task_id) : null;
@@ -10660,7 +10688,7 @@ export const Workspace = memo(function Workspace({
               coachOpen && !hubConflictAsk
                 ? "lc-secondary lc-agent-toggle lc-agent-toggle-open lc-tip-target"
                 : "lc-secondary lc-agent-toggle lc-tip-target",
-              problem ? "" : "is-vacant",
+              agentChipShown ? "" : "is-vacant",
               llmLink === "online" && "lc-agent-toggle-llm-on",
               llmLink === "offline" && "lc-agent-toggle-llm-off",
             ]
