@@ -10653,14 +10653,23 @@ body[data-lc-sash-drag="horizontal"] {
   cursor: grabbing;
 }
 
-/* While dragging, the sheet is clipped from the top (useAgentSheet): the
-   handle moves down with the clip edge and draws the sheet's top there. */
-.lc-agent-dragging .lc-mobile .lc-agent-sheet-handle,
-.lc-agent-dragging.lc-mobile .lc-agent-sheet-handle {
+/* While dragging, the sheet is clipped from the top (useAgentSheet). What
+   sits at the top of the resting sheet rides the clip edge, so a drag shows
+   the sheet's own layout: handle, top row and sessions above, the newest
+   messages and the composer below. Only transforms: no relayout per frame. */
+.lc-agent-dragging .lc-mobile .lc-agent-sheet-handle {
   transform: translateY(var(--lc-sheet-clip, 0px));
   z-index: 3;
   background: var(--panel);
   border-top: 1px solid var(--chrome-edge);
+}
+
+.lc-agent-dragging .lc-mobile :is(.lc-agent-pane-expand-row, .lc-agent-sessions-col) {
+  transform: translateY(var(--lc-sheet-clip, 0px));
+}
+
+.lc-agent-dragging .lc-mobile .lc-agent-pane-expand-row {
+  z-index: 4;
 }
 
 .lc-app:not(.lc-mobile) .lc-agent-sheet-handle {
