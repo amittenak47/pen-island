@@ -62,6 +62,8 @@ import { ExploreHeaderMenu } from "./components/ExploreHeaderMenu";
 import { useHeaderModes } from "./util/headerModesPref";
 import { collectExploreGraph } from "./util/exploreGraphExport";
 import { HubSyncControl, padTabSync, tabOffersHubSync } from "./components/HubSyncControl";
+import { LibrarySyncControl } from "./components/LibrarySyncControl";
+import { getCachedBookMeta } from "./util/localBookStore";
 import { BOOK_PASS_STATUS_EVENT, type BookPassResult } from "./util/bookSyncPass";
 import { bookNoticeMessage } from "./util/bookSyncMessages";
 import { LoadingDoodle } from "./components/LoadingDoodle";
@@ -10622,6 +10624,11 @@ export const Workspace = memo(function Workspace({
               try { return await pullMissingHubFiles(client); }
               finally { window.dispatchEvent(new Event("lc-explore-graph")); }
             }} getGraph={() => collectExploreGraph(tabsRef.current.tabs)} />}
+          <LibrarySyncControl client={client}
+            canOpen={book => book.kind === "annotate" ? listAnnotateDocs().some(doc => doc.id === book.id)
+              : book.kind === "whiteboard" ? listWhiteboardNotebooks().some(notebook => notebook.id === book.id)
+              : !!getCachedBookMeta(book.kind, book.id) && getCachedBookMeta(book.kind, book.id)?.deletedAt === undefined}
+            onOpen={book => openLinkedNode({ type: book.kind === "problem" ? "practice" : book.kind, id: book.id })} />
           <button
             type="button"
             className="lc-icon"

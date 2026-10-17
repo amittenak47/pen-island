@@ -6,7 +6,8 @@ const backups = vi.hoisted(() => new Map<string, import("./padSnapshotStore").Pa
 vi.mock("./padSnapshotStore", async original => ({ ...await original<typeof import("./padSnapshotStore")>(),
   listAllPadSnapshots: vi.fn(async () => [...backups.values()]), getPadSnapshot: vi.fn(async (_kind, _key, _tier, id) => backups.get(id) ?? null) }));
 import type { LcClient, PadSyncPingDto, BookStateDto } from "../api/client";
-import { syncBookPass } from "./bookSyncPass";
+import { syncBookPass, beginBookSyncWalk, getBookPassActivity } from "./bookSyncPass";
+import { loadLibrarySyncResults } from "../components/LibrarySyncResults";
 import { syncBook, BookSyncError, type BookResult } from "./bookSync";
 import { closeDbForTests } from "./idb";
 import { saveWhiteboardNotebook } from "./whiteboardStore";
@@ -32,6 +33,65 @@ beforeEach(async () => {
 });
 afterEach(async () => { await closeDbForTests(); resetLocalBookStoreForTests(); vi.unstubAllGlobals(); });
 const save = (id: string) => saveWhiteboardNotebook({ id, title: id, board, pageCount: 1 });
+
+it("only syncs the selected book, excluding dirty neighbours and their inventory errors", async () => {
+  await save("selected"); await save("dirty");
+  ping.books = [inventory("selected"), inventory("dirty", 5)];
+  ping.errors = [{ kind: "whiteboard", id: "dirty", book_rev: 5, error: { status: "unreadable_content", message: "Broken neighbour" } }];
+  backups.set("other-copy", { snapshotId: "other-copy", kind: "whiteboard", key: "dirty", tier: "2h", writtenAt: 1, name: "Other", board });
+  const result = await syncBookPass(api, { selected: { kind: "whiteboard", id: "selected" }, only: true });
+  expect(result.books.map(book => book.id)).toEqual(["selected"]);
+  expect(vi.mocked(syncBook).mock.calls.map(call => call[2])).toEqual(["selected"]);
+  expect(api.putSnapshotCopy).not.toHaveBeenCalled();
+});
+
+it("a library pass with no selection syncs every dirty candidate", async () => {
+  await save("a"); await save("b"); await save("c");
+  const result = await syncBookPass(api);
+  expect(result.books.map(book => book.id).sort()).toEqual(["a", "b", "c"]);
+  expect(syncBook).toHaveBeenCalledTimes(3);
+});
+
+it("only without an open book retains library behavior", async () => {
+  await save("a"); await save("b");
+  expect((await syncBookPass(api, { only: true })).books).toHaveLength(2);
+});
+
+it("reports library activity and preserves the tab walk's busy state after its pass", async () => {
+  await save("book");
+  let release!: (result: BookResult) => void;
+  vi.mocked(syncBook).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const pass = syncBookPass(api);
+  await vi.waitFor(() => expect(release).toBeDefined());
+  expect(getBookPassActivity()).toEqual({ busy: true, library: true, progress: { done: 1, total: 1 } });
+  release({ kind: "whiteboard", id: "book", committed: true, status: "synced" }); await pass;
+  const endWalk = beginBookSyncWalk();
+  await syncBookPass(api, { selected: { kind: "whiteboard", id: "book" }, only: true });
+  expect(getBookPassActivity()).toEqual({ busy: true, library: false, progress: null });
+  endWalk(); endWalk(); expect(getBookPassActivity().busy).toBe(false);
+});
+
+it("persists silent library results and patches just the tab's row", async () => {
+  await save("a"); await save("b"); saveHubAutosyncPref("on");
+  vi.mocked(syncBook).mockImplementation(async (_client, kind, id) => ({ kind, id, committed: false, status: "needs_choice" }));
+  await syncBookPass(api, { silent: true });
+  expect(loadLibrarySyncResults()?.books.map(book => book.status)).toEqual(["needs_choice", "needs_choice"]);
+  vi.mocked(syncBook).mockResolvedValueOnce({ kind: "whiteboard", id: "a", status: "synced", committed: true });
+  await syncBookPass(api, { only: true, selected: { kind: "whiteboard", id: "a" } });
+  expect(loadLibrarySyncResults()?.books.map(book => [book.id, book.status])).toEqual([["a", "synced"], ["b", "needs_choice"]]);
+});
+
+it("an overlapping tab pass waits for the library then returns only its own result", async () => {
+  await save("a"); await save("b"); saveHubAutosyncPref("on");
+  let release!: (result: BookResult) => void;
+  vi.mocked(syncBook).mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+  const library = syncBookPass(api, { silent: true });
+  await vi.waitFor(() => expect(release).toBeDefined());
+  const tab = syncBookPass(api, { only: true, selected: { kind: "whiteboard", id: "b" } });
+  release({ kind: "whiteboard", id: "a", status: "failed", committed: false });
+  await library;
+  expect((await tab).books.map(book => book.id)).toEqual(["b"]);
+});
 
 it("pings once, opens the selected book first, deduplicates and continues after failure", async () => {
   await save("a"); await save("b"); ping.books = [inventory("a"), inventory("b")];
