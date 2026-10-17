@@ -25,7 +25,11 @@ export interface DocWorkProgress {
  * first measurement there is genuinely nothing to report, and a ring showing
  * "0%" or an invented figure would be claiming otherwise.
  */
-function WorkRing({ progress }: { progress: DocWorkProgress | null }) {
+export function WorkRing({ progress, count }: {
+  progress: DocWorkProgress | null;
+  /** Shown inside instead of the percentage (Home's Sync all: books synced so far). */
+  count?: number | null;
+}) {
   /*
    * A working chip never claims 100%.
    *
@@ -59,7 +63,7 @@ function WorkRing({ progress }: { progress: DocWorkProgress | null }) {
           />
         </svg>
       </span>
-      {pct != null && <b className="lc-doc-index-ring-pct">{pct}</b>}
+      {count != null ? <b className="lc-doc-index-ring-pct">{count}</b> : pct != null && <b className="lc-doc-index-ring-pct">{pct}</b>}
     </>
   );
 }

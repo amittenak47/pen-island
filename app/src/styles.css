@@ -10808,25 +10808,22 @@ body[data-lc-sash-drag="horizontal"] {
   border-radius: 50%;
   background: var(--bad);
 }
-.lc-library-sync-spinning { animation: lc-library-sync-spin 1.2s linear infinite; }
-@keyframes lc-library-sync-spin { to { transform: rotate(360deg); } }
-@media (prefers-reduced-motion: reduce) { .lc-library-sync-spinning { animation: none; } }
-.lc-library-sync-popover {
-  box-sizing: border-box;
-  position: fixed;
-  z-index: 220;
-  width: min(360px, calc(100vw - 16px));
-  max-height: calc(100dvh - 100px);
-  overflow-y: auto;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: var(--lc-r-block);
-  background: var(--surface);
-  color: var(--ink);
-  box-shadow: 0 2px 8px rgb(0 0 0 / 14%);
-  font-size: 13px;
+/* The list inside the tab-style sync notification (`.lc-doc-sync-pop`). */
+.lc-library-sync-pop .lc-library-sync-list { max-height: min(50dvh, 360px); overflow-y: auto; }
+.lc-library-sync-toggle { width: 100%; }
+.lc-library-sync-trigger.is-bad { color: var(--bad); }
+/* Running: the tab's progress ring, big enough to hold the count of books
+   synced so far inside it (the tab's 14px ring puts its % beside it). */
+.lc-library-sync-trigger .lc-doc-index-ring { width: 22px; height: 22px; }
+.lc-library-sync-trigger .lc-doc-index-ring svg { width: 22px; height: 22px; }
+.lc-library-sync-trigger .lc-doc-index-ring-pct {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 600 9px/1 var(--lc-sans);
+  font-variant-numeric: tabular-nums;
 }
-.lc-library-sync-summary { color: var(--muted); }
 .lc-library-sync-list { list-style: none; padding: 0; margin: 8px 0 0; }
 .lc-library-sync-row {
   display: flex;
