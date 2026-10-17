@@ -138,6 +138,18 @@ it.each(["cancelled", "The AI assistant did not reply before the deadline.", "Th
   },
 );
 
+it("does not repeat a failure in the alert when the failed turn already shows it", () => {
+  const message = "agent run deadline expired — no reply arrived in time; please ask again";
+  const failed = { id: "run", role: "assistant" as const, content: message, at: Date.now(), requestState: "failed" as const };
+  act(() => root.render(<AgentSidePanel open mode="review" onModeChange={() => {}} onSend={() => {}}
+    busy={false} error={message} messages={[failed]} />));
+  expect(host.querySelector(".lc-agent-panel-error")).toBeNull();
+  expect(host.querySelector(".lc-agent-turn-body")?.textContent).toContain("deadline expired");
+  act(() => root.render(<AgentSidePanel open mode="review" onModeChange={() => {}} onSend={() => {}}
+    busy={false} error="Something else went wrong." messages={[failed]} />));
+  expect(host.querySelector('.lc-agent-panel-error[role="alert"]')?.textContent?.trim()).toBe("Something else went wrong.");
+});
+
 it("keeps API pipeline/tools and reasoning in their existing folds without agent chips or waiting animation", () => {
   const events: CoachProcessEvent[] = [
     { kind: "stage", label: "ask", detail: "Answering", ts: 1 },
