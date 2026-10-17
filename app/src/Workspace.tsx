@@ -11531,7 +11531,7 @@ export const Workspace = memo(function Workspace({
                     covered={annotateEntryOpen || whiteboardEntryOpen}
                     tabsRef={tabsRef}
                     onOpenRecent={openRecentWorkspace}
-                    startAction={loadPadHub() ? <LibrarySyncControl client={client} label="Sync all"
+                    startAction={loadPadHub() ? <LibrarySyncControl client={client}
                       canOpen={book => book.kind === "annotate" ? listAnnotateDocs().some(doc => doc.id === book.id)
                         : book.kind === "whiteboard" ? listWhiteboardNotebooks().some(notebook => notebook.id === book.id)
                         : !!getCachedBookMeta(book.kind, book.id) && getCachedBookMeta(book.kind, book.id)?.deletedAt === undefined}
