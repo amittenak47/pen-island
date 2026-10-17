@@ -9288,6 +9288,8 @@ body[data-lc-sash-drag="horizontal"] {
   --lc-explore-map-row: 2 / 4;
   --lc-explore-key-column: 1;
   --lc-explore-key-columns: minmax(0, 1fr);
+  --lc-explore-key-top: var(--lc-explore-hit);
+  --lc-explore-key-side: 0px;
   --lc-explore-key-animation: lc-explore-key-in;
   --lc-explore-map-animation: lc-explore-map-in;
   position: relative;
@@ -9318,6 +9320,7 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 .lc-explore-legend {
+  position: relative;
   grid-column: var(--lc-explore-key-column);
   grid-row: 3;
   z-index: 6;
@@ -9347,6 +9350,14 @@ body[data-lc-sash-drag="horizontal"] {
   grid-template-rows: 0fr;
   opacity: 0;
   transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease;
+}
+
+/* Room for the chevron: a top row in the corner box, a column on the strip.
+ * One level inside the fold's grid item, which has no padding of its own, so
+ * the zero-height track can still close all the way. */
+.lc-explore-legend-fold-inner > .lc-explore-legend-kinds {
+  padding-top: var(--lc-explore-key-top);
+  padding-right: var(--lc-explore-key-side);
 }
 
 .lc-explore-legend-kinds {
@@ -9434,12 +9445,14 @@ body[data-lc-sash-drag="horizontal"] {
   padding-top: 6px;
   border-top: 1px solid var(--chrome-edge);
   transition: margin-top 240ms cubic-bezier(0.22, 1, 0.36, 1), padding-top 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    border-color 160ms ease;
+    padding-right 240ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease;
 }
 
+/* Folded, the chevron has come down beside the swatch; make room for it. */
 .lc-explore-legend[data-collapsed] .lc-explore-legend-options {
   margin-top: 0;
   padding-top: 0;
+  padding-right: calc(var(--lc-explore-hit) + 2px);
   border-top-color: transparent;
 }
 
@@ -9453,10 +9466,15 @@ body[data-lc-sash-drag="horizontal"] {
   margin-left: auto;
 }
 
+/* Pinned to the key's top-right corner, so it rides the top edge as it folds. */
 .lc-explore-legend-toggle {
+  position: absolute;
+  /* Padding plus the controls row's 1 px divider: level with the swatch when folded. */
+  top: 7px;
+  right: 8px;
+  z-index: 1;
   display: grid;
   place-items: center;
-  flex: 0 0 auto;
   width: var(--lc-explore-hit);
   height: var(--lc-explore-hit);
   min-height: var(--lc-explore-hit) !important;
@@ -9701,6 +9719,8 @@ body[data-lc-sash-drag="horizontal"] {
     --lc-explore-map-row: 2;
     --lc-explore-key-column: 1;
     --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
+    --lc-explore-key-top: 0px;
+    --lc-explore-key-side: calc(var(--lc-explore-hit) + 4px);
     --lc-explore-key-animation: lc-explore-strip-in;
     --lc-explore-map-animation: lc-explore-strip-map-in;
     grid-template-rows: 46px minmax(0, 1fr) auto;
@@ -9714,6 +9734,8 @@ body[data-lc-sash-drag="horizontal"] {
   --lc-explore-map-row: 2;
   --lc-explore-key-column: 1;
   --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
+  --lc-explore-key-top: 0px;
+  --lc-explore-key-side: calc(var(--lc-explore-hit) + 4px);
   --lc-explore-key-animation: lc-explore-strip-in;
   --lc-explore-map-animation: lc-explore-strip-map-in;
   grid-template-rows: 46px minmax(0, 1fr) auto;
@@ -23482,6 +23504,24 @@ html[data-corners="rounded"] {
 /* Inside a tinted tab the Sync pill keeps its outline and drops its fill. */
 .lc-header .lc-tab .lc-doc-index-chip-row > button.lc-doc-index-sync:not(:hover):not(:focus-visible):not(.is-attention) {
   background: transparent;
+}
+
+/* Sized for a full-height cell, not the old 28 px chip: 22 px, 44 % of it. */
+.lc-header .lc-tab .lc-doc-index-chip-row > button.lc-doc-index-sync {
+  gap: 4px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lc-mobile .lc-header .lc-tab .lc-doc-index-chip-row > button.lc-doc-index-sync {
+  gap: 5px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
 }
 
 /* Mode buttons and Settings: butted cells, no boxes. */

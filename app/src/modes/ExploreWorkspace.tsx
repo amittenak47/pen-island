@@ -858,8 +858,18 @@ export function ExploreWorkspace({
     <div className={`${webglGraph ? "lc-explore is-webgl" : "lc-explore"}${showing ? " is-showing" : ""}`}>
       <div className="lc-explore-stage">
         <aside className="lc-explore-legend" ref={legendRef} aria-label="Map legend" data-collapsed={keyOpen ? undefined : ""}>
+          {/* Top-right while open; folded, it rides down beside the swatch. */}
+          <button type="button" className="lc-explore-legend-toggle"
+            aria-expanded={keyOpen} aria-controls="lc-explore-legend-kinds"
+            aria-label={keyOpen ? "Hide the key" : "Show the key"} onClick={toggleKey}>
+            <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+              strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+              <path d="m4 10 4-4 4 4" />
+            </svg>
+          </button>
           {/* The kind rows fold away; the controls row below always stays. */}
           <div className="lc-explore-legend-fold" inert={!keyOpen}>
+            <div className="lc-explore-legend-fold-inner">
             <div className="lc-explore-legend-kinds" role="group" aria-label="Filter by kind" id="lc-explore-legend-kinds">
               {CLUSTERS.map((cluster) => (
                 <button
@@ -879,6 +889,7 @@ export function ExploreWorkspace({
                 </button>
               ))}
             </div>
+            </div>
           </div>
           <div className="lc-explore-legend-options">
             <button type="button" className="lc-explore-group lc-tip-target" role="switch"
@@ -887,14 +898,6 @@ export function ExploreWorkspace({
               <span className="lc-explore-switch" aria-hidden><span /></span>
             </button>
             <BackgroundSwatchButton themeId={themeId} onPick={onThemePick} prefer="right" beside={legendRef} />
-            <button type="button" className="lc-explore-legend-toggle"
-              aria-expanded={keyOpen} aria-controls="lc-explore-legend-kinds"
-              aria-label={keyOpen ? "Hide the key" : "Show the key"} onClick={toggleKey}>
-              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
-                strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d="m4 10 4-4 4 4" />
-              </svg>
-            </button>
           </div>
         </aside>
         <form className="lc-explore-find" role="search" onSubmit={(event) => event.preventDefault()}>
