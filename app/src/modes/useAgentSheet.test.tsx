@@ -63,8 +63,12 @@ it("drags without rendering transcript, preserves height across hiding, and canc
   for (let y = 599; y > 560; y--) send("pointermove", y);
   const shell = node.style.height;
   act(() => vi.advanceTimersByTime(17)); expect(renders).toBe(before);
-  expect(node.style.height).toBe(shell); expect(node.style.transform).toContain('translate3d');
+  expect(node.style.height).toBe(shell);
+  // Clipped from the top, not slid down: the composer stays on the screen bottom.
+  expect(node.style.clipPath).toContain("inset(");
+  expect(node.style.transform).not.toContain("translate3d(0,1");
   send("pointerup", 550); const height = node.style.height;
+  expect(node.style.clipPath).toBe(""); expect(node.style.getPropertyValue("--lc-sheet-clip")).toBe("");
   act(() => root.render(<Panel open={false} />)); expect(node.inert).toBe(true); expect(node.style.visibility).toBe("hidden");
   act(() => root.render(<Panel open />)); expect(node.style.height).toBe(height);
   send("pointerdown", 500); send("pointermove", 300); send("pointercancel", 300);

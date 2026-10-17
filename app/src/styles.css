@@ -10653,6 +10653,16 @@ body[data-lc-sash-drag="horizontal"] {
   cursor: grabbing;
 }
 
+/* While dragging, the sheet is clipped from the top (useAgentSheet): the
+   handle moves down with the clip edge and draws the sheet's top there. */
+.lc-agent-dragging .lc-mobile .lc-agent-sheet-handle,
+.lc-agent-dragging.lc-mobile .lc-agent-sheet-handle {
+  transform: translateY(var(--lc-sheet-clip, 0px));
+  z-index: 3;
+  background: var(--panel);
+  border-top: 1px solid var(--chrome-edge);
+}
+
 .lc-app:not(.lc-mobile) .lc-agent-sheet-handle {
   align-items: center;
   min-height: 32px;
@@ -16211,7 +16221,9 @@ button.lc-row-selected:hover:not(:disabled) {
 
 .lc-mobile .lc-side,
 .lc-mobile.lc-app-problem .lc-side {
-  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 240ms cubic-bezier(0.22, 1, 0.36, 1), visibility 240ms;
+  /* Closing keeps the sheet above the board chrome (z-index 99) until it has
+     shrunk away; dropping to 40 at once put the toolbar over a closing sheet. */
+  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 240ms cubic-bezier(0.22, 1, 0.36, 1), visibility 240ms, z-index 0s linear 240ms;
   clip-path: inset(calc(100% - 24px) 40% 0 40% round var(--lc-r-block));
   transform-origin: bottom center;
   top: auto;
@@ -16238,6 +16250,8 @@ button.lc-row-selected:hover:not(:disabled) {
 
 .lc-mobile.lc-app-agent-open .lc-side,
 .lc-mobile .lc-side-sheet-dragging {
+  /* Opening raises it at once (no z-index delay). */
+  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 240ms cubic-bezier(0.22, 1, 0.36, 1), visibility 240ms;
   clip-path: inset(0 0 0 0 round var(--lc-r-block) var(--lc-r-block) 0 0);
   bottom: var(--lc-keyboard-inset, 0px);
   /* Above board chrome (95–98). Those controls fade as the sheet opens but
@@ -16281,7 +16295,12 @@ button.lc-row-selected:hover:not(:disabled) {
     4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
       var(--lc-map-above-coach)
   );
-  transition: bottom 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Back after the sheet has closed, as a quick fade: it used to pop in at
+     full size over a sheet that was still shrinking. */
+  transition:
+    bottom 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease 220ms,
+    visibility 0s linear 220ms;
 }
 
 /*
@@ -16313,6 +16332,9 @@ button.lc-row-selected:hover:not(:disabled) {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  /* Covered straight away on open (mobile only), so the sheet rises over
+     nothing; uncovering waits for the sheet (see `.lc-mobile .lc-map-controls`). */
+  transition: bottom 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 90ms ease, visibility 0s linear 90ms;
 }
 
 .lc-mobile .lc-agent-toggle-open {
