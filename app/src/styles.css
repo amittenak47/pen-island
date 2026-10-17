@@ -10823,15 +10823,19 @@ body[data-lc-sash-drag="horizontal"] {
 }
 /* The Succeeded | Failed groups inside the tab-style sync notification.
    No scrollbar: a very long list still scrolls on a small screen, unmarked. */
-.lc-library-sync-groups { display: grid; gap: 4px; max-height: min(60dvh, 420px); overflow-y: auto; scrollbar-width: none; }
+.lc-library-sync-groups { display: grid; gap: 4px; min-width: 0; max-height: min(60dvh, 420px); overflow-y: auto; scrollbar-width: none; }
 .lc-library-sync-groups::-webkit-scrollbar { display: none; }
+.lc-library-sync-group { min-width: 0; }
 .lc-library-sync-group > summary { cursor: pointer; font-weight: 600; list-style-position: inside; }
 .lc-library-sync-list { list-style: none; padding: 0; margin: 2px 0 0; }
+.lc-library-sync-list > li { margin: 0; padding: 0; }
 .lc-library-sync-row {
   display: flex;
   align-items: baseline;
   gap: 6px;
   width: 100%;
+  /* The app's buttons have a touch-size minimum; these rows are a list. */
+  min-height: 0;
   padding: 1px 2px;
   border: 0;
   border-radius: var(--lc-r-block);
@@ -10843,8 +10847,10 @@ body[data-lc-sash-drag="horizontal"] {
 }
 button.lc-library-sync-row { cursor: pointer; }
 button.lc-library-sync-row:hover { background: var(--bg); }
-.lc-library-sync-book { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lc-library-sync-book small { color: var(--muted); font-size: inherit; }
+/* Title shortens with an ellipsis; the reason keeps a small slot on the right. */
+.lc-library-sync-book { display: flex; gap: 8px; min-width: 0; flex: 1 1 auto; white-space: nowrap; }
+.lc-library-sync-title { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; }
+.lc-library-sync-book small { flex: 0 0 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: inherit; }
 .lc-library-sync-ok { color: var(--ok); }
 .lc-library-sync-bad { color: var(--bad); }
 

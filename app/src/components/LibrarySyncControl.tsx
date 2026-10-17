@@ -114,7 +114,6 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
     <button ref={trigger} type="button"
       className={`lc-icon lc-library-sync-trigger${syncing ? " is-working" : ""}${!syncing && (error || failures.length) ? " is-bad" : ""}`}
       aria-label={syncing && controller.current ? `Cancel sync — ${status}` : `Sync all books — ${status}`}
-      title={syncing && controller.current ? "Cancel sync" : "Sync all books"}
       aria-busy={syncing} aria-expanded={open} aria-haspopup="dialog"
       onClick={tap} onPointerEnter={enter} onPointerLeave={leave}>
       {syncing
@@ -141,7 +140,7 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
                   const reason = book.reason.startsWith(`${book.title}: `) ? book.reason.slice(book.title.length + 2) : book.reason;
                   const content = <><span className={failed ? "lc-library-sync-bad" : "lc-library-sync-ok"} aria-hidden="true">{failed ? "✗" : "✓"}</span>
                     <span className="lc-library-sync-book" title={failed ? `${book.title}: ${reason}` : book.title}>
-                      {book.title}{failed && <small> · {reason}</small>}</span></>;
+                      <span className="lc-library-sync-title">{book.title}</span>{failed && <small>{reason}</small>}</span></>;
                   return <li key={`${book.kind}:${book.id}`}>{failed && canOpen(book)
                     ? <button type="button" className="lc-library-sync-row" onClick={() => { onOpen({ kind: book.kind, id: book.id }); setOpen(false); }}>{content}</button>
                     : <div className="lc-library-sync-row">{content}</div>}</li>;

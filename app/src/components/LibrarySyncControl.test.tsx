@@ -93,7 +93,7 @@ it("a finish with failures stays open with the summary, then Failed (open) and S
   const groups = [...pop()!.querySelectorAll("details")];
   expect(groups.map(g => g.querySelector("summary")!.textContent)).toEqual(["Failed (3)", "Succeeded (2)"]);
   expect(groups.map(g => g.open)).toEqual([true, false]);
-  expect([...groups[0].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✗choice · Needs your choice", "✗bad · local storage isn't ready for safe sync. Your changes are kept on this device.", "✗cancel · Cancelled"]);
+  expect([...groups[0].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✗choiceNeeds your choice", "✗badlocal storage isn't ready for safe sync. Your changes are kept on this device.", "✗cancelCancelled"]);
   expect([...groups[1].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✓good", "✓same"]);
 });
 
