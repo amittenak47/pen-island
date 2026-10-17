@@ -1346,6 +1346,8 @@ export const Workspace = memo(function Workspace({
       (shown, mounted) => hubSyncHostRef.current!.onConflict(shown, mounted)),
   };
   const syncWorkingRevisionRef = useRef<(() => string)>(() => "");
+  /** A Sync tap is running: it reloads the open pad itself, at its end. */
+  const syncWalkActiveRef = useRef(false);
   const syncPreparedRevisionRef = useRef<string | null>(null);
   /**
    * Live rehydrate after a walk (and after auto-sync apply).
@@ -1520,7 +1522,10 @@ export const Workspace = memo(function Workspace({
           setHubConflictAsk(ask);
         }),
       onIndexProgress: (progress) => setDocIndexProgress(progress),
-      onWalkProgress: (report) => setWalkReport(report),
+      onWalkProgress: (report) => {
+        syncWalkActiveRef.current = report != null && report.stage !== "synced" && !report.error;
+        setWalkReport(report);
+      },
       // The hub has an index for this document now, whether the walk built it
       // or found it already there. Nothing used to say so, so the chip kept
       // reading "not indexed" about a document that was.
@@ -5038,6 +5043,11 @@ export const Workspace = memo(function Workspace({
         }
         return;
       }
+      // A Sync tap reloads the open pad itself when it ends. It also fires
+      // this event as it writes the open book, and reloading here as well
+      // bumped the ink revision under the walk's own guard: every Sync of an
+      // open PDF failed with "The page changed during sync (ink)".
+      if (syncWalkActiveRef.current) return;
       if (detail.kind === "problem") {
         const current = problemRef.current;
         if (!current || isLocalPad(current)) return;
