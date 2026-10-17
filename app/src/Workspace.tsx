@@ -10435,7 +10435,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Web"
               ariaLabel="Web pad: tap for a new page, hold for recent pages"
-              className="lc-icon lc-hold-icon"
+              className="lc-icon lc-hold-icon lc-head-mode-browse"
               disabled={busy !== null || canvasLoading}
               fillIndeterminate={spawning === "web"}
               onTap={() => {
@@ -10473,7 +10473,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Document"
               ariaLabel="Document pad: tap to open a file, hold for recent documents"
-              className="lc-icon lc-hold-icon"
+              className="lc-icon lc-hold-icon lc-head-mode-annotate"
               disabled={busy !== null || canvasLoading}
               onTap={() => void pickAndOpenAnnotate()}
               onConfirm={() => {
@@ -10505,7 +10505,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Web"
               ariaLabel="Web documents: tap to save now, hold for save / open menu"
-              className="lc-icon lc-hold-icon is-active"
+              className="lc-icon lc-hold-icon lc-head-mode-browse is-active"
               pressed
               disabled={busy !== null || canvasLoading}
               onTap={() => {
@@ -10541,7 +10541,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Markdown"
               ariaLabel="Markdown documents: tap to save now, hold for save / open menu"
-              className="lc-icon lc-hold-icon is-active"
+              className="lc-icon lc-hold-icon lc-head-mode-annotate is-active"
               pressed
               disabled={busy !== null || canvasLoading}
               onTap={() => {
@@ -10580,7 +10580,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Whiteboard"
               ariaLabel="Whiteboard: tap for a new notebook, hold to open the library"
-              className="lc-icon lc-hold-icon"
+              className="lc-icon lc-hold-icon lc-head-mode-whiteboard"
               disabled={busy !== null || canvasLoading}
               onTap={() => void openWhiteboard({ fresh: true })}
               onConfirm={() => setWhiteboardEntryOpen(true)}
@@ -10615,7 +10615,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Whiteboard"
               ariaLabel="Whiteboard: tap to save now, hold for save / load menu"
-              className="lc-icon lc-hold-icon is-active"
+              className="lc-icon lc-hold-icon lc-head-mode-whiteboard is-active"
               pressed
               disabled={busy !== null || canvasLoading}
               onTap={() => void saveWhiteboardNow()}
@@ -10640,7 +10640,7 @@ export const Workspace = memo(function Workspace({
               </svg>
             </HoldButton>
           )}
-          {!hidePadMenu && headerModes.practice && FEATURE_LEETCODE && <button type="button" className="lc-icon"
+          {!hidePadMenu && headerModes.practice && FEATURE_LEETCODE && <button type="button" className="lc-icon lc-head-mode-practice"
             aria-label="Practice: open the problem library" disabled={busy !== null || canvasLoading} onClick={() => openPracticePicker?.()}>
             <svg className="lc-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
               <path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18" />

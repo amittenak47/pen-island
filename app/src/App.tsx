@@ -1418,8 +1418,9 @@ export function App() {
           */}
           <button
             type="button"
-            className="lc-brand lc-brand-home"
+            className={tabState.activeId === HOME_TAB_ID ? "lc-brand lc-brand-home is-active" : "lc-brand lc-brand-home"}
             aria-label="Home"
+            aria-current={tabState.activeId === HOME_TAB_ID ? "page" : undefined}
             onClick={() => {
               // Going Home also drops whatever was loading, the way the Home
               // chip used to.
