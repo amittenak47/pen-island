@@ -124,7 +124,13 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
     saved.current = cancel ? d.height : settleSheetHeight(d.height + d.y - e.clientY, available.current, initial.current, true);
     apply(saved.current);
     unclip();
-    if (panel.current) panel.current.style.removeProperty("transition");
+    if (panel.current) {
+      // Commit the unclipped style while transitions are still off: dropping
+      // both at once let the sheet's clip-path transition replay the drag
+      // clip back to zero, a 240ms wipe (a flash) after every lift-off.
+      void getComputedStyle(panel.current).clipPath;
+      panel.current.style.removeProperty("transition");
+    }
     document.documentElement.classList.remove("lc-agent-dragging");
     document.dispatchEvent(new Event("lc-agent-drag-end"));
     if (e.currentTarget.hasPointerCapture?.(e.pointerId)) e.currentTarget.releasePointerCapture(e.pointerId);
