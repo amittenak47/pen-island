@@ -53,6 +53,21 @@ export const UNROLL_SCROLL_BOXES = `for (const el of document.querySelectorAll("
   }
 }`;
 
+/**
+ * Also just before serializing: nothing pinned survives the freeze.
+ *
+ * A frozen page does not scroll itself (the board moves it), so a sticky or
+ * fixed bar has nothing to stick to and ends up pinned over whatever it
+ * covered: a sticky contents bar over the title, sticky table headers over
+ * the first rows. Each goes back into the flow where its markup sits.
+ */
+export const UNPIN_STICKY = `for (const el of document.querySelectorAll("*")) {
+  const position = getComputedStyle(el).position;
+  if (position === "sticky" || position === "-webkit-sticky" || position === "fixed") {
+    el.style.setProperty("position", "static", "important");
+  }
+}`;
+
 export function localHtmlSrcdoc(original: string, nonce: string): string {
   const doc = new DOMParser().parseFromString(original, "text/html");
   removeRelativeResources(doc);
@@ -73,6 +88,7 @@ export function localHtmlSrcdoc(original: string, nonce: string): string {
       await Promise.race([document.fonts ? document.fonts.ready : Promise.resolve(), new Promise(r => setTimeout(r, 1200))]);
       await new Promise(r => setTimeout(r, 300));
       ${UNROLL_SCROLL_BOXES}
+      ${UNPIN_STICKY}
       const html = (document.doctype ? new XMLSerializer().serializeToString(document.doctype) : "<!DOCTYPE html>") + "\\n" + document.documentElement.outerHTML;
       parent.postMessage({...${envelope}, html}, "*");
     } catch (_) { parent.postMessage({...${envelope}, error: true}, "*"); }

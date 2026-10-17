@@ -4,7 +4,7 @@ import { PAGE_MAX_BYTES, webPageWidthForViewport } from "./webPage";
 import { docIdentityHash, hashMarkdown } from "./annotateStore";
 import {
   freezeLocalHtml, localHtmlSrcdoc, renderLocalHtml, LOCAL_HTML_CSP,
-  LOCAL_HTML_MESSAGE, LOCAL_HTML_TIMEOUT_MS, UNROLL_SCROLL_BOXES,
+  LOCAL_HTML_MESSAGE, LOCAL_HTML_TIMEOUT_MS, UNPIN_STICKY, UNROLL_SCROLL_BOXES,
 } from "./localHtmlRender";
 
 afterEach(() => {
@@ -160,6 +160,31 @@ describe("inner scroll boxes", () => {
     const srcdoc = localHtmlSrcdoc("<p>x</p>", "n");
     expect(srcdoc.indexOf(UNROLL_SCROLL_BOXES)).toBeGreaterThan(-1);
     expect(srcdoc.indexOf(UNROLL_SCROLL_BOXES)).toBeLessThan(srcdoc.indexOf("XMLSerializer().serializeToString(document.doctype)"));
+  });
+});
+
+describe("pinned bars", () => {
+  it("puts sticky and fixed elements back in the flow and leaves the rest", () => {
+    document.body.innerHTML =
+      '<nav id="toc" style="position: sticky; top: 0">contents</nav>' +
+      '<table><tr><th id="th" style="position: sticky; top: 0">h</th></tr></table>' +
+      '<div id="bar" style="position: fixed; bottom: 0">bar</div>' +
+      '<span id="pin" style="position: absolute; left: 0">x</span>' +
+      '<p id="text">text</p>';
+    new Function(UNPIN_STICKY)();
+    for (const id of ["toc", "th", "bar"]) {
+      const el = document.getElementById(id)!;
+      expect(el.style.getPropertyValue("position")).toBe("static");
+      expect(el.style.getPropertyPriority("position")).toBe("important");
+    }
+    expect(document.getElementById("pin")!.style.position).toBe("absolute");
+    expect(document.getElementById("text")!.getAttribute("style")).toBeNull();
+  });
+
+  it("runs in the sandbox after the scroll boxes unroll, before serializing", () => {
+    const srcdoc = localHtmlSrcdoc("<p>x</p>", "n");
+    expect(srcdoc.indexOf(UNPIN_STICKY)).toBeGreaterThan(srcdoc.indexOf(UNROLL_SCROLL_BOXES));
+    expect(srcdoc.indexOf(UNPIN_STICKY)).toBeLessThan(srcdoc.indexOf("XMLSerializer().serializeToString(document.doctype)"));
   });
 });
 
