@@ -1539,7 +1539,7 @@ export function HubConflictSplit({
           >
             <span className="lc-hub-conflict-dock-title">Changes</span>
             <span className="lc-hub-conflict-dock-count">{idsOnSide(side, true).length}</span>
-            <span className="lc-hub-conflict-dock-hint">{listOpen ? "Fold to see the whole page" : "Show changes"}</span>
+            {!listOpen && <span className="lc-hub-conflict-dock-hint">Show changes</span>}
             <svg className="lc-hub-conflict-dock-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
           </button>
           <div className="lc-hub-conflict-dock-fold">
