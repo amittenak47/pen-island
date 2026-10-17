@@ -70,7 +70,9 @@ pub fn run() {
             {
                 let port = cfg.serve.port;
                 let token = cfg.serve.token.clone();
-                let lan_state = harness::serve::new_state_with_token(cfg, token);
+                // One agent-run registry for both routers: runs the window starts
+                // are answered over this listener (the AI application's MCP, the bot).
+                let lan_state = harness::serve::new_state_sharing_agent_runs(cfg, token, gui_state.agent_runs.clone());
                 tauri::async_runtime::spawn(async move {
                     if let Err(err) = harness::serve::listen_lan(lan_state, port).await {
                         eprintln!("pad-sync listener: {err:#}");
