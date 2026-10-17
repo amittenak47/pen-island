@@ -126,7 +126,7 @@ export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Pa
       ...(parent.kind === "whiteboard" ? { title: snap.name ?? ctx.metadata?.title ?? "Recovered notebook",
         pageCount: snap.pageCount ?? ctx.metadata?.pageCount ?? 1 }
         : { name: snap.name ?? ctx.metadata?.name ?? "Recovered note.md",
-          hash: ["pdf", "epub"].includes(String(ctx.metadata?.docType))
+          hash: ctx.metadata?.localFileHash || ["pdf", "epub"].includes(String(ctx.metadata?.docType))
             ? ctx.metadata?.hash : recoveredHash ?? ctx.metadata?.hash,
           docType: ctx.metadata?.docType ?? "markdown" }) };
     if (ctx.metadata?.deletedAt || ctx.metadata?.purgedAt) {

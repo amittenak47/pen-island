@@ -399,7 +399,7 @@ async function inlineLinkedStyles(holder: HTMLElement, baseUrl: string): Promise
     if (!href || budget <= 0) continue;
     let absolute: string;
     try {
-      absolute = new URL(href, baseUrl).href;
+      absolute = baseUrl ? new URL(href, baseUrl).href : new URL(href).href;
     } catch {
       continue;
     }

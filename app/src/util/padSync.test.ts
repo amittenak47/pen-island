@@ -1188,3 +1188,12 @@ describe("unknown authored wire fields", () => {
     expect(restored.authoredExtras).not.toHaveProperty("record_rev");
   });
 });
+
+
+it("round trips a local web file marker using the existing annotate record", async () => {
+  await applyHubAnnotate({ id: "local-html", name: "guide.html", hash: "original-hash", local_file_hash: "original-hash",
+    doc_type: "web", updated_at: 3, source: "<table><tr><td>Generated</td></tr></table>", board: emptyBoard, footnotes: [], agent: [] }, { emitReload: false });
+  const restored = restoreAnnotateDoc.mock.calls.at(-1)![0] as Parameters<typeof annotatePadBody>[0];
+  expect(restored).toMatchObject({ docType: "web", localFileHash: "original-hash", hash: "original-hash" });
+  expect(await annotatePadBody(restored)).toMatchObject({ doc_type: "web", local_file_hash: "original-hash", hash: "original-hash", source: restored.source });
+});

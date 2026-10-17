@@ -68,6 +68,7 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
     }
   }
   return { ...common, name: meta.name, hash: meta.hash, doc_type: meta.docType ?? "markdown",
+    ...(meta.localFileHash ? { local_file_hash: meta.localFileHash } : {}),
     ...(typeof meta.label === "string" && meta.label.trim() ? { label: meta.label } : {}),
     source: payload.source ?? "", footnotes, footnote_boards: children,
     updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
@@ -188,6 +189,7 @@ function localRecordParts(owner: BookIdentity, record: Record<string, unknown>, 
     updatedAt: record.updated_at ?? capture.metadata?.updatedAt ?? 0, syncSeq: record.sync_seq ?? capture.metadata?.syncSeq ?? 0,
     hubAckUpdatedAt: record.updated_at ?? 0, lastSyncedAt: Date.now() };
   if (owner.kind === "annotate") Object.assign(metadata, { name: record.name, hash: record.hash, docType: record.doc_type,
+    localFileHash: typeof record.local_file_hash === "string" ? record.local_file_hash : undefined,
     ...(record.label !== undefined ? { label: record.label } : { label: undefined }) });
   else if (owner.kind === "whiteboard") Object.assign(metadata, { title: record.title, pageCount: record.page_count });
   else Object.assign(metadata, { dataset: record.dataset, taskId: record.task_id });

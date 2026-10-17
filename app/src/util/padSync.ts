@@ -295,6 +295,8 @@ export async function applyHubAnnotate(
     name: row.name,
     hash: row.hash,
     docType: (row.doc_type as DocType) || "markdown",
+    ...(typeof (row as unknown as Record<string, unknown>).local_file_hash === "string"
+      ? { localFileHash: (row as unknown as Record<string, unknown>).local_file_hash as string } : {}),
     updatedAt: row.updated_at,
     source: row.source ?? "",
     board: row.board as BoardBlob,
@@ -470,6 +472,7 @@ export async function annotatePadBody(doc: AnnotateDoc): Promise<AnnotatePadDto>
     ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
     hash: doc.hash,
     doc_type: doc.docType,
+    ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
     updated_at: doc.updatedAt,
     sync_seq: doc.syncSeq ?? 0,
     base_updated_at: doc.hubAckUpdatedAt ?? 0,
@@ -851,6 +854,7 @@ async function pushRestoreAllFour(
       ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
       hash: doc.hash,
       doc_type: doc.docType,
+      ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
       updated_at: doc.updatedAt,
       sync_seq: seq,
       source: doc.source,
@@ -1073,6 +1077,8 @@ export async function pullPads(client: LcClient): Promise<void> {
       name: row.name,
       hash: row.hash,
       docType: (row.doc_type as DocType) || "markdown",
+      ...(typeof (row as unknown as Record<string, unknown>).local_file_hash === "string"
+        ? { localFileHash: (row as unknown as Record<string, unknown>).local_file_hash as string } : {}),
       updatedAt: row.updated_at,
       source: row.source ?? "",
       board: row.board as BoardBlob,

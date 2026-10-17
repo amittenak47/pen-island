@@ -82,6 +82,8 @@ export interface AnnotateDocMeta {
   /** Hash of the document this was drawn over — text for markdown/code/web, bytes otherwise. */
   hash: string;
   docType: DocType;
+  /** Original local HTML hash. Presence means the web document is a file, not an address. */
+  localFileHash?: string;
   updatedAt: number;
   /**
    * What to call this set of annotations, when its file name is not enough.
@@ -256,7 +258,9 @@ export function docIdentityHash(input: {
   name: string;
   text?: string;
   bytes?: ArrayBuffer | null;
+  localFileHash?: string;
 }): string {
+  if (input.docType === "web" && input.localFileHash) return input.localFileHash;
   if (input.docType === "web") {
     const url = webIdentityUrl(input.name);
     // A web pad with an unparseable name is not a page anyone navigated to;
@@ -651,6 +655,7 @@ export async function saveAnnotateDoc(input: {
   hash: string;
   metadataIntent?: "rename";
   docType?: DocType;
+  localFileHash?: string;
   /** Undefined keeps whatever the set is already called. */
   label?: string;
   /** Undefined keeps whatever the set already claims. */
@@ -713,6 +718,7 @@ export async function saveAnnotateDoc(input: {
     updatedAt: now,
     ...(label ? { label } : {}),
     ...(owned ? { owned: true } : {}),
+    ...((input.localFileHash ?? existing?.localFileHash) ? { localFileHash: input.localFileHash ?? existing?.localFileHash } : {}),
     ...(existing?.locked ? { locked: true } : {}),
     syncSeq: existing?.syncSeq ?? 0,
     lastTouch: now,

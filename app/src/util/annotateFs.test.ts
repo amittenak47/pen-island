@@ -258,3 +258,24 @@ describe("sidecar round trip", () => {
     expect(readAnnotateSidecar("not json")).toBeNull();
   });
 });
+
+
+describe("local HTML file types", () => {
+  it.each(["guide.html", "guide.htm", "GUIDE.HTML", "path/Guide.HTM"])("opens %s as web", (name) => {
+    expect(docTypeForName(name)).toBe("web");
+    expect(docTypeForPicked({ name, type: "text/plain" })).toBe("web");
+  });
+  it.each(["", "document", "path/document"])("uses HTML MIME for an uninformative name: %s", (name) => {
+    expect(docTypeForPicked({ name, type: "text/html" })).toBe("web");
+    expect(docTypeForPicked({ name, type: "TEXT/HTML; charset=utf-8" })).toBe("web");
+  });
+  it.each(["guide.xhtml", "main.ts", "notes.txt", "Dockerfile", "unknown.xyz"])("keeps %s as code despite HTML MIME", (name) => {
+    expect(docTypeForName(name)).toBe("code");
+    expect(docTypeForPicked({ name, type: "text/html" })).toBe("code");
+  });
+  it("preserves the other named document types", () => {
+    expect(docTypeForPicked({ name: "notes.md", type: "text/html" })).toBe("markdown");
+    expect(docTypeForPicked({ name: "book.pdf", type: "text/html" })).toBe("pdf");
+    expect(docTypeForPicked({ name: "book.epub", type: "text/html" })).toBe("epub");
+  });
+});

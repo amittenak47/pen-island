@@ -44,6 +44,7 @@ export const DOCUMENT_ACCEPT = [
   "application/epub+zip,.epub",
   MARKDOWN_ACCEPT,
   CODE_ACCEPT,
+  "text/html,.html,.htm",
   "text/plain",
 ].join(",");
 
@@ -74,6 +75,8 @@ export interface OpenedMarkdown {
  * path does not fork before it has to.
  */
 export interface OpenedDocument {
+  /** Original HTML content hash; also marks a frozen local file, not an address. */
+  localFileHash?: string;
   name: string;
   docType: DocType;
   /** Markdown and code. */
@@ -101,6 +104,7 @@ export function docTypeForName(name: string): DocType {
   if (lower.endsWith(".pdf")) return "pdf";
   if (lower.endsWith(".epub")) return "epub";
   if (isMarkdownName(name)) return "markdown";
+  if (/\.html?$/i.test(name)) return "web";
   if (isCodeName(name)) return "code";
   return "code";
 }
@@ -139,11 +143,13 @@ export function docTypeForPicked(
     if (looksLikeEpub(raw)) return "epub";
   }
   const named = docTypeForName(file.name);
-  if (named === "pdf" || named === "epub" || named === "markdown") return named;
+  if (named === "pdf" || named === "epub" || named === "markdown" || named === "web") return named;
   const mime = (file.type ?? "").toLowerCase();
   if (mime === "application/pdf") return "pdf";
   if (mime === "application/epub+zip" || mime === "application/epub") return "epub";
   if (mime === "text/markdown" || mime === "text/x-markdown") return "markdown";
+  // Only an uninformative name may defer to HTML MIME; .xhtml/source stay code.
+  if (mime.split(";")[0].trim() === "text/html" && !/\.[^./\\]+$/.test(file.name) && !isCodeName(file.name)) return "web";
   return named;
 }
 
@@ -151,6 +157,7 @@ function fallbackPickedName(docType: DocType): string {
   if (docType === "pdf") return "document.pdf";
   if (docType === "epub") return "document.epub";
   if (docType === "markdown") return "document.md";
+  if (docType === "web") return "document.html";
   return "document";
 }
 
@@ -538,7 +545,14 @@ export function pickDocumentFile(): Promise<OpenedDocument | null> {
     const docType = docTypeForPicked(file, bytes);
     const name = file.name || fallbackPickedName(docType);
     if (isTextDocType(docType)) {
-      return { name, docType, text: new TextDecoder().decode(bytes) };
+      const text = new TextDecoder().decode(bytes);
+      if (docType === "web") {
+        const [{ freezeLocalHtml }, { hashMarkdown }] = await Promise.all([
+          import("./localHtmlRender"), import("./annotateStore"),
+        ]);
+        return { name, docType, localFileHash: hashMarkdown(text), text: await freezeLocalHtml(text) };
+      }
+      return { name, docType, text };
     }
     return { name, docType, bytes };
   });

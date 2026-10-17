@@ -177,3 +177,23 @@ describe("a file that arrives after the deadline", () => {
     await expect(pending).resolves.toMatchObject({ name: "late.pdf" });
   });
 });
+
+
+it("picks local HTML through the sandbox freeze and keys both renders by the original file", async () => {
+  const { hashMarkdown } = await import("./annotateStore");
+  const renderer = await import("./localHtmlRender");
+  const freeze = vi.spyOn(renderer, "freezeLocalHtml").mockResolvedValueOnce("<p>First render</p>").mockResolvedValueOnce("<p>Second render</p>");
+  const original = "<p id='table'></p><script>render()</script>";
+  const results = [];
+  for (let i = 0; i < 2; i++) {
+    const pending = pickDocumentFile();
+    const input = fileInput();
+    setFiles(input, new File([original], "guide.html", { type: "text/html" }));
+    input.dispatchEvent(new Event("change"));
+    results.push(await pending);
+  }
+  expect(freeze).toHaveBeenNthCalledWith(1, original);
+  expect(freeze).toHaveBeenNthCalledWith(2, original);
+  expect(results[0]).toEqual({ name: "guide.html", docType: "web", localFileHash: hashMarkdown(original), text: "<p>First render</p>" });
+  expect(results[1]).toEqual({ name: "guide.html", docType: "web", localFileHash: hashMarkdown(original), text: "<p>Second render</p>" });
+});

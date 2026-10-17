@@ -39,3 +39,12 @@ it.each(["annotate", "whiteboard", "problem"] as const)("captures identical %s r
     for (const row of all) if ((range as IDBKeyRange).includes(inkPageKey(row.docKey, row.pageId))) expect(expected).toContainEqual(row);
   }
 });
+
+
+it("captures the local HTML marker beside the original-file hash in a normal web record", async () => {
+  const { saveAnnotateDoc } = await import("./annotateStore");
+  await saveAnnotateDoc({ id: "local-html", name: "guide.html", docType: "web", hash: "original-hash", localFileHash: "original-hash",
+    source: "<p>Rendered DOM</p>", board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } } });
+  const capture = await captureBook({ kind: "annotate", id: "local-html" });
+  expect(capture.record).toMatchObject({ doc_type: "web", hash: "original-hash", local_file_hash: "original-hash", source: "<p>Rendered DOM</p>" });
+});

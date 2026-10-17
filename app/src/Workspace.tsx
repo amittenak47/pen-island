@@ -858,6 +858,7 @@ export const Workspace = memo(function Workspace({
     text: string;
     hash: string;
     docType: DocType;
+    localFileHash?: string;
     /**
      * The file's bytes for PDF and EPUB, held for as long as the pad is open.
      *
@@ -1726,6 +1727,7 @@ export const Workspace = memo(function Workspace({
     text: string;
     hash: string;
     docType: DocType;
+    localFileHash?: string;
   } | null>(null);
   const annotateDocIdRef = useRef<string | null>(null);
   /**
@@ -4060,6 +4062,7 @@ export const Workspace = memo(function Workspace({
     async (input: {
       name: string;
       docType?: DocType;
+      localFileHash?: string;
       /** Markdown, code, or captured web HTML. */
       text?: string;
       /** PDF and EPUB only. */
@@ -4171,7 +4174,7 @@ export const Workspace = memo(function Workspace({
           ? input.hash
           : bytes && docType !== "web"
             ? await hashBytesAsync(bytes)
-            : docIdentityHash({ docType, name: input.name, text, bytes });
+            : docIdentityHash({ docType, name: input.name, text, bytes, localFileHash: input.localFileHash });
         traceOpen("hashed", { hash, bytes: bytes ? bytes.byteLength : null, ms: openMs() });
 
         /*
@@ -4283,8 +4286,11 @@ export const Workspace = memo(function Workspace({
           publishPdfFilmCurrent(tab.id, sessionPage);
           boardRef.current?.aimPdfPage(sessionPage);
         }
-        setAnnotateSource({ name: input.name, text, hash, docType, bytes });
-        if (docType === "web") {
+        const localFileHash = input.localFileHash ?? existing?.localFileHash;
+        // Restores keep the original-file identity, never the varying frozen DOM.
+        if (localFileHash) hash = localFileHash;
+        setAnnotateSource({ name: input.name, text, hash, docType, bytes, localFileHash });
+        if (docType === "web" && !localFileHash) {
           setWebUrl(input.name);
           /*
            * Which capture the pad is showing, and what it is.
@@ -4338,6 +4344,11 @@ export const Workspace = memo(function Workspace({
           // A file pad is never a live webview. This used to run for every
           // annotate open and fired extra keepY fits on md/pdf/epub.
           setWebLive(false);
+          if (localFileHash) {
+            setWebHtmlSource("capture");
+            webHtmlSourceRef.current = "capture";
+            setWebHtmlNote(null);
+          }
         }
         /*
          * Give this document a tab, or claim the one it arrived on.
@@ -5264,6 +5275,7 @@ export const Workspace = memo(function Workspace({
     async (input: {
       name: string;
       docType?: DocType;
+      localFileHash?: string;
       text?: string;
       bytes?: ArrayBuffer;
       docId?: string | null;
@@ -5276,6 +5288,8 @@ export const Workspace = memo(function Workspace({
         return;
       }
       const docType = input.docType ?? "markdown";
+      const meta = input.docId ? getAnnotateDocMeta(input.docId) : null;
+      const localFileHash = input.localFileHash ?? meta?.localFileHash;
       /*
        * Library / file opens are annotate tabs, even when the sidecar is a
        * captured page. A web *tab* is only the globe / address bar path —
@@ -5294,6 +5308,7 @@ export const Workspace = memo(function Workspace({
               name: input.name,
               text: input.text,
               bytes: input.bytes,
+              localFileHash,
             });
 
       /*
@@ -5331,6 +5346,15 @@ export const Workspace = memo(function Workspace({
        * genuinely in the library can be read back from it.
        */
       const newSet = !sidecarId || !getAnnotateDocMeta(sidecarId);
+      if (docType === "web" && localFileHash && newSet) {
+        // Keep the marker and frozen body together before another pane mounts.
+        // A local file has no address from which an unmarked tab can refetch it.
+        await saveAnnotateDoc({
+          id: sidecarId ?? undefined, name: input.name, hash, docType, localFileHash,
+          source: input.text ?? "",
+          board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } },
+        });
+      }
 
       const proposed: TabRecord = {
         id: newTabId("annotate"),
@@ -5770,6 +5794,7 @@ export const Workspace = memo(function Workspace({
       await openAnnotate({
         name: picked.name,
         docType: picked.docType,
+        localFileHash: picked.localFileHash,
         text: picked.text,
         bytes: picked.bytes,
       });
@@ -5824,7 +5849,7 @@ export const Workspace = memo(function Workspace({
     try {
       setShellLoadActive(true);
       setWorkspaceLoadActive(true);
-      await openAnnotate({ name: picked.name, docType: picked.docType, text: picked.text, bytes: picked.bytes });
+      await openAnnotate({ ...picked });
     } catch (cause) {
       setError(messageOf(cause));
       setShellLoadActive(false);
@@ -9594,6 +9619,7 @@ export const Workspace = memo(function Workspace({
               name,
               docType,
               text,
+              localFileHash: entry?.localFileHash,
               docId: restoreDocId,
               existingDoc,
               tabId: tab.id,
@@ -9794,7 +9820,7 @@ export const Workspace = memo(function Workspace({
    * object in the header banner, then the fetched copy shown without a word —
    * the copy that does not look like the page.
    */
-  const canBrowseLive = webPadLive && isTauriRuntime() && liveWebviewSupported();
+  const canBrowseLive = webPadLive && !annotateSource?.localFileHash && isTauriRuntime() && liveWebviewSupported();
   /**
    * A live page on screen in a pane that does not have focus.
    *
@@ -10640,7 +10666,7 @@ export const Workspace = memo(function Workspace({
         the `+` that asks for another page, which stays here beside the address
         it is about rather than becoming a bare `+` on a strip of mixed kinds.
       */}
-      {webPadLive && (
+      {webPadLive && !annotateSource?.localFileHash && (
         <form
           className="lc-web-omnibox"
           onSubmit={(event) => {
@@ -11290,11 +11316,12 @@ export const Workspace = memo(function Workspace({
                     <WebDocument
                       html={annotateSource.text}
                       url={annotateSource.name}
+                      localFile={Boolean(annotateSource.localFileHash)}
                       source={webHtmlSource ?? undefined}
                       note={webHtmlNote ?? undefined}
                       onMeasure={onMdInkMeasure}
                       selectable={!annotateCode || Boolean(openFootnote) || highlighting}
-                      onNavigate={(href) => void openWebPage(href)}
+                      onNavigate={annotateSource.localFileHash ? undefined : (href) => void openWebPage(href)}
                     />
                   ) : (
                     <AnnotateDocument
@@ -12057,6 +12084,7 @@ export const Workspace = memo(function Workspace({
               void openAnnotate({
                 name: source.name,
                 docType: source.docType,
+                localFileHash: source.localFileHash,
                 text: source.text,
                 bytes: source.bytes ?? undefined,
                 docId: freshAnnotateId(),

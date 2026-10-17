@@ -12,6 +12,8 @@ import { promoteLazyImages, type WebHtmlSource } from "../util/webPage";
 export interface WebDocumentProps {
   html: string;
   url: string;
+  /** A frozen file has no address to browse, including through its links. */
+  localFile?: boolean;
   onMeasure?: (height: number) => void;
   selectable?: boolean;
   /** Reading-mode taps on links fetch a new snapshot instead of leaving the app. */
@@ -25,6 +27,7 @@ export interface WebDocumentProps {
 export function WebDocument({
   html,
   url,
+  localFile = false,
   onMeasure,
   selectable = false,
   onNavigate,
@@ -35,6 +38,8 @@ export function WebDocument({
   onMeasureRef.current = onMeasure;
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const localFileRef = useRef(localFile);
+  localFileRef.current = localFile;
 
   useEffect(() => {
     const node = nodeRef.current;
@@ -61,11 +66,19 @@ export function WebDocument({
       if (!anchor) return;
       event.preventDefault();
       const href = anchor.getAttribute("href");
-      if (!href || href.startsWith("#") || href.startsWith("mailto:")) return;
+      if (localFileRef.current || !href || href.startsWith("#") || href.startsWith("mailto:")) return;
       onNavigateRef.current?.(href);
     };
+    const onAuxClick = (event: MouseEvent) => {
+      const anchor = event.target instanceof Element ? event.target.closest("a") : null;
+      if (anchor && (localFileRef.current || anchor.getAttribute("href")?.startsWith("#"))) event.preventDefault();
+    };
     node.addEventListener("click", onClick);
-    return () => node.removeEventListener("click", onClick);
+    node.addEventListener("auxclick", onAuxClick);
+    return () => {
+      node.removeEventListener("click", onClick);
+      node.removeEventListener("auxclick", onAuxClick);
+    };
   }, [html]);
 
   /*

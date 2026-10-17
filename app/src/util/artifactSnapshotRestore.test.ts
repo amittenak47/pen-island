@@ -123,3 +123,16 @@ describe("transactional local snapshot restore", () => {
     expect(await run(STORE_SYNC_STATE, "readonly", store => store.get("__seq"))).toEqual(counter);
   });
 });
+
+
+it("restoring frozen HTML preserves the local file's original hash and marker", async () => {
+  await seed("annotate");
+  await mutateLocalBook({ kind: "annotate", id: "book" }, { requireIdb: true }, ctx => {
+    ctx.setMetadata({ ...ctx.metadata!, docType: "web", name: "guide.html", hash: "original-hash", localFileHash: "original-hash" });
+  });
+  await restorePadSnapshotLocally({ kind: "annotate", id: "book" }, { ...snapshot(), kind: "annotate", source: "<p>Varying rendered HTML</p>" });
+  expect(await run(STORE_BOOK_META, "readonly", store => store.get("annotate:book"))).toMatchObject({
+    docType: "web", hash: "original-hash", localFileHash: "original-hash",
+  });
+  expect(await run(STORE_CONTENT, "readonly", store => store.get("book"))).toMatchObject({ source: "<p>Varying rendered HTML</p>" });
+});
