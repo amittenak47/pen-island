@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState, type CSSProperties, type RefObject } from "react";
+import { useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 
 import { popPlacement } from "../util/popPlacement";
 
@@ -18,13 +18,17 @@ export function usePopPlacement(
   prefer: "below" | "above" = "below",
 ): CSSProperties {
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden", top: 0, left: 0 });
+  // The side is chosen when the notification opens and kept until it closes:
+  // collapsing a list inside it must not make it jump to the other side.
+  const side = useRef<"above" | "below" | null>(null);
   useLayoutEffect(() => {
-    if (!visible) { setStyle({ visibility: "hidden", top: 0, left: 0 }); return; }
+    if (!visible) { side.current = null; setStyle({ visibility: "hidden", top: 0, left: 0 }); return; }
     const place = () => {
       const button = trigger.current?.getBoundingClientRect();
       const box = pop.current?.getBoundingClientRect();
       if (!button || !box) return;
-      const at = popPlacement(button, { width: box.width, height: box.height }, { width: window.innerWidth, height: window.innerHeight }, 8, 8, prefer);
+      const at = popPlacement(button, { width: box.width, height: box.height }, { width: window.innerWidth, height: window.innerHeight }, 8, 8, prefer, side.current ?? undefined);
+      side.current = at.above ? "above" : "below";
       setStyle({ top: at.top, left: at.left });
     };
     place();

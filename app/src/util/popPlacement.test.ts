@@ -35,3 +35,7 @@ it("opens above when asked to, and falls back below when the top of the window i
   expect(popPlacement(button(100, 200), pop, { width: 1200, height: 800 }, 8, 8, "above")).toEqual({ top: 200 - 8 - 60, left: 100, above: true });
   expect(popPlacement(button(100, 20), pop, { width: 1200, height: 800 }, 8, 8, "above").above).toBe(false);
 });
+
+it("keeps a side it was given even when the other would now fit", () => {
+  expect(popPlacement(button(100, 200), pop, { width: 1200, height: 800 }, 8, 8, "above", "below")).toEqual({ top: 230, left: 100, above: false });
+});

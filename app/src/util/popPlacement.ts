@@ -16,6 +16,8 @@ export function popPlacement(
   margin = 8,
   /** "above": try above first (Home's sync icon), below only if it cannot fit. */
   prefer: "below" | "above" = "below",
+  /** Keep this side (a notification that is already open must not flip when it resizes). */
+  side?: "below" | "above",
 ): { top: number; left: number; above: boolean } {
   const maxLeft = Math.max(margin, viewport.width - pop.width - margin);
   const leftAligned = button.left;
@@ -25,7 +27,7 @@ export function popPlacement(
   const fitsBelow = below + pop.height + margin <= viewport.height;
   const above = button.top - gap - pop.height;
   const fitsAbove = above >= margin;
-  const useAbove = prefer === "above" ? fitsAbove || !fitsBelow : !fitsBelow && fitsAbove;
+  const useAbove = side ? side === "above" : prefer === "above" ? fitsAbove || !fitsBelow : !fitsBelow && fitsAbove;
   const top = useAbove ? Math.max(margin, above) : Math.max(margin, Math.min(below, viewport.height - pop.height - margin));
   return { top, left, above: useAbove };
 }
