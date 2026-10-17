@@ -27,8 +27,8 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   onOpen(book: BookIdentity): void;
 }) {
   const [open, setOpen] = useState(false);
-  /** Bumped when a group opens or closes, so the notification is placed again. */
-  const [groupsTick, setGroupsTick] = useState(0);
+  /** Failed opens by default, Succeeded stays folded. */
+  const [groupOpen, setGroupOpen] = useState<Record<string, boolean>>({ Failed: true, Succeeded: false });
   const [result, setResult] = useState(loadLibrarySyncResults), [activity, setActivity] = useState(getBookPassActivity);
   const [error, setError] = useState("");
   const [hover, setHover] = useState(false);
@@ -107,7 +107,7 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   const leave = () => { window.clearTimeout(leaveTimer.current); leaveTimer.current = window.setTimeout(() => setHover(false), HOVER_LEAVE_MS); };
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
   // Above the icon: below it the notification would sit over the Start tiles.
-  const placed = usePopPlacement(trigger, pop, visible, `${line}|${books.length}|${groupsTick}`, "above");
+  const placed = usePopPlacement(trigger, pop, visible, `${line}|${books.length}`, "above");
   const status = syncing ? `syncing, ${synced} synced so far` : failures.length && result ? librarySyncSummary({ time: 0, books: failures }) : result ? "all books synced" : "not synced yet";
 
   return <>
@@ -132,9 +132,14 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
         {!syncing && books.length > 0 && <div className="lc-library-sync-groups">
           {([["Failed", failures, true], ["Succeeded", books.filter(book => !bookSyncFailed(book)), false]] as const)
             .filter(([, rows]) => rows.length > 0).map(([label, rows, failed]) => (
-            <details key={label} className="lc-library-sync-group" open={failed} onToggle={() => setGroupsTick(tick => tick + 1)}>
-              <summary className={failed ? "lc-library-sync-bad" : "lc-library-sync-ok"}>{label} ({rows.length})</summary>
-              <ul className="lc-library-sync-list" aria-label={`${label} books`}>
+            // Not <details>: its open/close is instant. This one slides (CSS grid rows).
+            <div key={label} className="lc-library-sync-group" data-open={groupOpen[label] || undefined}>
+              <button type="button" className={`lc-library-sync-summary ${failed ? "lc-library-sync-bad" : "lc-library-sync-ok"}`}
+                aria-expanded={groupOpen[label]} onClick={() => setGroupOpen(open => ({ ...open, [label]: !open[label] }))}>
+                <span className="lc-library-sync-caret" aria-hidden="true">▸</span>{label} ({rows.length})
+              </button>
+              <div className="lc-library-sync-fold">
+              <ul className="lc-library-sync-list" aria-label={`${label} books`} inert={!groupOpen[label]}>
                 {rows.map(book => {
                   // Failure messages start with the book's title; the row already shows it.
                   const reason = book.reason.startsWith(`${book.title}: `) ? book.reason.slice(book.title.length + 2) : book.reason;
@@ -146,7 +151,8 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
                     : <div className="lc-library-sync-row">{content}</div>}</li>;
                 })}
               </ul>
-            </details>
+              </div>
+            </div>
           ))}
         </div>}
       </div>, document.body)}

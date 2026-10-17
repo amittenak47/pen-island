@@ -29,7 +29,9 @@ export function usePopPlacement(
       if (!button || !box) return;
       const at = popPlacement(button, { width: box.width, height: box.height }, { width: window.innerWidth, height: window.innerHeight }, 8, 8, prefer, side.current ?? undefined);
       side.current = at.above ? "above" : "below";
-      setStyle({ top: at.top, left: at.left });
+      // Above the button, hold the bottom edge: a list opening inside grows
+      // upward, away from the button, without being placed again every frame.
+      setStyle(at.above ? { bottom: window.innerHeight - (at.top + box.height), left: at.left } : { top: at.top, left: at.left });
     };
     place();
     window.addEventListener("resize", place);

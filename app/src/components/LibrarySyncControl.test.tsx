@@ -90,9 +90,12 @@ it("a finish with failures stays open with the summary, then Failed (open) and S
   expect(pop()!.querySelector(".lc-doc-sync-line")!.textContent).toBe("2 synced · 1 need your choice · 1 failed · 1 cancelled");
   expect(host.querySelector(".lc-library-sync-dot")).not.toBeNull();
   expect([...pop()!.querySelectorAll("button")].some(b => /Show/.test(b.textContent ?? ""))).toBe(false);
-  const groups = [...pop()!.querySelectorAll("details")];
-  expect(groups.map(g => g.querySelector("summary")!.textContent)).toEqual(["Failed (3)", "Succeeded (2)"]);
-  expect(groups.map(g => g.open)).toEqual([true, false]);
+  const groups = [...pop()!.querySelectorAll(".lc-library-sync-group")];
+  expect(groups.map(g => g.querySelector(".lc-library-sync-summary")!.textContent)).toEqual(["▸Failed (3)", "▸Succeeded (2)"]);
+  expect(groups.map(g => g.querySelector(".lc-library-sync-summary")!.getAttribute("aria-expanded"))).toEqual(["true", "false"]);
+  // Folding is a slide, not an instant <details>: the toggle flips data-open.
+  click(groups[1].querySelector<HTMLButtonElement>(".lc-library-sync-summary")!);
+  expect(groups[1].hasAttribute("data-open")).toBe(true);
   expect([...groups[0].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✗choiceNeeds your choice", "✗badlocal storage isn't ready for safe sync. Your changes are kept on this device.", "✗cancelCancelled"]);
   expect([...groups[1].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✓good", "✓same"]);
 });
