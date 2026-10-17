@@ -36,6 +36,23 @@ function removeRelativeResources(doc: Document): void {
   for (const node of doc.querySelectorAll("[style]")) node.setAttribute("style", cleanCss(node.getAttribute("style") ?? ""));
 }
 
+/**
+ * Runs inside the sandbox just before serializing, where layout is real.
+ *
+ * A frozen page is read by scrolling the board, so a box that scrolls on its
+ * own (a "max-height: 70vh; overflow: auto" table) catches the finger and
+ * hides rows from ink. Each one grows to its full height instead. Sideways
+ * overflow stays: the board already pans wide boxes sideways.
+ */
+export const UNROLL_SCROLL_BOXES = `for (const el of document.querySelectorAll("*")) {
+  const cs = getComputedStyle(el);
+  if ((cs.overflowY === "auto" || cs.overflowY === "scroll") && el.scrollHeight - el.clientHeight > 1) {
+    el.style.setProperty("max-height", "none", "important");
+    el.style.setProperty("height", "auto", "important");
+    el.style.setProperty("overflow-y", "visible", "important");
+  }
+}`;
+
 export function localHtmlSrcdoc(original: string, nonce: string): string {
   const doc = new DOMParser().parseFromString(original, "text/html");
   removeRelativeResources(doc);
@@ -55,6 +72,7 @@ export function localHtmlSrcdoc(original: string, nonce: string): string {
     try {
       await Promise.race([document.fonts ? document.fonts.ready : Promise.resolve(), new Promise(r => setTimeout(r, 1200))]);
       await new Promise(r => setTimeout(r, 300));
+      ${UNROLL_SCROLL_BOXES}
       const html = (document.doctype ? new XMLSerializer().serializeToString(document.doctype) : "<!DOCTYPE html>") + "\\n" + document.documentElement.outerHTML;
       parent.postMessage({...${envelope}, html}, "*");
     } catch (_) { parent.postMessage({...${envelope}, error: true}, "*"); }

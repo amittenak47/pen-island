@@ -4,7 +4,7 @@ import { PAGE_MAX_BYTES, webPageWidthForViewport } from "./webPage";
 import { docIdentityHash, hashMarkdown } from "./annotateStore";
 import {
   freezeLocalHtml, localHtmlSrcdoc, renderLocalHtml, LOCAL_HTML_CSP,
-  LOCAL_HTML_MESSAGE, LOCAL_HTML_TIMEOUT_MS,
+  LOCAL_HTML_MESSAGE, LOCAL_HTML_TIMEOUT_MS, UNROLL_SCROLL_BOXES,
 } from "./localHtmlRender";
 
 afterEach(() => {
@@ -135,6 +135,31 @@ describe("local HTML sandbox", () => {
     expect(doc.querySelectorAll("img")[2].hasAttribute("data-srcset")).toBe(false);
     expect(doc.querySelector("style")?.textContent).not.toContain("./");
     expect(doc.querySelector("a")?.getAttribute("href")).toBe("#table");
+  });
+});
+
+describe("inner scroll boxes", () => {
+  it("grows a box that scrolls vertically and leaves one that fits", () => {
+    document.body.innerHTML =
+      '<div id="map" style="max-height: 70vh; overflow-x: auto; overflow-y: auto"><table></table></div>' +
+      '<div id="fits" style="overflow-x: auto"></div>';
+    const map = document.getElementById("map")!;
+    const fits = document.getElementById("fits")!;
+    Object.defineProperty(map, "scrollHeight", { value: 2000 });
+    Object.defineProperty(map, "clientHeight", { value: 600 });
+    Object.defineProperty(fits, "scrollHeight", { value: 40 });
+    Object.defineProperty(fits, "clientHeight", { value: 40 });
+    new Function(UNROLL_SCROLL_BOXES)();
+    expect(map.style.getPropertyValue("max-height")).toBe("none");
+    expect(map.style.getPropertyPriority("max-height")).toBe("important");
+    expect(map.style.getPropertyValue("overflow-y")).toBe("visible");
+    expect(fits.getAttribute("style")).toBe("overflow-x: auto");
+  });
+
+  it("runs inside the sandbox right before serializing", () => {
+    const srcdoc = localHtmlSrcdoc("<p>x</p>", "n");
+    expect(srcdoc.indexOf(UNROLL_SCROLL_BOXES)).toBeGreaterThan(-1);
+    expect(srcdoc.indexOf(UNROLL_SCROLL_BOXES)).toBeLessThan(srcdoc.indexOf("XMLSerializer().serializeToString(document.doctype)"));
   });
 });
 
