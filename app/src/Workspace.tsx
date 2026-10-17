@@ -525,6 +525,21 @@ const WHITEBOARD_PROBLEM: ProblemDetail = {
   cases: [],
 };
 
+/** Names for the parts of `syncWorkingRevisionRef`, in the order it lists them. */
+const SYNC_REVISION_PARTS = ["notebook", "document", "ink", "footnotes", "chat", "text", "paper"];
+
+/** Which parts of the page differ between two sync revisions, for the error a reader sees. */
+function changedRevisionParts(before: string | null, after: string): string {
+  try {
+    const a = JSON.parse(before ?? "[]") as unknown[];
+    const b = JSON.parse(after || "[]") as unknown[];
+    const changed = SYNC_REVISION_PARTS.filter((_, i) => JSON.stringify(a[i]) !== JSON.stringify(b[i]));
+    return changed.length > 0 ? changed.join(", ") : "unknown";
+  } catch {
+    return "unknown";
+  }
+}
+
 function isWhiteboard(problem: ProblemDetail | null | undefined): boolean {
   return (
     problem?.task_id === WHITEBOARD_TASK_ID ||
@@ -1396,7 +1411,7 @@ export const Workspace = memo(function Workspace({
         }
         // This is the working copy. Explicit Save alone owns the baseline.
         if (revision !== syncWorkingRevisionRef.current()) {
-          throw new Error("The page changed while preparing sync. Your edits are kept; sync again.");
+          throw new Error(`The page changed while preparing sync (${changedRevisionParts(revision, syncWorkingRevisionRef.current())}). Your edits are kept; sync again.`);
         }
         syncPreparedRevisionRef.current = revision;
       },
@@ -1449,7 +1464,9 @@ export const Workspace = memo(function Workspace({
       emitReload: () => {
         if (syncPreparedRevisionRef.current !== null &&
             syncPreparedRevisionRef.current !== syncWorkingRevisionRef.current()) {
-          throw new Error("The page changed during sync. Your edits are kept; sync again to send them.");
+          const parts = changedRevisionParts(syncPreparedRevisionRef.current, syncWorkingRevisionRef.current());
+          console.warn("[lc-sync] page changed during sync:", parts);
+          throw new Error(`The page changed during sync (${parts}). Your edits are kept; sync again to send them.`);
         }
         const notebookId = whiteboardNotebookIdRef.current;
         if (notebookId) {
