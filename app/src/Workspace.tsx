@@ -10685,7 +10685,7 @@ export const Workspace = memo(function Workspace({
             onClick={() => chooseCoachOpen(!coachOpen)}
           >
             <span className="lc-agent-live-dot" aria-hidden />
-            Agent
+            <span className="lc-agent-toggle-label">Agent</span>
           </button>
       </>, headerSlots.right) : null}
       {active && headerSlots.chrome ? createPortal(<>
