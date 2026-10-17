@@ -15,12 +15,12 @@ const updateCamera = (api: Scene, next: CameraPatch) => {
 // The candidate uses the old path until the typed API exists.
 const adapters = {
   updateScene: updateCamera,
-  typedCamera: updateCamera,
+  typedCamera: (api: Scene, next: CameraPatch) => api.setCamera(next),
 };
 const subscribe = (api: Scene, listener: (x: number, y: number, zoom: { value: number }) => void) =>
   api.onScrollChange!(listener);
 
-function record(setCamera: typeof updateCamera): unknown[] {
+function record(setCamera: typeof updateCamera, listen = subscribe): unknown[] {
   const api = createBoardScene({
     elements: [{ id: "a", x: 0, y: 0, width: 40, height: 20 }],
     appState: { width: 800, height: 600, offsetLeft: 12, offsetTop: 24 },
@@ -30,8 +30,8 @@ function record(setCamera: typeof updateCamera): unknown[] {
     const state = api.getAppState();
     return [state.scrollX, state.scrollY, state.zoom, state.width, state.height, state.offsetLeft, state.offsetTop];
   };
-  subscribe(api, (x, y, zoom) => log.push(["scroll:first", x, y, { ...zoom }, camera()]));
-  const unsubscribe = subscribe(api, (x, y, zoom) => log.push(["scroll:second", x, y, { ...zoom }, camera()]));
+  listen(api, (x, y, zoom) => log.push(["scroll:first", x, y, { ...zoom }, camera()]));
+  const unsubscribe = listen(api, (x, y, zoom) => log.push(["scroll:second", x, y, { ...zoom }, camera()]));
   api.setOnChange!((elements, state) => log.push([
     "change", JSON.parse(JSON.stringify(elements)), camera(), state.selectedElementIds,
   ]));
@@ -379,6 +379,328 @@ describe("scene listener call log before the camera move", () => {
   });
   it("typedCamera preserves calls, ordering and history", () => {
     expect(record(adapters.typedCamera)).toMatchInlineSnapshot(`
+      [
+        [
+          "scroll:first",
+          10,
+          -30,
+          {
+            "value": 1,
+          },
+          [
+            10,
+            -30,
+            {
+              "value": 1,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "scroll:second",
+          10,
+          -30,
+          {
+            "value": 1,
+          },
+          [
+            10,
+            -30,
+            {
+              "value": 1,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "scroll:first",
+          10,
+          -30,
+          {
+            "value": 1.5,
+          },
+          [
+            10,
+            -30,
+            {
+              "value": 1.5,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "scroll:second",
+          10,
+          -30,
+          {
+            "value": 1.5,
+          },
+          [
+            10,
+            -30,
+            {
+              "value": 1.5,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "scroll:first",
+          -12.5,
+          40.25,
+          {
+            "value": 2,
+          },
+          [
+            -12.5,
+            40.25,
+            {
+              "value": 2,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "scroll:second",
+          -12.5,
+          40.25,
+          {
+            "value": 2,
+          },
+          [
+            -12.5,
+            40.25,
+            {
+              "value": 2,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "change",
+          [
+            {
+              "height": 40,
+              "id": "b",
+              "width": 60,
+              "x": 10,
+              "y": 20,
+            },
+          ],
+          [
+            -12.5,
+            40.25,
+            {
+              "value": 2,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+          {},
+        ],
+        [
+          "change",
+          [
+            {
+              "height": 60,
+              "id": "c",
+              "width": 80,
+              "x": 20,
+              "y": 30,
+            },
+          ],
+          [
+            -12.5,
+            40.25,
+            {
+              "value": 2,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+          {},
+        ],
+        [
+          "change",
+          [
+            {
+              "height": 80,
+              "id": "d",
+              "width": 100,
+              "x": 30,
+              "y": 40,
+            },
+          ],
+          [
+            -12.5,
+            40.25,
+            {
+              "value": 2,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+          {},
+        ],
+        [
+          "scroll:first",
+          -100,
+          -200,
+          {
+            "value": 1.25,
+          },
+          [
+            -100,
+            -200,
+            {
+              "value": 1.25,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "change",
+          [
+            {
+              "height": 80,
+              "id": "e",
+              "width": 40,
+              "x": 100,
+              "y": 200,
+            },
+          ],
+          [
+            -100,
+            -200,
+            {
+              "value": 1.25,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+          {
+            "e": true,
+          },
+        ],
+        [
+          "scroll:first",
+          200,
+          0,
+          {
+            "value": 1.25,
+          },
+          [
+            200,
+            0,
+            {
+              "value": 1.25,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+        ],
+        [
+          "change",
+          [
+            {
+              "height": 80,
+              "id": "d",
+              "width": 100,
+              "x": 30,
+              "y": 40,
+            },
+          ],
+          [
+            200,
+            0,
+            {
+              "value": 1.25,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+          {},
+        ],
+        [
+          "undo",
+          true,
+        ],
+        [
+          "change",
+          [
+            {
+              "height": 80,
+              "id": "e",
+              "width": 40,
+              "x": 100,
+              "y": 200,
+            },
+          ],
+          [
+            200,
+            0,
+            {
+              "value": 1.25,
+            },
+            800,
+            600,
+            12,
+            24,
+          ],
+          {},
+        ],
+        [
+          "redo",
+          true,
+        ],
+        [
+          "cleared",
+          false,
+          false,
+          false,
+          false,
+        ],
+      ]
+    `);
+  });
+  it("camera section preserves calls, ordering and history", () => {
+    expect(record(
+      (api, next) => api.camera.set(next),
+      (api, listener) => api.camera.subscribe(listener),
+    )).toMatchInlineSnapshot(`
       [
         [
           "scroll:first",

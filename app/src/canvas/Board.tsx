@@ -12,6 +12,7 @@ import { dedupeInkOps } from "./inkOpsDedupe";
 import { makeFingerRest } from "./fingerRest";
 import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
+import { createCameraController, type CameraController } from "./cameraController";
 import { touchPointersIn } from "./touchPointers";
 import {
   CaptureUpdateAction,
@@ -19,7 +20,7 @@ import {
   exportToBlob,
   exportToCanvas,
   getCommonBounds,
-  type ExcalidrawApi,
+  type BoardSceneApi,
 } from "./boardScene";
 import { convertToExcalidrawElements } from "./convertSkeletons";
 import {
@@ -48,6 +49,7 @@ import {
 import { healBoardLayout } from "./healBoardLayout";
 import { waitForFontsReady } from "./fontsReady";
 import { trackDockStrip } from "./liveDockStrip";
+import { useLatest } from "./useLatest";
 import { useUtilityTrayRef } from "./useUtilityTrayRef";
 import {
   healScratchpadGeometry,
@@ -452,7 +454,7 @@ function paintExportInk(
 }
 
 async function exportBoardBlob(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   /**
    * Pixels per scene unit. One — Excalidraw's default — for anything that is
@@ -591,7 +593,7 @@ async function exportBoardBlob(
  * alone, so pen work looked like a sparse "delta" of shapes only.
  */
 async function exportRegionBlob(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   elements: readonly SceneElementLike[],
   frame: { x: number; y: number; width: number; height: number },
@@ -707,7 +709,7 @@ async function exportRegionBlob(
  * raster ink. Works even when the rect contains only ink / empty background.
  */
 async function exportSceneFrameBlob(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   frame: { x: number; y: number; width: number; height: number },
   /** See {@link exportBoardBlob}. Sets the composite scale here, not just Excalidraw's. */
@@ -730,7 +732,7 @@ async function exportSceneFrameBlob(
  * are, every turn, and encoding would cost more than drawing.
  */
 async function renderSceneFrameCanvas(
-  api: ExcalidrawApi,
+  api: BoardSceneApi,
   ops: readonly InkOp[],
   frame: { x: number; y: number; width: number; height: number },
   exportScale = 2,
@@ -1467,7 +1469,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const splitPausedRef = useRef(false);
   splitPausedRef.current = splitPaused && !preparing;
   const splitFitRef = useRef(false);
-  const apiRef = useRef<ExcalidrawApi | null>(null);
+  const apiRef = useRef<BoardSceneApi | null>(null);
   if (apiRef.current == null) {
     const scene = createBoardScene();
     const updateScene = scene.updateScene;
@@ -1481,22 +1483,18 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }
   const boardRef = useRef<HTMLDivElement | null>(null);
   const mobile = useIsMobile();
-  const mobileRef = useRef(mobile);
-  mobileRef.current = mobile;
+  const mobileRef = useLatest(mobile);
   // Reading mode is the resting state, and reading mode is the hand — a board
   // that starts on `selection` answers the first finger drag with a rubber band.
   const [activeTool, setActiveTool] = useState<ToolName>("hand");
   const [fontSize, setFontSizeState] = useState<number>(DEFAULT_FONT_SIZE);
-  const fontSizeRef = useRef(fontSize);
-  fontSizeRef.current = fontSize;
+  const fontSizeRef = useLatest(fontSize);
   /** Plain prose vs monospace “code note” for the Text tool. */
   const [textMode, setTextMode] = useState<"plain" | "code">("plain");
-  const textModeRef = useRef(textMode);
-  textModeRef.current = textMode;
+  const textModeRef = useLatest(textMode);
   const inkPrefsRef = useRef(loadInkToolPrefs());
   const [presetStore, setPresetStore] = useState(() => loadInkToolPresets());
-  const presetStoreRef = useRef(presetStore);
-  presetStoreRef.current = presetStore;
+  const presetStoreRef = useLatest(presetStore);
   const [inkWheel, setInkWheel] = useState<
     { x: number; y: number } | "canvas" | null
   >(null);
@@ -1509,8 +1507,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const [inkColor, setInkColor] = useState(() =>
     resolveInkColor(themeId, inkPrefsRef.current.inkColor),
   );
-  const inkColorRef = useRef(inkColor);
-  inkColorRef.current = inkColor;
+  const inkColorRef = useLatest(inkColor);
   const [penStrokeWidth, setPenStrokeWidth] = useState(() => inkPrefsRef.current.penWidth);
   const [eraserStrokeWidth, setEraserStrokeWidth] = useState(() => inkPrefsRef.current.eraserWidth);
   const [inkFullness, setInkFullnessState] = useState(() => inkPrefsRef.current.inkFullness);
@@ -1535,15 +1532,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const [perfOverlay, setPerfOverlay] = useState(() => loadInkPerfOverlay());
   const [perfBar, setPerfBar] = useState(() => loadInkPerfBar());
   const [displayHz, setDisplayHz] = useState(() => loadInkDisplayHz());
-  const displayHzRef = useRef(displayHz);
-  displayHzRef.current = displayHz;
   const [matchDisplay, setMatchDisplay] = useState(() => loadInkMatchDisplay());
   const [stampTrash, setStampTrash] = useState<{
     ids: string[];
   } | null>(null);
   const stampTrashNodeRef = useRef<HTMLButtonElement | null>(null);
   const stampTrashPosRef = useRef<{ left: number; top: number } | null>(null);
-  const syncStampTrashRef = useRef<() => void>(() => {});
   /**
    * Markdown content slot — width is React state (rare); left/top/zoom are
    * written to the DOM node so a scroll frame does not re-render Board.
@@ -1573,8 +1567,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * React would detach and re-attach the node each time, which remounts
    * anything portalled into it and restarts its entry animation forever.
    */
-  const onMarksSlotRef = useRef(onMarksSlot);
-  onMarksSlotRef.current = onMarksSlot;
+  const onMarksSlotRef = useLatest(onMarksSlot);
   const writeMarksSlotHeight = (height: number) => {
     const marks = marksSlotNodeRef.current;
     if (!marks || !(height >= 1)) return;
@@ -1618,14 +1611,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   };
 
   const [contentSceneWidth, setContentSceneWidth] = useState(1);
-  const contentSceneWidthRef = useRef(contentSceneWidth);
-  contentSceneWidthRef.current = contentSceneWidth;
+  const contentSceneWidthRef = useLatest(contentSceneWidth);
   const lastContentSlotRef = useRef<ContentSlotPlace | null>(null);
-  const placeContentSlotAtRef = useRef<
-    (scrollX: number, scrollY: number, zoom: number) => ContentSlotPlace | null
-  >(() => null);
-  const pageContentRef = useRef<ReactNode>(pageContent);
-  pageContentRef.current = pageContent;
+  const pageContentRef = useLatest<ReactNode>(pageContent);
   /**
    * This page is a document: fit its width and scroll the rest.
    *
@@ -1633,18 +1621,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * there is no second flag to keep in step with it.
    */
 
-  const transparentCanvasRef = useRef(transparentCanvas);
-  transparentCanvasRef.current = transparentCanvas;
-  const docPaperRef = useRef(docPaper);
-  docPaperRef.current = docPaper;
+  const transparentCanvasRef = useLatest(transparentCanvas);
   /** Reading mode: wheel scrolls, drags stay in the column. */
   /*
    * Column lock is always on. There is no free 2D pan on these pages — wheel
    * scrolls vertically, and a drag cannot wander sideways off the column.
    */
   const [scrollMode] = useState(true);
-  const scrollModeRef = useRef(scrollMode);
-  scrollModeRef.current = scrollMode;
+  const scrollModeRef = useLatest(scrollMode);
   /**
    * Horizontal scroll the current drag is pinned to.
    *
@@ -1662,10 +1646,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const [annotateCode, setAnnotateCode] = useState(false);
   /** Highlighter mode — see `onHighlightingChange`. Annotate-only. */
   const [highlighting, setHighlighting] = useState(false);
-  const highlightingRef = useRef(highlighting);
-  highlightingRef.current = highlighting;
-  const annotateCodeRef = useRef(annotateCode);
-  annotateCodeRef.current = annotateCode;
+  const highlightingRef = useLatest(highlighting);
+  const annotateCodeRef = useLatest(annotateCode);
   /** Last pen / highlighter / eraser — scroll mode parks on hand, then this comes back. */
   const lastInkToolRef = useRef<"freedraw" | "highlighter" | "eraser">("freedraw");
   /** Annotate/scroll flip also swaps hand↔pen; that must not remesh the book. */
@@ -1676,8 +1658,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const [inkPaletteHistory, setInkPaletteHistory] = useState<InkPaletteHistory>(() =>
     seedInkPaletteHistory(themeId),
   );
-  const inkPaletteHistoryRef = useRef(inkPaletteHistory);
-  inkPaletteHistoryRef.current = inkPaletteHistory;
+  const inkPaletteHistoryRef = useLatest(inkPaletteHistory);
   const inkPalette = useMemo(
     () => currentInkPalette(inkPaletteHistory),
     [inkPaletteHistory],
@@ -1709,8 +1690,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const cycleInkPaletteBackward = useCallback(() => {
     applyInkPaletteHistory(cycleInkPalettePrev(inkPaletteHistoryRef.current));
   }, [applyInkPaletteHistory]);
-  const applyInkPaletteHistoryRef = useRef(applyInkPaletteHistory);
-  applyInkPaletteHistoryRef.current = applyInkPaletteHistory;
+  const applyInkPaletteHistoryRef = useLatest(applyInkPaletteHistory);
   /*
    * Publish the wheel, and lend out its forward cycle.
    *
@@ -1731,8 +1711,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [cycleInkPaletteBackward, filmScope]);
   useEffect(() => () => resetInkPaletteBridge(filmScope), [filmScope]);
   const [linedPaperMode, setLinedPaperMode] = useState<LinedPaperMode>(loadLinedPaperMode);
-  const linedPaperRef = useRef(linedPaperMode);
-  linedPaperRef.current = linedPaperMode;
+  const linedPaperRef = useLatest(linedPaperMode);
   /**
    * Both rulings from the write-time zoom. Overlay on or off, resize and
    * reload scale this pair — they do not recapture 36px/28px on this screen.
@@ -1754,8 +1733,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    */
   const linedPaperOn =
     linedPaperMode !== "off" && isDrawPageRegion(mobileRegion ?? null);
-  const linedPaperOnRef = useRef(linedPaperOn);
-  linedPaperOnRef.current = linedPaperOn;
+  const linedPaperOnRef = useLatest(linedPaperOn);
   const ensureLinedPair = useCallback((zoom: number) => {
     if (linedFirstFitZoomRef.current == null) return;
     const pair = ensureLinedPitchPair(linedPitchPairRef.current, zoom);
@@ -1775,7 +1753,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * would then be wider than the space it is fitted into.
    */
   /** Set below — lets the camera fit re-set a column it just re-measured. */
-  const reflowReadingTextRef = useRef<(() => void) | null>(null);
 
   const boardCssWidth = useCallback(() => {
     const box = boardBoxOf(boardRef.current);
@@ -1824,8 +1801,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     : { chrome: false, eye: false };
   /** Everything downstream still asks the one question it always asked. */
   const mapChromeHidden = !chromeShown.chrome;
-  const mapChromeHiddenRef = useRef(mapChromeHidden);
-  mapChromeHiddenRef.current = mapChromeHidden;
+  const mapChromeHiddenRef = useLatest(mapChromeHidden);
   const chromeWakeClass = [
     "lc-chrome-wake",
     "lc-tip-target",
@@ -1864,8 +1840,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     setChromeAwake(false);
   }, []);
   // Read from a native listener installed once — see the tap-to-wake guard.
-  const wakeChromeRef = useRef(wakeChrome);
-  wakeChromeRef.current = wakeChrome;
+  const wakeChromeRef = useLatest(wakeChrome);
   /*
    * Left-corner peek: same smear as the eye, but it only brings back the
    * annotate / scroll toggle. Independent of `chromeAwake` so a tap there
@@ -2015,9 +1990,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const flickSettleErrRef = useRef(0);
   const pdfCoastRef = useRef(false);
   const pendingPdfPageRef = useRef(0);
-  const scrollToPdfPageRef = useRef<
-    (pageId: number, opts?: { hold?: boolean }) => boolean
-  >(() => false);
   /** Last page named to the reader, so the pill fires on arrival only. */
   const lastNamedPageRef = useRef<RegionId | null>(null);
   /** Camera the page was last read from — skips the scene walk when still. */
@@ -2045,8 +2017,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const shapeDraftRef = useRef<unknown | null>(null);
   const stampPlacementRef = useRef<((box: { minX: number; minY: number; maxX: number; maxY: number }) => PaintSceneElement[]) | null>(null);
   const [textEdit, setTextEdit] = useState<SceneTextEdit | null>(null);
-  const textEditRef = useRef<SceneTextEdit | null>(null);
-  textEditRef.current = textEdit;
+  const textEditRef = useLatest<SceneTextEdit | null>(textEdit);
   useLayoutEffect(() => {
     sceneOverlayRef.current?.redraw();
     shapeSelectRef.current?.redraw();
@@ -2115,8 +2086,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    */
   const toolbarHeightRef = useRef(36);
   const clampingScrollRef = useRef(false);
-  /** True while commitVisualScroll's updateScene is in flight — skip re-clamp. */
-  const committingScrollRef = useRef(false);
+  const cameraControllerRef = useRef<CameraController | null>(null);
+  if (!cameraControllerRef.current) cameraControllerRef.current = createCameraController();
+  const cameraController = cameraControllerRef.current;
+  const committingScrollRef = cameraController.committing;
   /** Hand-tool pan: track velocity from scroll deltas for flick inertia. */
   const handPanningRef = useRef(false);
   const panVelocityRef = useRef({ x: 0, y: 0 });
@@ -2171,41 +2144,16 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     /** Zoom frozen for the drag — avoid `getAppState` / `readScroll` per move. */
     zoom: number;
   } | null>(null);
-  /**
-   * Live camera while reading-scroll is in flight.
-   *
-   * `updateScene` every pointer/wheel frame is what caps us at ~30fps — Excalidraw
-   * reconciles a full scene. During a gesture we drive markdown + ink from this
-   * ref and commit scroll to Excalidraw once on settle (Obsidian-style).
-   */
-  const liveCameraRef = useRef<{
-    scrollX: number;
-    scrollY: number;
-    zoom: number;
-    width: number;
-    height: number;
-    offsetLeft: number;
-    offsetTop: number;
-    live: boolean;
-  } | null>(null);
-  /**
-   * Excalidraw scroll the layers were last painted for during a live gesture.
-   * Updated on the first live sample and after each mid-gesture rebase — so
-   * `applyVisualScrollNow` can skip `getAppState` on every coalesced frame.
-   */
-  const committedPanCameraRef = useRef({ scrollX: 0, scrollY: 0, zoom: 1 });
-  const pendingVisualScrollRef = useRef<{ scrollX: number; scrollY: number } | null>(null);
-  const visualScrollRafRef = useRef(0);
+  const liveCameraRef = cameraController.live;
+  const committedPanCameraRef = cameraController.painted;
+  const pendingVisualScrollRef = cameraController.pendingVisualScroll;
+  const visualScrollRafRef = cameraController.visualScrollRaf;
   const slotReportFrameRef = useRef(0);
-  /**
-   * Wheel / scroll bursts must pin ink tiles the same way a pan does.
-   * Without this, every scroll frame paid full raster budget (camera perf).
-   */
-  const cameraMotionTimerRef = useRef(0);
-  const cameraIdleTeardownTimerRef = useRef(0);
-  const cameraMotionActiveRef = useRef(false);
-  const panRidePrimedRef = useRef(false);
-  const cameraLiveClassRafRef = useRef(0);
+  const cameraMotionTimerRef = cameraController.motionTimer;
+  const cameraIdleTeardownTimerRef = cameraController.idleTeardownTimer;
+  const cameraMotionActiveRef = cameraController.motionActive;
+  const panRidePrimedRef = cameraController.ridePrimed;
+  const cameraLiveClassRafRef = cameraController.liveClassRaf;
   /*
    * This board's own share of the module camera / pointer flags.
    *
@@ -2218,7 +2166,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const docFlagsRef = useRef<DocFlagHolds | null>(null);
   if (!docFlagsRef.current) docFlagsRef.current = makeDocFlagHolds(filmScope || undefined);
   const docFlags = docFlagsRef.current;
-  const applyVisualScrollNowRef = useRef<(scrollX: number, scrollY: number) => void>(() => {});
   /** Pages reading: the scene span of the open page, or null when scrolling freely. */
   const pageLockRef = useRef<{ minY: number; maxY: number } | null>(null);
   useEffect(() => () => publishBooktabPages(filmScope, []), [filmScope]);
@@ -2273,18 +2220,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const pad = pageFitRef.current != null && !pageSpreadRef.current ? sheetPadRef.current : 0;
     return { minX: column.minX - pad, maxX: column.maxX + pad };
   };
-  const applyPageFitRef = useRef<() => void>(() => {});
-  const lockPageSpanRef = useRef<
-    (span: { minY: number; maxY: number; pageId?: number } | null, side?: "left" | "right") => void
-  >(() => {});
   const publishPdfFilmFromScrollRef = useRef<
     (scrollX: number, scrollY: number, zoom: number, height: number) => void
   >(() => {});
-  const pdfFilmPublishRef = useRef(pdfFilmPublish);
-  pdfFilmPublishRef.current = pdfFilmPublish;
-  const pdfDocumentRef = useRef(pdfDocument);
-  const readingShareRef = useRef(readingShare);
-  readingShareRef.current = readingShare;
+  const pdfFilmPublishRef = useLatest(pdfFilmPublish);
+  const pdfDocumentRef = useLatest(pdfDocument);
+  const readingShareRef = useLatest(readingShare);
   /**
    * The layout the ink's coordinates are in, when that is known to differ
    * from — or not yet be checked against — the page layout on screen. Null
@@ -2292,25 +2233,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * before a pending remap still says truthfully where the strokes are.
    */
   const inkSpreadRef = useRef<boolean | null>(null);
-  pdfDocumentRef.current = pdfDocument;
   const pdfPanLogRef = useRef({ n: 0, t: 0 });
-  const scheduleVisualScrollRef = useRef<(scrollX: number, scrollY: number) => void>(() => {});
-  const flushVisualScrollRef = useRef<() => void>(() => {});
-  const commitVisualScrollRef = useRef<() => void>(() => {});
-  const rebaseVisualScrollRef = useRef<() => void>(() => {});
 
-  /**
-   * How far the page has been dragged from the camera everything was painted at.
-   *
-   * Reading scroll leaves Excalidraw's camera alone (see `applyVisualScrollNow`),
-   * so the ink bitmap, Excalidraw's own canvases, the scene overlay, the
-   * selection chrome, the lined paper and the page title are all still correct
-   * *relative to the page* and wrong only by this translation. Writing
-   * `translate3d` on those few nodes (not a custom property on the board root)
-   * keeps the compositor cheap — `--lc-pan-*` on `.lc-board` invalidated style
-   * for the whole markdown subtree every sample.
-   */
-  const panOffsetRef = useRef({ x: 0, y: 0 });
+  const panOffsetRef = cameraController.panOffset;
   const panRideNodesRef = useRef<HTMLElement[]>([]);
 
   const refreshPanRideNodes = useCallback(() => {
@@ -2361,58 +2286,15 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     [ensurePanRideNodes],
   );
 
-  const setPagePanOffset = useCallback(
-    (dx: number, dy: number) => {
-      const current = panOffsetRef.current;
-      if (current.x === dx && current.y === dy) return;
-      panOffsetRef.current = { x: dx, y: dy };
-      const next =
-        dx === 0 && dy === 0 ? "" : `translate3d(${dx}px, ${dy}px, 0)`;
-      for (const node of ensurePanRideNodes()) {
-        // Ink owns its painted camera, which can advance during an async
-        // rebase before the other overlays land. Never overwrite its delta.
-        if (node.classList.contains("lc-ink-lab-canvas")) continue;
-        if (node.style.transform !== next) node.style.transform = next;
-      }
-      const lined = linedSlotNodeRef.current;
-      const slot = lastLinedSlotRef.current;
-      if (lined && slot) {
-        lined.style.backgroundPosition = `0 ${slot.phase + dy}px`;
-      }
-    },
-    [ensurePanRideNodes],
-  );
+  const setPagePanOffset = useCallback(cameraController.setPagePanOffset, [ensurePanRideNodes]);
 
-  const setPagePanOffsetRef = useRef(setPagePanOffset);
-  setPagePanOffsetRef.current = setPagePanOffset;
+  const setPagePanOffsetRef = useLatest(setPagePanOffset);
 
-  /** Put every layer back on its painted coordinates. */
-  const clearPanOffsets = useCallback(() => {
-    setPagePanOffset(0, 0);
-    rasterInkRef.current?.setPanOffset(null);
-  }, [setPagePanOffset]);
-  const clearPanOffsetsRef = useRef(clearPanOffsets);
-  clearPanOffsetsRef.current = clearPanOffsets;
+  const clearPanOffsets = useCallback(cameraController.clearPanOffsets, [setPagePanOffset]);
+  const clearPanOffsetsRef = useLatest(clearPanOffsets);
 
-  /**
-   * The camera has stopped: drop this board's share of the paint freeze.
-   *
-   * Run by the pulse's settle timer, or early when a finger holding the page
-   * has rested (see `FINGER_REST_MS`).
-   */
-  const settleCameraPulse = useCallback(() => {
-    if (cameraMotionTimerRef.current) window.clearTimeout(cameraMotionTimerRef.current);
-    cameraMotionTimerRef.current = 0;
-    cameraMotionActiveRef.current = false;
-    if (cameraLiveClassRafRef.current) {
-      cancelAnimationFrame(cameraLiveClassRafRef.current);
-      cameraLiveClassRafRef.current = 0;
-    }
-    if (!readingZoomRef.current) docFlags.camera(false);
-    setPanRideWillChange(false);
-  }, [docFlags, setPanRideWillChange]);
-  const settleCameraPulseRef = useRef(settleCameraPulse);
-  settleCameraPulseRef.current = settleCameraPulse;
+  const settleCameraPulse = useCallback(cameraController.settleCameraPulse, [docFlags, setPanRideWillChange]);
+  const settleCameraPulseRef = useLatest(settleCameraPulse);
 
   const pulseCameraMotion = useCallback(() => {
     noteCameraBusy();
@@ -2462,15 +2344,13 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       rasterInkRef.current?.setCameraMoving(false);
     }, CAMERA_IDLE_TEARDOWN_MS);
   }, [filmScope, setPanRideWillChange]);
-  const pulseCameraMotionRef = useRef(pulseCameraMotion);
+  const pulseCameraMotionRef = useLatest(pulseCameraMotion);
   const readScrollRef = useRef<() => { scrollX: number; scrollY: number; zoom: number }>(
     () => ({ scrollX: 0, scrollY: 0, zoom: 1 }),
   );
 
-  pulseCameraMotionRef.current = pulseCameraMotion;
   const readingSize = readingSizeProp ?? "M";
-  const readingSizeRef = useRef(readingSize);
-  readingSizeRef.current = readingSize;
+  const readingSizeRef = useLatest(readingSize);
 
   /**
    * Options every `applyBoardReadingSize` call needs.
@@ -2497,12 +2377,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const drawBasePageHRef = useRef<number | null>(null);
   const lastCodeSourceRef = useRef<string>("");
   const lastCodeSlotRef = useRef<ScreenRect | null>(null);
-  /** Skip full scene reconcile when Excalidraw only moved the camera. */
+  /** Skip scene work for camera changes; live pans ride the painted camera until settle. */
   const lastSceneElementsRevRef = useRef<number>(-1);
   const lastSelectionSigRef = useRef<string>("");
   const lastElementsArgRef = useRef<readonly unknown[] | null>(null);
-  const onCodeSlotRef = useRef(onCodeSlot);
-  onCodeSlotRef.current = onCodeSlot;
+  const onCodeSlotRef = useLatest(onCodeSlot);
   /** Read by `fitView` and `reportCodeSlot`, which must not re-bind per page. */
   const mobileRegionRef = useRef<string | null>(mobileRegion ?? null);
   // Keep in sync during render so seed/restore → settleFitView sees the page
@@ -2511,8 +2390,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const focusRegionRef = useRef<string | null>(focusRegion ?? null);
   focusRegionRef.current = focusRegion ?? null;
   const prevMobileRegionRef = useRef<string | null>(mobileRegion ?? null);
-  const strokeWidthRef = useRef(strokeWidth);
-  strokeWidthRef.current = strokeWidth;
+  const strokeWidthRef = useLatest(strokeWidth);
   /** Zoom at the last brush sample, so a size change can resize the ring. */
   const brushZoomRef = useRef(1);
   /** Last text element the student was editing — for hand-tool handoff. */
@@ -2522,8 +2400,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   /** Shift held → text corner-drag keeps wrap width instead of free resize. */
   const shiftHeldRef = useRef(false);
   /** Read by the pointer listeners, which must not re-bind on every tool change. */
-  const activeToolRef = useRef<ToolName>(activeTool);
-  activeToolRef.current = activeTool;
+  const activeToolRef = useLatest<ToolName>(activeTool);
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
@@ -2818,18 +2695,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     }
     // Committed camera: the title rides a live pan on the shared translate —
     // see the note in `reportLinedSlot`.
-    const state = api.getAppState() as {
-      scrollX?: number;
-      scrollY?: number;
-      zoom?: { value?: number };
-    };
-    const zoom = state.zoom?.value ?? 1;
+    const state = api.getCamera();
+    const zoom = state.zoom;
     const anchor = scratchTitleAnchor(index);
     // Rides the page, but never shrinks below a pressable size: a scratch page
     // fits the viewport at ~0.2 zoom, where authored 20px chrome is 4px tall.
     const next = {
-      left: roundPx((anchor.x + (state.scrollX ?? 0)) * zoom),
-      top: roundPx((anchor.y + (state.scrollY ?? 0)) * zoom),
+      left: roundPx((anchor.x + state.scrollX) * zoom),
+      top: roundPx((anchor.y + state.scrollY) * zoom),
       fontPx: Math.max(12, Math.round(20 * zoom)),
     };
     const prev = lastTitleSlotRef.current;
@@ -2955,7 +2828,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     }
     return next;
   };
-  placeContentSlotAtRef.current = placeContentSlotAt;
+  const placeContentSlotAtRef = useLatest<(scrollX: number, scrollY: number, zoom: number) => ContentSlotPlace | null>(placeContentSlotAt);
 
   /**
    * Project the open page onto the screen for the HTML content layer.
@@ -2975,15 +2848,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     if (shouldSkipFrozenContentSlotReport(false, pan.x, pan.y)) {
       return;
     }
-    const app = api.getAppState() as {
-      scrollX?: number;
-      scrollY?: number;
-      zoom?: { value?: number };
-    };
+    const app = api.getCamera();
     const camera = {
-      scrollX: app.scrollX ?? 0,
-      scrollY: app.scrollY ?? 0,
-      zoom: app.zoom?.value ?? 1,
+      scrollX: app.scrollX,
+      scrollY: app.scrollY,
+      zoom: app.zoom,
     };
     const last = lastContentSlotRef.current;
     const next = placeContentSlotAtRef.current(camera.scrollX, camera.scrollY, camera.zoom);
@@ -3209,13 +3078,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
      */
     const live = liveCameraRef.current;
     const api = apiRef.current;
-    const state = (api?.getAppState() ?? {}) as {
-      scrollX?: number;
-      scrollY?: number;
-      zoom?: { value?: number };
-    };
-    const zoom = Math.max(0.05, live?.zoom ?? state.zoom?.value ?? 1);
-    const scrollY = live?.scrollY ?? state.scrollY ?? 0;
+    const state = api?.getCamera() ?? { scrollX: 0, scrollY: 0, zoom: 1 };
+    const zoom = Math.max(0.05, live?.zoom ?? state.zoom);
+    const scrollY = live?.scrollY ?? state.scrollY;
     const panY = live != null ? 0 : panOffsetRef.current.y;
     ensureLinedPair(zoom);
     const visibleRule: LinedRuling =
@@ -3623,11 +3488,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       captureUpdate: CaptureUpdateAction.NEVER,
     });
     syncPageVisibility();
-    const state = apiRef.current?.getAppState() as
-      | { scrollX?: number; scrollY?: number }
-      | undefined;
+    const state = apiRef.current?.getCamera();
     if (state && scrollModeRef.current) {
-      lockedScrollXRef.current = state.scrollX ?? 0;
+      lockedScrollXRef.current = state.scrollX;
     }
     scheduleSlotReports();
   }, [scheduleSlotReports, syncPageVisibility]);
@@ -3719,7 +3582,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     });
   }, []);
 
-  const setActiveToolRef = useRef<(tool: ToolName) => void>(() => {});
   const setTool = useCallback((tool: ToolName) => {
     stampPlacementRef.current = null;
     // One tool at a time: picking a drawing / select tool drops Ask-area (🔍).
@@ -3775,8 +3637,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       // refuses to run under any other tool. The placement effect owns the
       // gesture; upstream only ever sees the hand-off.
       const zoom =
-        (apiRef.current?.getAppState() as { zoom?: { value?: number } } | undefined)?.zoom
-          ?.value ?? 1;
+        apiRef.current?.getCamera().zoom ?? 1;
       const size = Math.min(
         TEXT_FONT_MAX,
         Math.max(TEXT_FONT_MIN, Math.round(DEFAULT_FONT_SIZE / Math.max(zoom, 0.35))),
@@ -3880,7 +3741,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       });
     }
   }, [activeTool, applyTextModeToAppState, applyInkWedge]);
-  setActiveToolRef.current = setTool;
+  const setActiveToolRef = useLatest<(tool: ToolName) => void>(setTool);
 
   useEffect(() => {
     const onPresets = () => setPresetStore(loadInkToolPresets());
@@ -4185,16 +4046,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
 
   /** Scene coords from a pointer event over the Excalidraw viewport. */
   const clientToScene = useCallback((clientX: number, clientY: number) => {
-    const state = apiRef.current?.getAppState() as
-      | {
-          zoom?: { value?: number };
-          scrollX?: number;
-          scrollY?: number;
-          offsetLeft?: number;
-          offsetTop?: number;
-        }
-      | undefined;
-    const zoom = state?.zoom?.value ?? 1;
+    const state = apiRef.current?.getCamera();
+    const zoom = state?.zoom ?? 1;
     return {
       x: (clientX - (state?.offsetLeft ?? 0)) / zoom - (state?.scrollX ?? 0),
       y: (clientY - (state?.offsetTop ?? 0)) / zoom - (state?.scrollY ?? 0),
@@ -4258,9 +4111,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * Move the page for one scroll sample — no `updateScene`, no reblit.
    *
    * Everything on the board is bound to page coordinates for the duration of
-   * the gesture: the markdown slot takes its absolute transform, and the ink,
-   * Excalidraw's canvases and the overlays take the delta from the camera they
-   * were painted at. That is one compositor translate per layer per frame,
+   * the gesture: the markdown slot takes its absolute transform, and the ink
+   * and overlays take the delta from the camera they were painted at.
+   * That is one compositor translate per layer per frame,
    * against the clear-and-blit of the whole ink layer this used to do — the
    * difference between a coast that costs `Board.step` and one that costs
    * `Board.step` plus a full raster pass.
@@ -4350,8 +4203,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
      * Ride, or rebase.
      *
      * The ink measures the delta against its own last paint and the overlays
-     * against Excalidraw's appState — the same camera in the ordinary case, and
-     * each one right on its own terms when a mid-gesture repaint has moved one
+     * against the scene store's painted camera — the same in the ordinary case,
+     * and each one right on its own terms when a mid-gesture repaint has moved one
      * of them. Either can veto: a zoom (no translate expresses a rescale) or a
      * drag past half a viewport (the painted screenful has run out). Rebase
      * then: one `updateScene` + ink reblit, then ride again from zero.
@@ -4388,37 +4241,21 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     pulseCameraMotionRef.current();
   }, []);
 
-  const flushVisualScroll = useCallback(() => {
-    if (visualScrollRafRef.current) {
-      cancelAnimationFrame(visualScrollRafRef.current);
-      visualScrollRafRef.current = 0;
-    }
-    const pending = pendingVisualScrollRef.current;
-    pendingVisualScrollRef.current = null;
-    if (pending) applyVisualScrollNow(pending.scrollX, pending.scrollY);
-  }, [applyVisualScrollNow]);
+  cameraController.bind({
+    ensurePanRideNodes, rasterInkRef, linedSlotNodeRef, lastLinedSlotRef,
+    readingZoomRef, docFlags, setPanRideWillChange, applyVisualScrollNow,
+  });
+  const flushVisualScroll = useCallback(cameraController.flushVisualScroll, [applyVisualScrollNow]);
 
-  const scheduleVisualScroll = useCallback(
-    (scrollX: number, scrollY: number) => {
-      pendingVisualScrollRef.current = { scrollX, scrollY };
-      if (visualScrollRafRef.current) return;
-      visualScrollRafRef.current = requestAnimationFrame(() => {
-        visualScrollRafRef.current = 0;
-        const pending = pendingVisualScrollRef.current;
-        pendingVisualScrollRef.current = null;
-        if (pending) applyVisualScrollNow(pending.scrollX, pending.scrollY);
-      });
-    },
-    [applyVisualScrollNow],
-  );
+  const scheduleVisualScroll = useCallback(cameraController.scheduleVisualScroll, [applyVisualScrollNow]);
 
   /**
    * Mid-gesture repaint: adopt the live camera as the painted one and carry on.
    *
    * A translate can only borrow against a screenful that has already been
    * painted, so a long flick has to stop and pay for a real one somewhere. Do
-   * it as a normal settle — push the camera into Excalidraw, repaint the ink
-   * once, re-report the slots — except that the gesture stays live, so the next
+   * it as a normal settle — commit the live camera to the scene store, repaint
+   * the ink once, re-report the slots — except that the gesture stays live, so the next
    * sample starts riding again from zero.
    */
   const rebaseVisualScroll = useCallback(() => {
@@ -4459,7 +4296,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [flushVisualScroll, landPanOffset]);
 
   /**
-   * Push live camera into Excalidraw once the gesture settles.
+   * Commit the live camera to the scene store once the pan settles.
    *
    * Clear the ride translate in this turn, then remesh. Landing that remesh
    * a frame later left the page at the live camera with the old translate still
@@ -4507,11 +4344,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       });
     });
   }, [flushVisualScroll, landPanOffset]);
-  applyVisualScrollNowRef.current = applyVisualScrollNow;
-  scheduleVisualScrollRef.current = scheduleVisualScroll;
-  flushVisualScrollRef.current = flushVisualScroll;
-  commitVisualScrollRef.current = commitVisualScroll;
-  rebaseVisualScrollRef.current = rebaseVisualScroll;
+  const applyVisualScrollNowRef = useLatest<(scrollX: number, scrollY: number) => void>(applyVisualScrollNow);
+  const scheduleVisualScrollRef = useLatest<(scrollX: number, scrollY: number) => void>(scheduleVisualScroll);
+  const flushVisualScrollRef = useLatest<() => void>(flushVisualScroll);
+  const commitVisualScrollRef = useLatest<() => void>(commitVisualScroll);
+  const rebaseVisualScrollRef = useLatest<() => void>(rebaseVisualScroll);
 
   useEffect(() => {
     if (!interactive) return;
@@ -4721,13 +4558,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const readScroll = () => {
       const live = liveCameraRef.current;
       if (live?.live) return { scrollX: live.scrollX, scrollY: live.scrollY, zoom: live.zoom };
-      const state = apiRef.current?.getAppState() as
-        | { scrollX?: number; scrollY?: number; zoom?: { value?: number } }
-        | undefined;
+      const state = apiRef.current?.getCamera();
       return {
         scrollX: state?.scrollX ?? 0,
         scrollY: state?.scrollY ?? 0,
-        zoom: state?.zoom?.value ?? 1,
+        zoom: state?.zoom ?? 1,
       };
     };
 
@@ -6088,17 +5923,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     let frame = 0;
 
     const readViewport = (): TextPlaceViewport => {
-      const state = apiRef.current?.getAppState() as
-        | {
-            zoom?: { value?: number };
-            scrollX?: number;
-            scrollY?: number;
-            offsetLeft?: number;
-            offsetTop?: number;
-          }
-        | undefined;
+      const state = apiRef.current?.getCamera();
       return {
-        zoom: state?.zoom?.value ?? 1,
+        zoom: state?.zoom ?? 1,
         scrollX: state?.scrollX ?? 0,
         scrollY: state?.scrollY ?? 0,
         offsetLeft: state?.offsetLeft ?? 0,
@@ -6346,8 +6173,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [themeId]);
 
   const readZoom = useCallback(() => {
-    const state = apiRef.current?.getAppState() as { zoom?: { value?: number } } | undefined;
-    return state?.zoom?.value ?? 1;
+    const state = apiRef.current?.getCamera();
+    return state?.zoom ?? 1;
   }, []);
 
   /*
@@ -6664,10 +6491,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         event.stopPropagation();
         flushVisualScrollRef.current();
         const cam = readScrollRef.current();
-        const state = api.getAppState() as { offsetLeft?: number; offsetTop?: number };
+        const state = api.getCamera();
         const anchor = {
-          x: (event.clientX - (state.offsetLeft ?? 0)) / cam.zoom - cam.scrollX,
-          y: (event.clientY - (state.offsetTop ?? 0)) / cam.zoom - cam.scrollY,
+          x: (event.clientX - state.offsetLeft) / cam.zoom - cam.scrollX,
+          y: (event.clientY - state.offsetTop) / cam.zoom - cam.scrollY,
         };
         const lines = event.deltaMode === 1 ? 16 : 1;
         const delta = Math.max(-30, Math.min(30, event.deltaY * lines));
@@ -7045,8 +6872,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                */
               const prevZoom =
                 liveCameraRef.current?.zoom ??
-                (api.getAppState() as { zoom?: { value?: number } }).zoom?.value ??
-                1;
+                api.getCamera().zoom;
               const basePageH = Math.max(1, availHeight / Math.max(prevZoom, 1e-6));
               drawBasePageHRef.current = basePageH;
               nextH = Math.max(
@@ -7236,18 +7062,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
          * A full reset jumps to page 1; skipping the camera leaves portrait
          * scrollX in a landscape hole.
          */
-        const prevCamera = api.getAppState() as {
-          scrollX?: number;
-          scrollY?: number;
-          zoom?: { value?: number };
-        };
+        const prevCamera = api.getCamera();
         const riding = liveCameraRef.current;
         const keepDocumentY = mode === "keepY" || mode === "recentre";
         const keepYInput = {
           box: { minX, minY, maxX, maxY },
           inset,
           viewWidth,
-          prevZoom: riding?.live ? riding.zoom : (prevCamera.zoom?.value ?? 1),
+          prevZoom: riding?.live ? riding.zoom : (prevCamera.zoom ?? 1),
           prevScrollX: riding?.live ? riding.scrollX : (prevCamera.scrollX ?? 0),
           prevScrollY: riding?.live ? riding.scrollY : (prevCamera.scrollY ?? 0),
           zoomMin: FIT_ZOOM_MIN,
@@ -7340,10 +7162,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
          * the previous orientation — so the file slot stayed on the old zoom
          * until spread toggle rewrote C. Stamp the fitted camera here.
          */
-        const offsets = api.getAppState() as {
-          offsetLeft?: number;
-          offsetTop?: number;
-        };
+        const offsets = api.getCamera();
         committedPanCameraRef.current = {
           scrollX: nextScrollX,
           scrollY: nextScrollY,
@@ -7664,23 +7483,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [scrollMode]);
 
   useEffect(() => {
-    const releaseCamera = () => {
-      if (cameraMotionTimerRef.current) window.clearTimeout(cameraMotionTimerRef.current);
-      cameraMotionTimerRef.current = 0;
-      if (cameraIdleTeardownTimerRef.current) window.clearTimeout(cameraIdleTeardownTimerRef.current);
-      cameraIdleTeardownTimerRef.current = 0;
-      if (cameraLiveClassRafRef.current) cancelAnimationFrame(cameraLiveClassRafRef.current);
-      cameraLiveClassRafRef.current = 0;
-      if (visualScrollRafRef.current) cancelAnimationFrame(visualScrollRafRef.current);
-      visualScrollRafRef.current = 0;
-      pendingVisualScrollRef.current = null;
-      cameraMotionActiveRef.current = false;
-      // A parked/closed document must release its paint hold. Cancelling only
-      // the settle timer left the hold latched indefinitely.
-      docFlags.camera(false);
-      docFlags.pointer(false);
-      setPanRideWillChange(false);
-    };
+    const releaseCamera = cameraController.releaseCamera;
     if (splitPaused) releaseCamera();
     return releaseCamera;
   }, [splitPaused, docFlags, setPanRideWillChange]);
@@ -7791,8 +7594,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         handPanningRef.current;
       const sashLive = sashDragActive();
       /*
-       * Sash drag: CSS already resized the panes. updateScene here is the
-       * Excalidraw 30fps cap on both halves. Camera waits for settle.
+       * Sash drag: CSS already resized the panes. Keep the painted camera in
+       * the scene store while the live view changes; commit when the drag settles.
        */
       if (sashLive) return true;
       /*
@@ -8787,7 +8590,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     },
     [applyRegionLayout, reportCodeSlot, reportLinedSlot],
   );
-  reflowReadingTextRef.current = reflowReadingText;
+  const reflowReadingTextRef = useLatest<(() => void) | null>(reflowReadingText);
 
   const wasInteractiveRef = useRef(false);
 
@@ -8994,7 +8797,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     });
     shapeSelectRef.current?.redraw();
   }, []);
-  syncStampTrashRef.current = syncStampTrash;
+  const syncStampTrashRef = useLatest<() => void>(syncStampTrash);
 
   useEffect(() => {
     if (!interactive) return;
@@ -9706,7 +9509,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     void rasterInkRef.current?.syncCamera();
     scheduleSlotReports();
   };
-  applyPageFitRef.current = applyPageFit;
+  const applyPageFitRef = useLatest<() => void>(applyPageFit);
 
   // A filmstrip opened or closed over the board (Pages reading) leaves its
   // size alone, so no resize refits the page: refit when it comes and goes.
@@ -9762,7 +9565,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     if (pageFitRef.current != null) applyPageFit();
     else publishTextBooktabs();
   };
-  lockPageSpanRef.current = lockPageSpan;
+  const lockPageSpanRef = useLatest<(span: { minY: number; maxY: number; pageId?: number } | null, side?: "left" | "right") => void>(lockPageSpan);
 
   const jumpToPdfPage = useCallback((pageId: number, opts?: { hold?: boolean; frameMinY?: number }) => {
     const api = apiRef.current;
@@ -9882,7 +9685,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     scheduleSlotReports();
     return true;
   }, [applyDocumentFrameHeight, scheduleSlotReports]);
-  scrollToPdfPageRef.current = jumpToPdfPage;
+  const scrollToPdfPageRef = useLatest<(pageId: number, opts?: { hold?: boolean }) => boolean>(jumpToPdfPage);
 
   useImperativeHandle(
     ref,
@@ -9945,7 +9748,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         const boxes = [...ops.filter(op => op.kind === "draw").map(op => inkOpsBounds([op])).filter((box): box is SceneBounds => Boolean(box)),
           ...authored.map(el => ({minX:el.x,minY:el.y,maxX:el.x+el.width,maxY:el.y+el.height}))];
         if (!boxes.length) return [];
-        const frozen = {getSceneElements:()=>snapshot.elements,getAppState:()=>({...snapshot.appState,viewBackgroundColor:"#ffffff"}),getFiles:()=>snapshot.files ?? {}} as unknown as ExcalidrawApi;
+        const frozen = {getSceneElements:()=>snapshot.elements,getAppState:()=>({...snapshot.appState,viewBackgroundColor:"#ffffff"}),getFiles:()=>snapshot.files ?? {}} as unknown as BoardSceneApi;
         const minX=Math.min(...boxes.map(b=>b.minX)), minY=Math.min(...boxes.map(b=>b.minY));
         const maxX=Math.max(...boxes.map(b=>b.maxX)), maxY=Math.max(...boxes.map(b=>b.maxY));
         const shots:Array<{label:string;png:string}>=[];
@@ -9969,7 +9772,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           getSceneElements: () => snapshot.elements,
           getAppState: () => ({ ...snapshot.appState, zoom: {value: snapshot.appState.zoom}, viewBackgroundColor: "#ffffff" }),
           getFiles: () => snapshot.files ?? {},
-        } as unknown as ExcalidrawApi;
+        } as unknown as BoardSceneApi;
         return exportSceneFrameBlob(frozen, ink, {x:bounds.minX-16,y:bounds.minY-16,
           width:bounds.maxX-bounds.minX+32,height:bounds.maxY-bounds.minY+32}, 2);
       },
@@ -11257,8 +11060,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                           const zoom = Math.max(
                             0.05,
                             live?.zoom ??
-                              (apiRef.current?.getAppState() as { zoom?: { value?: number } } | undefined)
-                                ?.zoom?.value ??
+                              apiRef.current?.getCamera().zoom ??
                               1,
                           );
                           ensureLinedPair(zoom);
