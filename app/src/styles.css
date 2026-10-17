@@ -9288,7 +9288,6 @@ body[data-lc-sash-drag="horizontal"] {
   --lc-explore-map-row: 2 / 4;
   --lc-explore-key-column: 1;
   --lc-explore-key-columns: minmax(0, 1fr);
-  --lc-explore-option-columns: minmax(0, 1fr) auto;
   --lc-explore-key-animation: lc-explore-key-in;
   --lc-explore-map-animation: lc-explore-map-in;
   position: relative;
@@ -9323,7 +9322,7 @@ body[data-lc-sash-drag="horizontal"] {
   grid-row: 3;
   z-index: 6;
   min-width: 0;
-  padding: 10px 8px 6px;
+  padding: 6px 8px;
   border: 1px solid var(--chrome-edge);
   border-radius: var(--lc-r-block);
   background: var(--panel);
@@ -9331,13 +9330,23 @@ body[data-lc-sash-drag="horizontal"] {
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.lc-explore-legend-caption {
-  padding: 0 9px 6px;
-  color: var(--hint);
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+/* The kind rows fold up into the controls row (and back) without a jump. */
+.lc-explore-legend-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  opacity: 1;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease 60ms;
+}
+
+.lc-explore-legend-fold > * {
+  min-height: 0;
+}
+
+.lc-explore-legend[data-collapsed] .lc-explore-legend-fold {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease;
 }
 
 .lc-explore-legend-kinds {
@@ -9418,18 +9427,61 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 .lc-explore-legend-options {
-  display: grid;
-  grid-template-columns: var(--lc-explore-option-columns);
+  display: flex;
   align-items: center;
   gap: 2px;
-  justify-content: space-between;
-  margin-top: 8px;
-  padding-top: 4px;
+  margin-top: 6px;
+  padding-top: 6px;
   border-top: 1px solid var(--chrome-edge);
+  transition: margin-top 240ms cubic-bezier(0.22, 1, 0.36, 1), padding-top 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-color 160ms ease;
 }
 
+.lc-explore-legend[data-collapsed] .lc-explore-legend-options {
+  margin-top: 0;
+  padding-top: 0;
+  border-top-color: transparent;
+}
+
+/* The switch alone, no label: its tip and accessible name say Cluster. */
 .lc-explore-group {
-  justify-content: space-between;
+  flex: 0 0 auto;
+  justify-content: center;
+}
+
+.lc-explore-legend-options .lc-palette-swatch-trigger {
+  margin-left: auto;
+}
+
+.lc-explore-legend-toggle {
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  width: var(--lc-explore-hit);
+  height: var(--lc-explore-hit);
+  min-height: var(--lc-explore-hit) !important;
+  padding: 0;
+  border: 0;
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  color: var(--hint);
+  cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
+}
+
+.lc-explore-legend-toggle:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
+
+/* Open, it points down (fold away); folded, up (bring the rows back). */
+.lc-explore-legend-toggle svg {
+  transform: rotate(180deg);
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lc-explore-legend[data-collapsed] .lc-explore-legend-toggle svg {
+  transform: rotate(0deg);
 }
 
 .lc-explore-switch {
@@ -9528,6 +9580,12 @@ body[data-lc-sash-drag="horizontal"] {
 
 @keyframes lc-palette-pop-in { from { opacity: 0; transform: translateY(4px) scale(0.97); } }
 @keyframes lc-palette-pop-out { to { opacity: 0; transform: translateY(4px) scale(0.97); } }
+
+/* Beside the key it slides out from the key's edge, and back into it. */
+.lc-palette-swatch-pop[data-side="right"] { animation-name: lc-palette-pop-in-right; }
+.lc-palette-swatch-pop[data-side="right"].is-leaving { animation-name: lc-palette-pop-out-right; }
+@keyframes lc-palette-pop-in-right { from { opacity: 0; transform: translateX(-6px) scale(0.97); } }
+@keyframes lc-palette-pop-out-right { to { opacity: 0; transform: translateX(-6px) scale(0.97); } }
 
 .lc-palette-swatch-cap {
   display: flex;
@@ -9643,7 +9701,6 @@ body[data-lc-sash-drag="horizontal"] {
     --lc-explore-map-row: 2;
     --lc-explore-key-column: 1;
     --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
-    --lc-explore-option-columns: minmax(160px, 220px) auto;
     --lc-explore-key-animation: lc-explore-strip-in;
     --lc-explore-map-animation: lc-explore-strip-map-in;
     grid-template-rows: 46px minmax(0, 1fr) auto;
@@ -9657,7 +9714,6 @@ body[data-lc-sash-drag="horizontal"] {
   --lc-explore-map-row: 2;
   --lc-explore-key-column: 1;
   --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
-  --lc-explore-option-columns: minmax(160px, 220px) auto;
   --lc-explore-key-animation: lc-explore-strip-in;
   --lc-explore-map-animation: lc-explore-strip-map-in;
   grid-template-rows: 46px minmax(0, 1fr) auto;

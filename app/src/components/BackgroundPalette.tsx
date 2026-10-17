@@ -3,7 +3,7 @@
  * Inline in the problem browser, or a compact popover in the header / map chrome.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type RefObject } from "react";
 import { createPortal } from "react-dom";
 
 import { APP_THEMES, type AppTheme } from "../theme/appThemes";
@@ -155,22 +155,56 @@ export function BackgroundPalette({ themeId, onPick, variant = "compact", label 
  * a small card beside it. The card stays open while you try themes, and
  * closes on a second tap, a tap outside or Escape. It fades in and out, the
  * chip's colour slides to the new theme, and the ring moves between swatches.
+ *
+ * `prefer="right"` opens it beside `beside` (the box the button sits in),
+ * its bottom level with the button's, so it covers nothing in that box. With
+ * no room on the right it opens above the button instead.
  */
 export function BackgroundSwatchButton({
   themeId,
   onPick,
   prefer = "above",
+  beside,
 }: {
   themeId: string;
   onPick: (id: string) => void;
-  prefer?: "above" | "below";
+  prefer?: "above" | "below" | "right";
+  beside?: RefObject<HTMLElement | null>;
 }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const pop = useRef<HTMLDivElement | null>(null);
   const current = APP_THEMES.find((theme) => theme.id === themeId) ?? APP_THEMES[0];
   const presence = usePresence(open);
-  const placed = usePopPlacement(trigger, pop, presence.mounted, themeId, prefer);
+  const stacked = usePopPlacement(trigger, pop, presence.mounted && prefer !== "right", themeId, prefer === "below" ? "below" : "above");
+  const [side, setSide] = useState<CSSProperties>({ visibility: "hidden", top: 0, left: 0 });
+  const sideLock = useRef<"right" | "above" | null>(null);
+  useLayoutEffect(() => {
+    if (prefer !== "right" || !presence.mounted) {
+      sideLock.current = null;
+      setSide({ visibility: "hidden", top: 0, left: 0 });
+      return;
+    }
+    const place = () => {
+      const button = trigger.current?.getBoundingClientRect();
+      const box = pop.current?.getBoundingClientRect();
+      if (!button || !box) return;
+      const edge = (beside?.current ?? trigger.current)!.getBoundingClientRect().right + 8;
+      const roomRight = edge + box.width <= window.innerWidth - 8;
+      // Chosen when it opens and kept, so it never jumps sides while open.
+      sideLock.current ??= roomRight ? "right" : "above";
+      const bottom = Math.max(8, window.innerHeight - button.bottom);
+      setSide(
+        sideLock.current === "right"
+          ? { left: edge, bottom }
+          : { right: Math.max(8, window.innerWidth - button.right), bottom: window.innerHeight - button.top + 8 },
+      );
+    };
+    place();
+    window.addEventListener("resize", place);
+    return () => window.removeEventListener("resize", place);
+  }, [prefer, presence.mounted, beside]);
+  const placed = prefer === "right" ? side : stacked;
 
   useEffect(() => {
     if (!open) return;
@@ -211,7 +245,7 @@ export function BackgroundSwatchButton({
           <div
             ref={pop}
             className={`lc-palette-swatch-pop${presence.leaving ? " is-leaving" : ""}`}
-            data-side={prefer}
+            data-side={prefer === "right" ? (sideLock.current ?? "right") : prefer}
             style={placed}
             role="listbox"
             aria-label="Background"

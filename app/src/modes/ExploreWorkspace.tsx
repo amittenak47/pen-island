@@ -104,6 +104,17 @@ const TINT: Record<NodeType, string> = {
   thread: "var(--lc-mode-explore)",
 };
 
+/** Whether the map key shows its kind rows; remembered on this device. */
+const KEY_OPEN_STORE = "lc-explore-key-open";
+
+function loadKeyOpen(): boolean {
+  try {
+    return localStorage.getItem(KEY_OPEN_STORE) !== "0";
+  } catch {
+    return true;
+  }
+}
+
 const KIND_SHORT: Record<NodeType, string> = {
   annotate: "Notes",
   whiteboard: "Boards",
@@ -161,6 +172,7 @@ export function ExploreWorkspace({
   const [query, setQuery] = useState("");
   const [queryDraft, setQueryDraft] = useState("");
   const [clustered, setClustered] = useState(false);
+  const [keyOpen, setKeyOpen] = useState(loadKeyOpen);
   const [clusterReady, setClusterReady] = useState(false);
   const [frozenLabels, setFrozenLabels] = useState<
     Array<{ type: NodeType; label: string; x: number; y: number }>
@@ -750,6 +762,17 @@ export function ExploreWorkspace({
     setKinds((was) => (was.includes(type) ? was.filter((row) => row !== type) : [...was, type]));
   };
 
+  const toggleKey = () => {
+    setKeyOpen((open) => {
+      try {
+        localStorage.setItem(KEY_OPEN_STORE, open ? "0" : "1");
+      } catch {
+        // Not remembered; the key still folds.
+      }
+      return !open;
+    });
+  };
+
   const toggleCluster = () => {
     if (clustered) {
       for (const body of bodiesRef.current) {
@@ -834,34 +857,44 @@ export function ExploreWorkspace({
   return (
     <div className={`${webglGraph ? "lc-explore is-webgl" : "lc-explore"}${showing ? " is-showing" : ""}`}>
       <div className="lc-explore-stage">
-        <aside className="lc-explore-legend" ref={legendRef} aria-label="Map legend">
-          <div className="lc-explore-legend-caption">Key · click to filter</div>
-          <div className="lc-explore-legend-kinds" role="group" aria-label="Filter by kind">
-            {CLUSTERS.map((cluster) => (
-              <button
-                key={cluster.type}
-                type="button"
-                className="lc-explore-legend-kind"
-                style={{ ["--lc-kind-tint" as string]: TINT[cluster.type] }}
-                aria-pressed={kinds.includes(cluster.type)}
-                aria-label={cluster.label}
-                onClick={() => toggleKind(cluster.type)}
-              >
-                <span className="lc-explore-legend-dot" aria-hidden />
-                <span>{KIND_SHORT[cluster.type]}</span>
-                <span className="lc-explore-legend-count">
-                  <span key={kindCounts.get(cluster.type) ?? 0}>{kindCounts.get(cluster.type) ?? 0}</span>
-                </span>
-              </button>
-            ))}
+        <aside className="lc-explore-legend" ref={legendRef} aria-label="Map legend" data-collapsed={keyOpen ? undefined : ""}>
+          {/* The kind rows fold away; the controls row below always stays. */}
+          <div className="lc-explore-legend-fold" inert={!keyOpen}>
+            <div className="lc-explore-legend-kinds" role="group" aria-label="Filter by kind" id="lc-explore-legend-kinds">
+              {CLUSTERS.map((cluster) => (
+                <button
+                  key={cluster.type}
+                  type="button"
+                  className="lc-explore-legend-kind"
+                  style={{ ["--lc-kind-tint" as string]: TINT[cluster.type] }}
+                  aria-pressed={kinds.includes(cluster.type)}
+                  aria-label={cluster.label}
+                  onClick={() => toggleKind(cluster.type)}
+                >
+                  <span className="lc-explore-legend-dot" aria-hidden />
+                  <span>{KIND_SHORT[cluster.type]}</span>
+                  <span className="lc-explore-legend-count">
+                    <span key={kindCounts.get(cluster.type) ?? 0}>{kindCounts.get(cluster.type) ?? 0}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
           </div>
           <div className="lc-explore-legend-options">
-            <button type="button" className="lc-explore-group" role="switch"
-              aria-checked={clustered} onClick={toggleCluster}>
-              <span>Cluster</span>
+            <button type="button" className="lc-explore-group lc-tip-target" role="switch"
+              aria-checked={clustered} aria-label="Cluster by kind" data-tip="Cluster by kind"
+              data-tip-placement="top" onClick={toggleCluster}>
               <span className="lc-explore-switch" aria-hidden><span /></span>
             </button>
-            <BackgroundSwatchButton themeId={themeId} onPick={onThemePick} prefer="above" />
+            <BackgroundSwatchButton themeId={themeId} onPick={onThemePick} prefer="right" beside={legendRef} />
+            <button type="button" className="lc-explore-legend-toggle"
+              aria-expanded={keyOpen} aria-controls="lc-explore-legend-kinds"
+              aria-label={keyOpen ? "Hide the key" : "Show the key"} onClick={toggleKey}>
+              <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor"
+                strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <path d="m4 10 4-4 4 4" />
+              </svg>
+            </button>
           </div>
         </aside>
         <form className="lc-explore-find" role="search" onSubmit={(event) => event.preventDefault()}>

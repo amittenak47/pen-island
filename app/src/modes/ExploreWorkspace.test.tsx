@@ -154,7 +154,7 @@ it("keeps the legend and title search available without rendering a tray or Find
   document.body.append(shell.headerSlots.boardChrome);
   render(true);
   await act(async () => {});
-  expect(host.querySelector(".lc-explore-legend-caption")!.textContent).toBe("Key \u00b7 click to filter");
+  expect(host.querySelector(".lc-explore-legend-caption")).toBeNull();
   const input = host.querySelector<HTMLInputElement>('input[placeholder="Search catalog"]')!;
   expect(input.tabIndex).toBe(0);
   expect(input.closest("form")!.className).toBe("lc-explore-find");
@@ -199,12 +199,37 @@ it("switches grouping on and off", async () => {
   render(true);
   await act(async () => {});
   const group = host.querySelector<HTMLButtonElement>('[role="switch"]')!;
-  expect(group.textContent).toContain("Cluster");
+  expect(group.getAttribute("aria-label")).toBe("Cluster by kind");
+  expect(group.textContent).toBe("");
   expect(group.getAttribute("aria-checked")).toBe("false");
   act(() => group.click());
   expect(group.getAttribute("aria-checked")).toBe("true");
   act(() => group.click());
   expect(group.getAttribute("aria-checked")).toBe("false");
+});
+
+it("folds the key's kind rows away and back, keeping the controls, and remembers it", async () => {
+  localStorage.removeItem("lc-explore-key-open");
+  render(true);
+  await act(async () => {});
+  const legend = host.querySelector<HTMLElement>(".lc-explore-legend")!;
+  const toggle = host.querySelector<HTMLButtonElement>(".lc-explore-legend-toggle")!;
+  const fold = host.querySelector<HTMLElement>(".lc-explore-legend-fold")!;
+  expect(toggle.getAttribute("aria-expanded")).toBe("true");
+  expect(legend.hasAttribute("data-collapsed")).toBe(false);
+  act(() => toggle.click());
+  expect(toggle.getAttribute("aria-expanded")).toBe("false");
+  expect(toggle.getAttribute("aria-label")).toBe("Show the key");
+  expect(legend.hasAttribute("data-collapsed")).toBe(true);
+  expect(fold.hasAttribute("inert")).toBe(true);
+  expect(host.querySelector('[role="switch"]')).not.toBeNull();
+  expect(host.querySelector(".lc-palette-swatch-trigger")).not.toBeNull();
+  expect(localStorage.getItem("lc-explore-key-open")).toBe("0");
+  act(() => toggle.click());
+  expect(legend.hasAttribute("data-collapsed")).toBe(false);
+  expect(fold.hasAttribute("inert")).toBe(false);
+  expect(localStorage.getItem("lc-explore-key-open")).toBe("1");
+  localStorage.removeItem("lc-explore-key-open");
 });
 
 it("searches titles immediately and clears with the button or Escape", async () => {
