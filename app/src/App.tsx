@@ -1046,6 +1046,36 @@ export function App() {
     };
   }, [liveIds, visibleIds.length]);
 
+  /*
+   * The page strip belongs to the tab it was opened in.
+   *
+   * It is one shared flag, and it used to be closed whenever a different tab
+   * was focused (so two split PDFs never filled thumbs at once). But Pages
+   * reading fits the page below the strip, so coming back to a book found the
+   * strip gone and the page jumped to a new size, as when closing a tab
+   * returned to it. Each tab keeps its own: leaving stores it, coming back
+   * restores it. A tab never left keeps the current state, as a new tab did.
+   * Swapping halves of one split changes nothing, or the pane reflows.
+   */
+  const pdfFilmByTabRef = useRef(new Map<string, boolean>());
+  const pdfFilmOpenRef = useRef(pdfFilmOpen);
+  pdfFilmOpenRef.current = pdfFilmOpen;
+  const filmActiveRef = useRef(tabState.activeId);
+  useLayoutEffect(() => {
+    const prev = filmActiveRef.current;
+    const next = tabState.activeId;
+    if (prev === next) return;
+    filmActiveRef.current = next;
+    const tabs = tabState.tabs;
+    const prevGroup = tabs.find((entry) => entry.id === prev)?.group;
+    if (prevGroup && prevGroup === tabs.find((entry) => entry.id === next)?.group) return;
+    const byTab = pdfFilmByTabRef.current;
+    for (const id of byTab.keys()) if (!tabs.some((entry) => entry.id === id)) byTab.delete(id);
+    if (tabs.some((entry) => entry.id === prev)) byTab.set(prev, pdfFilmOpenRef.current);
+    const restored = byTab.get(next);
+    if (restored != null && restored !== pdfFilmOpenRef.current) setPdfFilmOpen(restored);
+  }, [tabState.activeId, tabState.tabs]);
+
   const focusTab = useCallback(
     (id: string) => {
       const state = tabsRef.current;
@@ -1055,13 +1085,6 @@ export function App() {
       // selected, so a no-op here left the problem list up instead of the cards.
       if (id === HOME_TAB_ID) apisRef.current.get(HOME_TAB_ID)?.showHomeChooser?.();
       if (id === state.activeId) return;
-      // The strip is chrome for the focused book only. Leaving it open as a
-      // global meant both split PDFs filled thumbs at once — a 44 MB file
-      // next to a short one. Clicking a *different* tab closes it; swapping
-      // halves of the same split must not, or the file pane reflows and looks
-      // like it reloaded.
-      const sameSplit = Boolean(tab.group && tab.group === state.tabs.find((entry) => entry.id === state.activeId)?.group);
-      if (!sameSplit) setPdfFilmOpen(false);
       setMissingTab(null);
       setError(null);
       // Already on screen (the other split half): promoting it reorders the
