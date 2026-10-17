@@ -10808,9 +10808,6 @@ body[data-lc-sash-drag="horizontal"] {
   border-radius: 50%;
   background: var(--bad);
 }
-/* The list inside the tab-style sync notification (`.lc-doc-sync-pop`). */
-.lc-library-sync-pop .lc-library-sync-list { max-height: min(50dvh, 360px); overflow-y: auto; }
-.lc-library-sync-toggle { width: 100%; }
 .lc-library-sync-trigger.is-bad { color: var(--bad); }
 /* Running: the tab's progress ring, big enough to hold the count of books
    synced so far inside it (the tab's 14px ring puts its % beside it). */
@@ -10824,24 +10821,30 @@ body[data-lc-sash-drag="horizontal"] {
   font: 600 9px/1 var(--lc-sans);
   font-variant-numeric: tabular-nums;
 }
-.lc-library-sync-list { list-style: none; padding: 0; margin: 8px 0 0; }
+/* The Succeeded | Failed groups inside the tab-style sync notification.
+   No scrollbar: a very long list still scrolls on a small screen, unmarked. */
+.lc-library-sync-groups { display: grid; gap: 4px; max-height: min(60dvh, 420px); overflow-y: auto; scrollbar-width: none; }
+.lc-library-sync-groups::-webkit-scrollbar { display: none; }
+.lc-library-sync-group > summary { cursor: pointer; font-weight: 600; list-style-position: inside; }
+.lc-library-sync-list { list-style: none; padding: 0; margin: 2px 0 0; }
 .lc-library-sync-row {
   display: flex;
-  align-items: center;
-  gap: 8px;
+  align-items: baseline;
+  gap: 6px;
   width: 100%;
-  padding: 8px 4px;
+  padding: 1px 2px;
   border: 0;
   border-radius: var(--lc-r-block);
   background: transparent;
   color: inherit;
   text-align: left;
   font: inherit;
+  line-height: 1.35;
 }
+button.lc-library-sync-row { cursor: pointer; }
 button.lc-library-sync-row:hover { background: var(--bg); }
-.lc-library-sync-book { display: grid; min-width: 0; }
-.lc-library-sync-book > * { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lc-library-sync-book small { color: var(--muted); }
+.lc-library-sync-book { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lc-library-sync-book small { color: var(--muted); font-size: inherit; }
 .lc-library-sync-ok { color: var(--ok); }
 .lc-library-sync-bad { color: var(--bad); }
 

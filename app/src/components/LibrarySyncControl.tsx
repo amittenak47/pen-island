@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LcClient } from "../api/client";
 import type { BookIdentity } from "../util/syncState";
@@ -26,7 +26,9 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   canOpen(book: BookIdentity): boolean;
   onOpen(book: BookIdentity): void;
 }) {
-  const [open, setOpen] = useState(false), [details, setDetails] = useState(false);
+  const [open, setOpen] = useState(false);
+  /** Bumped when a group opens or closes, so the notification is placed again. */
+  const [groupsTick, setGroupsTick] = useState(0);
   const [result, setResult] = useState(loadLibrarySyncResults), [activity, setActivity] = useState(getBookPassActivity);
   const [error, setError] = useState("");
   const [hover, setHover] = useState(false);
@@ -34,7 +36,6 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   const [ranHere, setRanHere] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null), pop = useRef<HTMLDivElement>(null);
   const controller = useRef<AbortController | null>(null);
-  const listId = useId();
   useEffect(() => {
     const completed = () => setResult(loadLibrarySyncResults());
     const running = () => setActivity(getBookPassActivity());
@@ -77,7 +78,7 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
 
   const start = async () => {
     const abort = new AbortController(); controller.current = abort;
-    setError(""); setDetails(false); setRanHere(true); setOpen(true);
+    setError(""); setRanHere(true); setOpen(true);
     // The same pass as Pull: send and receive every changed book, add books
     // this device has never had, and repair missing source files.
     try { await syncBookPass(client, { signal: abort.signal, libraryPull: true, onProgress: () => setActivity(getBookPassActivity()) }); }
@@ -105,7 +106,8 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   };
   const leave = () => { window.clearTimeout(leaveTimer.current); leaveTimer.current = window.setTimeout(() => setHover(false), HOVER_LEAVE_MS); };
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
-  const placed = usePopPlacement(trigger, pop, visible, `${line}|${details}|${books.length}`);
+  // Above the icon: below it the notification would sit over the Start tiles.
+  const placed = usePopPlacement(trigger, pop, visible, `${line}|${books.length}|${groupsTick}`, "above");
   const status = syncing ? `syncing, ${synced} synced so far` : failures.length && result ? librarySyncSummary({ time: 0, books: failures }) : result ? "all books synced" : "not synced yet";
 
   return <>
@@ -128,20 +130,26 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
       <div ref={pop} className="lc-doc-sync-pop lc-library-sync-pop" role="status" aria-live="polite"
         style={placed} onPointerEnter={enter} onPointerLeave={leave}>
         <div className="lc-doc-sync-line">{line}</div>
-        {!syncing && failures.length > 0 && <>
-          <button type="button" className="lc-doc-sync-index lc-library-sync-toggle" aria-expanded={details} aria-controls={listId}
-            onClick={() => setDetails(value => !value)}>{details ? "Hide details" : "Show details"}</button>
-          {details && <ul id={listId} className="lc-library-sync-list" aria-label="Book sync results">
-            {books.map(book => {
-              const failed = bookSyncFailed(book);
-              const content = <><span className={failed ? "lc-library-sync-bad" : "lc-library-sync-ok"} aria-label={failed ? book.status : "synced"}>{failed ? "✗" : "✓"}</span>
-                <span className="lc-library-sync-book"><span title={book.title}>{book.title}</span>{failed && <small title={book.reason}>{book.reason}</small>}</span></>;
-              return <li key={`${book.kind}:${book.id}`}>{failed && canOpen(book)
-                ? <button type="button" className="lc-library-sync-row" onClick={() => { onOpen({ kind: book.kind, id: book.id }); setOpen(false); }}>{content}</button>
-                : <div className="lc-library-sync-row">{content}</div>}</li>;
-            })}
-          </ul>}
-        </>}
+        {!syncing && books.length > 0 && <div className="lc-library-sync-groups">
+          {([["Failed", failures, true], ["Succeeded", books.filter(book => !bookSyncFailed(book)), false]] as const)
+            .filter(([, rows]) => rows.length > 0).map(([label, rows, failed]) => (
+            <details key={label} className="lc-library-sync-group" open={failed} onToggle={() => setGroupsTick(tick => tick + 1)}>
+              <summary className={failed ? "lc-library-sync-bad" : "lc-library-sync-ok"}>{label} ({rows.length})</summary>
+              <ul className="lc-library-sync-list" aria-label={`${label} books`}>
+                {rows.map(book => {
+                  // Failure messages start with the book's title; the row already shows it.
+                  const reason = book.reason.startsWith(`${book.title}: `) ? book.reason.slice(book.title.length + 2) : book.reason;
+                  const content = <><span className={failed ? "lc-library-sync-bad" : "lc-library-sync-ok"} aria-hidden="true">{failed ? "✗" : "✓"}</span>
+                    <span className="lc-library-sync-book" title={failed ? `${book.title}: ${reason}` : book.title}>
+                      {book.title}{failed && <small> · {reason}</small>}</span></>;
+                  return <li key={`${book.kind}:${book.id}`}>{failed && canOpen(book)
+                    ? <button type="button" className="lc-library-sync-row" onClick={() => { onOpen({ kind: book.kind, id: book.id }); setOpen(false); }}>{content}</button>
+                    : <div className="lc-library-sync-row">{content}</div>}</li>;
+                })}
+              </ul>
+            </details>
+          ))}
+        </div>}
       </div>, document.body)}
   </>;
 }

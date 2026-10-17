@@ -30,3 +30,8 @@ it("keeps a tall notification on screen when neither side fits", () => {
   expect(placed.top).toBeGreaterThanOrEqual(8);
   expect(placed.top + 600).toBeLessThanOrEqual(640 - 8);
 });
+
+it("opens above when asked to, and falls back below when the top of the window is too close", () => {
+  expect(popPlacement(button(100, 200), pop, { width: 1200, height: 800 }, 8, 8, "above")).toEqual({ top: 200 - 8 - 60, left: 100, above: true });
+  expect(popPlacement(button(100, 20), pop, { width: 1200, height: 800 }, 8, 8, "above").above).toBe(false);
+});

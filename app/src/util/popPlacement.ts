@@ -14,6 +14,8 @@ export function popPlacement(
   viewport: { width: number; height: number },
   gap = 8,
   margin = 8,
+  /** "above": try above first (Home's sync icon), below only if it cannot fit. */
+  prefer: "below" | "above" = "below",
 ): { top: number; left: number; above: boolean } {
   const maxLeft = Math.max(margin, viewport.width - pop.width - margin);
   const leftAligned = button.left;
@@ -22,7 +24,8 @@ export function popPlacement(
   const below = button.bottom + gap;
   const fitsBelow = below + pop.height + margin <= viewport.height;
   const above = button.top - gap - pop.height;
-  const useAbove = !fitsBelow && above >= margin;
-  const top = useAbove ? above : Math.max(margin, Math.min(below, viewport.height - pop.height - margin));
+  const fitsAbove = above >= margin;
+  const useAbove = prefer === "above" ? fitsAbove || !fitsBelow : !fitsBelow && fitsAbove;
+  const top = useAbove ? Math.max(margin, above) : Math.max(margin, Math.min(below, viewport.height - pop.height - margin));
   return { top, left, above: useAbove };
 }

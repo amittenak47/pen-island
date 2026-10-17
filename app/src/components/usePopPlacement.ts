@@ -15,6 +15,7 @@ export function usePopPlacement(
   pop: RefObject<HTMLElement | null>,
   visible: boolean,
   content: unknown,
+  prefer: "below" | "above" = "below",
 ): CSSProperties {
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden", top: 0, left: 0 });
   useLayoutEffect(() => {
@@ -23,7 +24,7 @@ export function usePopPlacement(
       const button = trigger.current?.getBoundingClientRect();
       const box = pop.current?.getBoundingClientRect();
       if (!button || !box) return;
-      const at = popPlacement(button, { width: box.width, height: box.height }, { width: window.innerWidth, height: window.innerHeight });
+      const at = popPlacement(button, { width: box.width, height: box.height }, { width: window.innerWidth, height: window.innerHeight }, 8, 8, prefer);
       setStyle({ top: at.top, left: at.left });
     };
     place();
@@ -33,6 +34,6 @@ export function usePopPlacement(
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [trigger, pop, visible, content]);
+  }, [trigger, pop, visible, content, prefer]);
   return style;
 }

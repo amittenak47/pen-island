@@ -82,24 +82,24 @@ it("a clean finish says synced and closes like the tab's notification", async ()
   act(() => { vi.advanceTimersByTime(2_600); }); expect(pop()).toBeNull();
 });
 
-it("a finish with failures stays open with the summary and a ✓/✗ list, failures first", async () => {
+it("a finish with failures stays open with the summary, then Failed (open) and Succeeded (closed) groups", async () => {
   vi.useFakeTimers(); const finish = holdPass(); mount(); click(trigger());
   complete([row("good", "synced"), row("same", "unchanged"), row("choice", "needs_choice"), row("bad", "failed"), row("cancel", "cancelled")]);
   await act(async () => { finish(); });
   act(() => { vi.advanceTimersByTime(5_000); }); expect(pop()).not.toBeNull();
   expect(pop()!.querySelector(".lc-doc-sync-line")!.textContent).toBe("2 synced · 1 need your choice · 1 failed · 1 cancelled");
   expect(host.querySelector(".lc-library-sync-dot")).not.toBeNull();
-  const toggle = [...pop()!.querySelectorAll("button")].find(b => b.textContent === "Show details")!; click(toggle);
-  const rows = [...pop()!.querySelectorAll("li")]; expect(rows).toHaveLength(5);
-  expect([...pop()!.querySelectorAll(".lc-library-sync-bad")].map(el => el.textContent)).toEqual(["✗", "✗", "✗"]);
-  expect(rows[3].textContent).toBe("✓good"); expect(rows[4].textContent).toBe("✓same");
-  expect(pop()!.querySelector("small")!.title).toBe("Needs your choice");
+  expect([...pop()!.querySelectorAll("button")].some(b => /Show/.test(b.textContent ?? ""))).toBe(false);
+  const groups = [...pop()!.querySelectorAll("details")];
+  expect(groups.map(g => g.querySelector("summary")!.textContent)).toEqual(["Failed (3)", "Succeeded (2)"]);
+  expect(groups.map(g => g.open)).toEqual([true, false]);
+  expect([...groups[0].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✗choice · Needs your choice", "✗bad · local storage isn't ready for safe sync. Your changes are kept on this device.", "✗cancel · Cancelled"]);
+  expect([...groups[1].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✓good", "✓same"]);
 });
 
 it.each(["annotate", "whiteboard", "problem"] as const)("opens a local failed %s by kind and id and closes", async kind => {
   const finish = holdPass(); mount(); click(trigger());
   complete([row("local", "needs_choice", kind), row("missing", "failed", kind)]); await act(async () => { finish(); });
-  click([...pop()!.querySelectorAll("button")].find(b => b.textContent === "Show details")!);
   expect(pop()!.querySelectorAll("button.lc-library-sync-row")).toHaveLength(1);
   click(pop()!.querySelector<HTMLButtonElement>("button.lc-library-sync-row")!);
   expect(onOpen).toHaveBeenCalledWith({ kind, id: "local" }); expect(pop()).toBeNull();
