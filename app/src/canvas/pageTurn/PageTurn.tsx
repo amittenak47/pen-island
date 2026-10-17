@@ -1564,11 +1564,28 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      * mouse's cursor is set on the host; a finger has none to change.
      */
     let mouse = false;
-    const setHover = (edge: "left" | "right" | null) => {
+    /*
+     * The hover shows the turn's first moment where it would start: a corner
+     * lifting as a small curled lip (the top or bottom one, as the turn picks
+     * by half), or the side edge rising when the side strip is held. The
+     * part stays set when the hover ends, so the lip shrinks back into the
+     * same corner instead of jumping.
+     */
+    const setHover = (edge: "left" | "right" | null, at?: { clientX: number; clientY: number }) => {
       const hole = holeEl();
       if (hole) {
-        if (edge) hole.dataset.turnHover = edge;
-        else delete hole.dataset.turnHover;
+        if (edge) {
+          const r = at ? hole.getBoundingClientRect() : null;
+          const part = !r || !at ? "side"
+            : turnCornerAt(r, at.clientX, at.clientY) === null ? "side"
+            : at.clientY - r.top < r.height / 2 ? "top" : "bottom";
+          const lip = `${edge}-${part}`;
+          if (hole.dataset.turnLip !== lip) {
+            hole.dataset.turnLip = lip;
+            hole.style.setProperty("--lc-turn-paper", turnPaperColor(paperColor(), pagedRef.current));
+          }
+          if (hole.dataset.turnHover !== edge) hole.dataset.turnHover = edge;
+        } else if (hole.dataset.turnHover != null) delete hole.dataset.turnHover;
       }
       const el = host();
       if (el && mouse && !turnRef.current) el.style.cursor = edge ? "grab" : "";
@@ -1775,7 +1792,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           if (queued && queued.direction !== (side === "right" ? "next" : "prev")) queued = null;
           const landed = playing.commit ? playing : undefined;
           continueTurn(playing);
-          if (grip(event, side, landed) && event.pointerType === "touch") setHover(side);
+          if (grip(event, side, landed) && event.pointerType === "touch") setHover(side, event);
           return;
         }
         if (!catchable) {
@@ -1814,7 +1831,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       event.stopImmediatePropagation();
       event.preventDefault();
       // A finger has no hover: show the edge it pressed.
-      if (event.pointerType === "touch") setHover(side);
+      if (event.pointerType === "touch") setHover(side, event);
     };
 
     /**
@@ -1918,7 +1935,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       // A hovering stylus is shown what it can take hold of, as a mouse is.
       if (!active && (event.pointerType === "mouse" || event.pointerType === "pen") && event.buttons === 0) {
         if (event.pointerType === "mouse") mouse = true;
-        setHover(boardRef.current?.zoomedIntoPage() ? null : edgeAt(event));
+        setHover(boardRef.current?.zoomedIntoPage() ? null : edgeAt(event), event);
       }
     };
 
