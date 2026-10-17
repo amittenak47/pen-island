@@ -8,6 +8,7 @@
 import { useEffect, useRef } from "react";
 
 import { promoteLazyImages, type WebHtmlSource } from "../util/webPage";
+import { columnIsMeasurable } from "./AnnotateDocument";
 
 export interface WebDocumentProps {
   html: string;
@@ -46,6 +47,12 @@ export function WebDocument({
     if (!node) return;
     promoteLazyImages(node);
     const report = () => {
+      // Mounted in a slot that has no width yet, the page lays out a few
+      // pixels wide and measures tens of thousands tall. That height became
+      // the board's scroll limit, and the board kept it after the page settled,
+      // so the page scrolled far past its end. Wait for a real column, as the
+      // markdown reader does; the observer reports again when it arrives.
+      if (!columnIsMeasurable(node.clientWidth)) return;
       const height = node.scrollHeight;
       if (height > 0) onMeasureRef.current?.(height);
     };

@@ -26,12 +26,26 @@ function documentLayers(slot: HTMLElement): HTMLElement[] {
   return found.length > 0 ? found : Array.from(slot.querySelectorAll<HTMLElement>(DOCUMENT_LAYER_SELECTOR));
 }
 
+/** Narrower than this and a laid-out box is not a column yet (see `MIN_MEASURABLE_WIDTH_PX`). */
+const MIN_COLUMN_PX = 80;
+
+/**
+ * A box on screen but only a few pixels wide: a document mounted before its
+ * slot has a width, one word per line and tens of thousands of pixels tall.
+ * Its height means nothing, and the board keeps the tallest height it sees.
+ */
+function tooNarrowToMeasure(el: HTMLElement): boolean {
+  return el.getClientRects().length > 0 && el.clientWidth < MIN_COLUMN_PX;
+}
+
 export function documentLayerHeight(slot: HTMLElement): number {
   let best = 0;
   for (const inner of documentLayers(slot)) {
+    if (tooNarrowToMeasure(inner)) continue;
     best = Math.max(best, inner.scrollHeight, inner.offsetHeight);
   }
   // The slot includes the frame's tail padding. Feeding that back into frame
   // growth adds the padding again on each ResizeObserver delivery.
-  return best > 0 ? best : slot.scrollHeight;
+  if (best > 0) return best;
+  return tooNarrowToMeasure(slot) ? 0 : slot.scrollHeight;
 }
