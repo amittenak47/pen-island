@@ -527,7 +527,7 @@ const WHITEBOARD_PROBLEM: ProblemDetail = {
   cases: [],
 };
 
-/** The Agent chip as the last header on screen left it (see `agentChipShown`). */
+/** The Agent chip as the last header on screen left it (see `agentChipMotion`). */
 let lastAgentChipShown = false;
 
 /** Names for the parts of `syncWorkingRevisionRef`, in the order it lists them. */
@@ -2179,30 +2179,29 @@ export const Workspace = memo(function Workspace({
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
   /*
-   * Whether this tab's header shows the Agent chip, one frame behind `problem`.
+   * The Agent chip's fold or unfold when this tab's header comes on screen.
    *
    * Every tab draws its own header buttons and only the active tab's are on
-   * screen, so going back to Home swapped a header with the chip for one that
-   * never had it: nothing changed, so nothing animated. A header now starts
-   * as the last one on screen left the chip, then moves to its own state on
-   * the next frames, so the chip unfolds into a document and folds away on
-   * the way back to Home.
+   * screen, so a tab switch replaces the chip instead of changing it, and a
+   * CSS transition has nothing to animate from. When the previous header
+   * showed the chip differently, the new one plays a one-shot keyframe
+   * animation from the old look to its own (`is-folding` / `is-unfolding`).
    */
-  const [agentChipShown, setAgentChipShown] = useState(() => (active ? lastAgentChipShown : Boolean(problem)));
-  // A tab coming back on screen (Home after a document) starts from what the
-  // previous header showed, before paint, so its own state can animate in.
+  const [agentChipMotion, setAgentChipMotion] = useState<"fold" | "unfold" | null>(null);
   useLayoutEffect(() => {
-    if (active) setAgentChipShown(lastAgentChipShown);
-  }, [active]);
-  useEffect(() => {
     if (!active) return;
     const want = Boolean(problem);
+    const motion = lastAgentChipShown === want ? null : want ? "unfold" : "fold";
     lastAgentChipShown = want;
-    if (agentChipShown === want) return;
-    let second = 0;
-    const first = requestAnimationFrame(() => { second = requestAnimationFrame(() => setAgentChipShown(want)); });
-    return () => { cancelAnimationFrame(first); cancelAnimationFrame(second); };
-  }, [active, problem, agentChipShown]);
+    setAgentChipMotion(motion);
+    if (!motion) return;
+    // The longest step (the label, or the slot closing) ends by 460ms.
+    const timer = window.setTimeout(() => setAgentChipMotion(null), 480);
+    return () => window.clearTimeout(timer);
+    // `problem` changing inside the same tab uses the ordinary transitions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  useEffect(() => { if (active) lastAgentChipShown = Boolean(problem); }, [active, problem]);
   const problemRef = useRef<ProblemDetail | null>(null);
   useEffect(() => {
     const id = problem && !isLocalPad(problem) ? problemPadId(problem.dataset, problem.task_id) : null;
@@ -10688,7 +10687,9 @@ export const Workspace = memo(function Workspace({
               coachOpen && !hubConflictAsk
                 ? "lc-secondary lc-agent-toggle lc-agent-toggle-open lc-tip-target"
                 : "lc-secondary lc-agent-toggle lc-tip-target",
-              agentChipShown ? "" : "is-vacant",
+              // While folding it keeps its shown style; the fold animates to empty.
+              problem || agentChipMotion === "fold" ? "" : "is-vacant",
+              agentChipMotion === "fold" ? "is-folding" : agentChipMotion === "unfold" ? "is-unfolding" : "",
               llmLink === "online" && "lc-agent-toggle-llm-on",
               llmLink === "offline" && "lc-agent-toggle-llm-off",
             ]
