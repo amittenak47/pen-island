@@ -72,7 +72,10 @@ try {
     Math.random = () => ((seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0) / 0x100000000);
     document.addEventListener('DOMContentLoaded', () => {
       const style = document.createElement('style');
-      style.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}';
+      // The flick-prediction HUD is a debug overlay whose numbers and edge
+      // differ run to run on unchanged code (26 px on the PDF scroll states);
+      // it is not part of the camera under test.
+      style.textContent = '*,*::before,*::after{animation:none!important;transition:none!important;caret-color:transparent!important}.lc-flick-predict-hud{visibility:hidden!important}';
       document.head.append(style);
     });
   ` });
