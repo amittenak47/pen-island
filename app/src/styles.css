@@ -23340,7 +23340,9 @@ html[data-corners="rounded"] {
  * Height is unchanged (38 px plus the safe area).
  */
 .lc-app .lc-header {
-  --lc-rail-cell: 34px;
+  /* Narrow cells: the icons butt together, so they cost no more width than
+   * the old 28 px boxes with gaps did. Full height keeps them easy to hit. */
+  --lc-rail-cell: 30px;
   --lc-rail-tick: 38%;
   --lc-rail-hair: color-mix(in srgb, var(--chrome-edge) 70%, transparent);
   --lc-rail-ease: cubic-bezier(0.22, 1, 0.36, 1);
@@ -23362,7 +23364,7 @@ html[data-corners="rounded"] {
 }
 
 .lc-mobile .lc-header {
-  --lc-rail-cell: 44px;
+  --lc-rail-cell: 32px;
   padding: var(--lc-safe-top, 0px) var(--lc-safe-right, 0px) 0 var(--lc-safe-left, 0px);
 }
 
@@ -23564,8 +23566,8 @@ html[data-corners="rounded"] {
   height: auto;
   min-height: 0;
   max-height: none;
-  gap: 7px;
-  padding: 0 14px 0 12px;
+  gap: 6px;
+  padding: 0 10px;
   border: 0;
   border-left: 1px solid var(--lc-rail-hair);
   border-radius: 0;
