@@ -5,10 +5,12 @@ import type { BookIdentity } from "../util/syncState";
 import { BOOK_PASS_ACTIVITY_EVENT, BOOK_PASS_STATUS_EVENT, getBookPassActivity, syncBookPass } from "../util/bookSyncPass";
 import { bookSyncFailed, librarySyncSummary, loadLibrarySyncResults } from "./LibrarySyncResults";
 
-export function LibrarySyncControl({ client, canOpen, onOpen }: {
+export function LibrarySyncControl({ client, canOpen, onOpen, label }: {
   client: LcClient;
   canOpen(book: BookIdentity): boolean;
   onOpen(book: BookIdentity): void;
+  /** Visible text beside the icon (Home's Start row); icon-only without it. */
+  label?: string;
 }) {
   const [open, setOpen] = useState(false), [showAll, setShowAll] = useState(false);
   const [result, setResult] = useState(loadLibrarySyncResults), [activity, setActivity] = useState(getBookPassActivity);
@@ -57,7 +59,9 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   const start = async () => {
     if (getBookPassActivity().busy) return;
     const abort = new AbortController(); controller.current = abort; setError("");
-    try { await syncBookPass(client, { signal: abort.signal, onProgress: () => setActivity(getBookPassActivity()) }); }
+    // The same pass as Pull: send and receive every changed book, add books
+    // this device has never had, and repair missing source files.
+    try { await syncBookPass(client, { signal: abort.signal, libraryPull: true, onProgress: () => setActivity(getBookPassActivity()) }); }
     catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); }
     finally { if (controller.current === abort) controller.current = null; }
   };
@@ -67,13 +71,14 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   const status = activity.library ? "Syncing" : failures.length ? librarySyncSummary({ time: 0, books: failures }) : result ? "All books synced" : "Not synced yet";
   const visible = showAll ? books : failures;
   return <>
-    <button ref={trigger} type="button" className="lc-icon lc-library-sync-trigger" aria-label={`Sync all books — ${status}`}
+    <button ref={trigger} type="button" className={label ? "lc-secondary lc-library-sync-trigger has-label" : "lc-icon lc-library-sync-trigger"} aria-label={`Sync all books — ${status}`}
       title={`Sync all books — ${status}`} aria-expanded={open} aria-controls={open ? popoverId : undefined} aria-haspopup="dialog"
       onClick={() => { setShowAll(false); setOpen(value => !value); }}>
       <svg className={`lc-icon-svg${activity.library ? " lc-library-sync-spinning" : ""}`} viewBox="0 0 24 24" width="16" height="16"
         fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M20 7a9 9 0 0 0-15-2L2 8m0-6v6h6M4 17a9 9 0 0 0 15 2l3-3m0 6v-6h-6" />
       </svg>
+      {label && <span className="lc-library-sync-label">{label}</span>}
       {failures.length > 0 && <span className="lc-library-sync-dot" aria-hidden="true" />}
     </button>
     {open && createPortal(<div ref={popover} id={popoverId} role="dialog" aria-label="Library sync" className="lc-library-sync-popover"

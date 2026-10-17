@@ -10624,11 +10624,6 @@ export const Workspace = memo(function Workspace({
               try { return await pullMissingHubFiles(client); }
               finally { window.dispatchEvent(new Event("lc-explore-graph")); }
             }} getGraph={() => collectExploreGraph(tabsRef.current.tabs)} />}
-          <LibrarySyncControl client={client}
-            canOpen={book => book.kind === "annotate" ? listAnnotateDocs().some(doc => doc.id === book.id)
-              : book.kind === "whiteboard" ? listWhiteboardNotebooks().some(notebook => notebook.id === book.id)
-              : !!getCachedBookMeta(book.kind, book.id) && getCachedBookMeta(book.kind, book.id)?.deletedAt === undefined}
-            onOpen={book => openLinkedNode({ type: book.kind === "problem" ? "practice" : book.kind, id: book.id })} />
           <button
             type="button"
             className="lc-icon"
@@ -11536,6 +11531,11 @@ export const Workspace = memo(function Workspace({
                     covered={annotateEntryOpen || whiteboardEntryOpen}
                     tabsRef={tabsRef}
                     onOpenRecent={openRecentWorkspace}
+                    startAction={loadPadHub() ? <LibrarySyncControl client={client} label="Sync all"
+                      canOpen={book => book.kind === "annotate" ? listAnnotateDocs().some(doc => doc.id === book.id)
+                        : book.kind === "whiteboard" ? listWhiteboardNotebooks().some(notebook => notebook.id === book.id)
+                        : !!getCachedBookMeta(book.kind, book.id) && getCachedBookMeta(book.kind, book.id)?.deletedAt === undefined}
+                      onOpen={book => openLinkedNode({ type: book.kind === "problem" ? "practice" : book.kind, id: book.id })} /> : null}
                     busy={busy !== null || boardPreparing || workspaceLoadActive}
                     onPractice={() => setPracticeOpen(true)}
                     onWhiteboard={() => setWhiteboardEntryOpen(true)}

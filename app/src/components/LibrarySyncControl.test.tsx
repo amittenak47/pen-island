@@ -86,7 +86,8 @@ it("runs a manual library pass without selected/only/silent and cancels through 
     window.dispatchEvent(new Event("lc-book-pass-activity")); return new Promise<void>(resolve => { finish = resolve; }); });
   mount(); click(trigger()); click(button("Sync all books"));
   expect(pass.run).toHaveBeenCalledOnce(); expect(pass.run.mock.calls[0][0]).toBe(api);
-  expect(pass.run.mock.calls[0][1]).toEqual({ signal: expect.any(AbortSignal), onProgress: expect.any(Function) });
+  // Sync all is the Pull pass: it also adds books this device never had.
+  expect(pass.run.mock.calls[0][1]).toEqual({ signal: expect.any(AbortSignal), libraryPull: true, onProgress: expect.any(Function) });
   expect(button("Sync all books").disabled).toBe(true); click(button("Cancel"));
   expect(pass.run.mock.calls[0][1].signal.aborted).toBe(true);
   await act(async () => { finish(); });

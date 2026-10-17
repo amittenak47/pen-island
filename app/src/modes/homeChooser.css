@@ -13,6 +13,10 @@
   scrollbar-width: none;
 }
 .lc-home-section-title { margin: 0 0 12px; color: var(--muted); font: 600 11px/1.4 var(--lc-sans); text-transform: uppercase; letter-spacing: .1em; }
+/* "Start" and, on its right, library sync (Sync all). */
+.lc-home-start-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+.lc-home-start-row > .lc-home-section-title { margin: 0; }
+.lc-home-start-row .lc-library-sync-trigger.has-label { display: inline-flex; align-items: center; gap: 6px; min-height: 30px; padding: 4px 10px; font: 600 12px/1 var(--lc-sans); }
 .lc-home-chooser .lc-home-chooser-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: minmax(var(--lc-home-row-a, 0px),1.45fr) minmax(var(--lc-home-row-b, 0px),1fr) minmax(var(--lc-home-row-c, 0px),.72fr); gap: 14px; min-height: 0; }
 .lc-home-cell[data-mode="whiteboard"] { grid-column: 1 / -1; }
 .lc-home-cell[data-mode="annotate"]:first-child { grid-column: 1 / -1; }
