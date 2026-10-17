@@ -77,7 +77,7 @@ pub fn generate(
         examples => examples,
         total_cases => problem.input_output.len(),
     })?;
-    fs::write(dir.join("README.md"), readme)?;
+    write_replacing(&dir.join("README.md"), readme.as_bytes())?;
 
     let solution = solution_stub(problem);
     let solution_path = dir.join("solution.py");
@@ -90,7 +90,7 @@ pub fn generate(
     // returns 500, and reopening the same problem after returning to the
     // picker fails.
 
-    fs::write(dir.join("run_tests.py"), RUN_TESTS_PY)?;
+    write_replacing(&dir.join("run_tests.py"), RUN_TESTS_PY.as_bytes())?;
 
     let meta = WorkspaceMeta {
         dataset: dataset.id.to_string(),
@@ -103,12 +103,39 @@ pub fn generate(
         cases: problem.input_output.clone(),
         test: problem.test.clone(),
     };
-    fs::write(
-        dir.join(".lc").join("meta.json"),
-        serde_json::to_string_pretty(&meta)?,
+    write_replacing(
+        &dir.join(".lc").join("meta.json"),
+        serde_json::to_string_pretty(&meta)?.as_bytes(),
     )?;
 
     Ok(dir)
+}
+
+/// Rewrite a generated file without a moment where it is empty.
+///
+/// Opening a problem rewrites these files, and the same open (or the session
+/// restoring that tab) reads `meta.json` at the same time. `fs::write`
+/// truncates first, so a read in between saw an empty file and the tab failed
+/// with "invalid meta … EOF while parsing". Unchanged content (every reopen)
+/// is left alone; changed content goes to a sibling file that replaces the
+/// old one in one rename. If the rename is refused (a reader holding the file
+/// without delete sharing), it falls back to a plain write.
+fn write_replacing(path: &Path, bytes: &[u8]) -> Result<()> {
+    if fs::read(path).is_ok_and(|current| current == bytes) {
+        return Ok(());
+    }
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("file");
+    let unique = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0);
+    let temp = path.with_file_name(format!(".{name}.{}-{unique}.tmp", std::process::id()));
+    fs::write(&temp, bytes).with_context(|| format!("cannot write {}", temp.display()))?;
+    if fs::rename(&temp, path).is_err() {
+        let _ = fs::remove_file(&temp);
+        fs::write(path, bytes).with_context(|| format!("cannot write {}", path.display()))?;
+    }
+    Ok(())
 }
 
 /// The `solution.py` a fresh Practice workspace writes.
@@ -441,6 +468,27 @@ fn is_roman_segment(word: &str) -> bool {
             | "xix"
             | "xx"
     )
+}
+
+#[cfg(test)]
+mod write_replacing_tests {
+    use super::*;
+
+    #[test]
+    fn rewrites_only_changed_content_and_leaves_no_temp_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("meta.json");
+        write_replacing(&path, b"{\"a\":1}").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"a\":1}");
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        write_replacing(&path, b"{\"a\":1}").unwrap();
+        assert_eq!(fs::metadata(&path).unwrap().modified().unwrap(), before, "unchanged content is not rewritten");
+        write_replacing(&path, b"{\"a\":2}").unwrap();
+        assert_eq!(fs::read(&path).unwrap(), b"{\"a\":2}");
+        let names: Vec<String> = fs::read_dir(dir.path()).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect();
+        assert_eq!(names, vec!["meta.json".to_string()]);
+    }
 }
 
 #[cfg(test)]
