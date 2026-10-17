@@ -4,10 +4,13 @@ import type { LcClient } from "../api/client";
 import type { BookIdentity } from "../util/syncState";
 import { BOOK_PASS_ACTIVITY_EVENT, BOOK_PASS_STATUS_EVENT, getBookPassActivity, syncBookPass } from "../util/bookSyncPass";
 import { WorkRing } from "./DocIndexChip";
+import { usePopPlacement } from "./usePopPlacement";
 import { bookSyncFailed, librarySyncSummary, loadLibrarySyncResults } from "./LibrarySyncResults";
 
 /** How long a clean finish stays on screen, as the tab's Sync does. */
 const LANDED_MS = 2_500;
+/** Time to move from the button onto the notification before hover closes it. */
+const HOVER_LEAVE_MS = 220;
 
 /**
  * Home's library sync: a refresh icon on the Start row.
@@ -26,7 +29,8 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   const [open, setOpen] = useState(false), [details, setDetails] = useState(false);
   const [result, setResult] = useState(loadLibrarySyncResults), [activity, setActivity] = useState(getBookPassActivity);
   const [error, setError] = useState("");
-  const [anchor, setAnchor] = useState({ top: 0, left: 8 });
+  const [hover, setHover] = useState(false);
+  const leaveTimer = useRef(0);
   const [ranHere, setRanHere] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null), pop = useRef<HTMLDivElement>(null);
   const controller = useRef<AbortController | null>(null);
@@ -45,27 +49,17 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   }, []);
   useEffect(() => {
     if (!open) return;
-    const place = () => {
-      const rect = trigger.current?.getBoundingClientRect();
-      // The tab's notification is 280px wide; keep it on screen at the right edge.
-      if (rect) setAnchor({ top: rect.bottom + 8, left: Math.max(8, Math.min(rect.left, window.innerWidth - 288)) });
-    };
     const outside = (event: PointerEvent) => {
       if (!trigger.current?.contains(event.target as Node) && !pop.current?.contains(event.target as Node)) setOpen(false);
     };
     const escape = (event: KeyboardEvent) => {
       if (event.key === "Escape") { event.preventDefault(); setOpen(false); trigger.current?.focus(); }
     };
-    place();
     window.addEventListener("pointerdown", outside, true);
     window.addEventListener("keydown", escape);
-    window.addEventListener("resize", place);
-    window.addEventListener("scroll", place, true);
     return () => {
       window.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("keydown", escape);
-      window.removeEventListener("resize", place);
-      window.removeEventListener("scroll", place, true);
     };
   }, [open]);
 
@@ -103,6 +97,15 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
     : error ? error
     : failures.length && result ? librarySyncSummary(result)
     : result ? "synced" : "not synced";
+  // Hover (mouse or pen) shows the status without syncing; touch has no hover.
+  const visible = open || hover;
+  const enter = (event: { pointerType: string }) => {
+    if (event.pointerType === "touch") return;
+    window.clearTimeout(leaveTimer.current); setHover(true);
+  };
+  const leave = () => { window.clearTimeout(leaveTimer.current); leaveTimer.current = window.setTimeout(() => setHover(false), HOVER_LEAVE_MS); };
+  useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
+  const placed = usePopPlacement(trigger, pop, visible, `${line}|${details}|${books.length}`);
   const status = syncing ? `syncing, ${synced} synced so far` : failures.length && result ? librarySyncSummary({ time: 0, books: failures }) : result ? "all books synced" : "not synced yet";
 
   return <>
@@ -111,7 +114,7 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
       aria-label={syncing && controller.current ? `Cancel sync — ${status}` : `Sync all books — ${status}`}
       title={syncing && controller.current ? "Cancel sync" : "Sync all books"}
       aria-busy={syncing} aria-expanded={open} aria-haspopup="dialog"
-      onClick={tap}>
+      onClick={tap} onPointerEnter={enter} onPointerLeave={leave}>
       {syncing
         ? <WorkRing progress={activity.progress} count={synced} />
         : <svg className="lc-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
@@ -120,10 +123,10 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
           </svg>}
       {!syncing && failures.length > 0 && <span className="lc-library-sync-dot" aria-hidden="true" />}
     </button>
-    {open && createPortal(
+    {visible && createPortal(
       // The tab's Sync notification (`.lc-doc-sync-pop`), so both read the same.
       <div ref={pop} className="lc-doc-sync-pop lc-library-sync-pop" role="status" aria-live="polite"
-        style={{ top: anchor.top, left: anchor.left }}>
+        style={placed} onPointerEnter={enter} onPointerLeave={leave}>
         <div className="lc-doc-sync-line">{line}</div>
         {!syncing && failures.length > 0 && <>
           <button type="button" className="lc-doc-sync-index lc-library-sync-toggle" aria-expanded={details} aria-controls={listId}
