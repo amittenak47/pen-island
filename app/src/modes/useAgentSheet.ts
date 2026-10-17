@@ -49,7 +49,11 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
     // Mounting the inactive panel on a tab switch otherwise forces layout of
     // the entire PDF before the new tab can paint.
     if (!open) {
-      node.style.transform = "translate3d(0,12px,0) scale(.98)";
+      // Closed, the whole sheet waits just below the screen and slides up as
+      // one piece. It used to sit 12px down and clipped to a small pill, so
+      // opening grew a window out of the middle of the full-size panel: a
+      // cropped slice of messages and the sessions column with no sheet edge.
+      node.style.transform = "translate3d(0,100%,0)";
       node.style.visibility = "hidden";
       node.style.pointerEvents = "none";
       document.documentElement.style.setProperty("--lc-agent-open", "0");
