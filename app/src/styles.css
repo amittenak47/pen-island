@@ -11332,7 +11332,7 @@ button.lc-library-sync-row:hover { background: var(--bg); }
 
 .lc-side {
   position: absolute;
-  top: 38px;
+  top: var(--lc-header-height, 38px);
   right: 0;
   bottom: 0;
   z-index: 40;
@@ -23274,9 +23274,36 @@ html[data-corners="rounded"] {
   box-shadow: inset 0 -1px 0 var(--chrome-edge);
 }
 
+/*
+ * The tablet header is 44 px, so every cell is a full 44 px touch target.
+ * Nothing saved depends on it: ink layout and page fit follow the width, and
+ * Pages reading recuts its view-sized pages on every open anyway.
+ */
+.lc-app.lc-mobile {
+  --lc-header-height: 44px;
+}
+
 .lc-mobile .lc-header {
   --lc-rail-cell: 44px;
   padding: var(--lc-safe-top, 0px) var(--lc-safe-right, 0px) 0 var(--lc-safe-left, 0px);
+}
+
+.lc-mobile .lc-header .lc-tab .lc-tab-hit,
+.lc-mobile .lc-header .lc-header-right .lc-agent-toggle {
+  font-size: 13px;
+}
+
+.lc-mobile .lc-header .lc-header-right .lc-icon .lc-icon-svg {
+  width: 18px;
+  height: 18px;
+}
+
+.lc-mobile .lc-header .lc-tab .lc-tab-close {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  font-size: 16px;
 }
 
 .lc-android:not(.lc-mobile) .lc-header {
@@ -23327,6 +23354,12 @@ html[data-corners="rounded"] {
 .lc-header .lc-tab-row {
   align-self: stretch;
   align-items: stretch;
+  transition: flex-grow 220ms var(--lc-rail-ease);
+}
+
+/* Each tab is in its own row, so the active one's larger share goes on the row. */
+.lc-header .lc-tab-row:not(.is-group):has(> .lc-tab.is-active) {
+  flex-grow: 1.6;
 }
 
 .lc-header .lc-tab-row .lc-tab {
@@ -23487,6 +23520,7 @@ html[data-corners="rounded"] {
 
 @media (prefers-reduced-motion: reduce) {
   .lc-header .lc-header-left > .lc-brand-home,
+  .lc-header .lc-tab-row,
   .lc-header .lc-tab-row .lc-tab,
   .lc-header .lc-tab .lc-tab-hit,
   .lc-header .lc-header-right .lc-icon {
