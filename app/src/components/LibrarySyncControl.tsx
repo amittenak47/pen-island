@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { LcClient } from "../api/client";
 import type { BookIdentity } from "../util/syncState";
@@ -107,6 +107,28 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   const leave = () => { window.clearTimeout(leaveTimer.current); leaveTimer.current = window.setTimeout(() => setHover(false), HOVER_LEAVE_MS); };
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
   // Above the icon: below it the notification would sit over the Start tiles.
+  /*
+   * The card slides between widths (its text changes from "Syncing 6 of 20
+   * books" to a summary, groups fold): measure the new natural width, start
+   * from the old one, transition. CSS cannot transition between two
+   * content-sized widths by itself.
+   */
+  const lastWidth = useRef<number | null>(null);
+  useLayoutEffect(() => {
+    const el = pop.current;
+    if (!visible || !el) { lastWidth.current = null; return; }
+    el.style.transition = "none";
+    el.style.width = "";
+    const target = el.getBoundingClientRect().width;
+    const from = lastWidth.current;
+    lastWidth.current = target;
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    if (from == null || still || Math.abs(from - target) < 1) { el.style.width = `${target}px`; return; }
+    el.style.width = `${from}px`;
+    void el.offsetWidth;
+    el.style.transition = "width 200ms cubic-bezier(0.22, 1, 0.36, 1)";
+    el.style.width = `${target}px`;
+  }, [visible, line, books.length, groupOpen, syncing]);
   const placed = usePopPlacement(trigger, pop, visible, `${line}|${books.length}`, "above");
   const status = syncing ? `syncing, ${synced} synced so far` : failures.length && result ? librarySyncSummary({ time: 0, books: failures }) : result ? "all books synced" : "not synced yet";
 

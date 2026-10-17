@@ -10826,8 +10826,6 @@ body[data-lc-sash-drag="horizontal"] {
 .lc-library-sync-groups { display: grid; gap: 4px; min-width: 0; max-height: min(60dvh, 420px); overflow-y: auto; scrollbar-width: none; }
 .lc-library-sync-groups::-webkit-scrollbar { display: none; }
 .lc-library-sync-group { min-width: 0; }
-/* One width while open: groups opening and closing changed it and the card jumped. */
-.lc-doc-sync-pop.lc-library-sync-pop { width: min(280px, calc(100vw - 16px)); }
 .lc-library-sync-summary {
   display: flex;
   align-items: center;
