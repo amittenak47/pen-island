@@ -53,6 +53,12 @@ import {
   type AutosaveInterval,
 } from "./util/autosavePref";
 import { AGENT_SHEET_LOCK_EVENT, loadAgentSheetLock } from "./util/agentSheetLockPref";
+import {
+  llmFirstRunAsked,
+  loadLlmAskAtStartup,
+  markLlmFirstRunAsked,
+  saveLlmAskAtStartup,
+} from "./util/llmStartupPref";
 import { loadTestForwardMode, type TestForwardMode } from "./util/agentPrefs";
 import { installHandednessAttr } from "./util/inkHandedness";
 import { installUiHandednessAttr } from "./util/uiHandedness";
@@ -525,6 +531,7 @@ export function App() {
   const [llmDetail, setLlmDetail] = useState<string | null>(null);
   const [llmGateOpen, setLlmGateOpen] = useState(false);
   const [llmGatePhase, setLlmGatePhase] = useState<"enter" | "open" | "exit">("enter");
+  const [llmGateVariant, setLlmGateVariant] = useState<"offline" | "firstRun">("offline");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<
     "paths" | "llm" | "serve" | "datasets" | "workspace" | "agent" | undefined
@@ -632,7 +639,19 @@ export function App() {
      * answer. The boot effect opens it on the way out instead.
      */
     const noteLlm = (ok: boolean) => {
-      if (ok || llmPromptedRef.current) return;
+      if (llmPromptedRef.current) return;
+      /*
+       * The first launch on a device asks once whether to use a model at all,
+       * and only if none is reachable. After that the "offline" prompt is
+       * what shows, and only while Settings → LLM says to ask at startup.
+       */
+      const firstRun = !llmFirstRunAsked();
+      if (ok) {
+        if (firstRun) markLlmFirstRunAsked();
+        return;
+      }
+      if (!firstRun && !loadLlmAskAtStartup()) return;
+      setLlmGateVariant(firstRun ? "firstRun" : "offline");
       if (bootOverlayPendingRef.current) {
         llmGateWantedRef.current = true;
         return;
@@ -1618,14 +1637,27 @@ export function App() {
       <DialogPresence>{llmGateOpen && (
         <LlmStatusDialog
           phase={llmGatePhase}
+          variant={llmGateVariant}
           onOpenSettings={() => {
+            if (llmGateVariant === "firstRun") markLlmFirstRunAsked();
             closeLlmGate();
             setSettingsTab("llm");
             setSettingsOpen(true);
           }}
           onContinueWithout={() => {
             closeLlmGate();
+            if (llmGateVariant === "firstRun") {
+              markLlmFirstRunAsked();
+              saveLlmAskAtStartup(false);
+              setNotice("Using Pen Island without AI. Settings → LLM sets up a model whenever you want one.");
+              return;
+            }
             setNotice("Agent off — Settings → LLM when you want it back.");
+          }}
+          onStopAsking={() => {
+            closeLlmGate();
+            saveLlmAskAtStartup(false);
+            setNotice("Won't ask at startup. Settings → LLM turns it back on.");
           }}
         />
       )}</DialogPresence>

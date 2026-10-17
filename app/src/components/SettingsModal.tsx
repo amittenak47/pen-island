@@ -29,6 +29,7 @@ import { countSettingsChanges } from "../util/settingsChanges";
 import "./settingsDialog.css";
 import { SettingsSlider } from "./SettingsSlider";
 import { SettingsChoices } from "./SettingsChoices";
+import { loadLlmAskAtStartup, saveLlmAskAtStartup } from "../util/llmStartupPref";
 import { loadShowBooktabs, saveShowBooktabs, loadShowFootnoteTitles, saveShowFootnoteTitles, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes, type BooktabPosition, type BooktabFootnotes } from "../util/booktabsPref";
 import { HoldButton } from "./HoldButton";
 import { HEADER_MODES, loadHeaderModes, saveHeaderModes, type HeaderModes } from "../util/headerModesPref";
@@ -502,6 +503,7 @@ interface DevicePrefs {
   pageFit: PageFitPref;
   showBooktabs: boolean;
   showFootnoteTitles: boolean;
+  llmAskAtStartup: boolean;
   booktabPosition: BooktabPosition;
   booktabFootnotes: BooktabFootnotes;
   handedness: InkHandedness;
@@ -577,6 +579,7 @@ function loadDevicePrefs(): DevicePrefs {
     pageFit: loadPageFit(),
     showBooktabs: loadShowBooktabs(),
     showFootnoteTitles: loadShowFootnoteTitles(),
+    llmAskAtStartup: loadLlmAskAtStartup(),
     booktabPosition: loadBooktabPosition(),
     booktabFootnotes: loadBooktabFootnotes(),
     handedness: loadInkHandedness(),
@@ -627,6 +630,7 @@ function prefsEqual(a: DevicePrefs, b: DevicePrefs): boolean {
     a.pageFit === b.pageFit &&
     a.showBooktabs === b.showBooktabs &&
     a.showFootnoteTitles === b.showFootnoteTitles &&
+    a.llmAskAtStartup === b.llmAskAtStartup &&
     a.booktabPosition === b.booktabPosition &&
     a.booktabFootnotes === b.booktabFootnotes &&
     a.handedness === b.handedness &&
@@ -1004,6 +1008,7 @@ export function SettingsModal({
   const [pageFit, setPageFit] = useState<PageFitPref>(loadPageFit);
   const [showBooktabs, setShowBooktabs] = useState(loadShowBooktabs);
   const [showFootnoteTitles, setShowFootnoteTitles] = useState(loadShowFootnoteTitles);
+  const [llmAskAtStartup, setLlmAskAtStartup] = useState(loadLlmAskAtStartup);
   const [booktabPosition, setBooktabPosition] = useState(loadBooktabPosition);
   // "Same row as footnote" needs the margin; edge to edge the tabs sit on top.
   const shownPosition = booktabPosition === "beside" && pageFit !== "margin" ? "top" : booktabPosition;
@@ -1236,6 +1241,7 @@ export function SettingsModal({
     setPageFit(prefs.pageFit);
     setShowBooktabs(prefs.showBooktabs);
     setShowFootnoteTitles(prefs.showFootnoteTitles);
+    setLlmAskAtStartup(prefs.llmAskAtStartup);
     setBooktabPosition(prefs.booktabPosition);
     setBooktabFootnotes(prefs.booktabFootnotes);
     setAgentDisplay(prefs.agentDisplay);
@@ -1368,6 +1374,7 @@ export function SettingsModal({
     pageFit,
     showBooktabs,
     showFootnoteTitles,
+    llmAskAtStartup,
     booktabPosition,
     booktabFootnotes,
     handedness,
@@ -1435,6 +1442,7 @@ export function SettingsModal({
     ui: ["headerModes", "uiHandedness", "uiCorners", "startupTabs", "readingMode", "pageFit", "showBooktabs", "booktabPosition", "booktabFootnotes", "showFootnoteTitles", "agentDisplay", "notificationCards"],
     diagnostics: ["inkDisplayHz", "inkPerfOverlay", "inkPerfBar", "pdfFlickHud", "hubSyncWindowPill"],
     tests: ["testForward"],
+    llm: ["llmAskAtStartup"],
   };
   const configGroups: Record<string, (keyof LcConfig)[]> = {
     paths: ["data_json_dir", "workspace_dir"], datasets: ["dataset_dirs"], tests: ["stop_on_first_failure"],
@@ -1527,6 +1535,7 @@ export function SettingsModal({
         savePageFit(pageFit);
         saveShowBooktabs(showBooktabs);
         saveShowFootnoteTitles(showFootnoteTitles);
+        saveLlmAskAtStartup(llmAskAtStartup);
         saveBooktabPosition(booktabPosition);
         saveBooktabFootnotes(booktabFootnotes);
         saveAgentDisplayPrefs(agentDisplay);
@@ -3177,6 +3186,11 @@ export function SettingsModal({
                 </span>
               </p>
               {coachDetail && <p className="lc-settings-hint">{coachDetail}</p>}
+              <SettingsChoices className="lc-settings-choice" aria-label="Startup question">
+                <button type="button" role="switch" aria-checked={llmAskAtStartup}
+                  className={llmAskAtStartup ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                  onClick={() => setLlmAskAtStartup(!llmAskAtStartup)}><strong>Ask at startup when the model is offline</strong></button>
+              </SettingsChoices>
 
               </div>
 <div className="lc-setting-row">
