@@ -10282,10 +10282,15 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           publishPdfFilmCurrent(filmScope, savedPage);
           return;
         }
+        // Inside the page: a place saved while the page's scroll limit was
+        // wrong (past its end) would otherwise reopen on empty board.
+        const placed = typeof saved.scrollX === "number" && typeof saved.scrollY === "number"
+          ? clampPanScroll(saved.scrollX, saved.scrollY, zoom)
+          : { scrollX: saved.scrollX, scrollY: saved.scrollY };
         api.updateScene({
           appState: {
-            scrollX: saved.scrollX,
-            scrollY: saved.scrollY,
+            scrollX: placed.scrollX,
+            scrollY: placed.scrollY,
             zoom: { value: zoom },
           },
           captureUpdate: CaptureUpdateAction.NEVER,
