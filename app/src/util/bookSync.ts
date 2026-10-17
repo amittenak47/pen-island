@@ -410,6 +410,10 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
         if (remote.state === "gone" && !restoring && capture.metadata?.deletedAt === undefined && capture.state.lifecycle?.action !== "delete") throw new BookSyncError("gone", "Book deleted elsewhere; local content was kept");
         if (!capture.record && remote.record && !options.allowCreate && !capture.metadata && !capture.state.lifecycle) throw new BookSyncError("needs_choice", "This book is retained outside the active library");
         const remoteInline = remote.record ? await convertInlineBook(capture, remote.record, capture.state.changeSeq) : null;
+        // The reader chose, in Retained copies, between this exact hub record's
+        // own disagreeing inline handwriting and saved pages. That choice wins
+        // over it; a different (newer) hub record is compared afresh.
+        const choseOverHub = !!remote.record_hash && capture.state.inlineChoiceHubHash === remote.record_hash;
         const remoteLogicalHash = remoteInline?.converted ? await recordHash(remoteInline.record) : remote.record_hash;
         const recordLocalHash = effectiveCapture.record ? await recordHash(effectiveCapture.record) : null;
         let recordClass: Classification = deleting ? "skip" : restoring && remote.state === "gone" && capture.record ? "upload" : classifyBookItem(recordLocalHash, capture.state.baseRecordLocalHash, remoteLogicalHash, remote.record_rev, capture.state.recordRev);
@@ -471,6 +475,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           for (const [identity, page] of virtual) if (remotePages.get(identity)!.rev !== 0) {
             const shard = await load(remotePages.get(identity)!);
             if (shard.localHash !== page.localHash) {
+              if (choseOverHub) { virtual.delete(identity); continue; }
               const saved: InkPageRecord[] = [];
               for (const item of vector(remote)) saved.push((await load(item)).row);
               await prepareDependencies(client, capture, remote.record, false, options, signal);
@@ -521,6 +526,13 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           downloads.push(...await Promise.all(downloadTasks.map(work => work())));
           const lifecycleConflict = !!capture.state.lifecycle && ((capture.state.lifecycle.action === "delete" && capture.state.lifecycle.baseBookRev !== remote.book_rev)
             || restoring && remote.state === "gone" && capture.state.lifecycle.baseBookRev !== remote.book_rev);
+          if ((recordClass === "conflict" || conflicts.length) && !lifecycleConflict && choseOverHub) {
+            // Already chosen in Retained copies: commit the local version.
+            const chosen: BookConflict = { capture, remote, record: recordClass === "conflict", lifecycle: false, pages: conflicts, loadPage: load };
+            await applyChoices(client, chosen, { record: "local", artifacts: "local",
+              pages: conflicts.map(page => ({ key: page.key, pageId: page.page_id, choice: "local" as const })) }, local, options, signal);
+            continue;
+          }
           if (recordClass === "conflict" || conflicts.length || lifecycleConflict) {
             if (!options.manual || !options.requestChoice) throw new BookSyncError("needs_choice", "Open this book and choose the version to keep", conflicts.map(page=>({key:page.key,pageId:page.page_id})),
               { record:recordClass, lifecycle:lifecycleConflict, dependencies:[...dependencyConflicts] });

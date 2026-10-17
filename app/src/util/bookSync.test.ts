@@ -14,7 +14,7 @@ import { inkPageKey } from "./inkPageStore";
 import { resetBookCoordinatorForTests } from "./bookCoordinator";
 import { resetLocalBookStoreForTests } from "./localBookStore";
 import { getBookSyncState } from "./syncState";
-import { encodeInkOps, packEncodedInk, type EncodedInk } from "../canvas/inkCodec";
+import { encodeInkOps, packEncodedInk, unpackEncodedInk, type EncodedInk } from "../canvas/inkCodec";
 import { recordHash, validateInk } from "./syncContent";
 import { b64ToBytes, bytesToB64 } from "../api/nativeHttp";
 import { bookFailureMessage } from "./bookSyncMessages";
@@ -434,6 +434,25 @@ describe("modern current-state book sync", () => {
     expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("synced");
     expect((await encodedFromRecord((await getInkPageRecord("wb:book", 1))!))!.ops[0]!.c).toBe(choice === "pages" ? "#0000aa" : "#aa0000");
     expect((await listRecoveryCopies()).some(copy => copy.id === selected.id)).toBe(true);
+  });
+  it.each(["pages", "inline"] as const)("a hub whose own inline ink and pages differ syncs the restored %s choice over it", async choice => {
+    await remoteRecord("Legacy book");
+    remote.record = { ...remote.record!, board: { ...board, inkC: JSON.parse(JSON.stringify(drawing("#aa0000"))) } };
+    remote.record_hash = await recordHash(remote.record);
+    await remotePage(1, drawing("#0000aa"));
+    expect((await syncBook(api, "whiteboard", "book", undefined, { ...options, allowCreate: true })).status).toBe("needs_choice");
+    expect(api.commitPad).not.toHaveBeenCalled();
+    const copies = await listRecoveryCopies();
+    const selected = copies.find(copy => copy.provenance.source === (choice === "pages" ? "legacy-saved-page-choice" : "legacy-inline-page-choice"))!;
+    await restoreRetainedRecord(selected.id);
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("synced");
+    expect((remote.record!.board as Record<string, unknown>).inkC).toBeUndefined();
+    const hubPage = pages.get(pageKey("book", 1))!;
+    const hubInk = unpackEncodedInk((await validateInk(b64ToBytes(hubPage.gz!))).packed);
+    expect(hubInk!.ops[0]!.c).toBe(choice === "pages" ? "#0000aa" : "#aa0000");
+    const before = (await listRecoveryCopies()).length;
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).not.toBe("needs_choice");
+    expect((await listRecoveryCopies()).length).toBe(before);
   });
   it("a recovered older receipt cannot regress an already published baseline", async () => {
     await initial(); const captured = await captureBook({ kind: "whiteboard", id: "book" });

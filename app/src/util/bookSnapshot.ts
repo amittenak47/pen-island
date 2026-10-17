@@ -115,8 +115,8 @@ function readCapture(tx: IDBTransaction, owner: BookIdentity, done: (capture: Bo
       for (const request of [meta, payload, state, ...pages]) request.onsuccess = loaded;
 }
 
-function retainedRecord(capture: BookCapture, id: string, source: string) {
-  return { id, type: "record", kind: capture.kind, bookId: capture.id, provenance: { source },
+function retainedRecord(capture: BookCapture, id: string, source: string, hubRecordHash?: string) {
+  return { id, type: "record", kind: capture.kind, bookId: capture.id, provenance: hubRecordHash ? { source, hubRecordHash } : { source },
     record: { meta: capture.metadata ?? { kind: capture.kind, id: capture.id }, payload: capture.payload ?? {},
       children: capture.children, ink: capture.pages, wire: capture.record } };
 }
@@ -128,10 +128,14 @@ export async function retainInlineChoices(capture: BookCapture, converted: Recor
     children: converted.footnote_boards as BookCapture["children"] ?? capture.children };
   const replaced = new Map(saved.map(page => [pageIdentity(page.docKey, page.pageId), page]));
   for (const page of inline) replaced.set(pageIdentity(page.docKey, page.pageId), page);
-  const fingerprint = await hashBytes(new TextEncoder().encode(JSON.stringify({ original, saved, inline })));
+  // The hub's own record disagreeing with its pages: name the copies after
+  // that record, so a retry before anyone chooses keeps one pair, not a pair
+  // per attempt, and a restored choice can tell sync which record it beats.
+  const hubRecordHash = original && original !== capture.record ? await recordHash(original) : undefined;
+  const fingerprint = hubRecordHash ? `hub-${hubRecordHash}` : await hashBytes(new TextEncoder().encode(JSON.stringify({ original, saved, inline })));
   const key = `inline-choice:${capture.kind}:${capture.id}:${fingerprint}`;
-  const copies = [retainedRecord({ ...candidate, pages: saved }, `${key}:pages`, "legacy-saved-page-choice"),
-    retainedRecord({ ...candidate, pages: [...replaced.values()] }, `${key}:inline`, "legacy-inline-page-choice")];
+  const copies = [retainedRecord({ ...candidate, pages: saved }, `${key}:pages`, "legacy-saved-page-choice", hubRecordHash),
+    retainedRecord({ ...candidate, pages: [...replaced.values()] }, `${key}:inline`, "legacy-inline-page-choice", hubRecordHash)];
   await withBookWrite(capture.kind, capture.id, () => withTransaction<void>(
     [STORE_BOOK_META, STORE_CONTENT, STORE_PROBLEM_BOARDS, STORE_INK_PAGES, STORE_SYNC_STATE, STORE_SYNC_RECOVERY], "readwrite", (tx, done) => {
       readCapture(tx, capture, actual => {

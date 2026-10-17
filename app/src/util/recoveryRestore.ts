@@ -90,6 +90,10 @@ export async function restoreRetainedRecord(id: string): Promise<BookIdentity> {
       deleteAcked: false, updatedAt: Date.now(), lastTouch: Date.now(), syncSeq: Math.max(Number(record.meta.syncSeq ?? 0), ctx.state.lifecycle?.seq ?? 0) + 1 };
     ctx.setMetadata(metadata);
     ctx.setContent(owner.kind === "problem" ? { ...metadata, ...record.payload } : record.payload);
+    // A choice between the hub's own disagreeing versions: the next sync
+    // commits it over that hub record (see `inlineChoiceHubHash`).
+    const hubRecordHash = (copy.provenance as { hubRecordHash?: unknown } | undefined)?.hubRecordHash;
+    if (typeof hubRecordHash === "string") ctx.setState({ ...ctx.state, inlineChoiceHubHash: hubRecordHash });
     for (const [childId, child] of Object.entries(record.children ?? {})) ctx.tx.objectStore(STORE_CONTENT).put(child, `fnwb:${owner.id}:${childId}`);
     if (record.ink) for (const page of restoreInk) ctx.tx.objectStore(STORE_INK_PAGES).put({ ...page,
       changeSeq: ctx.seq, syncedChangeSeq: 0, syncedRev: 0, baseWireHash: null, baseLocalHash: null, bootstrap: true, dirty: true },

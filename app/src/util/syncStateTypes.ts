@@ -24,6 +24,13 @@ export interface SyncState extends BookIdentity {
     pages: Array<{ key: string; pageId: number; capturedSeq: number; wireHash: string; localHash: string }>;
     lifecycleToken: string | null;
   };
+  /**
+   * The hub record a Retained copies choice was made against, when the hub's
+   * own inline handwriting and saved pages disagreed. While the hub still
+   * holds that exact record, sync commits the chosen local version over it
+   * instead of asking again.
+   */
+  inlineChoiceHubHash?: string | null;
 }
 
 export const syncStateKey = (kind: PadKind, id: string): string => `${kind}:${id}`;
