@@ -9,6 +9,8 @@ import { APP_THEMES, type AppTheme } from "../theme/appThemes";
 
 export interface BackgroundPaletteProps {
   themeId: string;
+  /** Caption and accessible group name for the inline palette. */
+  label?: string;
   onPick: (id: string) => void;
   /** `inline` in the browser footer; `compact`/`header`/`map` are popovers. */
   variant?: "inline" | "compact" | "header" | "map";
@@ -17,7 +19,7 @@ export interface BackgroundPaletteProps {
 const LIGHT_THEMES = APP_THEMES.filter((theme) => theme.mode === "light");
 const DARK_THEMES = APP_THEMES.filter((theme) => theme.mode === "dark");
 
-export function BackgroundPalette({ themeId, onPick, variant = "compact" }: BackgroundPaletteProps) {
+export function BackgroundPalette({ themeId, onPick, variant = "compact", label = "Theme" }: BackgroundPaletteProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const current = APP_THEMES.find((theme) => theme.id === themeId) ?? APP_THEMES[0];
@@ -39,8 +41,8 @@ export function BackgroundPalette({ themeId, onPick, variant = "compact" }: Back
 
   if (variant === "inline") {
     return (
-      <div className="lc-bg-palette lc-bg-palette-inline" role="group" aria-label="Theme">
-        <span className="lc-bg-palette-label">Theme</span>
+      <div className="lc-bg-palette lc-bg-palette-inline" role="group" aria-label={label}>
+        <span className="lc-bg-palette-label">{label}</span>
         <div className="lc-bg-palette-swatches">
           {APP_THEMES.map((theme) => (
             <Swatch

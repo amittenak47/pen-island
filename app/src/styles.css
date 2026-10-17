@@ -9270,69 +9270,39 @@ body[data-lc-sash-drag="horizontal"] {
   min-width: 0;
   min-height: 0;
   background: var(--bg);
+  container-type: inline-size;
 }
 
-/* ---- top bar ---- */
-
-.lc-explore-bar {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
+/* The floating key reserves only its corner in the painter. The narrow strip
+ * gets its own grid row, leaving the measured map above it unobscured. */
+.lc-explore-stage {
+  --lc-explore-hit: 30px;
+  --lc-explore-columns: 220px minmax(0, 1fr);
+  --lc-explore-map-column: 1 / -1;
+  --lc-explore-map-row: 2 / 4;
+  --lc-explore-key-column: 1;
+  --lc-explore-key-columns: minmax(0, 1fr);
+  --lc-explore-option-columns: minmax(0, 1fr);
+  --lc-explore-key-animation: lc-explore-key-in;
+  --lc-explore-map-animation: lc-explore-map-in;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--lc-explore-columns);
+  grid-template-rows: 34px minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--chrome-edge) 60%, transparent);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-}
-
-/*
- * Filters scroll rather than wrap. A wrapping row changes the bar's height,
- * which moves the canvas under the reader's finger every time they narrow the
- * view; in a split pane it would do that constantly.
- */
-.lc-explore-filters {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: hidden;
 }
 
-.lc-explore-filters::-webkit-scrollbar {
-  display: none;
-}
-
-.lc-explore-chip {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 6px;
-  height: 28px;
-  padding: 0 11px;
-  border-radius: 999px;
-  border: 1px solid var(--chrome-edge);
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.lc-explore-chip:hover {
-  color: var(--ink);
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--chrome-edge));
-}
-
-.lc-explore-chip.is-active {
-  color: var(--ink);
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+.lc-explore-graph {
+  position: relative;
+  grid-column: var(--lc-explore-map-column);
+  grid-row: var(--lc-explore-map-row);
+  min-width: 0;
+  min-height: 0;
 }
 
 .lc-explore-chip-dot {
@@ -9342,74 +9312,243 @@ body[data-lc-sash-drag="horizontal"] {
   flex: 0 0 auto;
 }
 
-.lc-explore-chip-count {
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ink) 10%, transparent);
+.lc-explore-legend {
+  grid-column: var(--lc-explore-key-column);
+  grid-row: 3;
+  z-index: 6;
+  min-width: 0;
+  padding: 10px 8px 6px;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  background: var(--panel);
+  color: var(--muted);
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
+}
+
+.lc-explore-legend-caption {
+  padding: 0 8px 8px;
+  color: var(--hint);
   font-size: 10px;
-  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
 }
 
-.lc-explore-chip.is-active .lc-explore-chip-count {
-  background: color-mix(in srgb, var(--accent) 26%, transparent);
+.lc-explore-legend-kinds {
+  display: grid;
+  grid-template-columns: var(--lc-explore-key-columns);
+  gap: 2px;
+  overflow-x: auto;
 }
 
-.lc-explore-search {
+.lc-explore-legend-kind,
+.lc-explore-group {
   display: flex;
   align-items: center;
-  flex: 0 1 15rem;
-  gap: 6px;
-  min-width: 7rem;
-  margin-left: auto;
-  height: 28px;
+  gap: 8px;
+  min-width: 0;
+  min-height: var(--lc-explore-hit);
   padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--chrome-edge);
+  border: 0;
+  border-radius: var(--lc-r-block);
   background: transparent;
+  box-shadow: inset 2px 0 0 transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+.lc-explore-legend-kind[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--lc-kind-tint) 13%, transparent);
+  box-shadow: inset 2px 0 0 var(--lc-kind-tint);
+  color: var(--ink);
+}
+
+.lc-explore-legend-kind:hover,
+.lc-explore-group:hover {
+  color: var(--ink);
+}
+
+.lc-explore-legend :is(button, .lc-swatch):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.lc-explore-legend-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--lc-kind-tint);
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.lc-explore-legend-kinds:has([aria-pressed="true"]) [aria-pressed="false"] .lc-explore-legend-dot {
+  opacity: 0.5;
+}
+
+.lc-explore-legend-count {
+  display: inline-grid;
+  justify-items: end;
+  width: 5ch;
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--hint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transition: color 160ms ease;
+}
+
+.lc-explore-legend-count > span {
+  animation: lc-explore-count-in 160ms ease both;
+}
+
+.lc-explore-legend-kind[aria-pressed="true"] .lc-explore-legend-count {
   color: var(--muted);
 }
 
-.lc-explore-search:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  color: var(--ink);
+.lc-explore-legend-options {
+  display: grid;
+  grid-template-columns: var(--lc-explore-option-columns);
+  align-items: center;
+  gap: 2px;
+  margin-top: 8px;
+  padding-top: 4px;
+  border-top: 1px solid var(--chrome-edge);
 }
 
-.lc-explore-search input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-  outline: none;
+.lc-explore-group {
+  justify-content: space-between;
 }
 
-.lc-explore-search input::-webkit-search-cancel-button {
-  display: none;
-}
-
-.lc-explore-search-clear {
+.lc-explore-switch {
+  width: 32px;
+  height: 20px;
+  padding: 3px;
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--ink) 12%, transparent);
-  color: var(--ink);
-  font-size: 12px;
-  line-height: 1;
-  cursor: pointer;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  transition: background-color 160ms ease, border-color 160ms ease;
 }
 
-/* ---- stage ---- */
+.lc-explore-switch > span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--hint);
+  transition: transform 160ms ease, background-color 160ms ease;
+}
 
-.lc-explore-stage {
-  position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
+.lc-explore-group[aria-checked="true"] .lc-explore-switch {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.lc-explore-group[aria-checked="true"] .lc-explore-switch > span {
+  transform: translateX(12px);
+  background: var(--accent);
+}
+
+.lc-explore-legend .lc-bg-palette-inline {
+  width: auto;
+  min-width: 0;
+  gap: 4px;
+  margin: 0;
+  padding: 0 0 0 8px;
+  border: 0;
+}
+
+.lc-explore-legend .lc-bg-palette-swatches {
+  flex: 1;
+  flex-wrap: nowrap;
+  gap: 0;
+  min-width: 0;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+/* All theme choices remain available by scrolling; the dots keep full targets. */
+.lc-explore-legend .lc-bg-palette .lc-swatch {
+  width: var(--lc-explore-hit);
+  height: var(--lc-explore-hit);
+  min-width: var(--lc-explore-hit);
+  min-height: var(--lc-explore-hit) !important;
+  padding: calc((var(--lc-explore-hit) - 16px) / 2);
+  background-clip: content-box;
+  border: 1px solid transparent;
+  border-radius: var(--lc-r-block);
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+.lc-explore-legend .lc-bg-palette .lc-swatch-active {
+  border-color: var(--accent);
+}
+
+.lc-explore.is-showing .lc-explore-legend {
+  animation: var(--lc-explore-key-animation) 180ms ease both;
+}
+
+.lc-explore.is-showing .lc-explore-graph {
+  animation: var(--lc-explore-map-animation) 180ms ease both;
+}
+
+@keyframes lc-explore-key-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Separate names replay the brief fade when crossing the strip breakpoint. */
+@keyframes lc-explore-strip-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes lc-explore-map-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes lc-explore-strip-map-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes lc-explore-count-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Container width also handles Explore in a narrow desktop split pane. */
+@container (max-width: 839px) {
+  .lc-explore-stage {
+    --lc-explore-hit: 44px;
+    --lc-explore-columns: minmax(0, 1fr);
+    --lc-explore-map-column: 1;
+    --lc-explore-map-row: 2;
+    --lc-explore-key-column: 1;
+    --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
+    --lc-explore-option-columns: minmax(140px, 0.4fr) minmax(0, 1fr);
+    --lc-explore-key-animation: lc-explore-strip-in;
+    --lc-explore-map-animation: lc-explore-strip-map-in;
+    grid-template-rows: 46px minmax(0, 1fr) auto;
+  }
+}
+
+.lc-mobile .lc-explore-stage {
+  --lc-explore-hit: 44px;
+  --lc-explore-columns: minmax(0, 1fr);
+  --lc-explore-map-column: 1;
+  --lc-explore-map-row: 2;
+  --lc-explore-key-column: 1;
+  --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
+  --lc-explore-option-columns: minmax(140px, 0.4fr) minmax(0, 1fr);
+  --lc-explore-key-animation: lc-explore-strip-in;
+  --lc-explore-map-animation: lc-explore-strip-map-in;
+  grid-template-rows: 46px minmax(0, 1fr) auto;
 }
 
 .lc-explore-chrome-slot:empty {
@@ -9440,6 +9579,19 @@ body[data-lc-sash-drag="horizontal"] {
   background: transparent;
   border-radius: var(--lc-r-block);
   min-height: 32px;
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.lc-mobile .lc-explore-chrome-tools .lc-lined-toggle {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (max-width: 839px) {
+  .lc-explore-chrome-tools .lc-lined-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -9452,127 +9604,45 @@ body[data-lc-sash-drag="horizontal"] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.lc-explore-chrome {
-  position: absolute;
-  top: auto;
-  right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  left: auto;
-  z-index: 4;
-  overflow: visible;
-}
-
-.lc-explore-chrome .lc-map-chrome-stack {
-  flex-direction: inherit;
-  align-items: stretch;
-}
-
-.lc-explore-chrome .lc-palette-popover-map {
-  bottom: calc(100% + 6px);
-  left: auto;
-  right: 0;
-  top: auto;
-}
-
-/*
- * Catalog-style find bar. Same clip-and-slide as the agent panel, turned
- * vertical so it unfolds into the top of the frame.
- */
 .lc-explore-find {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  right: 12px;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  justify-self: end;
   z-index: 6;
   display: flex;
   align-items: center;
-  gap: 2px;
-  min-height: 32px;
-  padding: 2px 6px 2px 4px;
+  width: min(280px, 100%);
+  min-width: 0;
+  min-height: var(--lc-explore-hit);
+  padding: 0 2px 0 10px;
   border: 1px solid var(--chrome-edge);
-  border-radius: max(8px, var(--lc-r-round));
-  background: var(--bg);
+  border-radius: var(--lc-r-block);
+  background: var(--panel);
   color: var(--ink);
-  transform: translateY(-8px);
-  clip-path: inset(0 0 100% 0);
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 240ms;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.lc-explore-find.is-open {
-  transform: translateY(0);
-  clip-path: inset(0);
-  visibility: visible;
-  pointer-events: auto;
+.lc-explore.is-showing .lc-explore-find {
+  animation: lc-explore-search-in 180ms ease both;
+}
+
+@keyframes lc-explore-search-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .lc-explore-find:focus-within {
   border-color: var(--accent);
 }
 
-.lc-explore-find-kinds {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  flex-shrink: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.lc-explore-find-kinds::-webkit-scrollbar {
-  display: none;
-}
-
-.lc-explore-find-kinds button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 22px;
-  min-height: 0;
-  padding: 0 6px;
-  border: 0;
-  border-radius: max(4px, var(--lc-r-round));
-  background: transparent;
-  box-shadow: none;
-  color: var(--hint);
-  font: inherit;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.lc-explore-find-kinds button:hover,
-.lc-explore-find-kinds button:focus-visible {
-  color: var(--ink);
-  background: transparent;
-}
-
-.lc-explore-find-kinds button.is-filter {
-  color: var(--accent);
-  box-shadow: inset 0 -2px 0 currentColor;
-}
-
-.lc-explore-find-field {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-  margin-left: 4px;
-  padding-right: 4px;
-  border-left: 1px solid color-mix(in srgb, var(--chrome-edge) 70%, transparent);
-}
-
 .lc-explore-find input {
   flex: 1;
+  align-self: stretch;
   min-width: 0;
   min-height: 0;
   margin: 0;
   padding: 4px 6px;
   border: 0;
-  border-radius: calc(var(--lc-r-block) - 2px);
   background: transparent;
   color: inherit;
   font: inherit;
@@ -9592,11 +9662,29 @@ body[data-lc-sash-drag="horizontal"] {
   display: none;
 }
 
-.lc-explore-find .lc-explore-search-clear {
+.lc-explore-search-clear {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin: 0 4px 0 0;
+  width: var(--lc-explore-hit);
+  height: var(--lc-explore-hit);
+  min-height: var(--lc-explore-hit);
+  padding: 0;
+  border: 0;
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  visibility: hidden;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 160ms;
+}
+
+.lc-explore-search-clear.is-visible {
+  opacity: 1;
+  transform: scale(1);
+  visibility: visible;
 }
 
 .lc-explore-empty {
@@ -9689,6 +9777,17 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .lc-explore.is-showing .lc-explore-legend,
+  .lc-explore.is-showing .lc-explore-graph,
+  .lc-explore.is-showing .lc-explore-find,
+  .lc-explore-legend *,
+  .lc-explore-find *,
+  .lc-explore-chrome-tools .lc-lined-toggle {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .lc-explore-legend,
   .lc-explore-cluster-label,
   .lc-explore-find,
   .lc-explore-node,

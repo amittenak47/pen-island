@@ -165,7 +165,6 @@ export function ExploreWorkspace({
   const [frozenLabels, setFrozenLabels] = useState<
     Array<{ type: NodeType; label: string; x: number; y: number }>
   >([]);
-  const [searchOpen, setSearchOpen] = useState(false);
   /** Nodes a filter just hid, kept mounted long enough to fade out. */
   const [leaving, setLeaving] = useState<Body[]>([]);
   /** Bumped when the loop wants the labels redrawn, which is not every frame. */
@@ -180,6 +179,10 @@ export function ExploreWorkspace({
   }, []);
 
   const hostRef = useRef<HTMLDivElement | null>(null);
+  const legendRef = useRef<HTMLElement | null>(null);
+  const labelElsRef = useRef(new Map<NodeType, HTMLSpanElement>());
+  const labelSpotsRef = useRef(frozenLabels);
+  labelSpotsRef.current = frozenLabels;
   /** Edges by id, for the paint loop, which must not depend on React state. */
   const edgeIndexRef = useRef(new Map<string, Edge>());
   const edgeBowsRef = useRef(new Map<string,EdgeBow>());
@@ -205,9 +208,7 @@ export function ExploreWorkspace({
   clusteredRef.current = clustered;
   const clusterReadyRef = useRef(clustered);
   clusterReadyRef.current = clusterReady;
-  const chromeRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
-  const findRef = useRef<HTMLFormElement | null>(null);
   const leaveStampRef = useRef(0);
   const [chromeHost, setChromeHost] = useState<HTMLElement | null>(null);
   const [inBoardStack, setInBoardStack] = useState(false);
@@ -226,6 +227,16 @@ export function ExploreWorkspace({
     y: number;
     moved: boolean;
   } | null>(null);
+
+  /*
+   * The map is laid out over the whole stage, as before the key existed: the
+   * key floats over its corner like the tray did. Squeezing the map beside it
+   * bent the drift and the node layout there.
+   */
+  const graphPoint = useCallback((x: number, y: number) => {
+    const { w, h } = boxRef.current;
+    return { x: x * w, y: y * h, inset: 0 };
+  }, []);
 
   useEffect(() => {
     edgeIndexRef.current = new Map(edges.map((edge) => [edge.id, edge]));
@@ -317,6 +328,7 @@ export function ExploreWorkspace({
       const box = host.getBoundingClientRect();
       const first = boxRef.current.w === 0 || boxRef.current.h === 0;
       boxRef.current = { w: box.width, h: box.height };
+      paintRef.current();
       wakeRef.current();
       /*
        * Re-settle the first time the box is real.
@@ -343,6 +355,7 @@ export function ExploreWorkspace({
     if (typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(read);
     observer.observe(host);
+    if (legendRef.current) observer.observe(legendRef.current);
     return () => observer.disconnect();
   }, []);
 
@@ -360,8 +373,7 @@ export function ExploreWorkspace({
     const renderer=graphRendererRef.current;
     const positions:GraphNodePosition[]=[];
     for (const body of bodiesRef.current) {
-      const x = body.x * w;
-      const y = body.y * h;
+      const { x, y } = graphPoint(body.x, body.y);
       at.set(body.key, { x, y, vx:body.vx*w, vy:body.vy*h });
       if(renderer){positions.push({id:body.key,x,y});continue;}
       const el = nodeElsRef.current.get(body.key);
@@ -374,8 +386,16 @@ export function ExploreWorkspace({
       }
     }
     for(const body of leavingRef.current) if(!at.has(body.key)) {
-      at.set(body.key,{x:body.x*w,y:body.y*h,vx:0,vy:0});
-      if(renderer)positions.push({id:body.key,x:body.x*w,y:body.y*h});
+      const { x, y } = graphPoint(body.x, body.y);
+      at.set(body.key,{x,y,vx:0,vy:0});
+      if(renderer)positions.push({id:body.key,x,y});
+    }
+    for (const spot of labelSpotsRef.current) {
+      const el = labelElsRef.current.get(spot.type);
+      if (!el) continue;
+      const point = graphPoint(spot.x, spot.y);
+      el.style.left = `${point.x}px`;
+      el.style.top = `${point.y}px`;
     }
     const boxKey=`${w}:${h}`;
     if(edgeBoxRef.current!==boxKey){edgeBowsRef.current.clear();edgeBoxRef.current=boxKey;}
@@ -418,7 +438,7 @@ export function ExploreWorkspace({
         disableWebGL();paintRef.current();
       }
     }
-  }, [disableWebGL]);
+  }, [disableWebGL, graphPoint]);
 
   paintRef.current = paint;
 
@@ -532,7 +552,7 @@ export function ExploreWorkspace({
       timer = 0;
       frame = requestAnimationFrame(tick);
     };
-    const host = hostRef.current;
+    const host = hostRef.current?.parentElement;
     const onDown = (event: PointerEvent) => {
       pressed.add(event.pointerId);
       wakeRef.current();
@@ -661,26 +681,6 @@ export function ExploreWorkspace({
   }, [clustered]);
 
   useEffect(() => {
-    if (!searchOpen) return;
-    const onPointer = (event: PointerEvent) => {
-      const target = event.target as Node;
-      if (chromeRef.current?.contains(target) || findRef.current?.contains(target)) return;
-      setSearchOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointer);
-    return () => document.removeEventListener("pointerdown", onPointer);
-  }, [searchOpen]);
-
-  useEffect(() => {
-    if (searchOpen) searchInputRef.current?.focus();
-  }, [searchOpen]);
-
-  useEffect(() => {
-    if (active) return;
-    setSearchOpen(false);
-  }, [active]);
-
-  useEffect(() => {
     if (!showing) {
       setChromeHost(null);
       setInBoardStack(false);
@@ -730,7 +730,9 @@ export function ExploreWorkspace({
 
   const nodeRect = (key:string):DOMRect|null => {
     const body=bodiesRef.current.find(body=>body.key===key),box=hostRef.current?.getBoundingClientRect();
-    return body && box ? new DOMRect(box.left+body.x*box.width-20,box.top+body.y*box.height-20,40,40) : null;
+    if (!body || !box) return null;
+    const point = graphPoint(body.x, body.y);
+    return new DOMRect(box.left+point.x-20,box.top+point.y-20,40,40);
   };
   const select = (node: NodeRef, el: HTMLElement | null) => {
     setSheetFrom(graphRendererRef.current ? nodeRect(nodeKey(node)) : el?.getBoundingClientRect() ?? null);
@@ -739,7 +741,10 @@ export function ExploreWorkspace({
   const hitNode = (clientX:number,clientY:number):Body|undefined => {
     const box=hostRef.current?.getBoundingClientRect();if(!box)return;
     const x=clientX-box.left,y=clientY-box.top;
-    return [...bodiesRef.current].reverse().find(body=>Math.abs(body.x*box.width-x)<=20 && Math.abs(body.y*box.height-y)<=20);
+    return [...bodiesRef.current].reverse().find(body => {
+      const point = graphPoint(body.x, body.y);
+      return Math.abs(point.x-x)<=20 && Math.abs(point.y-y)<=20;
+    });
   };
 
   const placeDragged = (key: string, clientX: number, clientY: number) => {
@@ -748,8 +753,9 @@ export function ExploreWorkspace({
     if (!host || !body) return;
     const box = host.getBoundingClientRect();
     if (box.width < 1 || box.height < 1) return;
-    body.x = Math.min(1 - EDGE_PAD, Math.max(EDGE_PAD, (clientX - box.left) / box.width));
     body.y = Math.min(1 - EDGE_PAD, Math.max(EDGE_PAD, (clientY - box.top) / box.height));
+    const { inset } = graphPoint(0, body.y);
+    body.x = Math.min(1 - EDGE_PAD, Math.max(EDGE_PAD, (clientX - box.left - inset) / (box.width - inset)));
     body.vx = 0;
     body.vy = 0;
     paint();
@@ -763,23 +769,7 @@ export function ExploreWorkspace({
     >
       <div data-morph-id="idle" />
       <div data-morph-id="tools">
-        <div className="lc-explore-chrome-tools" ref={chromeRef}>
-          <button
-            type="button"
-            className={
-              searchOpen || query.trim() || kinds.length > 0
-                ? "lc-lined-toggle lc-tip-target is-active"
-                : "lc-lined-toggle lc-tip-target"
-            }
-            aria-pressed={searchOpen}
-            aria-label={searchOpen ? "Hide search" : "Find a workspace"}
-            data-tip={searchOpen ? "Hide search" : "Find"}
-            data-tip-placement="top"
-            onClick={() => setSearchOpen((open) => !open)}
-          >
-            <SearchIcon />
-          </button>
-
+        <div className="lc-explore-chrome-tools">
           <button
             type="button"
             className={
@@ -800,90 +790,83 @@ export function ExploreWorkspace({
     </MorphBar>
   );
 
-  const exploreChrome = inBoardStack ? (
-    exploreTools
-  ) : (
-    <div className="lc-map-controls lc-map-controls-paged">
-      <div className="lc-map-chrome-right">
-        <div className="lc-map-chrome-stack" role="toolbar" aria-label="Atlas view">
-          {exploreTools}
-          <BackgroundPalette variant="map" themeId={themeId} onPick={onThemePick} />
-        </div>
-      </div>
-    </div>
-  );
+  // Counts describe the catalog, so filtering a kind never erases its count.
+  const kindCounts = new Map<NodeType, number>();
+  for (const node of nodes) kindCounts.set(node.type, (kindCounts.get(node.type) ?? 0) + 1);
 
   return (
-    <div className={webglGraph ? "lc-explore is-webgl" : "lc-explore"}>
-      {/*
-        Searching inside the documents, above the map of them.
-        
-        The strip below finds nodes by title; this finds passages by meaning.
-        They are different questions and deserve different controls — "which
-        note is called gradients" and "which of my books talks about
-        gradients" have almost nothing to do with each other.
-      */}
-      <div className="lc-explore-stage" ref={hostRef}>
-        <form
-          ref={findRef}
-          className={searchOpen ? "lc-explore-find is-open" : "lc-explore-find"}
-          onSubmit={(event) => event.preventDefault()}
-        >
-          <div className="lc-explore-find-kinds" role="group" aria-label="Filter by kind">
-            {CLUSTERS.map((cluster) => {
-              const on = kinds.includes(cluster.type);
-              return (
-                <button
-                  key={cluster.type}
-                  type="button"
-                  className={on ? "is-filter" : undefined}
-                  aria-pressed={on}
-                  aria-label={cluster.label}
-                  onClick={() => toggleKind(cluster.type)}
-                >
-                  <span className="lc-explore-chip-dot" style={{ background: TINT[cluster.type] }} />
-                  {KIND_SHORT[cluster.type]}
-                </button>
-              );
-            })}
-          </div>
-          <div className="lc-explore-find-field">
-            <input
-              ref={searchInputRef}
-              type="search"
-              value={queryDraft}
-              placeholder="Search catalog"
-              aria-label="Find a workspace by title"
-              tabIndex={searchOpen ? 0 : -1}
-              onChange={(event) => {
-                setQueryDraft(event.target.value);
-                setQuery(event.target.value);
-              }}
-            />
-            {queryDraft ? (
+    <div className={`${webglGraph ? "lc-explore is-webgl" : "lc-explore"}${showing ? " is-showing" : ""}`}>
+      <div className="lc-explore-stage">
+        <aside className="lc-explore-legend" ref={legendRef} aria-label="Map legend">
+          <div className="lc-explore-legend-caption">Key · click to filter</div>
+          <div className="lc-explore-legend-kinds" role="group" aria-label="Filter by kind">
+            {CLUSTERS.map((cluster) => (
               <button
+                key={cluster.type}
                 type="button"
-                className="lc-explore-search-clear"
-                aria-label="Clear the search"
-                tabIndex={searchOpen ? 0 : -1}
-                onClick={() => {
-                  setQueryDraft("");
-                  setQuery("");
-                  searchInputRef.current?.focus();
-                }}
+                className="lc-explore-legend-kind"
+                style={{ ["--lc-kind-tint" as string]: TINT[cluster.type] }}
+                aria-pressed={kinds.includes(cluster.type)}
+                aria-label={cluster.label}
+                onClick={() => toggleKind(cluster.type)}
               >
-                ×
+                <span className="lc-explore-legend-dot" aria-hidden />
+                <span>{KIND_SHORT[cluster.type]}</span>
+                <span className="lc-explore-legend-count">
+                  <span key={kindCounts.get(cluster.type) ?? 0}>{kindCounts.get(cluster.type) ?? 0}</span>
+                </span>
               </button>
-            ) : null}
-            <span className="lc-explore-find-glass" aria-hidden>
-              <SearchIcon />
-            </span>
+            ))}
           </div>
+          <div className="lc-explore-legend-options">
+            <button type="button" className="lc-explore-group" role="switch"
+              aria-checked={clustered} onClick={toggleCluster}>
+              <span>Cluster</span>
+              <span className="lc-explore-switch" aria-hidden><span /></span>
+            </button>
+            <BackgroundPalette variant="inline" label="Background" themeId={themeId} onPick={onThemePick} />
+          </div>
+        </aside>
+        <form className="lc-explore-find" role="search" onSubmit={(event) => event.preventDefault()}>
+          <span className="lc-explore-find-glass" aria-hidden><SearchIcon /></span>
+          <input
+            ref={searchInputRef}
+            type="search"
+            value={queryDraft}
+            placeholder="Search catalog"
+            aria-label="Find a workspace by title"
+            onChange={(event) => {
+              setQueryDraft(event.target.value);
+              setQuery(event.target.value);
+            }}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              setQueryDraft("");
+              setQuery("");
+              event.currentTarget.blur();
+            }}
+          />
+          <button
+            type="button"
+            className={`lc-explore-search-clear${queryDraft ? " is-visible" : ""}`}
+            aria-label="Clear the search"
+            aria-hidden={!queryDraft}
+            tabIndex={queryDraft ? 0 : -1}
+            disabled={!queryDraft}
+            onClick={() => {
+              setQueryDraft("");
+              setQuery("");
+              searchInputRef.current?.focus();
+            }}
+          >
+            ×
+          </button>
         </form>
-        {showing && chromeHost && (active || inBoardStack)
-          ? createPortal(exploreChrome, chromeHost)
-          : null}
+        {showing && chromeHost && inBoardStack ? createPortal(exploreTools, chromeHost) : null}
 
+        {/* Painting, hit testing and dragging share the same map and corner reservation. */}
+        <div className="lc-explore-graph" ref={hostRef}>
         {bodiesRef.current.length === 0 && leaving.length === 0 ? (
           <p className="lc-explore-empty">
             {nodes.length === 0
@@ -969,7 +952,13 @@ export function ExploreWorkspace({
                 <span
                   key={spot.type}
                   className="lc-explore-cluster-label"
-                  style={{ left: `${spot.x * 100}%`, top: `${spot.y * 100}%` }}
+                  ref={(el) => {
+                    if (!el) { labelElsRef.current.delete(spot.type); return; }
+                    labelElsRef.current.set(spot.type, el);
+                    const point = graphPoint(spot.x, spot.y);
+                    el.style.left = `${point.x}px`;
+                    el.style.top = `${point.y}px`;
+                  }}
                 >
                   {spot.label}
                 </span>
@@ -993,7 +982,8 @@ export function ExploreWorkspace({
                     ref={(el) => {
                       if (el) {
                         nodeElsRef.current.set(key, el);
-                        el.style.transform=`translate3d(${body.x*boxRef.current.w}px, ${body.y*boxRef.current.h}px, 0) translate(-50%, -50%)`;
+                        const point = graphPoint(body.x, body.y);
+                        el.style.transform=`translate3d(${point.x}px, ${point.y}px, 0) translate(-50%, -50%)`;
                       }
                       else nodeElsRef.current.delete(key);
                     }}
@@ -1076,6 +1066,7 @@ export function ExploreWorkspace({
             </div>
           </>
         )}
+        </div>
       </div>
 
       {selected && (
