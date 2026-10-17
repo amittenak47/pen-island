@@ -59,7 +59,8 @@
 .lc-home-recent[data-mode="practice"] { --lc-home-mode: var(--lc-mode-practice); }
 .lc-home-recent[data-mode="browse"] { --lc-home-mode: var(--lc-mode-browse); }
 .lc-home-recent:focus-visible { outline: 2px solid var(--lc-home-mode); outline-offset: -3px; }
-.lc-home-recent:hover { border-color: var(--lc-home-mode); }
+/* Dim like the Start cards, so the sweep (styles.css) reads against it. */
+.lc-home-recent:hover { border-color: color-mix(in srgb,var(--lc-home-mode) 55%,transparent); }
 .lc-home-recent:disabled { cursor: default; opacity: .55; }
 .lc-home-recent-preview { flex: 0 0 38px; width: 38px; height: 50px; background: color-mix(in srgb,var(--bg) 90%,var(--ink) 10%); border-radius: var(--lc-r-block); overflow: hidden; }
 .lc-home-recent-preview svg { width: 100%; height: 100%; stroke: color-mix(in srgb,var(--ink) 25%,transparent); stroke-width: 2px; }
@@ -146,7 +147,7 @@
 }
 /* The edge trace sits over the item's content. */
 .lc-home-recent { position: relative; isolation: isolate; }
-.lc-home-recent > :not(.lc-home-recent-trace) { position: relative; z-index: 1; }
+.lc-home-recent > :not(.lc-home-recent-trace, .lc-home-card-glow) { position: relative; z-index: 1; }
 /* A 2px dash in the item's mode colour runs clockwise around the edge. */
 .lc-home-recent-trace { position: absolute; z-index: 2; inset: -1px; width: calc(100% + 2px); height: calc(100% + 2px); overflow: visible; pointer-events: none; }
 .lc-home-recent-trace rect { width: calc(100% - 2px); height: calc(100% - 2px); fill: none; stroke: var(--lc-home-mode); stroke-width: 2px; stroke-linecap: square; stroke-dasharray: 18 82; stroke-dashoffset: 0; rx: var(--lc-r-block); animation: lc-home-recent-trace-dash 1.6s linear infinite; animation-delay: var(--lc-trace-delay, 0s); }

@@ -7239,27 +7239,45 @@ body[data-lc-sash-drag="horizontal"] {
     transform 140ms ease;
 }
 
+/*
+ * The resting border stays dim so the sweep reads against it. The glow is
+ * even on all four sides: offset 10px down it only showed under the card.
+ */
 .lc-home-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 75%, transparent);
+  border-color: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 55%, transparent);
   background: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 7%, transparent);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 30%, transparent),
-    0 10px 28px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 22%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 12%, transparent),
+    0 0 18px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 28%, transparent);
   transform: translateY(-3px);
 }
 
 /* Hover runs the loading tab's sweep around the card's border, in the card's
-   colour: a 2px ring masked out of the box with a conic sweep spinning behind
-   it. Only a transform animates, and only while the card is hovered/focused. */
-.lc-home-card-sweep {
+   colour: a 3px ring masked out of the box with a conic sweep spinning behind
+   it. Only a transform animates, and only while the card is hovered/focused.
+   The glow sits on a parent: a filter on the masked ring itself is applied
+   before the mask and would be cut away with everything outside the ring. */
+.lc-home-card-glow {
   position: absolute;
   inset: -1px;
   pointer-events: none;
   z-index: 2;
+  border-radius: inherit;
+  color: var(--lc-home-mode, var(--accent));
+}
+
+:is(.lc-home-card, .lc-home-recent):is(:hover, :focus-visible):not(:disabled) .lc-home-card-glow {
+  filter:
+    drop-shadow(0 0 2px currentColor)
+    drop-shadow(0 0 6px color-mix(in srgb, currentColor 70%, transparent));
+}
+
+.lc-home-card-sweep {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   border-radius: inherit;
-  padding: 2px;
-  color: var(--lc-home-mode, var(--accent));
+  padding: 3px;
   opacity: 0;
   transition: opacity 160ms ease;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -7277,16 +7295,23 @@ body[data-lc-sash-drag="horizontal"] {
   max-width: 1600px;
   max-height: 1600px;
   translate: -50% -50%;
-  background: conic-gradient(from 0deg, transparent 0 62%, currentColor 86%, transparent 100%);
+  /* A faint tail and a short, solid head: the head is what the eye follows. */
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 58%,
+    color-mix(in srgb, currentColor 30%, transparent) 80%,
+    currentColor 93%,
+    transparent 100%
+  );
   will-change: transform;
   animation: lc-tab-border-lap 1.6s linear infinite paused;
 }
 
-.lc-home-card:is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep {
+:is(.lc-home-card, .lc-home-recent):is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep {
   opacity: 1;
 }
 
-.lc-home-card:is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep::before {
+:is(.lc-home-card, .lc-home-recent):is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep::before {
   animation-play-state: running;
 }
 

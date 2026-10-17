@@ -981,6 +981,7 @@ export function HomeChooser({
                 {/* pathLength 100 makes the dash travel at one speed around the whole edge. */}
                 <rect x="1" y="1" pathLength="100" />
               </svg>}
+              {!editing && <span className="lc-home-card-glow" aria-hidden><span className="lc-home-card-sweep" /></span>}
               <span className="lc-home-recent-preview" aria-hidden="true"><svg viewBox="0 0 40 52" fill="none"><path d="M8 8h24M8 17h24M8 26h24M8 35h24M8 44h18"/><path className="lc-home-recent-mark" d={tab.kind === "whiteboard" ? "M8 31q6-15 12 0t12 0" : "M8 17h18"}/></svg></span>
               <span className="lc-home-recent-text"><strong>{tab.title}</strong><span>{tab.kind === "practice" ? "Practice" : tab.kind === "whiteboard" ? "Whiteboard" : tab.kind === "web" ? "Web" : `Annotate · ${tab.kind === "annotate" ? tab.docType === "markdown" ? "Markdown" : tab.docType.toUpperCase() : ""}`}</span></span>
             </button>
@@ -1142,7 +1143,7 @@ function HomeCard({ mode, busy, active, delay }: { mode: HomeMode; busy: boolean
         } : undefined}
       >
         {mode.wip ? <span className="lc-home-wip">(WIP)</span> : null}
-        <span className="lc-home-card-sweep" aria-hidden />
+        <span className="lc-home-card-glow" aria-hidden><span className="lc-home-card-sweep" /></span>
         <span className="lc-home-card-icon" aria-hidden>
           {active && mode.live}
           {mode.icon}
