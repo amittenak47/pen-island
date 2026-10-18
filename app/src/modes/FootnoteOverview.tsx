@@ -752,17 +752,21 @@ export function FootnoteOverview({
       setTask(null);
       return;
     }
-    const pictures = images.length > 0 ? images : undefined;
+    // No pictures means no `images` key: an undefined value is not JSON and
+    // stopped the whole book from syncing.
+    const pictures = images.length > 0 ? { images } : {};
     if (task.id) {
       updateNotes(
-        notes.map((note) =>
-          note.id === task.id ? { ...note, text: body, images: pictures, updatedAt: now } : note,
-        ),
+        notes.map((note) => {
+          if (note.id !== task.id) return note;
+          const { images: _previous, ...rest } = note;
+          return { ...rest, text: body, ...pictures, updatedAt: now };
+        }),
       );
     } else {
       updateNotes([
         ...notes,
-        { id: freshNoteId(notes, now), text: body, images: pictures, by: "reader", createdAt: now, updatedAt: now },
+        { id: freshNoteId(notes, now), text: body, ...pictures, by: "reader", createdAt: now, updatedAt: now },
       ]);
     }
     setTask(null);

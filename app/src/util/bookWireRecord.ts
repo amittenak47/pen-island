@@ -5,6 +5,8 @@ const messageOptional = ["requestId", "retryOf", "requestState", "requestNote", 
 const noteOptional = ["captureId", "updatedAt", "threads", "threadRootId", "png", "query", "url", "notes", "whiteboards", "artifacts", "userLinks", "color", "palette", "title", "bands", "blockText", "subMarks"];
 const processOptional = ["updateId", "detail", "status"];
 const drawingOptional = ["page", "redacted", "frameIndex"];
+/** A reader note saved without pictures carried `images: undefined`. */
+const readerNoteOptional = ["images"];
 export function bookWireRecord(value: Record<string, unknown>): Record<string, unknown> {
   const record = structuredClone(value);
   const omit = (rows: unknown, names: string[]) => {
@@ -14,6 +16,9 @@ export function bookWireRecord(value: Record<string, unknown>): Record<string, u
     }
   };
   omit(record.agent, messageOptional); omit(record.footnotes, noteOptional);
+  if (Array.isArray(record.footnotes)) for (const note of record.footnotes) {
+    if (note && typeof note === "object") omit(note.notes, readerNoteOptional);
+  }
   if (Array.isArray(record.agent)) for (const message of record.agent) {
     if (message && typeof message === "object") {
       omit(message.processEvents, processOptional);

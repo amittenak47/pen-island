@@ -18,3 +18,8 @@ it("keeps all defined optional authored data, zero timestamps, empty lists and t
   const record = { agent: [{ id: "turn", deletedAt: 0, queued: false, attachments: [] }], footnotes: [{ notes: [], updatedAt: 0, png: "", threadRootId: "turn" }] };
   expect(bookWireRecord(record)).toStrictEqual(record);
 });
+it("drops a reader note's undefined images so the book stays representable", () => {
+  const wire = bookWireRecord({ footnotes: [{ id: "mark", notes: [{ id: "n", text: "hi", images: undefined }, { id: "p", text: "", images: ["a.png"] }] }] });
+  expect(wire).toStrictEqual({ footnotes: [{ id: "mark", notes: [{ id: "n", text: "hi" }, { id: "p", text: "", images: ["a.png"] }] }] });
+  expect(() => canonicalJson(wire)).not.toThrow();
+});
