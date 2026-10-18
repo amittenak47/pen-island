@@ -264,6 +264,7 @@ export function applyFootnoteResult(
     added.push({
       id: freshNoteId([...existing, ...added], now),
       text,
+      images: [],
       by: "ai",
       ...(field ? { field } : {}),
       createdAt: now,
@@ -280,11 +281,11 @@ export function applyFootnoteResult(
   delete rest.pending;
   const next: DocFootnote = {
     ...rest,
-    ...(notes ? { notes } : {}),
-    ...(userLinks ? { userLinks } : {}),
+    notes: notes ?? [],
+    userLinks: userLinks ?? [],
     ...(title ? { title } : {}),
     ...(color ? { color } : {}),
-    ...(subMarks ? { subMarks } : {}),
+    subMarks: subMarks ?? entry.subMarks ?? [],
     ...(title || color || subMarks ? { updatedAt: now } : {}),
   };
   return footnotes.map((item, at) => (at === index ? next : item));
@@ -314,6 +315,7 @@ function mergeMarks(entry: DocFootnote, incoming: readonly FootnoteMarkDto[] | u
       excerpt: subMarkText(text.slice(at.start, at.end), mark.quote),
       start: at.start,
       end: at.end,
+      bands: [],
       ...(color ? { color } : {}),
     });
     added += 1;

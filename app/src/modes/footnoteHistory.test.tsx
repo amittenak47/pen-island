@@ -50,6 +50,14 @@ function withNote(text: string, base: DocFootnote): DocFootnote {
 }
 
 describe("footnote panel history", () => {
+  it("ignores explicit empty defaults and restores the empty whiteboard list", () => {
+    const api = mount({ t: 1000 }, []);
+    act(() => api.set({ ...api.footnote, threads: [], bands: [], subMarks: [], userLinks: [], artifacts: [], notes: MARK.notes!.map(note => ({ ...note, images: [] })) }));
+    expect(api.canUndo).toBe(false);
+    act(() => api.set(withNote("second", api.footnote)));
+    act(() => api.undo());
+    expect(api.footnote.whiteboards).toEqual([]);
+  });
   it("undoes and redoes a change, whoever made it", () => {
     const clock = { t: 1000 };
     const api = mount(clock, []);

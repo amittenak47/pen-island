@@ -99,6 +99,14 @@ beforeEach(() => {
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
+it("builds job marks with explicit empty lists and image lists", () => {
+  const empty = footnoteFromItem(item({ result: { notes: [] } }), STREAM, [], 50)!;
+  expect(empty).toMatchObject({ notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [] });
+  const filled = footnoteFromItem(item(), STREAM, [], 50)!;
+  expect(filled.notes![0].images).toEqual([]);
+  expect(filled.subMarks![0].bands).toEqual([]);
+});
+
 describe("page-range footnotes", () => {
   it("finds a quote whatever the spacing between the PDF's text pieces", () => {
     const at = findLoosely(STREAM, "Depth-first search is a surprisingly versatile procedure.")!;

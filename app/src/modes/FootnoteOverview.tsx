@@ -541,10 +541,10 @@ export function FootnoteOverview({
     const current = footnoteRef.current;
     onChange({
       ...current,
-      userLinks: undefined,
-      notes: undefined,
-      threads: undefined,
-      subMarks: undefined,
+      userLinks: [],
+      notes: [],
+      threads: [],
+      subMarks: [],
       ...(current.threadRootId ? { threadRootId: undefined } : {}),
     });
     setTask(null);
@@ -733,10 +733,10 @@ export function FootnoteOverview({
     node.scrollTop = node.scrollHeight;
   }, [openThreadMessages]);
   const updateNotes = (next: DocFootnoteNote[]) => {
-    onChange({ ...footnote, notes: next.length > 0 ? next : undefined });
+    onChange({ ...footnote, notes: next });
   };
   const updateWhiteboards = (next: typeof whiteboards) => {
-    onChange({ ...footnote, whiteboards: next.length > 0 ? next : undefined });
+    onChange({ ...footnote, whiteboards: next });
   };
   const removeWhiteboard = (id: string) => {
     updateWhiteboards(whiteboards.filter((entry) => entry.id !== id));
@@ -752,27 +752,20 @@ export function FootnoteOverview({
       setTask(null);
       return;
     }
-    // No pictures means no `images` key: an undefined value is not JSON and
-    // stopped the whole book from syncing.
-    const pictures = images.length > 0 ? { images } : {};
     if (task.id) {
       updateNotes(
-        notes.map((note) => {
-          if (note.id !== task.id) return note;
-          const { images: _previous, ...rest } = note;
-          return { ...rest, text: body, ...pictures, updatedAt: now };
-        }),
+        notes.map((note) => note.id === task.id ? { ...note, text: body, images, updatedAt: now } : note),
       );
     } else {
       updateNotes([
         ...notes,
-        { id: freshNoteId(notes, now), text: body, ...pictures, by: "reader", createdAt: now, updatedAt: now },
+        { id: freshNoteId(notes, now), text: body, images, by: "reader", createdAt: now, updatedAt: now },
       ]);
     }
     setTask(null);
   };
   const updateUserLinks = (next: DocFootnoteUserLink[]) => {
-    onChange({ ...footnote, userLinks: next.length > 0 ? next : undefined });
+    onChange({ ...footnote, userLinks: next });
   };
   const saveLink = (url: string, title?: string) => {
     if (task?.kind !== "link") return;
@@ -796,7 +789,7 @@ export function FootnoteOverview({
     const next = threads.filter((thread) => thread.rootId !== rootId);
     onChange({
       ...footnote,
-      threads: next.length > 0 ? next : undefined,
+      threads: next,
       ...(footnote.threadRootId === rootId ? { threadRootId: next[0]?.rootId } : {}),
     });
     if (task?.kind === "thread" && task.rootId === rootId) setTask(null);
@@ -817,7 +810,7 @@ export function FootnoteOverview({
     onHoverSubMark?.(null);
     if (activeSubMarkId === id) onActiveSubMarkIdChange?.(null);
     const next = subMarks.filter((mark) => mark.id !== id);
-    onChange({ ...footnote, subMarks: next.length > 0 ? next : undefined });
+    onChange({ ...footnote, subMarks: next });
   };
   const selectSubMark = (mark: (typeof subMarks)[number]) => {
     if (!underlineArmed) return;

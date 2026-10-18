@@ -1,4 +1,5 @@
 import type { AgentChatMessage } from "./AgentSidePanel";
+import { normalizeRecord } from "../util/syncContent";
 
 export type SessionStatus = "failed" | "aborted" | "succeeded";
 
@@ -165,9 +166,8 @@ function withoutSessionId(value: unknown): unknown {
   if (!value || typeof value !== "object") return value;
   const copy = { ...(value as Record<string, unknown>) };
   delete copy.sessionId;
-  if (copy.pending === false) delete copy.pending;
-  if (copy.queued === false) delete copy.queued;
-  return copy;
+  // Conflict identity follows the book's exact empty-default paths too.
+  return (normalizeRecord(JSON.parse(JSON.stringify({ agent: [copy] }))).agent as unknown[])[0];
 }
 
 /** Object key order is not authored content. */

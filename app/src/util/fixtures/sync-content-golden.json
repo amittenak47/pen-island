@@ -49,6 +49,231 @@
       "input": "{\"id\":\"doc\",\"hash\":\"src\",\"footnote_boards\":{},\"footnotes\":[],\"agent\":[{\"id\":\"m1\",\"role\":\"user\",\"content\":\"hi\",\"pending\":false,\"queued\":false},{\"id\":\"m2\",\"role\":\"assistant\",\"content\":\"yo\",\"pending\":true}],\"board\":{\"v\":1,\"elements\":[{\"id\":\"lcmdink-0-frame\",\"type\":\"rectangle\",\"x\":0,\"y\":0,\"width\":642,\"height\":93955,\"version\":4,\"versionNonce\":451615249.4499662,\"updated\":1,\"seed\":1,\"customData\":{\"lcDocumentPage\":true,\"lcMdInkFrame\":true,\"lcRegion\":\"mdink-0\",\"lcRegionFrame\":true}},{\"id\":\"pen\",\"type\":\"rectangle\",\"x\":1,\"y\":2,\"width\":3,\"height\":4,\"version\":2,\"versionNonce\":7,\"seed\":9}],\"appState\":{\"scrollX\":1,\"linedPaperMode\":\"off\"}}}",
       "canonical": "{\"agent\":[{\"content\":\"hi\",\"id\":\"m1\",\"role\":\"user\"},{\"content\":\"yo\",\"id\":\"m2\",\"pending\":true,\"role\":\"assistant\"}],\"board\":{\"appState\":{\"linedPaperMode\":\"off\"},\"elements\":[{\"customData\":{\"lcDocumentPage\":true,\"lcMdInkFrame\":true,\"lcRegion\":\"mdink-0\",\"lcRegionFrame\":true},\"id\":\"lcmdink-0-frame\",\"type\":\"rectangle\",\"x\":0,\"y\":0},{\"height\":4,\"id\":\"pen\",\"seed\":9,\"type\":\"rectangle\",\"version\":2,\"versionNonce\":7,\"width\":3,\"x\":1,\"y\":2}],\"v\":1},\"footnotes\":[],\"hash\":\"src\",\"id\":\"doc\"}",
       "hash": "20b141ae266866fe74efc009c511a608389723eb550d12bb8590deaa1a2029bf"
+    },
+    {
+      "name": "root empty defaults: missing",
+      "input": "{\"id\":\"empty-root\"}",
+      "canonical": "{\"id\":\"empty-root\"}",
+      "hash": "3fede9f6639a0883207184b0e569625e9ff21d42ab48473d36660c754ddd06ae"
+    },
+    {
+      "name": "root empty defaults: explicit",
+      "input": "{\"id\":\"empty-root\",\"agent\":[],\"footnote_boards\":{}}",
+      "canonical": "{\"id\":\"empty-root\"}",
+      "hash": "3fede9f6639a0883207184b0e569625e9ff21d42ab48473d36660c754ddd06ae"
+    },
+    {
+      "name": "root empty defaults: legacy undefined through wire",
+      "input": "{\"id\":\"empty-root\"}",
+      "undefinedPaths": [
+        [
+          "agent"
+        ],
+        [
+          "footnote_boards"
+        ]
+      ],
+      "canonical": "{\"id\":\"empty-root\"}",
+      "hash": "3fede9f6639a0883207184b0e569625e9ff21d42ab48473d36660c754ddd06ae"
+    },
+    {
+      "name": "footnote empty lists: missing",
+      "input": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "hash": "0c3dfeaf3e3cc90102a019fb1bead2a568307ee35a3b0a5c538ddca0be88c12b"
+    },
+    {
+      "name": "footnote empty lists: explicit",
+      "input": "{\"footnotes\":[{\"id\":\"mark\",\"notes\":[],\"threads\":[],\"bands\":[],\"subMarks\":[],\"userLinks\":[],\"whiteboards\":[],\"artifacts\":[]}]}",
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "hash": "0c3dfeaf3e3cc90102a019fb1bead2a568307ee35a3b0a5c538ddca0be88c12b"
+    },
+    {
+      "name": "footnote empty lists: legacy undefined through wire",
+      "input": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "undefinedPaths": [
+        [
+          "footnotes",
+          0,
+          "notes"
+        ],
+        [
+          "footnotes",
+          0,
+          "threads"
+        ],
+        [
+          "footnotes",
+          0,
+          "bands"
+        ],
+        [
+          "footnotes",
+          0,
+          "subMarks"
+        ],
+        [
+          "footnotes",
+          0,
+          "userLinks"
+        ],
+        [
+          "footnotes",
+          0,
+          "whiteboards"
+        ],
+        [
+          "footnotes",
+          0,
+          "artifacts"
+        ]
+      ],
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "hash": "0c3dfeaf3e3cc90102a019fb1bead2a568307ee35a3b0a5c538ddca0be88c12b"
+    },
+    {
+      "name": "message empty lists and off flags: missing",
+      "input": "{\"agent\":[{\"id\":\"turn\"}]}",
+      "canonical": "{\"agent\":[{\"id\":\"turn\"}]}",
+      "hash": "373864029a8be8868614a1c58766b0bc567c3ad47274ef5e89f28911ae8d2e61"
+    },
+    {
+      "name": "message empty lists and off flags: explicit",
+      "input": "{\"agent\":[{\"id\":\"turn\",\"attachments\":[],\"artifacts\":[],\"artifactProposals\":[],\"flags\":[],\"processEvents\":[],\"pending\":false,\"queued\":false,\"bridgePending\":false}]}",
+      "canonical": "{\"agent\":[{\"id\":\"turn\"}]}",
+      "hash": "373864029a8be8868614a1c58766b0bc567c3ad47274ef5e89f28911ae8d2e61"
+    },
+    {
+      "name": "message empty lists and off flags: legacy undefined through wire",
+      "input": "{\"agent\":[{\"id\":\"turn\"}]}",
+      "undefinedPaths": [
+        [
+          "agent",
+          0,
+          "attachments"
+        ],
+        [
+          "agent",
+          0,
+          "artifacts"
+        ],
+        [
+          "agent",
+          0,
+          "artifactProposals"
+        ],
+        [
+          "agent",
+          0,
+          "flags"
+        ],
+        [
+          "agent",
+          0,
+          "processEvents"
+        ],
+        [
+          "agent",
+          0,
+          "pending"
+        ],
+        [
+          "agent",
+          0,
+          "queued"
+        ],
+        [
+          "agent",
+          0,
+          "bridgePending"
+        ]
+      ],
+      "canonical": "{\"agent\":[{\"id\":\"turn\"}]}",
+      "hash": "373864029a8be8868614a1c58766b0bc567c3ad47274ef5e89f28911ae8d2e61"
+    },
+    {
+      "name": "nested note images submark bands drawing and proposal defaults: missing",
+      "input": "{\"agent\":[{\"drawing\":{\"program\":{\"id\":\"p\"}},\"artifactProposals\":[{\"kind\":\"whiteboard\",\"title\":\"Sketch\"}]}],\"footnotes\":[{\"notes\":[{\"text\":\"words\"}],\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "canonical": "{\"agent\":[{\"artifactProposals\":[{\"kind\":\"whiteboard\",\"title\":\"Sketch\"}],\"drawing\":{\"program\":{\"id\":\"p\"}}}],\"footnotes\":[{\"notes\":[{\"text\":\"words\"}],\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "hash": "ee34f8f8654c9f2f172aa4b1ae9e0ce6c5aad91816dc6e3dc30d0cb17d5d0266"
+    },
+    {
+      "name": "nested note images submark bands drawing and proposal defaults: explicit",
+      "input": "{\"agent\":[{\"drawing\":{\"program\":{\"id\":\"p\"},\"redacted\":false},\"artifactProposals\":[{\"kind\":\"whiteboard\",\"title\":\"Sketch\",\"programs\":[],\"messages\":[]}]}],\"footnotes\":[{\"notes\":[{\"text\":\"words\",\"images\":[]}],\"subMarks\":[{\"id\":\"sub\",\"bands\":[]}]}]}",
+      "canonical": "{\"agent\":[{\"artifactProposals\":[{\"kind\":\"whiteboard\",\"title\":\"Sketch\"}],\"drawing\":{\"program\":{\"id\":\"p\"}}}],\"footnotes\":[{\"notes\":[{\"text\":\"words\"}],\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "hash": "ee34f8f8654c9f2f172aa4b1ae9e0ce6c5aad91816dc6e3dc30d0cb17d5d0266"
+    },
+    {
+      "name": "nested note images submark bands drawing and proposal defaults: legacy undefined through wire",
+      "input": "{\"agent\":[{\"drawing\":{\"program\":{\"id\":\"p\"}},\"artifactProposals\":[{\"kind\":\"whiteboard\",\"title\":\"Sketch\"}]}],\"footnotes\":[{\"notes\":[{\"text\":\"words\"}],\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "undefinedPaths": [
+        [
+          "agent",
+          0,
+          "drawing",
+          "redacted"
+        ],
+        [
+          "agent",
+          0,
+          "artifactProposals",
+          0,
+          "programs"
+        ],
+        [
+          "agent",
+          0,
+          "artifactProposals",
+          0,
+          "messages"
+        ],
+        [
+          "footnotes",
+          0,
+          "notes",
+          0,
+          "images"
+        ],
+        [
+          "footnotes",
+          0,
+          "subMarks",
+          0,
+          "bands"
+        ]
+      ],
+      "canonical": "{\"agent\":[{\"artifactProposals\":[{\"kind\":\"whiteboard\",\"title\":\"Sketch\"}],\"drawing\":{\"program\":{\"id\":\"p\"}}}],\"footnotes\":[{\"notes\":[{\"text\":\"words\"}],\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "hash": "ee34f8f8654c9f2f172aa4b1ae9e0ce6c5aad91816dc6e3dc30d0cb17d5d0266"
+    },
+    {
+      "name": "meaningful mark association missing",
+      "input": "{\"agent\":[{\"id\":\"turn\"}]}",
+      "canonical": "{\"agent\":[{\"id\":\"turn\"}]}",
+      "hash": "373864029a8be8868614a1c58766b0bc567c3ad47274ef5e89f28911ae8d2e61"
+    },
+    {
+      "name": "meaningful empty mark association suppresses fallback",
+      "input": "{\"agent\":[{\"id\":\"turn\",\"artifactFootnoteIds\":[]}]}",
+      "canonical": "{\"agent\":[{\"artifactFootnoteIds\":[],\"id\":\"turn\"}]}",
+      "hash": "472bbf37097e2f5d13fd696437003eb5d0cb0867f7d7e4948ff39f5f05aca5b3"
+    },
+    {
+      "name": "unknown user empty lists still count",
+      "input": "{\"agent\":[{\"id\":\"turn\",\"future\":[]}],\"footnotes\":[{\"id\":\"mark\",\"future\":[]}],\"future\":[]}",
+      "canonical": "{\"agent\":[{\"future\":[],\"id\":\"turn\"}],\"footnotes\":[{\"future\":[],\"id\":\"mark\"}],\"future\":[]}",
+      "hash": "51399fdb6b8898c16d7a6c57975b84cfef7108615b0d282a72ffac7b91a3a984"
+    },
+    {
+      "name": "nonqualifying empty palette and title still count",
+      "input": "{\"footnotes\":[{\"id\":\"mark\",\"palette\":[],\"title\":\"\"}]}",
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\",\"palette\":[],\"title\":\"\"}]}",
+      "hash": "270f716aaeea161236112b422deb3a2d1ced7e84cdac2f08de89999db34a5152"
+    },
+    {
+      "name": "attachment false changes default model inclusion",
+      "input": "{\"agent\":[{\"attachments\":[{\"png\":\"a\",\"sendToModel\":false}]}]}",
+      "canonical": "{\"agent\":[{\"attachments\":[{\"png\":\"a\",\"sendToModel\":false}]}]}",
+      "hash": "e5feb38da891b598fdc14b900439b5772b117a457a86fad87c2ba9e2999244b2"
     }
   ],
   "ink": [

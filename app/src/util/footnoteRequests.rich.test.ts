@@ -42,6 +42,14 @@ function mark(patch: Partial<DocFootnote> = {}): DocFootnote {
   };
 }
 
+it("saves empty answer collections and note image lists explicitly", () => {
+  const [empty] = applyFootnoteResult([mark()], { id: "fr-1", notes: [] }, 50);
+  expect(empty).toMatchObject({ notes: [], userLinks: [], subMarks: [] });
+  const [filled] = applyFootnoteResult([mark()], { id: "fr-1", notes: ["A thought"], marks: [{ kind: "underline", quote: "directed graphs" }] }, 50);
+  expect(filled.notes![0].images).toEqual([]);
+  expect(filled.subMarks![0].bands).toEqual([]);
+});
+
 describe("rich ChatBot answers", () => {
   it("sets an empty title and color from the mark's palette, and places marks on the quoted words", () => {
     const [next] = applyFootnoteResult([mark()], {
@@ -94,7 +102,7 @@ describe("rich ChatBot answers", () => {
   it("adds no marks to a region mark, which has no text offsets to place them", () => {
     const region = mark({ anchor: { kind: "region", page: 1, rect: { x: 0, y: 0, w: 1, h: 1 } } as unknown as DocFootnote["anchor"] });
     const [next] = applyFootnoteResult([region], { id: "fr-1", notes: ["n"], marks: [{ kind: "highlight", quote: "depth-first" }] });
-    expect(next!.subMarks).toBeUndefined();
+    expect(next!.subMarks).toEqual([]);
     expect(next!.pending).toBeUndefined();
   });
 
