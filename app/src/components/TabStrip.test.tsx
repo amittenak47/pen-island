@@ -621,7 +621,8 @@ describe("TabStrip", () => {
 
       // A tab already in a split can only leave it.
       view.rightClick("left");
-      expect(view.menuItems()).toEqual(["Unsplit", "Close"]);
+      // It also has tabs to its right (its partner and the loose one).
+      expect(view.menuItems()).toEqual(["Unsplit", "Close", "Close tabs to the right"]);
       act(() => {
         view.menuItem("Unsplit")?.click();
       });
@@ -803,6 +804,91 @@ describe("TabStrip", () => {
     });
     expect(view.host.querySelector(".lc-tab-title-input")).toBeNull();
     expect(onRename).not.toHaveBeenCalled();
+    view.unmount();
+  });
+});
+
+describe("holding a tab", () => {
+  const hold = (view: ReturnType<typeof mount>, title: string, ms = 500) => {
+    const hit = grab(view, title);
+    act(() => { hit.dispatchEvent(pointer("pointerdown", { x: 10, y: 10, type: "touch" })); });
+    act(() => { vi.advanceTimersByTime(ms); });
+    return hit;
+  };
+  const release = (hit: HTMLElement) => act(() => {
+    hit.dispatchEvent(pointer("pointerup", { x: 10, y: 10, type: "touch" }));
+    hit.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+  });
+  const panel = () => document.querySelector<HTMLElement>(".lc-tab-hold-pop");
+  const action = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>(".lc-tab-hold-pop button")).find(b => b.textContent === label);
+  const four = [board("one", "One"), board("two", "Two"), board("three", "Three"), board("four", "Four")];
+
+  it("opens Close tab / Close tabs to the right under it, and the release does not switch tabs", () => {
+    vi.useFakeTimers();
+    const onFocus = vi.fn();
+    const view = mount({ tabs: four, activeId: "one", onFocus });
+    release(hold(view, "Two"));
+    expect(panel()).not.toBeNull();
+    expect(Array.from(panel()!.querySelectorAll("button")).map(b => b.textContent)).toEqual(["Close tab", "Close tabs to the right"]);
+    expect(onFocus).not.toHaveBeenCalled();
+    view.unmount();
+  });
+
+  it("Close tabs to the right closes every tab after it in strip order, and only those", () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const view = mount({ tabs: four, activeId: "one", onClose });
+    release(hold(view, "Two"));
+    act(() => { action("Close tabs to the right")!.click(); });
+    expect(onClose.mock.calls.map(call => call[0]).sort()).toEqual(["four", "three"]);
+    view.unmount();
+  });
+
+  it("Close tab closes only the held tab", () => {
+    vi.useFakeTimers();
+    const onClose = vi.fn();
+    const view = mount({ tabs: four, activeId: "one", onClose });
+    release(hold(view, "Three"));
+    act(() => { action("Close tab")!.click(); });
+    expect(onClose.mock.calls).toEqual([["three"]]);
+    view.unmount();
+  });
+
+  it("the last tab has nothing to its right", () => {
+    vi.useFakeTimers();
+    const view = mount({ tabs: four, activeId: "one" });
+    release(hold(view, "Four"));
+    expect(action("Close tabs to the right")!.disabled).toBe(true);
+    view.unmount();
+  });
+
+  it("a quick tap does not open it", () => {
+    vi.useFakeTimers();
+    const onFocus = vi.fn();
+    const view = mount({ tabs: four, activeId: "one", onFocus });
+    release(hold(view, "Two", 120));
+    expect(panel()).toBeNull(); expect(onFocus).toHaveBeenCalledWith("two");
+    view.unmount();
+  });
+
+  it("hold and drag is still the split drag: moving closes the panel and drags", () => {
+    vi.useFakeTimers();
+    const onTabDrag = vi.fn();
+    const view = mount({ tabs: four, activeId: "one", onTabDrag });
+    const hit = hold(view, "Two");
+    expect(panel()).not.toBeNull();
+    act(() => { hit.dispatchEvent(pointer("pointermove", { x: 80, y: 40, type: "touch" })); });
+    expect(onTabDrag).toHaveBeenCalled();
+    act(() => { vi.advanceTimersByTime(300); });
+    expect(panel()).toBeNull();
+    act(() => { hit.dispatchEvent(pointer("pointerup", { x: 80, y: 40, type: "touch" })); });
+    view.unmount();
+  });
+
+  it("right-click also offers Close tabs to the right when there are tabs to the right", () => {
+    const view = mount({ tabs: four, activeId: "one" });
+    view.rightClick("Two");
+    expect(view.menuItems()).toContain("Close tabs to the right");
     view.unmount();
   });
 });
