@@ -65,10 +65,11 @@ pub fn canonical_json(value: &Value) -> Result<String> {
     Ok(out)
 }
 
-/// Each device lays out the document page frame itself: its height comes from
-/// that screen's text layout and its version stamps from the editor. Width is
-/// shared (handwriting is placed against it).
-pub const PAGE_FRAME_LOCAL_KEYS: &[&str] = &["height", "version", "versionNonce", "updated", "seed"];
+/// Each device lays out the document page frame itself: its size comes from
+/// that screen's layout and its version stamps from the editor. Handwriting
+/// carries its own layout tag; the record's width is only a hint for pages
+/// saved before tags, and sync keeps each device's own frame on download.
+pub const PAGE_FRAME_LOCAL_KEYS: &[&str] = &["width", "height", "version", "versionNonce", "updated", "seed"];
 /// Agent message flags whose `false` is the same as leaving them out.
 pub const MESSAGE_FALSE_DEFAULT_KEYS: &[&str] = &["pending", "queued"];
 

@@ -65,10 +65,11 @@ export function canonicalJson(value: unknown): string {
   return visit(value);
 }
 
-/** Each device lays out the document page frame itself: its height comes from
- * that screen's text layout and its version stamps from the editor. Width is
- * shared (handwriting is placed against it). */
-export const PAGE_FRAME_LOCAL_KEYS = ["height", "version", "versionNonce", "updated", "seed"] as const;
+/** Each device lays out the document page frame itself: its size comes from
+ * that screen's layout and its version stamps from the editor. Handwriting
+ * carries its own layout tag; the record's width is only a hint for pages
+ * saved before tags, and sync keeps each device's own frame on download. */
+export const PAGE_FRAME_LOCAL_KEYS = ["width", "height", "version", "versionNonce", "updated", "seed"] as const;
 /** Agent message flags whose `false` is the same as leaving them out. */
 export const MESSAGE_FALSE_DEFAULT_KEYS = ["pending", "queued"] as const;
 
