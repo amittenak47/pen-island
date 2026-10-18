@@ -115,6 +115,14 @@ it("does not start another pass while a tab or automatic sync runs; it shows tha
   expect(trigger().querySelector(".lc-doc-index-ring")).toBeNull();
 });
 
+it("a full pass drops failures for books it no longer has work for", () => {
+  rememberLibrarySyncResults([row("one", "failed"), row("two", "failed"), row("three", "synced")], 1);
+  const full = rememberLibrarySyncResults([row("two", "unchanged")], 2, true);
+  expect(full.books.map(book => [book.id, book.status])).toEqual([["two", "unchanged"], ["three", "synced"]]);
+  const single = rememberLibrarySyncResults([row("four", "failed")], 3);
+  expect(single.books.map(book => book.id)).toEqual(["two", "three", "four"]);
+});
+
 it("persists compact results across remounts and a single-book result replaces only its row", () => {
   const saved = rememberLibrarySyncResults([row("one", "needs_choice"), row("two", "failed")], 1234);
   expect(loadLibrarySyncResults()).toEqual(saved);

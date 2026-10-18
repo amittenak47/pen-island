@@ -20,9 +20,15 @@ export function loadLibrarySyncResults(): LibrarySyncResults | null {
     return value;
   } catch { return null; }
 }
-/** All passes patch matching identities, retaining books that needed no work. */
-export function rememberLibrarySyncResults(books: BookResult[], time = Date.now()): LibrarySyncResults {
+/** Passes patch matching identities, retaining books that needed no work; a full pass also drops failures it no longer visits. */
+export function rememberLibrarySyncResults(books: BookResult[], time = Date.now(), fullPass = false): LibrarySyncResults {
   const rows = new Map((loadLibrarySyncResults()?.books ?? []).map(book => [`${book.kind}:${book.id}`, book]));
+  // A full pass visits every book with work left. A failure it did not visit
+  // is no longer pending, so it must not stay on the list.
+  if (fullPass) {
+    const visited = new Set(books.map(book => `${book.kind}:${book.id}`));
+    for (const [key, row] of rows) if (!visited.has(key) && row.status !== "synced" && row.status !== "unchanged") rows.delete(key);
+  }
   for (const book of books) rows.set(`${book.kind}:${book.id}`, {
     kind: book.kind, id: book.id, title: (book.display ?? bookDisplay(book)).title, status: book.status,
     reason: book.status === "needs_choice" ? "Needs your choice" : book.status === "cancelled" ? "Cancelled"

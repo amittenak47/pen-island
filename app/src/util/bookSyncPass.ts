@@ -206,7 +206,7 @@ async function executePass(client: LcClient, options: BookPassOptions): Promise<
     else throw cause;
     return result;
   } finally {
-    if (result.modern && (inventoried || result.books.length)) rememberLibrarySyncResults(result.books);
+    if (result.modern && (inventoried || result.books.length)) rememberLibrarySyncResults(result.books, Date.now(), inventoried && !options.only && !result.cancelled);
     for (const book of result.books) {
       debugLog({ k: book.error ? "error" : "action", n: "book sync", a: JSON.stringify({kind:book.kind,id:book.id,committed:book.committed}),
         r: book.status, ...(book.error ? { e: bookFailureMessage(book, options.libraryPull) } : {}) });
