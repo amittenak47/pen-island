@@ -51,6 +51,9 @@ class GestureGuardPlugin(private val activity: Activity) : Plugin(activity) {
     private var backCallback: OnBackInvokedCallback? = null
     private var immersiveEnabled = false
 
+    /** Reading full screen: status and navigation bars hidden until turned off. */
+    private var fullscreenEnabled = false
+
     /** The loading doodle's pen path — see `DoodleRelay`. */
     private val doodle by lazy {
         DoodleRelay(activity) { activity.window?.decorView?.let { findWebView(it) as? WebView } }
@@ -75,6 +78,11 @@ class GestureGuardPlugin(private val activity: Activity) : Plugin(activity) {
 
     @InvokeArg
     class ImmersiveArgs {
+        var enabled: Boolean = false
+    }
+
+    @InvokeArg
+    class FullscreenArgs {
         var enabled: Boolean = false
     }
 
@@ -219,18 +227,51 @@ class GestureGuardPlugin(private val activity: Activity) : Plugin(activity) {
             }
             val controller = WindowCompat.getInsetsController(window, window.decorView)
             immersiveEnabled = args.enabled
-            if (args.enabled) {
+            if (args.enabled) registerBackSink() else unregisterBackSink()
+            applyBars(controller)
+            invoke.resolve(JSObject().apply { put("ok", true) })
+        }
+    }
+
+    /**
+     * Reading full screen hides the status bar too. It is its own flag so a pen
+     * surface releasing writing immersive cannot bring the bars back mid-read.
+     * A swipe from the edge still shows them for a moment (sticky).
+     */
+    @Command
+    fun set_fullscreen(invoke: Invoke) {
+        val args = invoke.parseArgs(FullscreenArgs::class.java)
+        activity.runOnUiThread {
+            val window = activity.window
+            if (window == null) {
+                invoke.reject("no window")
+                return@runOnUiThread
+            }
+            fullscreenEnabled = args.enabled
+            applyBars(WindowCompat.getInsetsController(window, window.decorView))
+            invoke.resolve(JSObject().apply { put("ok", true) })
+        }
+    }
+
+    /** One place decides which bars show: full screen, then writing, then neither. */
+    private fun applyBars(controller: WindowInsetsControllerCompat) {
+        when {
+            fullscreenEnabled -> {
                 controller.systemBarsBehavior =
                     WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.hide(WindowInsetsCompat.Type.systemBars())
+            }
+            immersiveEnabled -> {
+                controller.systemBarsBehavior =
+                    WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                controller.show(WindowInsetsCompat.Type.statusBars())
                 controller.hide(WindowInsetsCompat.Type.navigationBars())
-                registerBackSink()
-            } else {
-                controller.show(WindowInsetsCompat.Type.navigationBars())
+            }
+            else -> {
+                controller.show(WindowInsetsCompat.Type.systemBars())
                 controller.systemBarsBehavior =
                     WindowInsetsControllerCompat.BEHAVIOR_DEFAULT
-                unregisterBackSink()
             }
-            invoke.resolve(JSObject().apply { put("ok", true) })
         }
     }
 

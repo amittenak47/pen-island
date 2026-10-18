@@ -205,6 +205,7 @@ pub fn run() {
         lan_base_url,
         set_gesture_exclusions,
         set_drawing_immersive,
+        set_reading_fullscreen,
         set_display_refresh,
         connect_native_doodle,
         voice_available,
@@ -329,6 +330,25 @@ fn set_drawing_immersive(
         use tauri_plugin_gestureguard::GestureGuardExt;
         let guard = app.gesture_guard().ok_or("gesture guard unavailable")?;
         return guard.set_immersive(enabled).map_err(|e| e.to_string());
+    }
+    #[cfg(not(target_os = "android"))]
+    {
+        Ok(false)
+    }
+}
+
+/// Reading full screen on the tablet: status and navigation bars hidden until
+/// turned off. Desktop uses the window's own full screen instead.
+#[tauri::command]
+fn set_reading_fullscreen(
+    #[allow(unused_variables)] app: tauri::AppHandle,
+    #[allow(unused_variables)] enabled: bool,
+) -> std::result::Result<bool, String> {
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_gestureguard::GestureGuardExt;
+        let guard = app.gesture_guard().ok_or("gesture guard unavailable")?;
+        return guard.set_fullscreen(enabled).map_err(|e| e.to_string());
     }
     #[cfg(not(target_os = "android"))]
     {

@@ -101,6 +101,7 @@ import {
 import { syncBookPass } from "./util/bookSyncPass";
 import { pollFootnoteInbox } from "./util/footnoteRequests";
 import { pollAnnotationJobs } from "./util/annotationJobs";
+import { useReadingFullscreen } from "./useReadingFullscreen";
 import { HUB_AUTOSYNC_EVENT, loadHubAutosyncPref } from "./util/hubAutoSyncPref";
 import { PAD_HUB_EVENT, setHostLoopback } from "./util/padHub";
 import { startPadHubStatusMonitoring } from "./util/padHubStatus";
@@ -1346,6 +1347,8 @@ export function App() {
   }, [focusTab]);
   const practiceRequestHandled = useCallback(() => setPracticeRequested(false), []);
 
+  // Hold Recenter: the header hides for reading. Home has no way back, so it leaves.
+  const readingFullscreen = useReadingFullscreen(tabState.activeId !== HOME_TAB_ID);
   const shell: ShellValue = useMemo(
     () => ({
       client,
@@ -1405,6 +1408,7 @@ export function App() {
       markUserLoad,
       takeUserLoad,
       onMissingContent,
+      readingFullscreen,
     }),
     [
       autosaveMs, bankFilters, browseMotion, capabilities, client, closeTab, coachFlags, error,
@@ -1412,7 +1416,7 @@ export function App() {
       announceAutosave, onMissingContent, openWorkspace, patchTab, pdfFilmOpen, readingSize, recognizer,
       refreshCoachFlags, refreshSession, serverLink, session, setChrome, setWorkspaceApi,
       settingsOpen, setShellLoadActive, sheetDragLocked, shellLoadActive, markUserLoad, takeUserLoad, testForward, themeId,
-      splitTabs, webPush, webStep,
+      splitTabs, webPush, webStep, readingFullscreen,
     ],
   );
 
@@ -1430,6 +1434,7 @@ export function App() {
           chrome.agentOpen ? "lc-app-agent-open" : "",
           chrome.loading || shellLoadActive ? "lc-app-loading" : "",
           bootPhase !== "gone" && bootPhase !== "exit" ? "lc-app-booting" : "",
+          readingFullscreen.on ? "lc-app-fullscreen" : "",
         ]
           .filter(Boolean)
           .join(" ")}

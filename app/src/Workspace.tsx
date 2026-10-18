@@ -767,6 +767,7 @@ export const Workspace = memo(function Workspace({
     shellLoadActive,
     takeUserLoad,
     onMissingContent,
+    readingFullscreen,
   } = useShell();
 
   // Writing hand mirrors the chrome across the Y-axis — see inkHandedness.
@@ -10589,6 +10590,7 @@ export const Workspace = memo(function Workspace({
             agentOpen={coachOpen && !hubConflictAsk}
             agentOnline={serverLinkRef.current === "online" && llmLink === "online"}
             onToggleAgent={() => { if (!hubConflictAsk) chooseCoachOpen(!coachOpen); }}
+            fullscreen={readingFullscreen ? { on: readingFullscreen.on, onToggle: readingFullscreen.toggle } : null}
             pageFilm={
               pdfNav && pdfNav.count >= 2
                 ? { open: pdfFilmOpen && active, onToggle: togglePdfFilm }

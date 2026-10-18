@@ -1,4 +1,5 @@
 import { publishBooktabPages } from "../util/booktabPages";
+import { RecenterFullscreenButton } from "./RecenterFullscreenButton";
 import { textOf } from "../util/docAnchors";
 import { DialogPresence } from "../components/DialogMotion";
 /**
@@ -1349,6 +1350,8 @@ export interface BoardProps {
    * markdown are one flowing document and have nothing to thumbnail.
    */
   pageFilm?: { open: boolean; onToggle: () => void } | null;
+  /** Reading full screen, held from the Recenter button. Absent where the shell does not offer it. */
+  fullscreen?: { on: boolean; onToggle: () => void } | null;
   /**
    * ChatBot in the right tray: ask an assistant to annotate a page range.
    * `active` while one of this document's runs is still going.
@@ -1451,6 +1454,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     agentOnline = false,
     onToggleAgent,
     pageFilm = null,
+    fullscreen = null,
     chatBot = null,
     pdfFilmPublish = true,
     pdfDocument = false,
@@ -11136,7 +11140,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                   </button>
                 )}
                 {/* Recentre — see `recentreKeepPlace` for why it is two rules. */}
-                {mountStackTools && (
+                {mountStackTools && (fullscreen ? (
+                  <RecenterFullscreenButton fullscreen={fullscreen.on} onRecenter={() => recentreKeepPlace()} onToggleFullscreen={fullscreen.onToggle} />
+                ) : (
                   <button
                     type="button"
                     className="lc-lined-toggle lc-tip-target"
@@ -11145,7 +11151,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                   >
                     <RecentreIcon />
                   </button>
-                )}
+                ))}
                 {mountStackTools && onThemePick && (
                   <BackgroundPalette variant="map" themeId={themeId} onPick={onThemePick} />
                 )}

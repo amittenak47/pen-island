@@ -119,6 +119,15 @@ impl<R: Runtime> GestureGuard<R> {
         Ok(response.ok)
     }
 
+    /// Reading full screen: hide the status and navigation bars, or show them.
+    /// Independent of `set_immersive`, which only governs the writing nav bar.
+    pub fn set_fullscreen(&self, enabled: bool) -> Result<bool> {
+        let response = self
+            .0
+            .run_mobile_plugin::<ImmersiveResponse>("set_fullscreen", ImmersiveArgs { enabled })?;
+        Ok(response.ok)
+    }
+
     /// Ask for the panel's fastest refresh (`high`), or give the choice back.
     /// Returns the rate asked for, 0 when none.
     pub fn set_high_refresh(&self, high: bool) -> Result<f64> {
