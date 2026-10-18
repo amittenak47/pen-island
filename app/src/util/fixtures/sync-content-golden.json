@@ -43,6 +43,12 @@
       "input": "{\"id\":\"book\",\"board\":{\"elements\":[],\"appState\":{\"scrollX\":99,\"scrollY\":12,\"zoom\":3,\"pdfPage\":5,\"pdfSpread\":true}},\"footnote_boards\":{\"scratch\":{\"board\":{\"appState\":{\"scrollX\":-1,\"scrollY\":0,\"zoom\":2}},\"pageCount\":1}}}",
       "canonical": "{\"board\":{\"elements\":[]},\"footnote_boards\":{\"scratch\":{\"board\":{},\"pageCount\":1}},\"id\":\"book\"}",
       "hash": "0be5754737d8a8bf6f09492d53b696308850d9f4c3b60c70c7c1e1c7108a800d"
+    },
+    {
+      "name": "page frame layout, empty footnote boards and false agent flags are per-device",
+      "input": "{\"id\":\"doc\",\"hash\":\"src\",\"footnote_boards\":{},\"footnotes\":[],\"agent\":[{\"id\":\"m1\",\"role\":\"user\",\"content\":\"hi\",\"pending\":false,\"queued\":false},{\"id\":\"m2\",\"role\":\"assistant\",\"content\":\"yo\",\"pending\":true}],\"board\":{\"v\":1,\"elements\":[{\"id\":\"lcmdink-0-frame\",\"type\":\"rectangle\",\"x\":0,\"y\":0,\"width\":642,\"height\":93955,\"version\":4,\"versionNonce\":451615249.4499662,\"updated\":1,\"seed\":1,\"customData\":{\"lcDocumentPage\":true,\"lcMdInkFrame\":true,\"lcRegion\":\"mdink-0\",\"lcRegionFrame\":true}},{\"id\":\"pen\",\"type\":\"rectangle\",\"x\":1,\"y\":2,\"width\":3,\"height\":4,\"version\":2,\"versionNonce\":7,\"seed\":9}],\"appState\":{\"scrollX\":1,\"linedPaperMode\":\"off\"}}}",
+      "canonical": "{\"agent\":[{\"content\":\"hi\",\"id\":\"m1\",\"role\":\"user\"},{\"content\":\"yo\",\"id\":\"m2\",\"pending\":true,\"role\":\"assistant\"}],\"board\":{\"appState\":{\"linedPaperMode\":\"off\"},\"elements\":[{\"customData\":{\"lcDocumentPage\":true,\"lcMdInkFrame\":true,\"lcRegion\":\"mdink-0\",\"lcRegionFrame\":true},\"id\":\"lcmdink-0-frame\",\"type\":\"rectangle\",\"width\":642,\"x\":0,\"y\":0},{\"height\":4,\"id\":\"pen\",\"seed\":9,\"type\":\"rectangle\",\"version\":2,\"versionNonce\":7,\"width\":3,\"x\":1,\"y\":2}],\"v\":1},\"footnotes\":[],\"hash\":\"src\",\"id\":\"doc\"}",
+      "hash": "a3b50a6a35512b192f6f10d02196f9633d0903c0e310b18e84e39f764c6c5611"
     }
   ],
   "ink": [

@@ -317,6 +317,7 @@ import {
   loadLinedPaperMode,
   nextLinedPaperMode,
   saveLinedPaperMode,
+  storedLinedPitch,
   type LinedPaperMode,
   type LinedPitchPair,
   type LinedRuling,
@@ -10368,11 +10369,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
             scrollY: state.scrollY ?? 0,
             zoom: state.zoom?.value ?? 1,
             linedPaperMode: linedPaperRef.current,
-            ...(linedPitchRef.current > 0 ? { linedPitch: linedPitchRef.current } : {}),
+            ...(linedPitchRef.current > 0 ? { linedPitch: storedLinedPitch(linedPitchRef.current) } : {}),
             ...(linedPitchPairRef.current
               ? {
-                  linedPitchWide: linedPitchPairRef.current.wide,
-                  linedPitchCollege: linedPitchPairRef.current.college,
+                  linedPitchWide: storedLinedPitch(linedPitchPairRef.current.wide),
+                  linedPitchCollege: storedLinedPitch(linedPitchPairRef.current.college),
                 }
               : {}),
             ...(linedRuleRef.current ? { linedRule: linedRuleRef.current } : {}),

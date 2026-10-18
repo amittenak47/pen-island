@@ -1,6 +1,7 @@
 //! Content identity for atomic sync. This contract is mirrored by syncContent.ts.
 //! Keys sort by UTF-16 code units; numbers use ECMAScript's shortest spelling.
-//! Only named root transport fields and board view/manifests are excluded.
+//! Only named root transport fields, board view/manifests, the page frame's per-device
+//! layout fields, an empty footnote board map and false agent flags are excluded.
 use anyhow::{ensure, Context, Result};
 use flate2::bufread::GzDecoder;
 use serde_json::Value;
@@ -64,6 +65,21 @@ pub fn canonical_json(value: &Value) -> Result<String> {
     Ok(out)
 }
 
+/// Each device lays out the document page frame itself: its height comes from
+/// that screen's text layout and its version stamps from the editor. Width is
+/// shared (handwriting is placed against it).
+pub const PAGE_FRAME_LOCAL_KEYS: &[&str] = &["height", "version", "versionNonce", "updated", "seed"];
+/// Agent message flags whose `false` is the same as leaving them out.
+pub const MESSAGE_FALSE_DEFAULT_KEYS: &[&str] = &["pending", "queued"];
+
+fn is_page_frame(element: &serde_json::Map<String, Value>) -> bool {
+    if element.get("id").and_then(Value::as_str) == Some("lcmdink-0-frame") { return true; }
+    let Some(meta) = element.get("customData").and_then(Value::as_object) else { return false };
+    let flag = |key: &str| meta.get(key) == Some(&Value::Bool(true));
+    flag("lcMdInkFrame") || flag("lcDocumentPage")
+        || (flag("lcRegionFrame") && meta.get("lcRegion").and_then(Value::as_str) == Some("mdink-0"))
+}
+
 fn normalize_board(board: &mut Value) {
     if let Some(object) = board.as_object_mut() {
         object.remove("inkPages");
@@ -71,6 +87,11 @@ fn normalize_board(board: &mut Value) {
             for key in LOCAL_VIEW_KEYS { state.remove(*key); }
             // A camera-only addition has no shared state after exclusions.
             if state.is_empty() { object.remove("appState"); }
+        }
+        if let Some(elements) = object.get_mut("elements").and_then(Value::as_array_mut) {
+            for element in elements.iter_mut().filter_map(Value::as_object_mut) {
+                if is_page_frame(element) { for key in PAGE_FRAME_LOCAL_KEYS { element.remove(*key); } }
+            }
         }
     }
 }
@@ -86,6 +107,15 @@ pub fn normalize_record(value: &Value) -> Result<Value> {
     if let Some(boards) = object.get_mut("footnote_boards").and_then(Value::as_object_mut) {
         for content in boards.values_mut() {
             if let Some(board) = content.get_mut("board") { normalize_board(board); }
+        }
+        // The book format defaults an absent map to empty and omits it when empty.
+        if boards.is_empty() { object.remove("footnote_boards"); }
+    }
+    if let Some(messages) = object.get_mut("agent").and_then(Value::as_array_mut) {
+        for message in messages.iter_mut().filter_map(Value::as_object_mut) {
+            for key in MESSAGE_FALSE_DEFAULT_KEYS {
+                if message.get(*key) == Some(&Value::Bool(false)) { message.remove(*key); }
+            }
         }
     }
     Ok(value)
