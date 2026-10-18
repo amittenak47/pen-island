@@ -307,6 +307,8 @@ export interface ShellValue {
   takeUserLoad: (id: string) => boolean;
   /** The load found nothing to open; the shell keeps the chip and prompts. */
   onMissingContent: (tabId: string, title: string, detail: string) => void;
+  /** Reading full screen: header hidden, window or system bars too. Held from Recenter. */
+  readingFullscreen?: { on: boolean; toggle: () => void; exit: () => void };
 }
 
 export const ShellContext = createContext<ShellValue | null>(null);

@@ -150,6 +150,21 @@ export async function setDrawingImmersive(enabled: boolean): Promise<void> {
   }
 }
 
+/**
+ * Reading full screen hides the status and navigation bars until turned off.
+ * Separate from the writing immersive above: a pen surface releasing its claim
+ * must not bring the bars back while the reader is in full screen.
+ */
+export async function setReadingFullscreenNative(enabled: boolean): Promise<void> {
+  const invoke = await loadInvoke();
+  if (!invoke) return;
+  try {
+    await invoke("set_reading_fullscreen", { enabled });
+  } catch {
+    /* desktop, or the plugin is missing from this APK */
+  }
+}
+
 // Each visible writing/reading surface owns a claim. A parked Board or a
 // departing tool must not clear another pane's page-turn protection.
 const claims = new Map<symbol, ExclusionRect[]>();

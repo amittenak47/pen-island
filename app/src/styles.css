@@ -23793,3 +23793,64 @@ html[data-corners="rounded"] {
     transition: none;
   }
 }
+
+/* ------------------------------------------------- reading full screen --- */
+/*
+ * Hold Recenter: the header slides away and everything placed under it
+ * (rail, side panes, board) follows the same variable, so nothing jumps.
+ * Registered so the variable itself can transition, both ways.
+ */
+@property --lc-header-height {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 38px;
+}
+
+.lc-app {
+  transition: --lc-header-height 220ms ease;
+}
+
+.lc-app.lc-app-fullscreen {
+  --lc-header-height: 0px;
+}
+
+.lc-app .lc-header {
+  transition: opacity 160ms ease 60ms, padding 220ms ease, border-bottom-color 220ms ease, visibility 0s;
+}
+
+.lc-app.lc-app-fullscreen .lc-header {
+  overflow: hidden;
+  padding-block: 0;
+  border-bottom-color: transparent;
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: opacity 120ms ease, padding 220ms ease, border-bottom-color 220ms ease, visibility 0s linear 220ms;
+}
+
+/* A hold button dressed as its menu neighbours: the same 36 px box and ink. */
+.lc-hold-reveal.lc-recenter-fullscreen {
+  width: 36px;
+  min-width: 36px;
+  padding: 0;
+  color: var(--ink);
+  font-weight: inherit;
+}
+
+/* The icon swaps between "recenter" and "exit full screen"; each one arrives. */
+.lc-recenter-fullscreen-icon {
+  display: inline-flex;
+  animation: lc-sync-pop-in 180ms ease-out both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-app,
+  .lc-app .lc-header,
+  .lc-app.lc-app-fullscreen .lc-header {
+    transition: none;
+  }
+
+  .lc-recenter-fullscreen-icon {
+    animation: none;
+  }
+}
