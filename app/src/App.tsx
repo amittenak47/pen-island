@@ -101,7 +101,7 @@ import {
 import { syncBookPass } from "./util/bookSyncPass";
 import { pollFootnoteInbox } from "./util/footnoteRequests";
 import { pollAnnotationJobs } from "./util/annotationJobs";
-import { useReadingFullscreen } from "./useReadingFullscreen";
+import { registerFullscreenRoot, setReadingFullscreen } from "./util/readingFullscreenStore";
 import { HUB_AUTOSYNC_EVENT, loadHubAutosyncPref } from "./util/hubAutoSyncPref";
 import { PAD_HUB_EVENT, setHostLoopback } from "./util/padHub";
 import { startPadHubStatusMonitoring } from "./util/padHubStatus";
@@ -1347,8 +1347,11 @@ export function App() {
   }, [focusTab]);
   const practiceRequestHandled = useCallback(() => setPracticeRequested(false), []);
 
-  // Hold Recenter: the header hides for reading. Home has no way back, so it leaves.
-  const readingFullscreen = useReadingFullscreen(tabState.activeId !== HOME_TAB_ID);
+  // Reading full screen lives outside React (readingFullscreenStore). Home has
+  // no Recenter button to leave it with, so arriving there leaves it.
+  useEffect(() => {
+    if (tabState.activeId === HOME_TAB_ID) setReadingFullscreen(false);
+  }, [tabState.activeId]);
   const shell: ShellValue = useMemo(
     () => ({
       client,
@@ -1408,7 +1411,6 @@ export function App() {
       markUserLoad,
       takeUserLoad,
       onMissingContent,
-      readingFullscreen,
     }),
     [
       autosaveMs, bankFilters, browseMotion, capabilities, client, closeTab, coachFlags, error,
@@ -1416,7 +1418,7 @@ export function App() {
       announceAutosave, onMissingContent, openWorkspace, patchTab, pdfFilmOpen, readingSize, recognizer,
       refreshCoachFlags, refreshSession, serverLink, session, setChrome, setWorkspaceApi,
       settingsOpen, setShellLoadActive, sheetDragLocked, shellLoadActive, markUserLoad, takeUserLoad, testForward, themeId,
-      splitTabs, webPush, webStep, readingFullscreen,
+      splitTabs, webPush, webStep,
     ],
   );
 
@@ -1424,6 +1426,7 @@ export function App() {
     <ShellContext.Provider value={shell}>
       <NotificationStack />
       <div
+        ref={registerFullscreenRoot}
         data-lc-device={isHandheldDevice() ? "handheld" : "desktop"}
         className={[
           "lc-app",
@@ -1434,7 +1437,6 @@ export function App() {
           chrome.agentOpen ? "lc-app-agent-open" : "",
           chrome.loading || shellLoadActive ? "lc-app-loading" : "",
           bootPhase !== "gone" && bootPhase !== "exit" ? "lc-app-booting" : "",
-          readingFullscreen.on ? "lc-app-fullscreen" : "",
         ]
           .filter(Boolean)
           .join(" ")}

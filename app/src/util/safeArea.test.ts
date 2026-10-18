@@ -68,3 +68,18 @@ describe("combineTopInset", () => {
     expect(combineTopInset(0, 0, 0, { android: true, nativeKnown: true })).toBe(0);
   });
 });
+
+describe("readingTopInset", () => {
+  it("keeps the status bar's inset while reading full screen hides it, so nothing shifts", async () => {
+    const { readingTopInset } = await import("./safeArea");
+    // Normal: the measured inset is used and remembered.
+    expect(readingTopInset(41, false, 0)).toBe(41);
+    // Full screen hides the bar (measured 0): the remembered 41 stays.
+    expect(readingTopInset(0, true, 41)).toBe(41);
+    // Nothing remembered yet: use what is measured.
+    expect(readingTopInset(0, true, 0)).toBe(0);
+    // Back out of full screen: the measured value again.
+    expect(readingTopInset(41, false, 41)).toBe(41);
+    expect(readingTopInset(24, false, 41)).toBe(24);
+  });
+});

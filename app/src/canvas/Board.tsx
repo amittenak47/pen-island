@@ -1,5 +1,5 @@
 import { publishBooktabPages } from "../util/booktabPages";
-import { RecenterFullscreenButton } from "./RecenterFullscreenButton";
+import { RecenterFullscreenControl } from "./RecenterFullscreenButton";
 import { textOf } from "../util/docAnchors";
 import { DialogPresence } from "../components/DialogMotion";
 /**
@@ -1350,8 +1350,6 @@ export interface BoardProps {
    * markdown are one flowing document and have nothing to thumbnail.
    */
   pageFilm?: { open: boolean; onToggle: () => void } | null;
-  /** Reading full screen, held from the Recenter button. Absent where the shell does not offer it. */
-  fullscreen?: { on: boolean; onToggle: () => void } | null;
   /**
    * ChatBot in the right tray: ask an assistant to annotate a page range.
    * `active` while one of this document's runs is still going.
@@ -1454,7 +1452,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     agentOnline = false,
     onToggleAgent,
     pageFilm = null,
-    fullscreen = null,
     chatBot = null,
     pdfFilmPublish = true,
     pdfDocument = false,
@@ -1813,6 +1810,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   // Keep its contents mounted so the wake animation can close and reopen it.
   const mountStackTools = chromeEnabled;
   const mountEye = chromeShown.eye || chromeTraySleeps;
+  /** Menu stack groups — a rule is drawn only between two that are showing. */
+  const stackPageGroup = mountStackTools;
+  const stackAskGroup = mountStackTools && (!!chatBot || !!onToggleAgent);
+  const stackViewGroup = (mountStackTools && !!onThemePick) || mountEye;
   /*
    * Fade/hidden keeps the wake mounted while the tray is still up, so the first
    * idle hide can run the same close sequence as tapping Hide controls. Adding
@@ -10995,6 +10996,16 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                   the note is a view of the document, and views live in this
                   stack — same rail as paper, page previews and the eye.
                 */}
+                {/*
+                  Three groups, split by faint rules: the page view (paper,
+                  previews, spread, recentre / full screen), asking (ChatBot,
+                  agent), and the board's own visibility (theme, eye). The stack
+                  is bottom-anchored and grows upward off the eye, so the eye and
+                  the swatch keep their slots whatever tab is open, and Recentre
+                  sits last in its group, nearest the rule. A rule only shows
+                  between groups that are both on screen: with the tools tucked
+                  away (fade, hidden) the eye stands alone, as before.
+                */}
                 {mountStackTools && editToggle && (
                   <button
                     type="button"
@@ -11017,14 +11028,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                     </span>
                   </button>
                 )}
-                {/*
-                  Order here is deliberate, and the stack is bottom-anchored:
-                  it grows upward off the eye, so everything optional sits
-                  ABOVE the fixed trio. Recentre / theme / eye then keep the
-                  same slot whatever tab is open — the page-film button on a
-                  PDF used to shove the theme swatch up a notch, and a reader
-                  aims at where the swatch was last time.
-                */}
                 {mountStackTools &&
                   linedPaperToggle &&
                   isDrawPageRegion(mobileRegion ?? null) && (
@@ -11084,25 +11087,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                     <PagesFilmIcon />
                   </button>
                 )}
-                {mountStackTools && chatBot && (
-                  <button
-                    type="button"
-                    className={
-                      chatBot.active
-                        ? "lc-lined-toggle lc-tip-target lc-chatbot-tray is-active"
-                        : "lc-lined-toggle lc-tip-target lc-chatbot-tray"
-                    }
-                    aria-label={chatBot.active ? "ChatBot: annotating" : "ChatBot"}
-                    data-tip={chatBot.active ? "ChatBot is annotating" : "Ask ChatBot"}
-                    onPointerDown={(event) => event.preventDefault()}
-                    onClick={chatBot.onOpen}
-                  >
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
-                      <path d="M12 8.2l.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9z" fill="currentColor" stroke="none" />
-                    </svg>
-                  </button>
-                )}
                 {mountStackTools && pageSpread && (
                   <button
                     type="button"
@@ -11132,6 +11116,27 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                     </span>
                   </button>
                 )}
+                {mountStackTools && <RecenterFullscreenControl onRecenter={() => recentreKeepPlace()} />}
+                {stackPageGroup && stackAskGroup && <span className="lc-chrome-stack-sep" aria-hidden />}
+                {mountStackTools && chatBot && (
+                  <button
+                    type="button"
+                    className={
+                      chatBot.active
+                        ? "lc-lined-toggle lc-tip-target lc-chatbot-tray is-active"
+                        : "lc-lined-toggle lc-tip-target lc-chatbot-tray"
+                    }
+                    aria-label={chatBot.active ? "ChatBot: annotating" : "ChatBot"}
+                    data-tip={chatBot.active ? "ChatBot is annotating" : "Ask ChatBot"}
+                    onPointerDown={(event) => event.preventDefault()}
+                    onClick={chatBot.onOpen}
+                  >
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                      <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-7l-4 3v-3H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+                      <path d="M12 8.2l.9 1.9 1.9.9-1.9.9-.9 1.9-.9-1.9-1.9-.9 1.9-.9z" fill="currentColor" stroke="none" />
+                    </svg>
+                  </button>
+                )}
                 {mountStackTools && onToggleAgent && (
                   <button type="button" className="lc-lined-toggle lc-agent-tray-dot" aria-expanded={agentOpen}
                     aria-controls="lc-agent-panel" aria-label={`${agentOpen ? "Hide" : "Open"} agent — ${agentOnline ? "online" : "offline"}`}
@@ -11140,18 +11145,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                   </button>
                 )}
                 {/* Recentre — see `recentreKeepPlace` for why it is two rules. */}
-                {mountStackTools && (fullscreen ? (
-                  <RecenterFullscreenButton fullscreen={fullscreen.on} onRecenter={() => recentreKeepPlace()} onToggleFullscreen={fullscreen.onToggle} />
-                ) : (
-                  <button
-                    type="button"
-                    className="lc-lined-toggle lc-tip-target"
-                    aria-label="Recenter and refresh the view"
-                    onClick={() => recentreKeepPlace()}
-                  >
-                    <RecentreIcon />
-                  </button>
-                ))}
+                {(stackPageGroup || stackAskGroup) && stackViewGroup && <span className="lc-chrome-stack-sep" aria-hidden />}
                 {mountStackTools && onThemePick && (
                   <BackgroundPalette variant="map" themeId={themeId} onPick={onThemePick} />
                 )}
@@ -11550,26 +11544,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     </div>
   );
 });
-
-/** Crosshair in a frame — "put the page back where it belongs". */
-function RecentreIcon() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      width="16"
-      height="16"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="1.7"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-    >
-      <path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" />
-      <circle cx="12" cy="12" r="2.5" />
-    </svg>
-  );
-}
 
 function EyeIcon({ closed = false, half = false }: { closed?: boolean; half?: boolean }) {
   if (half) {

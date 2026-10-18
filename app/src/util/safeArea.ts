@@ -70,6 +70,18 @@ export function combineTopInset(
   return 0;
 }
 
+/**
+ * Reading full screen hides the status bar. The (hidden) header keeps the
+ * bar's inset, so nothing shifts when the bars hide or come back: on the first
+ * toggle the bar used to hide mid-motion and move the header and the page
+ * before they could animate.
+ */
+export function readingTopInset(measured: number, reading: boolean, previous: number): number {
+  return reading ? previous || measured : measured;
+}
+
+let lastTopInset = 0;
+
 function readEnvInset(edge: "top" | "bottom" | "left" | "right"): number {
   if (typeof document === "undefined") return 0;
   const probe = document.createElement("div");
@@ -125,10 +137,12 @@ export function holdSceneTextViewport(): () => void {
 function publishInsets(): void {
   const root = document.documentElement;
   const native = nativeInsets ?? { top: 0, right: 0, bottom: 0, left: 0 };
-  const top = combineTopInset(readEnvInset("top"), 0, native.top, {
+  const reading = Boolean(document.querySelector(".lc-app[data-fullscreen]"));
+  const top = readingTopInset(combineTopInset(readEnvInset("top"), 0, native.top, {
     android: isAndroidDevice(),
     nativeKnown,
-  });
+  }), reading, lastTopInset);
+  if (!reading) lastTopInset = top;
   const left = Math.max(readEnvInset("left"), native.left, 0);
   const right = Math.max(readEnvInset("right"), native.right, 0);
   const { safeBottom, keyboardInset } = splitBottomInsets(
