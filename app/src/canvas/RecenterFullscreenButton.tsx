@@ -1,5 +1,6 @@
 import { HoldButton } from "../components/HoldButton";
 import { LIBRARY_HOLD_MS } from "../util/gesture";
+import { toggleReadingFullscreen, useReadingFullscreenOn } from "../util/readingFullscreenStore";
 
 /** Crosshair in a frame — "put the page back where it belongs". */
 function RecentreIcon() {
@@ -47,4 +48,10 @@ export function RecenterFullscreenButton({ fullscreen, onRecenter, onToggleFulls
       </span>
     </HoldButton>
   );
+}
+
+/** The menu toolbar's button, wired to the app-wide full-screen store. Only this re-renders on a toggle. */
+export function RecenterFullscreenControl({ onRecenter }: { onRecenter: () => void }) {
+  const fullscreen = useReadingFullscreenOn();
+  return <RecenterFullscreenButton fullscreen={fullscreen} onRecenter={onRecenter} onToggleFullscreen={toggleReadingFullscreen} />;
 }

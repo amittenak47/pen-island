@@ -22594,6 +22594,16 @@ button.lc-row-selected:hover:not(:disabled) {
   align-items: stretch;
   gap: 2px;
 }
+/* Faint rules between the menu's groups: page view, asking, visibility. */
+.lc-chrome-stack-fold-inner > .lc-chrome-stack-sep {
+  flex: none;
+  align-self: center;
+  width: 60%;
+  height: 1px;
+  margin-block: 3px;
+  background: color-mix(in srgb, var(--ink) 16%, transparent);
+  pointer-events: none;
+}
 @media (prefers-reduced-motion: reduce) {
   .lc-map-chrome-row > .lc-lined-toggle svg,
   .lc-chrome-stack-fold-inner > :is(.lc-lined-toggle, .lc-chrome-eye) svg {
@@ -23796,36 +23806,27 @@ html[data-corners="rounded"] {
 
 /* ------------------------------------------------- reading full screen --- */
 /*
- * Hold Recenter: the header slides away and everything placed under it
- * (rail, side panes, board) follows the same variable, so nothing jumps.
- * Registered so the variable itself can transition, both ways.
+ * Hold Recenter: the header leaves the flow and the content takes its height,
+ * in one layout change. The visible motion is `fullscreenMotion.ts`, on
+ * transforms only, so nothing is laid out per frame.
+ *
+ * Only the content's copy of the header height drops to 0. The header keeps
+ * its natural box (out of the flow, clipped shut), so its box can close and
+ * open in place without its contents moving.
  */
-@property --lc-header-height {
-  syntax: "<length>";
-  inherits: true;
-  initial-value: 38px;
-}
-
-.lc-app {
-  transition: --lc-header-height 220ms ease;
-}
-
-.lc-app.lc-app-fullscreen {
+.lc-app[data-fullscreen] > :not(.lc-header) {
   --lc-header-height: 0px;
 }
 
-.lc-app .lc-header {
-  transition: opacity 160ms ease 60ms, padding 220ms ease, border-bottom-color 220ms ease, visibility 0s;
-}
-
-.lc-app.lc-app-fullscreen .lc-header {
-  overflow: hidden;
-  padding-block: 0;
-  border-bottom-color: transparent;
-  opacity: 0;
+.lc-app[data-fullscreen] > .lc-header {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 30;
+  clip-path: inset(0px 0px 100% 0px);
   visibility: hidden;
   pointer-events: none;
-  transition: opacity 120ms ease, padding 220ms ease, border-bottom-color 220ms ease, visibility 0s linear 220ms;
 }
 
 /* A hold button dressed as its menu neighbours: the same 36 px box and ink. */
@@ -23844,12 +23845,6 @@ html[data-corners="rounded"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .lc-app,
-  .lc-app .lc-header,
-  .lc-app.lc-app-fullscreen .lc-header {
-    transition: none;
-  }
-
   .lc-recenter-fullscreen-icon {
     animation: none;
   }
