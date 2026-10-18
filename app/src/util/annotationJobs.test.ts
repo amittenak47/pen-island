@@ -151,6 +151,24 @@ describe("page-range footnotes", () => {
     expect(store.footnotes).toHaveLength(1);
   });
 
+  it("adds a later run's notes to an earlier run's footnote on the same sentence, and Undo takes them back out", async () => {
+    await placeAnnotationJobItems(client([item()]).client);
+    expect(store.footnotes).toHaveLength(1);
+    const later = item({ item_id: 7, job_id: "aj-2", result: { notes: ["Linear time: each edge is scanned twice."], title: "Other title" } });
+    expect(await placeAnnotationJobItems(client([later]).client)).toEqual({ placed: 1, unplaced: 0, waiting: 0 });
+    expect(store.footnotes).toHaveLength(1);
+    const merged = store.footnotes[0] as DocFootnote;
+    expect(merged!.title).toBe("DFS");
+    expect(merged!.notes!.map((note) => note.text)).toEqual(["Explores as deep as possible before backtracking.", "Linear time: each edge is scanned twice."]);
+    expect(merged!.notes![1]).toMatchObject({ jobId: "aj-2", by: "ai" });
+    // A redelivery of the later run adds nothing.
+    await placeAnnotationJobItems(client([later]).client);
+    expect((store.footnotes[0] as DocFootnote).notes).toHaveLength(2);
+    expect(await undoAnnotationJob("algo", "aj-2")).toBe(1);
+    expect(store.footnotes).toHaveLength(1);
+    expect((store.footnotes[0] as DocFootnote).notes!.map((note) => note.text)).toEqual(["Explores as deep as possible before backtracking."]);
+  });
+
   it("leaves items on the hub while their PDF is not open on this device", async () => {
     pdf.open = false;
     const { client: c, acked } = client([item()]);

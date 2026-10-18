@@ -390,6 +390,7 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
     const placedItems: AnnotationJobItemDto[] = [];
     const write = await writeFootnotes(docId, (footnotes) => {
       let next = [...footnotes];
+      let merged = false;
       placedItems.length = 0;
       for (const item of docItems) {
         // Undo may have finished while the poll was reading this PDF's text.
@@ -398,11 +399,14 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
         const footnote = stream ? footnoteFromItem(item, stream, next) : null;
         if (!footnote) continue;
         placedItems.push(item);
-        // A retried delivery, or a mark the reader already has there: keep theirs.
-        if (next.some((existing) => samePlace(existing, footnote))) continue;
-        next = addFootnote(next, footnote);
+        const at = next.findIndex((existing) => samePlace(existing, footnote));
+        if (at < 0) { next = addFootnote(next, footnote); continue; }
+        // Another run's footnote is already on this sentence: add this run's
+        // notes to it instead of dropping them. A retried delivery adds nothing.
+        const combined = mergeRunNotes(next[at]!, footnote);
+        if (combined !== next[at]) { merged = true; next = next.map((entry, index) => index === at ? combined : entry); }
       }
-      return next.length === footnotes.length ? (footnotes as DocFootnote[]) : next;
+      return next.length === footnotes.length && !merged ? (footnotes as DocFootnote[]) : next;
     });
     const currentItems = docItems.filter((item) => {
       if (!isSuppressed(docId, item.job_id)) return true;
@@ -432,6 +436,27 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
   return outcome;
 }
 
+/**
+ * `existing` with `incoming`'s notes appended, each tagged with the run that
+ * wrote it. The existing title, colour and the reader's own notes stay. Notes
+ * this run already added, or with the same text, are not added twice.
+ */
+export function mergeRunNotes(existing: DocFootnote, incoming: DocFootnote): DocFootnote {
+  const runId = incoming.jobId;
+  if (!runId || existing.jobId === runId) return existing;
+  const notes = existing.notes ?? [];
+  if (notes.some((note) => note.jobId === runId)) return existing;
+  const texts = new Set(notes.map((note) => note.text.trim()));
+  const ids = new Set(notes.map((note) => note.id));
+  const added = (incoming.notes ?? []).filter((note) => note.text.trim() && !texts.has(note.text.trim()))
+    .map((note, index) => ({ ...note, id: ids.has(note.id) ? `${note.id}-${runId}-${index}` : note.id, by: note.by ?? "ai" as const, jobId: runId }));
+  if (!added.length) return existing;
+  const links = existing.userLinks ?? [];
+  const extraLinks = (incoming.userLinks ?? []).filter((link) => !links.some((own) => own.url === link.url));
+  return { ...existing, notes: [...notes, ...added], ...(extraLinks.length ? { userLinks: [...links, ...extraLinks] } : {}),
+    updatedAt: Math.max(existing.updatedAt ?? 0, ...added.map((note) => note.updatedAt)) };
+}
+
 /** Remove every footnote a run created on this document, and nothing else. */
 export async function undoAnnotationJob(docId: string, jobId: string): Promise<number> {
   let removed = 0;
@@ -443,9 +468,16 @@ export async function undoAnnotationJob(docId: string, jobId: string): Promise<n
   pendingUndos.set(key, pending);
   try {
     const write = await writeFootnotes(docId, (footnotes) => {
-      const kept = footnotes.filter((footnote) => footnote.jobId !== jobId);
-      removed = footnotes.length - kept.length;
-      return removed ? kept : (footnotes as DocFootnote[]);
+      let changed = false;
+      removed = 0;
+      const kept = footnotes.filter((footnote) => footnote.jobId !== jobId).map((footnote) => {
+        // Notes this run added to another run's footnote come back out too.
+        if (!footnote.notes?.some((note) => note.jobId === jobId)) return footnote;
+        changed = true; removed += 1;
+        return { ...footnote, notes: footnote.notes.filter((note) => note.jobId !== jobId) };
+      });
+      removed += footnotes.length - kept.length;
+      return removed || changed ? kept : (footnotes as DocFootnote[]);
     });
     if (write === "failed") throw new Error("Couldn't save the document after undoing this run.");
     return removed;

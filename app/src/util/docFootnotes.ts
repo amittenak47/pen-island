@@ -63,6 +63,8 @@ export interface DocFootnoteNote {
   by?: "ai" | "reader";
   /** The preset field this note fills ("Character"); its text opens "**Field:**". */
   field?: string;
+  /** The ChatBot run that added this note to an earlier footnote, so Undo can take it back out. */
+  jobId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -736,6 +738,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
             ...(Array.isArray(candidate.images) ? { images } : {}),
             ...(candidate.by === "ai" || candidate.by === "reader" ? { by: candidate.by } : {}),
             ...(typeof candidate.field === "string" && candidate.field.trim() && candidate.field.length <= 40 ? { field: candidate.field.trim() } : {}),
+            ...(typeof candidate.jobId === "string" && candidate.jobId ? { jobId: candidate.jobId } : {}),
             createdAt,
             updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : createdAt,
           },
