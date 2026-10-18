@@ -79,11 +79,17 @@ it.each([true, false])("uses the sheet's CSS clip/transform clock, entering=%s, 
     else delete app.dataset.fullscreen;
   });
   expect(layouts).toBe(1);
+  // The board fits the final geometry once, before the motion, untransformed:
+  // the motion then ends on the fitted page instead of snapping after it.
+  expect(settles).toEqual([false]);
   expect(committed).toContainEqual({
     clip: entering ? OPEN : CLOSED,
     transform: entering ? `translateY(44px) scaleY(${956 / 1000})` : `translateY(-44px) scaleY(${1000 / 956})`,
     transition: "none", held: true,
   });
+  // The old box is what the next frames paint; the clock starts once frames are quick again.
+  expect(header.style.clipPath).toBe(entering ? OPEN : CLOSED);
+  await vi.advanceTimersByTimeAsync(48); // two quick frames, then the clock starts
   expect(header.style.clipPath).toBe(entering ? CLOSED : OPEN);
   expect(header.style.transform).toBe(""); expect(header.style.opacity).toBe("");
   expect(getComputedStyle(header).visibility).toBe("visible");
@@ -91,7 +97,7 @@ it.each([true, false])("uses the sheet's CSS clip/transform clock, entering=%s, 
   expect(main.style.transform).toBe("translateY(0px) scaleY(1)");
   expect(getComputedStyle(main).transition).toBe(`transform ${TRANSITION}`);
   expect([headerSlot, agentSlot].every(el => el.style.transform === "")).toBe(true);
-  expect(settles).toEqual([]);
+  expect(settles).toEqual([false]);
   expect(boardResizeDeferred()).toBe(true);
   const resize = vi.fn(() => {
     expect(main.style.transform).toBe("");
@@ -110,17 +116,17 @@ it.each([true, false])("uses the sheet's CSS clip/transform clock, entering=%s, 
   expect(header.style.clipPath).toBe(""); expect(main.style.transform).toBe("");
   if (entering) expect(getComputedStyle(header).visibility).toBe("hidden");
   else expect(getComputedStyle(header).visibility).not.toBe("hidden");
-  expect(settles).toEqual([false]); expect(resize).toHaveBeenCalledOnce();
-  await vi.runAllTimersAsync(); expect(settles).toHaveLength(1);
+  expect(settles).toEqual([false, false]); expect(resize).toHaveBeenCalledOnce();
+  await vi.runAllTimersAsync(); expect(settles).toHaveLength(2);
   window.removeEventListener("resize", resize);
 });
 
 it("falls back to one final settle when WebView transitionend is missing", async () => {
   const done = toggle(true);
   await vi.advanceTimersByTimeAsync(239);
-  expect(boardResizeDeferred()).toBe(true); expect(settles).toEqual([]);
+  expect(boardResizeDeferred()).toBe(true); expect(settles).toEqual([false]);
   await vi.runAllTimersAsync(); await done;
-  expect(boardResizeDeferred()).toBe(false); expect(settles).toEqual([false]);
+  expect(boardResizeDeferred()).toBe(false); expect(settles).toEqual([false, false]);
 });
 
 it("reverses from the visible box and clip, resolves the interrupted motion and keeps the refit hold", async () => {
@@ -141,10 +147,10 @@ it("reverses from the visible box and clip, resolves the interrupted motion and 
     transition: "none", held: true,
   });
   await vi.advanceTimersByTimeAsync(180); // The cancelled fallback must not settle.
-  expect(boardResizeDeferred()).toBe(true); expect(settles).toEqual([]);
+  expect(boardResizeDeferred()).toBe(true); expect(settles).toEqual([false, false]);
   transitionEnd(header, "clip-path"); transitionEnd(main, "transform");
   await done; await vi.runAllTimersAsync();
-  expect(settles).toEqual([false]); expect(boardResizeDeferred()).toBe(false);
+  expect(settles).toEqual([false, false, false]); expect(boardResizeDeferred()).toBe(false);
   expect(app.dataset.fullscreen).toBeUndefined();
 });
 
@@ -166,5 +172,36 @@ it("a reduced-motion toggle during a transition clears the old hold and settles 
   await toggle(false); await first; await vi.runAllTimersAsync();
   expect(app.dataset.fullscreen).toBeUndefined();
   expect(app.hasAttribute("data-fullscreen-motion")).toBe(false);
-  expect(boardResizeDeferred()).toBe(false); expect(settles).toEqual([false]);
+  // The first motion fitted its geometry when it started; the reduced toggle
+  // fits the new one. The cancelled motion adds no settle of its own.
+  expect(boardResizeDeferred()).toBe(false); expect(settles).toEqual([false, false]);
+});
+
+it("a document page is mapped from its refitted box back onto its old one, uniformly", async () => {
+  // Reading a PDF page: the board refits it to the taller screen, the motion starts from where it was.
+  const page = document.createElement("div"); page.className = "lc-pdf-page"; main.append(page);
+  vi.spyOn(page, "getBoundingClientRect").mockImplementation(() => app.hasAttribute("data-fullscreen")
+    ? { ...rect(30, 1060), left: 10, width: 780, right: 790 } : { ...rect(80, 1000), left: 50, width: 700, right: 750 });
+  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [page, main, app] });
+  const done = toggle(true);
+  const scale = 700 / 780;
+  // Old centre (400, 580); new centre (400, 560). Origin at the new centre inside the box.
+  expect(committed).toContainEqual({ clip: OPEN, transform: `translate(0px, 20px) scale(${scale})`, transition: "none", held: true });
+  expect(main.style.transformOrigin).toBe("400px 560px");
+  await vi.advanceTimersByTimeAsync(48); // two quick frames, then the clock starts
+  expect(main.style.transform).toBe("translate(0px, 0px) scale(1)");
+  transitionEnd(header, "clip-path"); transitionEnd(main, "transform"); await done;
+  expect(main.style.transform).toBe("");
+  delete (document as { elementsFromPoint?: unknown }).elementsFromPoint;
+});
+
+it.each([true, false])("runs in two phases, entering=%s: header then page, or page then header", async entering => {
+  // Entering: the header closes, then the page expands. Leaving: the page shrinks, then the header opens.
+  if (!entering) app.dataset.fullscreen = "true";
+  const done = toggle(entering);
+  await vi.advanceTimersByTimeAsync(48);
+  expect(header.style.transitionDelay).toBe(entering ? "0ms" : "200ms");
+  expect(main.style.transitionDelay).toBe(entering ? "200ms" : "0ms");
+  transitionEnd(header, "clip-path"); transitionEnd(main, "transform"); await done;
+  expect(header.style.transitionDelay).toBe(""); expect(main.style.transitionDelay).toBe("");
 });
