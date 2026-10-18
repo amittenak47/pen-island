@@ -1742,7 +1742,7 @@ export function HubConflictSplit({
             />
           )}
           {(busy || error || !valid) && <span role={error ? "alert" : "status"} className={error && !busy ? "lc-hub-conflict-error" : "lc-muted"}>
-            {busy ? "Saving..." : error || (serverMissing || serverInkUnread || !catalogHomed ? whyDisabled : `${remainingChoices} changes still need a choice`)}
+            {busy ? "Saving..." : error || (serverMissing || serverInkUnread || !catalogHomed ? whyDisabled : recordOnly && wholePick === null ? "Tick the copy to keep." : `${remainingChoices} changes still need a choice`)}
           </span>}
         </div>
         {onCancel && (

@@ -189,6 +189,7 @@ describe("HubConflictSplit", () => {
     const { onResolve } = mount({ ...CONFLICT, local: annotateBody("book", 900, []), server: annotateBody("book renamed", 500, []) });
     expect(paneButton(1, "keep").disabled).toBe(false);
     expect(resolveButton().disabled).toBe(true);
+    expect(document.body.textContent).toContain("Tick the copy to keep.");
     act(() => paneButton(1, "keep").click());
     expect(paneButton(1, "keep").getAttribute("aria-pressed")).toBe("true");
     expect(paneButton(0, "drop").getAttribute("aria-pressed")).toBe("true");
