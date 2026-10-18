@@ -32,6 +32,21 @@ it("fails when a mounted window disappears", async () => {
   await expect(waiting).rejects.toThrow("window closed");
 });
 
+it("survives an unmount that remounts at once, as React's development mode does", async () => {
+  let lifecycle!: ConflictUiLifecycle;
+  let choose!: (value: string) => void;
+  const waiting = waitForConflictUi<string>((value) => {
+    lifecycle = value;
+    value.onMounted();
+    return new Promise((resolve) => { choose = resolve; });
+  }, new AbortController().signal, "window closed");
+  lifecycle.onUnavailable();
+  lifecycle.onMounted();
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  choose("hub");
+  await expect(waiting).resolves.toBe("hub");
+});
+
 it("fails immediately with no handler or a thrown handler", async () => {
   await expect(waitForConflictUi(undefined, new AbortController().signal, "no UI")).rejects.toThrow("no UI");
   await expect(waitForConflictUi(() => { throw new Error("mount failed"); }, new AbortController().signal, "no UI")).rejects.toThrow("mount failed");

@@ -41,30 +41,10 @@ use crate::llm::coach::{
 };
 use crate::llm::{make_provider_for_mode, ChatMessage, ChatRequest, LlmProvider};
 
-/// What an interactive `run` frame is asking for. Bridge / Reveal are
-/// deliberately absent: they sit behind a confirmation dialog and stay on HTTP.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum RunAction {
-    Ask,
-    Review,
-    Viz,
-    Lazy,
-    /// The post-render check on a diagram the client already drew.
-    DrawReview,
-}
+use super::agent_socket;
 
-impl RunAction {
-    fn as_str(self) -> &'static str {
-        match self {
-            RunAction::Ask => "ask",
-            RunAction::Review => "review",
-            RunAction::Viz => "viz",
-            RunAction::Lazy => "lazy",
-            RunAction::DrawReview => "draw_review",
-        }
-    }
-}
+pub use crate::llm::agent_runs::AgentAction as RunAction;
+use crate::llm::agent_runs::AgentResponder;
 
 /// Frames the client sends.
 #[derive(Debug, Deserialize)]
@@ -291,7 +271,7 @@ async fn drive(state: Shared, socket: WebSocket) {
         }
     });
 
-    let incoming_for_reader = incoming_tx.clone();
+    let incoming_for_reader = incoming_tx;
     let reader = tokio::spawn(async move {
         while let Some(Ok(message)) = stream.next().await {
             match message {
@@ -309,7 +289,6 @@ async fn drive(state: Shared, socket: WebSocket) {
     drive_channels(state, incoming_rx, outgoing).await;
 
     reader.abort();
-    drop(incoming_tx);
     let _ = writer.await;
 }
 
@@ -417,6 +396,49 @@ fn spawn_run(
     action: RunAction,
     payload: serde_json::Value,
 ) -> InFlight {
+    let state_for_run = state;
+    let id_for_run = request_id.clone();
+    spawn_run_with(
+        outgoing,
+        request_id,
+        action,
+        payload,
+        move |payload, events| async move {
+            let provider = state_for_run
+                .cfg_snapshot()
+                .llm
+                .modes
+                .get(action.provider_mode())?
+                .to_string();
+            if let Some(responder) = AgentResponder::from_provider(&provider) {
+                agent_socket::run(
+                    &state_for_run,
+                    id_for_run,
+                    action,
+                    responder,
+                    payload,
+                    events,
+                )
+                .await
+            } else {
+                run_action(&state_for_run, action, payload, events).await
+            }
+        },
+    )
+}
+
+/// Common task/frame boundary, also used by the network-free API regression.
+fn spawn_run_with<F, Fut>(
+    outgoing: UnboundedSender<ServerFrame>,
+    request_id: String,
+    action: RunAction,
+    payload: serde_json::Value,
+    run: F,
+) -> InFlight
+where
+    F: FnOnce(serde_json::Value, EventSink) -> Fut + Send + 'static,
+    Fut: std::future::Future<Output = Result<serde_json::Value, AppError>> + Send,
+{
     let events = run_event_sink(outgoing.clone(), request_id.clone());
     // Acknowledge the run before `run_action` schedules pool work — the client
     // switches from its local ack line to stage frames on this one.
@@ -428,7 +450,7 @@ fn spawn_run(
     let task = tokio::spawn({
         let request_id = request_id.clone();
         async move {
-            let outcome = run_action(&state, action, payload, events.clone()).await;
+            let outcome = run(payload, events.clone()).await;
             // A run that was cancelled already had its `error` frame sent, and
             // whatever it produced afterwards is for a turn the client closed.
             if events.is_cancelled() {
@@ -837,3 +859,6 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod agent_tests;

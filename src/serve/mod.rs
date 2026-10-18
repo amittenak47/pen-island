@@ -18,6 +18,7 @@ pub mod board_session;
 pub mod session;
 pub mod viz;
 pub mod ws;
+mod agent_socket;
 
 use std::sync::{Arc, RwLock};
 
@@ -43,6 +44,8 @@ pub struct AppState {
     /// `runner` records each run to a single `last_run.json`; serialize test
     /// runs so two clients can't interleave and read each other's results.
     pub test_lock: tokio::sync::Mutex<()>,
+    /// Ephemeral coach jobs; shared by all sockets and future agent adapters.
+    pub agent_runs: Arc<crate::llm::agent_runs::AgentRunRegistry>,
 }
 
 impl AppState {
@@ -63,12 +66,28 @@ pub fn new_state(cfg: Config) -> Shared {
 
 /// Same router, with a pairing token — used only by the LAN pad-sync listener.
 pub fn new_state_with_token(cfg: Config, token: Option<String>) -> Shared {
+    new_state_sharing_agent_runs(cfg, token, Arc::new(crate::llm::agent_runs::AgentRunRegistry::default()))
+}
+
+/// The LAN listener's state for a desktop app whose window has its own.
+///
+/// The window starts agent runs through its embedded router; the AI
+/// application's MCP process and the ChatBot bridge reach the same runs over
+/// the LAN listener. With a registry each, every run the window started was
+/// "unknown" there: the required MCP server failed to start and the AI
+/// application exited before it could reply. One registry, two routers.
+pub fn new_state_sharing_agent_runs(
+    cfg: Config,
+    token: Option<String>,
+    agent_runs: Arc<crate::llm::agent_runs::AgentRunRegistry>,
+) -> Shared {
     Arc::new(AppState {
         cfg: RwLock::new(cfg),
         token,
         sessions: tokio::sync::Mutex::new(SessionStore::default()),
         board_sessions: tokio::sync::Mutex::new(board_session::BoardSessionStore::default()),
         test_lock: tokio::sync::Mutex::new(()),
+        agent_runs,
     })
 }
 
@@ -257,6 +276,7 @@ pub fn router(state: Shared) -> Router {
         .route("/coach/scaffold", post(coach::scaffold))
         .route("/coach/capabilities", get(coach::capabilities))
         .route("/coach/session", get(ws::session))
+        .route("/coach/agent-mcp", post(crate::mcp::coach::route))
         .route(
             "/workspace/:id/solution",
             get(routes::get_solution).put(routes::put_solution),
@@ -402,6 +422,15 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lan_state_can_share_the_windows_agent_runs() {
+        let gui = new_state(Config::default());
+        let lan = new_state_sharing_agent_runs(Config::default(), Some("t".repeat(32)), gui.agent_runs.clone());
+        assert!(Arc::ptr_eq(&gui.agent_runs, &lan.agent_runs));
+        assert!(!Arc::ptr_eq(&gui.agent_runs, &new_state_with_token(Config::default(), None).agent_runs));
+        assert!(lan.token.is_some() && gui.token.is_none());
+    }
 
     #[test]
     fn token_comparison_rejects_length_mismatch_and_wrong_bytes() {

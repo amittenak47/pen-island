@@ -1,17 +1,28 @@
 //! Subscription-backed assistants run in an empty directory with a bounded MCP inbox.
 
 use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(test)]
+use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use anyhow::{anyhow, Context, Result};
 use serde::Serialize;
-use serde_json::{json, Value};
+use serde_json::Value;
+#[cfg(test)]
+use serde_json::json;
+#[cfg(test)]
 use tokio::process::Command;
 
 use crate::config::{AssistantAppConfig, Config};
 use crate::pads::{self, annotation_jobs, footnotes};
+
+#[path = "agent_cli.rs"]
+pub mod agent_cli;
+use agent_cli::kill_tree;
+#[cfg(test)]
+use agent_cli::{hide, restricted_catalog, CommandSpec};
 
 pub const MCP_TOOLS: &[&str] = &[
     "list_footnote_requests", "get_footnote_request", "submit_footnote",
@@ -19,8 +30,6 @@ pub const MCP_TOOLS: &[&str] = &[
     "submit_page_annotations", "finish_annotation_job",
 ];
 const MCP_FLAG: &str = "--pen-island-assistant-mcp";
-const DEFAULT_MODEL: &str = "gpt-6.1-sol";
-const CODEX_VERSION: &str = "codex-cli 0.162.1";
 const DRY_PROMPT: &str = "Check the Pen Island connection. Call list_footnote_requests and list_annotation_jobs once each. Do not fetch, answer, submit, finish, or change any request or job. Report whether the two tools worked. Don't do anything else.";
 
 #[derive(Debug, Clone, Serialize, PartialEq)]
@@ -208,136 +217,30 @@ fn fixed_prompt(job_id: Option<&str>, dry: bool) -> Result<String> {
     Ok(prompt)
 }
 
-#[derive(Debug)]
-struct CommandSpec { executable: PathBuf, args: Vec<String> }
+fn footnote_mcp(mcp: &Path, hub: &str, job_id: Option<&str>, dry: bool) -> agent_cli::McpSpec {
+    let mut args = vec![MCP_FLAG.to_owned(), "--hub".into(), hub.into()];
+    if let Some(id) = job_id { args.extend(["--job".into(), id.into()]); }
+    if dry { args.push("--read-only".into()); }
+    let allowed = if dry { vec!["list_footnote_requests", "list_annotation_jobs"] } else { MCP_TOOLS.to_vec() };
+    agent_cli::McpSpec { executable: mcp.into(), args,
+        allowed_tools: allowed.into_iter().map(str::to_owned).collect(), env: Default::default() }
+}
 
+#[cfg(test)]
 fn command_spec(settings: &AssistantAppConfig, executable: PathBuf, mcp: &Path, cwd: &Path,
     hub: &str, job_id: Option<&str>, dry: bool, catalog: Option<&Path>, claude_mcp: Option<&Path>) -> Result<CommandSpec> {
-    settings.validate()?;
-    let prompt = fixed_prompt(job_id, dry)?;
-    let mut mcp_args = vec![MCP_FLAG.to_owned(), "--hub".into(), hub.into()];
-    if let Some(id) = job_id { mcp_args.extend(["--job".into(), id.into()]); }
-    if dry { mcp_args.push("--read-only".into()); }
-    let allowed = if dry { vec!["list_footnote_requests", "list_annotation_jobs"] } else { MCP_TOOLS.to_vec() };
-    let mut args = Vec::new();
-    if settings.app == "codex" {
-        args.extend(["exec", "--ignore-user-config", "--ignore-rules", "--ephemeral", "--skip-git-repo-check",
-            "--strict-config", "--sandbox", "read-only", "--json", "--color", "never"].map(str::to_owned));
-        args.extend(["-C".into(), cwd.to_string_lossy().into_owned(), "-m".into(),
-            if settings.model.trim().is_empty() { DEFAULT_MODEL.into() } else { settings.model.trim().into() }]);
-        for (key, value) in [
-            ("approval_policy", json!("never")), ("forced_login_method", json!("chatgpt")),
-            ("model_reasoning_effort", json!(settings.effort)), ("web_search", json!("disabled")),
-            ("history.persistence", json!("none")), ("project_doc_max_bytes", json!(0)),
-            ("mcp_servers.pen_island.command", json!(mcp.to_string_lossy())),
-            ("mcp_servers.pen_island.args", json!(mcp_args)), ("mcp_servers.pen_island.required", json!(true)),
-            ("mcp_servers.pen_island.default_tools_approval_mode", json!("approve")),
-            ("mcp_servers.pen_island.enabled_tools", json!(allowed)),
-            ("model_catalog_json", json!(catalog.context("The Codex tool catalog is unavailable.")?.to_string_lossy())),
-        ] { args.extend(["-c".into(), format!("{key}={value}")]); }
-        for feature in ["shell_tool", "apps", "plugins", "hooks", "multi_agent", "browser_use", "browser_use_external",
-            "computer_use", "image_generation", "code_mode", "tool_suggest", "skill_search", "skill_mcp_dependency_install",
-            "goals", "sleep_tool", "workspace_dependencies", "view_image"] {
-            args.extend(["--disable".into(), feature.into()]);
-        }
-        // The bounded code-mode host stays on: this CLI needs it for MCP calls.
-        args.push(prompt);
-    } else {
-        args.extend(["-p".into(), prompt, "--restricted".into(), "--strict-mcp-config".into(),
-            "--mcp-config".into(), claude_mcp.context("The Claude tool configuration is unavailable.")?.to_string_lossy().into_owned(),
-            "--tools".into(), String::new(), "--allowedTools".into(), "mcp__pen_island__*".into(),
-            "--permission-mode".into(), "dontAsk".into(), "--permission-prompts".into(), "none".into(),
-            "--no-session-persistence".into(), "--disable-slash-commands".into(), "--no-chrome".into(),
-            "--output-format".into(), "json".into()]);
-        if !settings.model.trim().is_empty() { args.extend(["--model".into(), settings.model.trim().into()]); }
-    }
-    Ok(CommandSpec { executable, args })
-}
-
-fn native_executable(app: &str) -> Result<PathBuf> {
-    let name = if app == "claude" { "claude" } else { "codex" };
-    for directory in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
-        let native = directory.join(if cfg!(windows) { format!("{name}.exe") } else { name.into() });
-        if native.is_file() { return Ok(native); }
-        if cfg!(windows) && app == "codex" {
-            let binary = directory.join("node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe");
-            if binary.is_file() { return Ok(binary); }
-        }
-    }
-    if let Some(user) = directories::UserDirs::new() {
-        let native = user.home_dir().join(if cfg!(windows) { format!(".local/bin/{name}.exe") } else { format!(".local/bin/{name}") });
-        if native.is_file() { return Ok(native); }
-    }
-    Err(anyhow!("{} is not installed on this PC.", if app == "claude" { "Claude Code" } else { "Codex" }))
-}
-
-fn hide(command: &mut Command) {
-    #[cfg(windows)] {
-        command.creation_flags(0x08000000);
-    }
-    command.stdin(std::process::Stdio::null());
-}
-
-async fn cli_output(executable: &Path, args: &[&str]) -> Result<Vec<u8>> {
-    let mut command = Command::new(executable);
-    command.args(args).kill_on_drop(true);
-    hide(&mut command);
-    let output = tokio::time::timeout(Duration::from_secs(15), command.output()).await
-        .map_err(|_| anyhow!("The assistant app did not respond. Open Settings, ChatBot, Test."))?
-        .map_err(|_| anyhow!("The assistant app could not start."))?;
-    anyhow::ensure!(output.status.success() && output.stdout.len() <= 8_000_000, "The assistant app did not return a supported configuration.");
-    Ok(output.stdout)
-}
-
-fn restricted_catalog(bytes: &[u8], model: &str) -> Result<Value> {
-    let catalog: Value = serde_json::from_slice(bytes).map_err(|_| anyhow!("Codex returned an unsupported model catalog."))?;
-    let mut model = catalog["models"].as_array().and_then(|models| models.iter().find(|entry| entry["slug"] == model))
-        .cloned().context("This model is not in Codex's installed catalog. Choose another model in Settings.")?;
-    anyhow::ensure!(model.get("apply_patch_tool_type").is_some() && model["experimental_supported_tools"].is_array(),
-        "This Codex tool catalog is not supported. Open Settings, ChatBot, Test.");
-    model["apply_patch_tool_type"] = Value::Null;
-    model["experimental_supported_tools"] = json!([]);
-    Ok(json!({ "models": [model] }))
+    agent_cli::command_spec(settings, executable, &footnote_mcp(mcp, hub, job_id, dry), cwd,
+        fixed_prompt(job_id, dry)?, catalog, claude_mcp)
 }
 
 async fn run(settings: &AssistantAppConfig, cfg: &Config, job_id: Option<&str>, dry: bool) -> Result<()> {
-    settings.validate()?;
-    let executable = native_executable(&settings.app)?;
-    let temp = tempfile::Builder::new().prefix("pen-island-assistant-").tempdir()
-        .map_err(|_| anyhow!("Could not create the assistant's temporary workspace."))?;
-    let cwd = temp.path().join("empty");
-    std::fs::create_dir(&cwd)?;
     let mcp = std::env::current_exe().map_err(|_| anyhow!("Could not find Pen Island's assistant tools."))?;
     let hub = format!("http://127.0.0.1:{}", cfg.serve.port);
-    let catalog = temp.path().join("model-catalog.json");
-    let claude_mcp = temp.path().join("mcp.json");
-    if settings.app == "codex" {
-        let version = cli_output(&executable, &["--version"]).await?;
-        anyhow::ensure!(String::from_utf8_lossy(&version).trim() == CODEX_VERSION,
-            "This Codex version has not been verified for automatic footnotes. Open Settings, ChatBot, Test.");
-        let metadata = cli_output(&executable, &["debug", "models", "--bundled"]).await?;
-        let selected = if settings.model.trim().is_empty() { DEFAULT_MODEL } else { settings.model.trim() };
-        std::fs::write(&catalog, serde_json::to_vec(&restricted_catalog(&metadata, selected)?)?)?;
-    } else {
-        let auth = cli_output(&executable, &["auth", "status", "--json"]).await?;
-        let auth: Value = serde_json::from_slice(&auth).map_err(|_| anyhow!("Could not check Claude Code's sign-in."))?;
-        anyhow::ensure!(auth["loggedIn"] == true && auth["authMethod"] != "api_key", "Sign in to Claude Code on this PC, then try Test again.");
-        let mut mcp_args = vec![MCP_FLAG.to_owned(), "--hub".into(), hub.clone()];
-        if let Some(id) = job_id { mcp_args.extend(["--job".into(), id.into()]); }
-        if dry { mcp_args.push("--read-only".into()); }
-        std::fs::write(&claude_mcp, serde_json::to_vec(&json!({"mcpServers":{"pen_island":{
-            "command": mcp, "args": mcp_args
-        }}}))?)?;
-    }
-    let spec = command_spec(settings, executable, &mcp, &cwd, &hub, job_id, dry,
-        (settings.app == "codex").then_some(catalog.as_path()), (settings.app == "claude").then_some(claude_mcp.as_path()))?;
+    let prepared = agent_cli::prepare(settings, footnote_mcp(&mcp, &hub, job_id, dry), fixed_prompt(job_id, dry)?).await?;
     let logfile = std::env::temp_dir().join("pen-island-assistant-last.log");
     let log = std::fs::File::create(&logfile)?;
-    let mut command = Command::new(&spec.executable);
-    command.args(&spec.args).current_dir(&cwd).stdout(log.try_clone()?).stderr(log).kill_on_drop(true)
-        .env_remove("OPENAI_API_KEY").env_remove("CODEX_API_KEY").env_remove("ANTHROPIC_API_KEY")
-        .env("PEN_ISLAND_ASSISTANT_CHILD", "1");
-    hide(&mut command);
+    let mut command = prepared.command();
+    command.stdout(log.try_clone()?).stderr(log);
     let mut child = {
         let mut inner = runner().lock().unwrap_or_else(|error| error.into_inner());
         anyhow::ensure!(!inner.stopped, "The assistant app is stopping.");
@@ -361,7 +264,7 @@ async fn run(settings: &AssistantAppConfig, cfg: &Config, job_id: Option<&str>, 
                     "Codex could not reach Pen Island's tools. Open Settings, ChatBot, Test.");
             }
         }
-    } else {
+    } else if settings.app == "claude" {
         let response: Value = serde_json::from_str(output.trim()).map_err(|_| anyhow!("Claude Code could not finish. Open Settings, ChatBot, Test."))?;
         anyhow::ensure!(response["is_error"] != true, "Claude Code could not finish. Open Settings, ChatBot, Test.");
     }
@@ -379,18 +282,6 @@ async fn wait_child(child: &mut tokio::process::Child, limit: Duration) -> Resul
             let _ = child.wait().await;
             Err(anyhow!("The assistant app timed out. Open Settings, ChatBot, Test."))
         }
-    }
-}
-
-fn kill_tree(pid: u32) {
-    #[cfg(windows)] {
-        use std::os::windows::process::CommandExt;
-        let _ = std::process::Command::new("taskkill.exe").args(["/PID", &pid.to_string(), "/T", "/F"])
-            .creation_flags(0x08000000).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
-    }
-    #[cfg(not(windows))] {
-        let _ = std::process::Command::new("kill").args(["-TERM", &pid.to_string()])
-            .stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status();
     }
 }
 
@@ -424,6 +315,98 @@ mod tests {
         assert!(prompt.contains("job `aj-one` only"));
         assert!(!fixed_prompt(None, false).unwrap().contains("list_annotation_jobs"));
         assert_eq!(fixed_prompt(Some("untrusted text"), true).unwrap(), DRY_PROMPT);
+    }
+
+    // Written against the original runner before extracting the adapters.
+    #[test]
+    fn exact_footnote_command_lines_regression() {
+        let settings = AssistantAppConfig::default();
+        let spec = command_spec(&settings, "codex.exe".into(), Path::new("desktop.exe"),
+            Path::new("empty"), "http://127.0.0.1:7878", Some("aj-one"), false,
+            Some(Path::new("catalog.json")), None).unwrap();
+        assert_eq!(spec.args.join("\n"), r#"exec
+--ignore-user-config
+--ignore-rules
+--ephemeral
+--skip-git-repo-check
+--strict-config
+--sandbox
+read-only
+--json
+--color
+never
+-C
+empty
+-m
+gpt-6.1-sol
+-c
+approval_policy="never"
+-c
+forced_login_method="chatgpt"
+-c
+model_reasoning_effort="high"
+-c
+web_search="disabled"
+-c
+history.persistence="none"
+-c
+project_doc_max_bytes=0
+-c
+mcp_servers.pen_island.command="desktop.exe"
+-c
+mcp_servers.pen_island.args=["--pen-island-assistant-mcp","--hub","http://127.0.0.1:7878","--job","aj-one"]
+-c
+mcp_servers.pen_island.required=true
+-c
+mcp_servers.pen_island.default_tools_approval_mode="approve"
+-c
+mcp_servers.pen_island.enabled_tools=["list_footnote_requests","get_footnote_request","submit_footnote","list_annotation_jobs","get_annotation_pages","get_annotation_reference","submit_page_annotations","finish_annotation_job"]
+-c
+model_catalog_json="catalog.json"
+--disable
+shell_tool
+--disable
+apps
+--disable
+plugins
+--disable
+hooks
+--disable
+multi_agent
+--disable
+browser_use
+--disable
+browser_use_external
+--disable
+computer_use
+--disable
+image_generation
+--disable
+code_mode
+--disable
+tool_suggest
+--disable
+skill_search
+--disable
+skill_mcp_dependency_install
+--disable
+goals
+--disable
+sleep_tool
+--disable
+workspace_dependencies
+--disable
+view_image
+Answer the pending Pen Island ChatBot work. Call list_footnote_requests and answer each request (get_footnote_request, then submit_footnote). Then call list_annotation_jobs and, for the job `aj-one` only, read its pages and references and submit footnotes page by page, then finish_annotation_job. Follow the tool descriptions. Don't do anything else."#);
+        let settings = AssistantAppConfig { app: "claude".into(), model: "sonnet".into(), ..settings };
+        let spec = command_spec(&settings, "claude.exe".into(), Path::new("desktop.exe"),
+            Path::new("empty"), "http://127.0.0.1:7878", None, true, None,
+            Some(Path::new("mcp.json"))).unwrap();
+        assert_eq!(spec.args, vec!["-p", DRY_PROMPT, "--restricted", "--strict-mcp-config",
+            "--mcp-config", "mcp.json", "--tools", "", "--allowedTools", "mcp__pen_island__*",
+            "--permission-mode", "dontAsk", "--permission-prompts", "none",
+            "--no-session-persistence", "--disable-slash-commands", "--no-chrome",
+            "--output-format", "json", "--model", "sonnet"]);
     }
 
     #[test]

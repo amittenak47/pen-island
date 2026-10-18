@@ -13,6 +13,11 @@
   scrollbar-width: none;
 }
 .lc-home-section-title { margin: 0 0 12px; color: var(--muted); font: 600 11px/1.4 var(--lc-sans); text-transform: uppercase; letter-spacing: .1em; }
+/* "Start" and, on its right, library sync (Sync all). */
+.lc-home-start-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
+.lc-home-start-row > .lc-home-section-title { margin: 0; }
+.lc-home-start-row .lc-library-sync-trigger { width: 22px; height: 22px; padding: 0; color: var(--muted); }
+.lc-home-start-row .lc-library-sync-trigger:hover { color: var(--ink); }
 .lc-home-chooser .lc-home-chooser-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); grid-template-rows: minmax(var(--lc-home-row-a, 0px),1.45fr) minmax(var(--lc-home-row-b, 0px),1fr) minmax(var(--lc-home-row-c, 0px),.72fr); gap: 14px; min-height: 0; }
 .lc-home-cell[data-mode="whiteboard"] { grid-column: 1 / -1; }
 .lc-home-cell[data-mode="annotate"]:first-child { grid-column: 1 / -1; }
@@ -59,7 +64,8 @@
 .lc-home-recent[data-mode="practice"] { --lc-home-mode: var(--lc-mode-practice); }
 .lc-home-recent[data-mode="browse"] { --lc-home-mode: var(--lc-mode-browse); }
 .lc-home-recent:focus-visible { outline: 2px solid var(--lc-home-mode); outline-offset: -3px; }
-.lc-home-recent:hover { border-color: var(--lc-home-mode); }
+/* Dim like the Start cards, so the sweep (styles.css) reads against it. */
+.lc-home-recent:hover { border-color: color-mix(in srgb,var(--lc-home-mode) 55%,transparent); }
 .lc-home-recent:disabled { cursor: default; opacity: .55; }
 .lc-home-recent-preview { flex: 0 0 38px; width: 38px; height: 50px; background: color-mix(in srgb,var(--bg) 90%,var(--ink) 10%); border-radius: var(--lc-r-block); overflow: hidden; }
 .lc-home-recent-preview svg { width: 100%; height: 100%; stroke: color-mix(in srgb,var(--ink) 25%,transparent); stroke-width: 2px; }
@@ -108,6 +114,8 @@
 
 /* Recently opened: absent when empty, one slim row when folded, sharing the height when open. */
 .lc-home-chooser.lc-home-redesign[data-recents="none"] { grid-template-rows: minmax(min-content, 1fr); }
+/* No recents but a hub: the Start row (Sync all) gets its own short track. */
+.lc-home-chooser.lc-home-redesign[data-recents="none"]:has(> .lc-home-start-row) { grid-template-rows: min-content minmax(min-content, 1fr); }
 .lc-home-chooser.lc-home-redesign[data-recents="collapsed"] { grid-template-rows: auto auto minmax(min-content, 1fr); }
 .lc-home-recents-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 0 0 12px; }
 .lc-home-recents-heading { margin: 0; }
@@ -146,7 +154,7 @@
 }
 /* The edge trace sits over the item's content. */
 .lc-home-recent { position: relative; isolation: isolate; }
-.lc-home-recent > :not(.lc-home-recent-trace) { position: relative; z-index: 1; }
+.lc-home-recent > :not(.lc-home-recent-trace, .lc-home-card-glow) { position: relative; z-index: 1; }
 /* A 2px dash in the item's mode colour runs clockwise around the edge. */
 .lc-home-recent-trace { position: absolute; z-index: 2; inset: -1px; width: calc(100% + 2px); height: calc(100% + 2px); overflow: visible; pointer-events: none; }
 .lc-home-recent-trace rect { width: calc(100% - 2px); height: calc(100% - 2px); fill: none; stroke: var(--lc-home-mode); stroke-width: 2px; stroke-linecap: square; stroke-dasharray: 18 82; stroke-dashoffset: 0; rx: var(--lc-r-block); animation: lc-home-recent-trace-dash 1.6s linear infinite; animation-delay: var(--lc-trace-delay, 0s); }
@@ -179,6 +187,7 @@
   .lc-home-chooser.lc-home-redesign[data-recents="open"],
   .lc-home-chooser.lc-home-redesign[data-recents="collapsed"] { grid-template-rows: min-content min-content minmax(calc(var(--lc-home-row-a) + var(--lc-home-row-b) + var(--lc-home-row-c) + 20px), 1fr); }
   .lc-home-chooser.lc-home-redesign[data-recents="none"] { grid-template-rows: minmax(calc(var(--lc-home-row-a) + var(--lc-home-row-b) + var(--lc-home-row-c) + 20px), 1fr); }
+  .lc-home-chooser.lc-home-redesign[data-recents="none"]:has(> .lc-home-start-row) { grid-template-rows: min-content minmax(calc(var(--lc-home-row-a) + var(--lc-home-row-b) + var(--lc-home-row-c) + 20px), 1fr); }
   .lc-home-chooser.lc-home-redesign .lc-home-chooser-grid { grid-template-rows: minmax(var(--lc-home-row-a), 1.45fr) minmax(var(--lc-home-row-b), 1fr) minmax(var(--lc-home-row-c), .72fr); height: 100%; }
   .lc-home-chooser.lc-home-redesign .lc-home-card[data-mode] .lc-home-card-icon { container-type: size; }
   .lc-home-chooser.lc-home-redesign .lc-home-card[data-mode] .lc-home-card-icon > svg { width: min(62cqw, 62cqh); height: min(62cqw, 62cqh); max-width: none; max-height: none; }

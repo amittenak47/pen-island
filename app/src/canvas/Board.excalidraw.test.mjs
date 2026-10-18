@@ -640,7 +640,15 @@ describe("Workspace pane switch", () => {
 
   it("does not close the PDF film when swapping split halves", () => {
     const src = readFileSync(join(here, "../App.tsx"), "utf8");
-    expect(src).toMatch(/if \(!sameSplit\) setPdfFilmOpen\(false\)/);
+    expect(src).toMatch(/if \(prevGroup && prevGroup === tabs\.find\(\(entry\) => entry\.id === next\)\?\.group\) return;/);
+  });
+
+  it("gives each tab back the page strip it had, so a book's page fit does not jump", () => {
+    const src = readFileSync(join(here, "../App.tsx"), "utf8");
+    expect(src).toMatch(/byTab\.set\(prev, pdfFilmOpenRef\.current\)/);
+    expect(src).toMatch(/const restored = byTab\.get\(next\)/);
+    const focus = src.slice(src.indexOf("const focusTab = useCallback"), src.indexOf("const focusTab = useCallback") + 1500);
+    expect(focus).not.toMatch(/setPdfFilmOpen\(false\)/);
   });
 
   it("does not move canvas DOM nodes when focusing the other split half", () => {

@@ -21,14 +21,15 @@ vi.mock("../modes/pdfOpenDocs", () => ({
   } : null,
 }));
 
-const store = vi.hoisted(() => ({ footnotes: [] as unknown[], files: {} as Record<string, string>, fail: false }));
+const store = vi.hoisted(() => ({ footnotes: [] as unknown[], files: {} as Record<string, string>, fail: false, deletedAt: undefined as number | undefined }));
 vi.mock("./annotateStore", () => ({
   getAnnotateDoc: async (id: string) => id === "algo"
-    ? { id, name: "Algorithms", hash: "h-algo", docType: "pdf", footnotes: store.footnotes }
+    ? { id, name: "Algorithms", hash: "h-algo", docType: "pdf", footnotes: store.footnotes, deletedAt: store.deletedAt }
     : id in store.files ? { id, name: `${id}.md`, docType: "markdown", source: store.files[id] } : null,
   saveAnnotateDoc: async () => {},
   mutateAnnotateFootnotes: async (_id: string, mutate: (footnotes: unknown[]) => unknown[]) => {
     if (store.fail) throw new Error("Storage unavailable");
+    if (store.deletedAt !== undefined) return "gone";
     store.footnotes = [...mutate(store.footnotes)];
     return "saved";
   },
@@ -84,6 +85,7 @@ function client(items: AnnotationJobItemDto[]) {
 const storage = new Map<string, string>();
 beforeEach(() => {
   store.fail = false;
+  store.deletedAt = undefined;
   store.footnotes = [];
   store.files = { hw: "# 3.1 Run DFS on the graph." };
   edges.length = 0;
@@ -98,6 +100,14 @@ beforeEach(() => {
   });
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("builds job marks with explicit empty lists and image lists", () => {
+  const empty = footnoteFromItem(item({ result: { notes: [] } }), STREAM, [], 50)!;
+  expect(empty).toMatchObject({ notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [] });
+  const filled = footnoteFromItem(item(), STREAM, [], 50)!;
+  expect(filled.notes![0].images).toEqual([]);
+  expect(filled.subMarks![0].bands).toEqual([]);
+});
 
 describe("page-range footnotes", () => {
   it("finds a quote whatever the spacing between the PDF's text pieces", () => {
@@ -143,12 +153,46 @@ describe("page-range footnotes", () => {
     expect(store.footnotes).toHaveLength(1);
   });
 
+  it("adds a later run's notes to an earlier run's footnote on the same sentence, and Undo takes them back out", async () => {
+    await placeAnnotationJobItems(client([item()]).client);
+    expect(store.footnotes).toHaveLength(1);
+    const later = item({ item_id: 7, job_id: "aj-2", result: { notes: ["Linear time: each edge is scanned twice."], title: "Other title" } });
+    expect(await placeAnnotationJobItems(client([later]).client)).toEqual({ placed: 1, unplaced: 0, waiting: 0 });
+    expect(store.footnotes).toHaveLength(1);
+    const merged = store.footnotes[0] as DocFootnote;
+    expect(merged!.title).toBe("DFS");
+    expect(merged!.notes!.map((note) => note.text)).toEqual(["Explores as deep as possible before backtracking.", "Linear time: each edge is scanned twice."]);
+    expect(merged!.notes![1]).toMatchObject({ jobId: "aj-2", by: "ai" });
+    // A redelivery of the later run adds nothing.
+    await placeAnnotationJobItems(client([later]).client);
+    expect((store.footnotes[0] as DocFootnote).notes).toHaveLength(2);
+    expect(await undoAnnotationJob("algo", "aj-2")).toBe(1);
+    expect(store.footnotes).toHaveLength(1);
+    expect((store.footnotes[0] as DocFootnote).notes!.map((note) => note.text)).toEqual(["Explores as deep as possible before backtracking."]);
+  });
+
   it("leaves items on the hub while their PDF is not open on this device", async () => {
     pdf.open = false;
     const { client: c, acked } = client([item()]);
     expect(await placeAnnotationJobItems(c)).toEqual({ placed: 0, unplaced: 0, waiting: 1 });
     expect(acked).toEqual([]);
     expect(store.footnotes).toHaveLength(0);
+  });
+
+  it("T16 leaves ChatBot items waiting for a trashed book until it is restored", async () => {
+    // Book is trashed, then ChatBot items arrive; restoring it lets the waiting items be placed.
+    store.deletedAt = 1234;
+    const delivered = client([item()]);
+    expect(await placeAnnotationJobItems(delivered.client)).toEqual({ placed: 0, unplaced: 0, waiting: 1 });
+    expect(delivered.acked).toEqual([]);
+    expect(store.footnotes).toEqual([]);
+    expect(store.deletedAt).toBe(1234);
+    expect(edges).toEqual([]);
+
+    store.deletedAt = undefined;
+    expect(await placeAnnotationJobItems(delivered.client)).toEqual({ placed: 1, unplaced: 0, waiting: 0 });
+    expect(delivered.acked).toEqual([[1]]);
+    expect(store.footnotes).toHaveLength(1);
   });
 
   it("gathers generic PDF page ranges and library files in their chosen order", async () => {

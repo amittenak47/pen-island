@@ -76,7 +76,7 @@ export function AttemptDialog({
 
         <div className="lc-settings-body">
           {error && <div className="lc-warning">{error}</div>}
-          <p className="lc-muted lc-reveal-hold-hint">Hold either answer briefly.</p>
+          <p className="lc-muted lc-reveal-hold-hint">Hold to confirm.</p>
           <div className="lc-settings-choice">
             <HoldButton
               label={solved ? "Save attempt" : "Save progress"}

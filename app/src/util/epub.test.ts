@@ -152,4 +152,27 @@ describe("readEpub", () => {
     );
     expect(book.chapters[0].html).not.toContain("<img");
   });
+
+  it("inlines an SVG-wrapped cover the way it inlines an <img>", () => {
+    // Project Gutenberg and most converters wrap the cover in an SVG <image>.
+    const svg = (href: string) =>
+      `<div><svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 800 1104">` +
+      `<image width="800" height="1104" xlink:href="${href}"/></svg></div>`;
+    const files: Record<string, Uint8Array> = {
+      "META-INF/container.xml": strToU8(CONTAINER),
+      "OEBPS/book.opf": strToU8(OPF),
+      "OEBPS/cover.xhtml": strToU8(chapter("<p>Cover art</p>")),
+      "OEBPS/text/one.xhtml": strToU8(chapter(svg("../images/cover.jpg"))),
+      "OEBPS/text/two.xhtml": strToU8(chapter(svg("../images/missing.jpg"))),
+      "OEBPS/images/cover.jpg": new Uint8Array([0xff, 0xd8, 0xff, 0xe0]),
+    };
+    const zipped = zipSync(files);
+    const book = readEpub(
+      zipped.buffer.slice(zipped.byteOffset, zipped.byteOffset + zipped.byteLength) as ArrayBuffer,
+    );
+    expect(book.chapters[0].html).toContain("<image");
+    expect(book.chapters[0].html).toContain("data:image/jpeg;base64,/9j/4A==");
+    expect(book.chapters[0].html).not.toContain("cover.jpg");
+    expect(book.chapters[1].html).not.toContain("<image");
+  });
 });

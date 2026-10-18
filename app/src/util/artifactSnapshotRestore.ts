@@ -14,8 +14,9 @@ import type { PadSnapshot } from "./padSnapshotStore";
 import type { ArtifactCatalog, ArtifactParent } from "./padArtifacts";
 import { ARTIFACTS_CHANGED } from "./artifactRepository";
 import { mutateLocalBook } from "./localBookStore";
-import { getBookSyncState } from "./syncState";
 import { validateInk, validatePackedInk } from "./syncContent";
+import { preparePadRestore, finishPadRestore, type RestorePadOptions, type RestorePadResult } from "./padSync";
+import { recordAuthoredExtras } from "./recordAuthoredExtras";
 
 type SnapshotParent = ArtifactParent & { kind: "annotate" | "whiteboard" };
 function validBoard(board: unknown): board is BoardBlob {
@@ -48,10 +49,13 @@ async function currentInk(parent: SnapshotParent): Promise<InkPageRecord[]> {
 }
 
 /** Metadata, content, children, ink and tracking share one local commit. */
-export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Partial<PadSnapshot>, bundle?: ArtifactSnapshotBundle): Promise<void> {
+export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Partial<PadSnapshot>, bundle?: ArtifactSnapshotBundle, options: RestorePadOptions = {}): Promise<RestorePadResult> {
   if (contentSpillOnly()) throw new Error("Repair local storage before restoring a snapshot.");
   if (!validBoard(snap.board)) throw new Error("Snapshot board is invalid; current work was kept.");
-  const capturedState = await getBookSyncState(parent.kind, parent.id);
+  const prepared = await preparePadRestore(parent, options);
+  if (prepared.status === "stale") return { status: "stale" };
+  const capturedState = prepared.capture.state;
+  const bookRecord = (snap as Partial<PadSnapshot> & { bookRecord?: Record<string, unknown> }).bookRecord;
   const before = await getContent<{ artifacts?: ArtifactCatalog; [key: string]: unknown }>(parent.id);
   const fingerprint = JSON.stringify(before);
   const previousInk = await currentInk(parent);
@@ -113,27 +117,32 @@ export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Pa
   await mutateLocalBook(parent, { requireIdb: true, extraStores: [STORE_INK_PAGES, STORE_SYNC_RECOVERY] }, ctx => {
     if (!ctx.tx || contentSpillOnly() || JSON.stringify(ctx.content) !== fingerprint
       || ctx.state.changeSeq !== (capturedState?.changeSeq ?? 1)) throw new ArtifactEditConflict();
-    if (parent.kind === "annotate" && !ctx.metadata && recoveredHash === undefined) {
+    if (parent.kind === "annotate" && !ctx.metadata && recoveredHash === undefined && typeof bookRecord?.hash !== "string") {
       throw new Error("This backup's source identity is unavailable. Choose an existing document to restore it; the backup was kept.");
     }
     if (before || previousInk.length || Object.keys(previousChildren).length) {
       const id = `snapshot-restore:${newBookToken()}`;
       ctx.tx.objectStore(STORE_SYNC_RECOVERY).put({ id, type: "conflict", kind: parent.kind, bookId: parent.id,
         provenance: { source: "snapshot-restore", snapshotId: snap.snapshotId ?? null },
+        ...(ctx.metadata && before && prepared.capture.record ? { record: { meta: ctx.metadata, payload: before,
+          children: Object.fromEntries(Object.entries(previousChildren).map(([key, value]) => [key.slice(`fnwb:${parent.id}:`.length), value])),
+          ink: previousInk, wire: prepared.capture.record } } : {}),
         content: { metadata: ctx.metadata, payload: before, children: previousChildren, ink: previousInk } }, id);
     }
-    const meta = { ...ctx.metadata, ...parent, updatedAt: now, lastTouch: now,
+    const restoredIdentity = bookRecord ? { authoredExtras: recordAuthoredExtras(bookRecord),
+      ...(parent.kind === "annotate" ? { hash: bookRecord.hash, docType: bookRecord.doc_type,
+        localFileHash: typeof bookRecord.local_file_hash === "string" ? bookRecord.local_file_hash : undefined,
+        label: bookRecord.label } : {}) } : {};
+    const meta = { ...ctx.metadata, ...restoredIdentity, ...parent, updatedAt: now, lastTouch: now,
       ...(parent.kind === "whiteboard" ? { title: snap.name ?? ctx.metadata?.title ?? "Recovered notebook",
         pageCount: snap.pageCount ?? ctx.metadata?.pageCount ?? 1 }
         : { name: snap.name ?? ctx.metadata?.name ?? "Recovered note.md",
-          hash: ["pdf", "epub"].includes(String(ctx.metadata?.docType))
+          hash: bookRecord ? bookRecord.hash : ctx.metadata?.localFileHash || ["pdf", "epub"].includes(String(ctx.metadata?.docType))
             ? ctx.metadata?.hash : recoveredHash ?? ctx.metadata?.hash,
-          docType: ctx.metadata?.docType ?? "markdown" }) };
-    if (ctx.metadata?.deletedAt || ctx.metadata?.purgedAt) {
-      const seq = Math.max(Number(ctx.metadata.syncSeq ?? 0), ctx.state.lifecycle?.seq ?? 0) + 1;
-      Object.assign(meta, { deletedAt: undefined, purgedAt: undefined, deleteAcked: false, syncSeq: seq });
-      ctx.markLifecycle("restore", seq, ctx.state.bootstrap ? null : ctx.state.appliedBookRev, ctx.state.lifecycle?.goneSeq ?? null);
-    }
+          docType: bookRecord?.doc_type ?? ctx.metadata?.docType ?? "markdown" }) };
+    const seq = Math.max(Number(ctx.metadata?.syncSeq ?? 0), ctx.state.lifecycle?.seq ?? 0, prepared.goneSeq ?? 0) + 1;
+    Object.assign(meta, { deletedAt: undefined, purgedAt: undefined, deleteAcked: false, deleteFollowed: undefined, syncSeq: seq });
+    ctx.markLifecycle("restore", seq, prepared.baseBookRev, prepared.goneSeq);
     ctx.setMetadata(meta);
     ctx.setContent({ ...before, board: snap.board,
       ...(artifacts ? { artifacts } : {}),
@@ -167,8 +176,9 @@ export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Pa
     }
   });
   if (bundle && typeof window !== "undefined") window.dispatchEvent(new CustomEvent(ARTIFACTS_CHANGED, { detail: parent }));
+  return finishPadRestore(parent, prepared, options);
 }
 
-export async function restoreArtifactSnapshot(parent: SnapshotParent, snap: Partial<PadSnapshot>, bundle: ArtifactSnapshotBundle): Promise<void> {
-  return restorePadSnapshotLocally(parent, snap, bundle);
+export async function restoreArtifactSnapshot(parent: SnapshotParent, snap: Partial<PadSnapshot>, bundle: ArtifactSnapshotBundle, options: RestorePadOptions = {}): Promise<RestorePadResult> {
+  return restorePadSnapshotLocally(parent, snap, bundle, options);
 }

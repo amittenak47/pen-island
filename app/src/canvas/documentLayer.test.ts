@@ -34,4 +34,21 @@ describe("documentLayerHeight", () => {
     Object.defineProperty(inner, "offsetHeight", { configurable: true, value: 4000 });
     expect(documentLayerHeight(slot)).toBe(4000);
   });
+  it("ignores a layer laid out too narrow to be a column yet", () => {
+    const slot = document.createElement("div");
+    const inner = document.createElement("div");
+    inner.className = "lc-web-doc-wrap";
+    slot.append(inner);
+    const onScreen = () => [{ width: 32, height: 58848 }] as unknown as DOMRectList;
+    Object.defineProperty(inner, "getClientRects", { value: onScreen });
+    Object.defineProperty(slot, "getClientRects", { value: onScreen });
+    Object.defineProperty(inner, "clientWidth", { configurable: true, value: 32 });
+    Object.defineProperty(slot, "clientWidth", { configurable: true, value: 32 });
+    Object.defineProperty(inner, "scrollHeight", { configurable: true, value: 58848 });
+    Object.defineProperty(slot, "scrollHeight", { configurable: true, value: 58848 });
+    expect(documentLayerHeight(slot)).toBe(0);
+    Object.defineProperty(inner, "clientWidth", { configurable: true, value: 920 });
+    Object.defineProperty(inner, "scrollHeight", { configurable: true, value: 20914 });
+    expect(documentLayerHeight(slot)).toBe(20914);
+  });
 });

@@ -53,6 +53,12 @@ import {
   type AutosaveInterval,
 } from "./util/autosavePref";
 import { AGENT_SHEET_LOCK_EVENT, loadAgentSheetLock } from "./util/agentSheetLockPref";
+import {
+  llmFirstRunAsked,
+  loadLlmAskAtStartup,
+  markLlmFirstRunAsked,
+  saveLlmAskAtStartup,
+} from "./util/llmStartupPref";
 import { loadTestForwardMode, type TestForwardMode } from "./util/agentPrefs";
 import { installHandednessAttr } from "./util/inkHandedness";
 import { installUiHandednessAttr } from "./util/uiHandedness";
@@ -156,6 +162,9 @@ function doneHoldMs(): number {
   return prefersReducedMotion() ? 0 : BOOT_DONE_HOLD_MS;
 }
 
+/** The boot doodle draws on the dark boot screen, whatever the palette or saved pen. */
+const BOOT_DOODLE_INK = "#ededf0";
+
 function serverGateExitMs(): number {
   return prefersReducedMotion() ? 0 : BOOT_EXIT_MS;
 }
@@ -194,6 +203,11 @@ export function App() {
   const serverLinkRef = useRef(serverLink);
   serverLinkRef.current = serverLink;
   const [bootPhase, setBootPhase] = useState<"enter" | "show" | "done" | "exit" | "gone">("enter");
+  // index.html starts the page dark to match the boot screen; the palette's
+  // own background shows through as that screen fades.
+  useEffect(() => {
+    if (bootPhase === "exit" || bootPhase === "gone") document.documentElement.classList.remove("lc-booting");
+  }, [bootPhase]);
   const openStatus = useOpenStatus();
   /** The boot overlay is still on screen, so nothing else may open in front of it. */
   const bootOverlayPendingRef = useRef(true);
@@ -370,10 +384,16 @@ export function App() {
       void pollAnnotationJobs(client).catch(() => {});
     };
     const timer = window.setInterval(tick, PAD_SYNC_PING_MS);
+    // Hidden windows skip ticks; catch up the moment the reader looks again.
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
     tick();
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [serverLink, client]);
 
@@ -517,6 +537,7 @@ export function App() {
   const [llmDetail, setLlmDetail] = useState<string | null>(null);
   const [llmGateOpen, setLlmGateOpen] = useState(false);
   const [llmGatePhase, setLlmGatePhase] = useState<"enter" | "open" | "exit">("enter");
+  const [llmGateVariant, setLlmGateVariant] = useState<"offline" | "firstRun">("offline");
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<
     "paths" | "llm" | "serve" | "datasets" | "workspace" | "agent" | undefined
@@ -624,7 +645,19 @@ export function App() {
      * answer. The boot effect opens it on the way out instead.
      */
     const noteLlm = (ok: boolean) => {
-      if (ok || llmPromptedRef.current) return;
+      if (llmPromptedRef.current) return;
+      /*
+       * The first launch on a device asks once whether to use a model at all,
+       * and only if none is reachable. After that the "offline" prompt is
+       * what shows, and only while Settings → LLM says to ask at startup.
+       */
+      const firstRun = !llmFirstRunAsked();
+      if (ok) {
+        if (firstRun) markLlmFirstRunAsked();
+        return;
+      }
+      if (!firstRun && !loadLlmAskAtStartup()) return;
+      setLlmGateVariant(firstRun ? "firstRun" : "offline");
       if (bootOverlayPendingRef.current) {
         llmGateWantedRef.current = true;
         return;
@@ -1019,6 +1052,36 @@ export function App() {
     };
   }, [liveIds, visibleIds.length]);
 
+  /*
+   * The page strip belongs to the tab it was opened in.
+   *
+   * It is one shared flag, and it used to be closed whenever a different tab
+   * was focused (so two split PDFs never filled thumbs at once). But Pages
+   * reading fits the page below the strip, so coming back to a book found the
+   * strip gone and the page jumped to a new size, as when closing a tab
+   * returned to it. Each tab keeps its own: leaving stores it, coming back
+   * restores it. A tab never left keeps the current state, as a new tab did.
+   * Swapping halves of one split changes nothing, or the pane reflows.
+   */
+  const pdfFilmByTabRef = useRef(new Map<string, boolean>());
+  const pdfFilmOpenRef = useRef(pdfFilmOpen);
+  pdfFilmOpenRef.current = pdfFilmOpen;
+  const filmActiveRef = useRef(tabState.activeId);
+  useLayoutEffect(() => {
+    const prev = filmActiveRef.current;
+    const next = tabState.activeId;
+    if (prev === next) return;
+    filmActiveRef.current = next;
+    const tabs = tabState.tabs;
+    const prevGroup = tabs.find((entry) => entry.id === prev)?.group;
+    if (prevGroup && prevGroup === tabs.find((entry) => entry.id === next)?.group) return;
+    const byTab = pdfFilmByTabRef.current;
+    for (const id of byTab.keys()) if (!tabs.some((entry) => entry.id === id)) byTab.delete(id);
+    if (tabs.some((entry) => entry.id === prev)) byTab.set(prev, pdfFilmOpenRef.current);
+    const restored = byTab.get(next);
+    if (restored != null && restored !== pdfFilmOpenRef.current) setPdfFilmOpen(restored);
+  }, [tabState.activeId, tabState.tabs]);
+
   const focusTab = useCallback(
     (id: string) => {
       const state = tabsRef.current;
@@ -1028,13 +1091,6 @@ export function App() {
       // selected, so a no-op here left the problem list up instead of the cards.
       if (id === HOME_TAB_ID) apisRef.current.get(HOME_TAB_ID)?.showHomeChooser?.();
       if (id === state.activeId) return;
-      // The strip is chrome for the focused book only. Leaving it open as a
-      // global meant both split PDFs filled thumbs at once — a 44 MB file
-      // next to a short one. Clicking a *different* tab closes it; swapping
-      // halves of the same split must not, or the file pane reflows and looks
-      // like it reloaded.
-      const sameSplit = Boolean(tab.group && tab.group === state.tabs.find((entry) => entry.id === state.activeId)?.group);
-      if (!sameSplit) setPdfFilmOpen(false);
       setMissingTab(null);
       setError(null);
       // Already on screen (the other split half): promoting it reorders the
@@ -1391,8 +1447,9 @@ export function App() {
           */}
           <button
             type="button"
-            className="lc-brand lc-brand-home"
+            className={tabState.activeId === HOME_TAB_ID ? "lc-brand lc-brand-home is-active" : "lc-brand lc-brand-home"}
             aria-label="Home"
+            aria-current={tabState.activeId === HOME_TAB_ID ? "page" : undefined}
             onClick={() => {
               // Going Home also drops whatever was loading, the way the Home
               // chip used to.
@@ -1583,7 +1640,8 @@ export function App() {
           aria-live="polite"
           aria-label={bootPhase === "done" ? "Ready" : "Starting up"}
         >
-          <LoadingDoodle themeId={themeId} nativeInput />
+          <img className="lc-boot-mark" src="/boot-mark.svg" alt="" aria-hidden="true" draggable={false} />
+          <LoadingDoodle themeId={themeId} ink={BOOT_DOODLE_INK} nativeInput />
           <p className="lc-load-status" aria-hidden="true">
             {bootPhase === "done" ? "Ready" : openStatus ?? "Starting up…"}
           </p>
@@ -1609,14 +1667,27 @@ export function App() {
       <DialogPresence>{llmGateOpen && (
         <LlmStatusDialog
           phase={llmGatePhase}
+          variant={llmGateVariant}
           onOpenSettings={() => {
+            if (llmGateVariant === "firstRun") markLlmFirstRunAsked();
             closeLlmGate();
             setSettingsTab("llm");
             setSettingsOpen(true);
           }}
           onContinueWithout={() => {
             closeLlmGate();
+            if (llmGateVariant === "firstRun") {
+              markLlmFirstRunAsked();
+              saveLlmAskAtStartup(false);
+              setNotice("Using Pen Island without AI. Settings → LLM sets up a model whenever you want one.");
+              return;
+            }
             setNotice("Agent off — Settings → LLM when you want it back.");
+          }}
+          onStopAsking={() => {
+            closeLlmGate();
+            saveLlmAskAtStartup(false);
+            setNotice("Won't ask at startup. Settings → LLM turns it back on.");
           }}
         />
       )}</DialogPresence>

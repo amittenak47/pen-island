@@ -1731,6 +1731,15 @@ html[data-theme="dark"] .lc-web-doc {
   line-height: 1.45;
 }
 
+/* Sync notifications (tab and Home) fade and scale in, and out when they close. */
+.lc-doc-sync-pop { animation: lc-sync-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.lc-doc-sync-pop.is-leaving { animation: lc-sync-pop-out 140ms ease-in both; pointer-events: none; }
+@keyframes lc-sync-pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+@keyframes lc-sync-pop-out { to { opacity: 0; transform: translateY(-4px) scale(0.97); } }
+@media (prefers-reduced-motion: reduce) {
+  .lc-doc-sync-pop, .lc-doc-sync-pop.is-leaving { animation: none; }
+}
+
 .lc-doc-sync-index {
   display: inline-flex;
   align-items: center;
@@ -2212,29 +2221,99 @@ body[data-lc-sash-drag] .lc-board-chrome-slot {
     0 0 0 200vmax var(--lc-page-mask);
 }
 
+/*
+ * The turn's first moment, shown where it would start (PageTurn sets
+ * `data-turn-lip`): a corner lifting as a small curled lip, as the real turn
+ * begins, or the side edge rising when the side strip is held.
+ *
+ * Drawn once for the top-left corner and mirrored into the others. ::after is
+ * the lip: the page beneath showing past the fold, then the back of the sheet
+ * with the turn's light band along the fold, its free edges bowed like paper.
+ * ::before is the shadow it casts. It grows out of the corner and shrinks
+ * back into it; the lip's corner stays set after the hover so it can.
+ */
+.lc-page-mask-hole[data-turn-edges] {
+  --lc-lip-x: 0px;
+  --lc-lip-y: 0px;
+  --lc-lip-sx: 1;
+  --lc-lip-sy: 1;
+  --lc-lip-paper: var(--lc-turn-paper, var(--bg));
+}
+
 .lc-page-mask-hole[data-turn-edges]::before,
 .lc-page-mask-hole[data-turn-edges]::after {
   content: "";
   position: absolute;
-  top: 0;
-  bottom: 0;
-  width: var(--lc-turn-corner, clamp(44px, 12%, 120px));
+  left: var(--lc-lip-x);
+  top: var(--lc-lip-y);
+  width: 56px;
+  height: 56px;
   /* Over the blank paper below a text page's cut, as over the rest. */
   z-index: 1;
+  transform-origin: 0 0;
+  transform: scale(var(--lc-lip-sx), var(--lc-lip-sy));
+  scale: 0.35;
   opacity: 0;
-  transition: opacity 160ms ease;
+  transition: scale 200ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms ease;
   pointer-events: none;
 }
+
 .lc-page-mask-hole[data-turn-edges]::before {
-  left: 0;
-  background: color-mix(in srgb, var(--ink) 12%, transparent);
-  clip-path: polygon(0 0, 100% 0, 0 var(--lc-turn-corner, 44px), 0 calc(100% - var(--lc-turn-corner, 44px)), 100% 100%, 0 100%);
+  background: radial-gradient(circle at 0 0, transparent 0 29px, rgb(0 0 0 / 16%) 31px, rgb(0 0 0 / 6%) 38px, transparent 50px);
 }
+
 .lc-page-mask-hole[data-turn-edges]::after {
-  right: 0;
-  background: color-mix(in srgb, var(--ink) 12%, transparent);
-  clip-path: polygon(100% 0, 0 0, 100% var(--lc-turn-corner, 44px), 100% calc(100% - var(--lc-turn-corner, 44px)), 0 100%, 100% 100%);
+  /* Past the fold (x + y < t) the page beneath; then the back of the sheet. */
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--ink) 18%, var(--lc-lip-paper)) 0 19.5%,
+    color-mix(in srgb, var(--ink) 10%, var(--lc-lip-paper)) 19.5%,
+    color-mix(in srgb, #fff 45%, var(--lc-lip-paper)) 21.5%,
+    color-mix(in srgb, #fff 15%, var(--lc-lip-paper)) 27%,
+    color-mix(in srgb, var(--ink) 5%, var(--lc-lip-paper)) 33%,
+    color-mix(in srgb, var(--ink) 8%, var(--lc-lip-paper)) 37.5%);
+  clip-path: path("M22 0C25 8 25 16 21 21C16 25 8 25 0 22L0 0Z");
 }
+
+.lc-mobile .lc-page-mask-hole[data-turn-edges]::before,
+.lc-mobile .lc-page-mask-hole[data-turn-edges]::after {
+  width: 72px;
+  height: 72px;
+}
+
+.lc-mobile .lc-page-mask-hole[data-turn-edges]::before {
+  background: radial-gradient(circle at 0 0, transparent 0 37px, rgb(0 0 0 / 16%) 40px, rgb(0 0 0 / 6%) 48px, transparent 64px);
+}
+
+.lc-mobile .lc-page-mask-hole[data-turn-edges]::after {
+  clip-path: path("M28 0C32 10 32 20 27 27C20 32 10 32 0 28L0 0Z");
+}
+
+.lc-page-mask-hole[data-turn-lip^="right"] { --lc-lip-x: 100%; --lc-lip-sx: -1; }
+.lc-page-mask-hole[data-turn-lip$="-bottom"] { --lc-lip-y: 100%; --lc-lip-sy: -1; }
+
+/* Held by the side: the whole edge rises, a thin roll the height of the page. */
+.lc-app .lc-page-mask-hole[data-turn-edges][data-turn-lip$="-side"]::before,
+.lc-app .lc-page-mask-hole[data-turn-edges][data-turn-lip$="-side"]::after {
+  height: 100%;
+  scale: 0.35 1;
+}
+
+.lc-app .lc-page-mask-hole[data-turn-edges][data-turn-lip$="-side"]::before {
+  width: 28px;
+  background: linear-gradient(to right, transparent 0 9px, rgb(0 0 0 / 12%) 10px, transparent 28px);
+}
+
+.lc-app .lc-page-mask-hole[data-turn-edges][data-turn-lip$="-side"]::after {
+  width: 10px;
+  clip-path: none;
+  background: linear-gradient(to right,
+    color-mix(in srgb, var(--ink) 18%, var(--lc-lip-paper)) 0 2px,
+    color-mix(in srgb, var(--ink) 10%, var(--lc-lip-paper)) 2px,
+    color-mix(in srgb, #fff 45%, var(--lc-lip-paper)) 4px,
+    color-mix(in srgb, #fff 10%, var(--lc-lip-paper)) 7px,
+    transparent 10px);
+}
+
 /*
  * On the page's hole, the only thing these style. Set on the tab's host,
  * even inherited-only rules (a grab cursor, no selecting) restyled every
@@ -2242,9 +2321,17 @@ body[data-lc-sash-drag] .lc-board-chrome-slot {
  * taken hold of and again as it was let go. PageTurn keeps selections from
  * starting itself, and gives a mouse its cursor.
  */
-.lc-page-mask-hole[data-turn-hover="left"]::before,
-.lc-page-mask-hole[data-turn-hover="right"]::after {
+.lc-app .lc-page-mask-hole[data-turn-edges][data-turn-hover]::before,
+.lc-app .lc-page-mask-hole[data-turn-edges][data-turn-hover]::after {
   opacity: 1;
+  scale: 1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-page-mask-hole[data-turn-edges]::before,
+  .lc-page-mask-hole[data-turn-edges]::after {
+    transition: none;
+  }
 }
 
 /* Pages reading: the sheet being turned, drawn over the view for the length
@@ -2724,6 +2811,90 @@ body[data-lc-sash-drag] .lc-board-chrome-slot {
 .lc-hub-conflict-cancel:disabled {
   opacity: 0.45;
   cursor: default;
+}
+
+/* Whole-book delete/restore decision: two options in place of the diff. */
+.lc-hub-lifecycle-body {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px 16px;
+}
+
+.lc-hub-lifecycle-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  text-align: center;
+  text-wrap: balance;
+  animation: lc-sync-pop-in 180ms ease-out both;
+}
+
+.lc-hub-lifecycle-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 260px));
+  gap: 12px;
+}
+
+.lc-hub-lifecycle-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 96px;
+  padding: 16px;
+  border: 1px solid var(--chrome-edge);
+  border-radius: 12px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  cursor: pointer;
+  animation: lc-sync-pop-in 220ms ease-out both;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 120ms ease;
+}
+
+.lc-hub-lifecycle-option[data-side="server"] {
+  animation-delay: 40ms;
+}
+
+.lc-hub-lifecycle-option strong {
+  font-size: 15px;
+}
+
+.lc-hub-lifecycle-option span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.lc-hub-lifecycle-option:hover:not(:disabled) {
+  border-color: var(--ink);
+}
+
+.lc-hub-lifecycle-option:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+.lc-hub-lifecycle-option:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+@media (max-width: 560px) {
+  .lc-hub-lifecycle-options {
+    grid-template-columns: minmax(0, 1fr);
+    width: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-hub-lifecycle-title,
+  .lc-hub-lifecycle-option {
+    animation: none;
+    transition: none;
+  }
 }
 
 .lc-main.is-split-horizontal {
@@ -7239,27 +7410,45 @@ body[data-lc-sash-drag="horizontal"] {
     transform 140ms ease;
 }
 
+/*
+ * The resting border stays dim so the sweep reads against it. The glow is
+ * even on all four sides: offset 10px down it only showed under the card.
+ */
 .lc-home-card:hover:not(:disabled) {
-  border-color: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 75%, transparent);
+  border-color: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 55%, transparent);
   background: color-mix(in srgb, var(--lc-home-mode, var(--accent)) 7%, transparent);
   box-shadow:
-    0 0 0 1px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 30%, transparent),
-    0 10px 28px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 22%, transparent);
+    0 0 0 1px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 12%, transparent),
+    0 0 18px color-mix(in srgb, var(--lc-home-mode, var(--accent)) 28%, transparent);
   transform: translateY(-3px);
 }
 
 /* Hover runs the loading tab's sweep around the card's border, in the card's
-   colour: a 2px ring masked out of the box with a conic sweep spinning behind
-   it. Only a transform animates, and only while the card is hovered/focused. */
-.lc-home-card-sweep {
+   colour: a 3px ring masked out of the box with a conic sweep spinning behind
+   it. Only a transform animates, and only while the card is hovered/focused.
+   The glow sits on a parent: a filter on the masked ring itself is applied
+   before the mask and would be cut away with everything outside the ring. */
+.lc-home-card-glow {
   position: absolute;
   inset: -1px;
   pointer-events: none;
   z-index: 2;
+  border-radius: inherit;
+  color: var(--lc-home-mode, var(--accent));
+}
+
+:is(.lc-home-card, .lc-home-recent):is(:hover, :focus-visible):not(:disabled) .lc-home-card-glow {
+  filter:
+    drop-shadow(0 0 2px currentColor)
+    drop-shadow(0 0 6px color-mix(in srgb, currentColor 70%, transparent));
+}
+
+.lc-home-card-sweep {
+  position: absolute;
+  inset: 0;
   overflow: hidden;
   border-radius: inherit;
-  padding: 2px;
-  color: var(--lc-home-mode, var(--accent));
+  padding: 3px;
   opacity: 0;
   transition: opacity 160ms ease;
   -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
@@ -7277,16 +7466,23 @@ body[data-lc-sash-drag="horizontal"] {
   max-width: 1600px;
   max-height: 1600px;
   translate: -50% -50%;
-  background: conic-gradient(from 0deg, transparent 0 62%, currentColor 86%, transparent 100%);
+  /* A faint tail and a short, solid head: the head is what the eye follows. */
+  background: conic-gradient(
+    from 0deg,
+    transparent 0 58%,
+    color-mix(in srgb, currentColor 30%, transparent) 80%,
+    currentColor 93%,
+    transparent 100%
+  );
   will-change: transform;
   animation: lc-tab-border-lap 1.6s linear infinite paused;
 }
 
-.lc-home-card:is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep {
+:is(.lc-home-card, .lc-home-recent):is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep {
   opacity: 1;
 }
 
-.lc-home-card:is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep::before {
+:is(.lc-home-card, .lc-home-recent):is(:hover, :focus-visible):not(:disabled) .lc-home-card-sweep::before {
   animation-play-state: running;
 }
 
@@ -9228,6 +9424,12 @@ body[data-lc-sash-drag="horizontal"] {
  * can be half a split pane with a sash moving beside it, so `100%` and `flex`
  * do the work and no rule reads `vw` or `vh`.
  */
+/* Explore reads in the system UI face (Segoe UI, Roboto, San Francisco). */
+.lc-explore,
+.lc-palette-swatch-pop {
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
 .lc-explore {
   display: flex;
   flex-direction: column;
@@ -9236,69 +9438,40 @@ body[data-lc-sash-drag="horizontal"] {
   min-width: 0;
   min-height: 0;
   background: var(--bg);
+  container-type: inline-size;
 }
 
-/* ---- top bar ---- */
-
-.lc-explore-bar {
-  display: flex;
-  align-items: center;
-  flex: 0 0 auto;
+/* The floating key reserves only its corner in the painter. The narrow strip
+ * gets its own grid row, leaving the measured map above it unobscured. */
+.lc-explore-stage {
+  --lc-explore-hit: 30px;
+  --lc-explore-columns: 220px minmax(0, 1fr);
+  --lc-explore-map-column: 1 / -1;
+  --lc-explore-map-row: 2 / 4;
+  --lc-explore-key-column: 1;
+  --lc-explore-key-columns: minmax(0, 1fr);
+  --lc-explore-key-top: var(--lc-explore-hit);
+  --lc-explore-key-side: 0px;
+  --lc-explore-key-animation: lc-explore-key-in;
+  --lc-explore-map-animation: lc-explore-map-in;
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--lc-explore-columns);
+  grid-template-rows: 34px minmax(0, 1fr) auto;
   gap: 12px;
-  padding: 10px 14px;
-  border-bottom: 1px solid color-mix(in srgb, var(--chrome-edge) 60%, transparent);
-  background: color-mix(in srgb, var(--surface) 70%, transparent);
-}
-
-/*
- * Filters scroll rather than wrap. A wrapping row changes the bar's height,
- * which moves the canvas under the reader's finger every time they narrow the
- * view; in a split pane it would do that constantly.
- */
-.lc-explore-filters {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+  padding: 14px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  flex: 1 1 auto;
+  min-height: 0;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: hidden;
 }
 
-.lc-explore-filters::-webkit-scrollbar {
-  display: none;
-}
-
-.lc-explore-chip {
-  display: inline-flex;
-  align-items: center;
-  flex: 0 0 auto;
-  gap: 6px;
-  height: 28px;
-  padding: 0 11px;
-  border-radius: 999px;
-  border: 1px solid var(--chrome-edge);
-  background: transparent;
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  line-height: 1;
-  white-space: nowrap;
-  cursor: pointer;
-  transition:
-    background 120ms ease,
-    border-color 120ms ease,
-    color 120ms ease;
-}
-
-.lc-explore-chip:hover {
-  color: var(--ink);
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--chrome-edge));
-}
-
-.lc-explore-chip.is-active {
-  color: var(--ink);
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
+.lc-explore-graph {
+  position: relative;
+  grid-column: var(--lc-explore-map-column);
+  grid-row: var(--lc-explore-map-row);
+  min-width: 0;
+  min-height: 0;
 }
 
 .lc-explore-chip-dot {
@@ -9308,74 +9481,426 @@ body[data-lc-sash-drag="horizontal"] {
   flex: 0 0 auto;
 }
 
-.lc-explore-chip-count {
-  padding: 1px 5px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--ink) 10%, transparent);
-  font-size: 10px;
-  font-variant-numeric: tabular-nums;
+.lc-explore-legend {
+  position: relative;
+  grid-column: var(--lc-explore-key-column);
+  grid-row: 3;
+  z-index: 6;
+  min-width: 0;
+  padding: 6px 8px;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  background: var(--panel);
+  color: var(--muted);
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.lc-explore-chip.is-active .lc-explore-chip-count {
-  background: color-mix(in srgb, var(--accent) 26%, transparent);
+/* The kind rows fold up into the controls row (and back) without a jump. */
+.lc-explore-legend-fold {
+  display: grid;
+  grid-template-rows: 1fr;
+  overflow: hidden;
+  opacity: 1;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease 60ms;
 }
 
-.lc-explore-search {
+.lc-explore-legend-fold > * {
+  min-height: 0;
+}
+
+.lc-explore-legend[data-collapsed] .lc-explore-legend-fold {
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 120ms ease;
+}
+
+/* Room for the chevron: a top row in the corner box, a column on the strip.
+ * One level inside the fold's grid item, which has no padding of its own, so
+ * the zero-height track can still close all the way. */
+.lc-explore-legend-fold-inner > .lc-explore-legend-kinds {
+  padding-top: var(--lc-explore-key-top);
+  padding-right: var(--lc-explore-key-side);
+}
+
+.lc-explore-legend-kinds {
+  display: grid;
+  grid-template-columns: var(--lc-explore-key-columns);
+  gap: 2px;
+  overflow-x: auto;
+}
+
+.lc-explore-legend-kind,
+.lc-explore-group {
   display: flex;
   align-items: center;
-  flex: 0 1 15rem;
-  gap: 6px;
-  min-width: 7rem;
-  margin-left: auto;
-  height: 28px;
-  padding: 0 8px;
-  border-radius: 999px;
-  border: 1px solid var(--chrome-edge);
+  gap: 9px;
+  min-width: 0;
+  min-height: var(--lc-explore-hit);
+  padding: 0 9px;
+  border: 0;
+  border-radius: var(--lc-r-block);
   background: transparent;
+  box-shadow: inset 2px 0 0 transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12.5px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+.lc-explore-legend-kind[aria-pressed="true"] {
+  background: color-mix(in srgb, var(--lc-kind-tint) 13%, transparent);
+  box-shadow: inset 2px 0 0 var(--lc-kind-tint);
+  color: var(--ink);
+}
+
+.lc-explore-legend-kind:hover,
+.lc-explore-group:hover {
+  color: var(--ink);
+}
+
+.lc-explore-legend button:focus-visible,
+.lc-palette-swatch-pop .lc-swatch:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.lc-explore-legend-dot {
+  width: 8px;
+  height: 8px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  background: var(--lc-kind-tint);
+  transition: opacity 160ms ease, background-color 160ms ease;
+}
+
+.lc-explore-legend-kinds:has([aria-pressed="true"]) [aria-pressed="false"] .lc-explore-legend-dot {
+  opacity: 0.5;
+}
+
+.lc-explore-legend-count {
+  display: inline-grid;
+  justify-items: end;
+  width: 5ch;
+  margin-left: auto;
+  flex: 0 0 auto;
+  color: var(--hint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  transition: color 160ms ease;
+}
+
+.lc-explore-legend-count > span {
+  animation: lc-explore-count-in 160ms ease both;
+}
+
+.lc-explore-legend-kind[aria-pressed="true"] .lc-explore-legend-count {
   color: var(--muted);
 }
 
-.lc-explore-search:focus-within {
-  border-color: color-mix(in srgb, var(--accent) 70%, transparent);
-  color: var(--ink);
+.lc-explore-legend-options {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--chrome-edge);
+  transition: margin-top 240ms cubic-bezier(0.22, 1, 0.36, 1), padding-top 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding-right 240ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms ease;
 }
 
-.lc-explore-search input {
-  flex: 1 1 auto;
-  min-width: 0;
-  border: 0;
-  background: transparent;
-  color: var(--ink);
-  font: inherit;
-  font-size: 12px;
-  outline: none;
+/* Folded, the chevron has come down beside the swatch; make room for it. */
+.lc-explore-legend[data-collapsed] .lc-explore-legend-options {
+  margin-top: 0;
+  padding-top: 0;
+  padding-right: calc(var(--lc-explore-hit) + 2px);
+  border-top-color: transparent;
 }
 
-.lc-explore-search input::-webkit-search-cancel-button {
-  display: none;
-}
-
-.lc-explore-search-clear {
+/* The switch alone, no label: its tip and accessible name say Cluster. */
+.lc-explore-group {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
+  justify-content: center;
+}
+
+.lc-explore-legend-options .lc-palette-swatch-trigger {
+  margin-left: auto;
+}
+
+/* Pinned to the key's top-right corner, so it rides the top edge as it folds. */
+.lc-explore-legend-toggle {
+  position: absolute;
+  /* Padding plus the controls row's 1 px divider: level with the swatch when folded. */
+  top: 7px;
+  right: 8px;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: var(--lc-explore-hit);
+  height: var(--lc-explore-hit);
+  min-height: var(--lc-explore-hit) !important;
   padding: 0;
   border: 0;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--ink) 12%, transparent);
-  color: var(--ink);
-  font-size: 12px;
-  line-height: 1;
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  color: var(--hint);
   cursor: pointer;
+  transition: color 160ms ease, background-color 160ms ease;
 }
 
-/* ---- stage ---- */
+.lc-explore-legend-toggle:hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--ink) 6%, transparent);
+}
 
-.lc-explore-stage {
+/* Open, it points down (fold away); folded, up (bring the rows back). */
+.lc-explore-legend-toggle svg {
+  transform: rotate(180deg);
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lc-explore-legend[data-collapsed] .lc-explore-legend-toggle svg {
+  transform: rotate(0deg);
+}
+
+.lc-explore-switch {
+  width: 32px;
+  height: 20px;
+  padding: 3px;
+  flex: 0 0 auto;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.lc-explore-switch > span {
+  display: block;
+  width: 12px;
+  height: 12px;
+  border-radius: 1px;
+  background: var(--hint);
+  transition: transform 160ms ease, background-color 160ms ease;
+}
+
+.lc-explore-group[aria-checked="true"] .lc-explore-switch {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.lc-explore-group[aria-checked="true"] .lc-explore-switch > span {
+  transform: translateX(12px);
+  background: var(--accent);
+}
+
+/* Background: one swatch of the current theme that opens every theme. */
+.lc-palette-swatch-trigger {
   position: relative;
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: hidden;
+  display: grid;
+  place-items: center;
+  width: var(--lc-explore-hit, 30px);
+  height: var(--lc-explore-hit, 30px);
+  min-height: var(--lc-explore-hit, 30px) !important;
+  padding: 0;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  cursor: pointer;
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+
+/* The corner notch says it opens something. */
+.lc-palette-swatch-trigger::after {
+  content: "";
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  border: 3px solid transparent;
+  border-top-color: var(--hint);
+  border-right-color: var(--hint);
+  transition: border-color 160ms ease;
+}
+
+.lc-palette-swatch-trigger:hover,
+.lc-palette-swatch-trigger[aria-expanded="true"] {
+  border-color: var(--accent);
+}
+
+.lc-palette-swatch-trigger[aria-expanded="true"]::after {
+  border-top-color: var(--accent);
+  border-right-color: var(--accent);
+}
+
+.lc-palette-swatch-chip {
+  width: 16px;
+  height: 16px;
+  border: 1px solid color-mix(in srgb, var(--ink) 38%, transparent);
+  border-radius: 50%;
+  transition: background-color 220ms ease;
+}
+
+.lc-palette-swatch-pop {
+  position: fixed;
+  z-index: 110;
+  display: grid;
+  gap: 8px;
+  padding: 9px 9px 8px;
+  border: 1px solid var(--chrome-edge);
+  border-radius: var(--lc-r-block);
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 16%);
+  color: var(--ink);
+  animation: lc-palette-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.lc-palette-swatch-pop.is-leaving {
+  animation: lc-palette-pop-out 140ms ease-in both;
+  pointer-events: none;
+}
+
+@keyframes lc-palette-pop-in { from { opacity: 0; transform: translateY(4px) scale(0.97); } }
+@keyframes lc-palette-pop-out { to { opacity: 0; transform: translateY(4px) scale(0.97); } }
+
+/* Beside the key it slides out from the key's edge, and back into it. */
+.lc-palette-swatch-pop[data-side="right"] { animation-name: lc-palette-pop-in-right; }
+.lc-palette-swatch-pop[data-side="right"].is-leaving { animation-name: lc-palette-pop-out-right; }
+@keyframes lc-palette-pop-in-right { from { opacity: 0; transform: translateX(-6px) scale(0.97); } }
+@keyframes lc-palette-pop-out-right { to { opacity: 0; transform: translateX(-6px) scale(0.97); } }
+
+.lc-palette-swatch-cap {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  color: var(--hint);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.lc-palette-swatch-cap em {
+  color: var(--muted);
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 400;
+  letter-spacing: 0;
+  text-transform: none;
+  animation: lc-explore-count-in 160ms ease both;
+}
+
+.lc-palette-swatch-pop .lc-palette-group-label {
+  color: var(--hint);
+  letter-spacing: 0.14em;
+}
+
+.lc-palette-swatch-pop .lc-palette-group-swatches {
+  grid-template-columns: repeat(6, auto);
+  justify-content: start;
+  gap: 2px;
+}
+
+.lc-palette-swatch-pop .lc-swatch {
+  --lc-palette-swatch: 26px;
+  width: var(--lc-palette-swatch);
+  height: var(--lc-palette-swatch);
+  min-width: var(--lc-palette-swatch);
+  min-height: var(--lc-palette-swatch) !important;
+  padding: 4px;
+  background-clip: content-box;
+  /* The ring moves to the picked theme; pale themes keep a faint edge. */
+  border: 1px solid transparent;
+  border-radius: 50%;
+  box-shadow: inset 0 0 0 4px var(--panel), inset 0 0 0 5px color-mix(in srgb, var(--ink) 22%, transparent);
+  cursor: pointer;
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.lc-palette-swatch-pop .lc-swatch:hover { transform: scale(1.1); }
+
+.lc-palette-swatch-pop .lc-swatch-active {
+  border-color: var(--accent);
+}
+
+.lc-mobile .lc-palette-swatch-pop .lc-swatch { --lc-palette-swatch: 44px; padding: 10px; }
+.lc-mobile .lc-palette-swatch-pop .lc-swatch { box-shadow: inset 0 0 0 10px var(--panel), inset 0 0 0 11px color-mix(in srgb, var(--ink) 22%, transparent); }
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-palette-swatch-trigger,
+  .lc-palette-swatch-trigger::after,
+  .lc-palette-swatch-chip,
+  .lc-palette-swatch-pop,
+  .lc-palette-swatch-pop *,
+  .lc-palette-swatch-pop.is-leaving {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+.lc-explore.is-showing .lc-explore-legend {
+  animation: var(--lc-explore-key-animation) 180ms ease both;
+}
+
+.lc-explore.is-showing .lc-explore-graph {
+  animation: var(--lc-explore-map-animation) 180ms ease both;
+}
+
+@keyframes lc-explore-key-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Separate names replay the brief fade when crossing the strip breakpoint. */
+@keyframes lc-explore-strip-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes lc-explore-map-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes lc-explore-strip-map-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes lc-explore-count-in {
+  from { opacity: 0; transform: translateY(2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Container width also handles Explore in a narrow desktop split pane. */
+@container (max-width: 839px) {
+  .lc-explore-stage {
+    --lc-explore-hit: 44px;
+    --lc-explore-columns: minmax(0, 1fr);
+    --lc-explore-map-column: 1;
+    --lc-explore-map-row: 2;
+    --lc-explore-key-column: 1;
+    --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
+    --lc-explore-key-top: 0px;
+    --lc-explore-key-side: calc(var(--lc-explore-hit) + 4px);
+    --lc-explore-key-animation: lc-explore-strip-in;
+    --lc-explore-map-animation: lc-explore-strip-map-in;
+    grid-template-rows: 46px minmax(0, 1fr) auto;
+  }
+}
+
+.lc-mobile .lc-explore-stage {
+  --lc-explore-hit: 44px;
+  --lc-explore-columns: minmax(0, 1fr);
+  --lc-explore-map-column: 1;
+  --lc-explore-map-row: 2;
+  --lc-explore-key-column: 1;
+  --lc-explore-key-columns: repeat(5, minmax(108px, 1fr));
+  --lc-explore-key-top: 0px;
+  --lc-explore-key-side: calc(var(--lc-explore-hit) + 4px);
+  --lc-explore-key-animation: lc-explore-strip-in;
+  --lc-explore-map-animation: lc-explore-strip-map-in;
+  grid-template-rows: 46px minmax(0, 1fr) auto;
 }
 
 .lc-explore-chrome-slot:empty {
@@ -9406,6 +9931,19 @@ body[data-lc-sash-drag="horizontal"] {
   background: transparent;
   border-radius: var(--lc-r-block);
   min-height: 32px;
+  transition: background-color 160ms ease, color 160ms ease, transform 160ms ease;
+}
+
+.lc-mobile .lc-explore-chrome-tools .lc-lined-toggle {
+  min-width: 44px;
+  min-height: 44px;
+}
+
+@media (max-width: 839px) {
+  .lc-explore-chrome-tools .lc-lined-toggle {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 @media (hover: hover) and (pointer: fine) {
@@ -9418,131 +9956,49 @@ body[data-lc-sash-drag="horizontal"] {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
-.lc-explore-chrome {
-  position: absolute;
-  top: auto;
-  right: 12px;
-  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
-  left: auto;
-  z-index: 4;
-  overflow: visible;
-}
-
-.lc-explore-chrome .lc-map-chrome-stack {
-  flex-direction: inherit;
-  align-items: stretch;
-}
-
-.lc-explore-chrome .lc-palette-popover-map {
-  bottom: calc(100% + 6px);
-  left: auto;
-  right: 0;
-  top: auto;
-}
-
-/*
- * Catalog-style find bar. Same clip-and-slide as the agent panel, turned
- * vertical so it unfolds into the top of the frame.
- */
 .lc-explore-find {
-  position: absolute;
-  top: 10px;
-  left: 12px;
-  right: 12px;
+  grid-column: 1 / -1;
+  grid-row: 1;
+  justify-self: end;
   z-index: 6;
   display: flex;
   align-items: center;
-  gap: 2px;
-  min-height: 32px;
-  padding: 2px 6px 2px 4px;
+  width: min(280px, 100%);
+  min-width: 0;
+  min-height: var(--lc-explore-hit);
+  padding: 0 2px 0 10px;
   border: 1px solid var(--chrome-edge);
-  border-radius: max(8px, var(--lc-r-round));
-  background: var(--bg);
+  border-radius: var(--lc-r-block);
+  background: var(--panel);
   color: var(--ink);
-  transform: translateY(-8px);
-  clip-path: inset(0 0 100% 0);
-  visibility: hidden;
-  pointer-events: none;
-  transition:
-    clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    transform 240ms cubic-bezier(0.22, 1, 0.36, 1),
-    visibility 240ms;
+  transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease;
 }
 
-.lc-explore-find.is-open {
-  transform: translateY(0);
-  clip-path: inset(0);
-  visibility: visible;
-  pointer-events: auto;
+.lc-explore.is-showing .lc-explore-find {
+  animation: lc-explore-search-in 180ms ease both;
+}
+
+@keyframes lc-explore-search-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 .lc-explore-find:focus-within {
   border-color: var(--accent);
 }
 
-.lc-explore-find-kinds {
-  display: flex;
-  align-items: center;
-  gap: 1px;
-  flex-shrink: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-
-.lc-explore-find-kinds::-webkit-scrollbar {
-  display: none;
-}
-
-.lc-explore-find-kinds button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  height: 22px;
-  min-height: 0;
-  padding: 0 6px;
-  border: 0;
-  border-radius: max(4px, var(--lc-r-round));
-  background: transparent;
-  box-shadow: none;
-  color: var(--hint);
-  font: inherit;
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.lc-explore-find-kinds button:hover,
-.lc-explore-find-kinds button:focus-visible {
-  color: var(--ink);
-  background: transparent;
-}
-
-.lc-explore-find-kinds button.is-filter {
-  color: var(--accent);
-  box-shadow: inset 0 -2px 0 currentColor;
-}
-
-.lc-explore-find-field {
-  display: flex;
-  align-items: center;
-  flex: 1;
-  min-width: 0;
-  margin-left: 4px;
-  padding-right: 4px;
-  border-left: 1px solid color-mix(in srgb, var(--chrome-edge) 70%, transparent);
-}
-
 .lc-explore-find input {
   flex: 1;
+  align-self: stretch;
   min-width: 0;
   min-height: 0;
   margin: 0;
   padding: 4px 6px;
   border: 0;
-  border-radius: calc(var(--lc-r-block) - 2px);
   background: transparent;
   color: inherit;
   font: inherit;
-  font-size: 13px;
+  font-size: 12.5px;
   outline: none;
 }
 
@@ -9558,11 +10014,29 @@ body[data-lc-sash-drag="horizontal"] {
   display: none;
 }
 
-.lc-explore-find .lc-explore-search-clear {
+.lc-explore-search-clear {
   flex: 0 0 auto;
-  width: 16px;
-  height: 16px;
-  margin: 0 4px 0 0;
+  width: var(--lc-explore-hit);
+  height: var(--lc-explore-hit);
+  min-height: var(--lc-explore-hit);
+  padding: 0;
+  border: 0;
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 18px;
+  cursor: pointer;
+  opacity: 0;
+  transform: scale(0.8);
+  visibility: hidden;
+  transition: opacity 160ms ease, transform 160ms ease, visibility 160ms;
+}
+
+.lc-explore-search-clear.is-visible {
+  opacity: 1;
+  transform: scale(1);
+  visibility: visible;
 }
 
 .lc-explore-empty {
@@ -9591,6 +10065,33 @@ body[data-lc-sash-drag="horizontal"] {
 
 .lc-explore-beams.is-rasterized {
   visibility: hidden;
+}
+
+/* Cluster rings: under the nodes and edges, styled like the edges' bloom. */
+.lc-explore-rings {
+  opacity: 0;
+  transition: opacity 260ms ease;
+}
+.lc-explore-rings[data-on] {
+  opacity: 1;
+  transition: opacity 360ms ease;
+}
+.lc-explore-rings ellipse {
+  fill: none;
+  stroke: currentColor;
+  transform-box: fill-box;
+  transform-origin: center;
+  transform: scale(0.9);
+  transition: transform 260ms ease-in;
+}
+.lc-explore-rings[data-on] ellipse {
+  transform: scale(1);
+  transition: transform 420ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.lc-explore-ring-glow { stroke-width: 4; opacity: 0.16; }
+.lc-explore-ring-core { stroke-width: 0.8; opacity: 0.5; }
+@media (prefers-reduced-motion: reduce) {
+  .lc-explore-rings, .lc-explore-rings ellipse { transition: none; }
 }
 
 .lc-explore-webgl {
@@ -9634,9 +10135,9 @@ body[data-lc-sash-drag="horizontal"] {
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg) 82%, transparent);
   color: var(--muted);
-  font-size: 10.5px;
+  font-size: 12px;
   font-weight: 600;
-  letter-spacing: 0.12em;
+  letter-spacing: 0.16em;
   text-transform: uppercase;
   white-space: nowrap;
   pointer-events: none;
@@ -9655,6 +10156,17 @@ body[data-lc-sash-drag="horizontal"] {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .lc-explore.is-showing .lc-explore-legend,
+  .lc-explore.is-showing .lc-explore-graph,
+  .lc-explore.is-showing .lc-explore-find,
+  .lc-explore-legend *,
+  .lc-explore-find *,
+  .lc-explore-chrome-tools .lc-lined-toggle {
+    animation: none !important;
+    transition: none !important;
+  }
+
+  .lc-explore-legend,
   .lc-explore-cluster-label,
   .lc-explore-find,
   .lc-explore-node,
@@ -9974,10 +10486,10 @@ body[data-lc-sash-drag="horizontal"] {
   top: 100%;
   left: 50%;
   transform: translateX(-50%);
-  max-width: 122px;
+  max-width: 140px;
   overflow: hidden;
   color: var(--muted);
-  font-size: 11px;
+  font-size: 12.5px;
   line-height: 1.3;
   text-align: center;
   text-overflow: ellipsis;
@@ -10628,6 +11140,29 @@ body[data-lc-sash-drag="horizontal"] {
   cursor: grabbing;
 }
 
+/* While dragging, the sheet is clipped from the top (useAgentSheet). What
+   sits at the top of the resting sheet rides the clip edge, so a drag shows
+   the sheet's own layout: handle, top row and sessions above, the newest
+   messages and the composer below. Only transforms: no relayout per frame. */
+.lc-agent-dragging .lc-mobile .lc-agent-sheet-handle {
+  transform: translateY(var(--lc-sheet-clip, 0px));
+  z-index: 3;
+  background: var(--panel);
+  border-top: 1px solid var(--chrome-edge);
+}
+
+.lc-agent-dragging .lc-mobile :is(.lc-agent-pane-expand-row, .lc-agent-sessions-col) {
+  transform: translateY(var(--lc-sheet-clip, 0px));
+  /* The sessions column eases its transform (for hide/show). Under the
+     finger that easing made it trail the sheet, sliding up from below on
+     every frame of a drag and again after lift-off. */
+  transition: none;
+}
+
+.lc-agent-dragging .lc-mobile .lc-agent-pane-expand-row {
+  z-index: 4;
+}
+
 .lc-app:not(.lc-mobile) .lc-agent-sheet-handle {
   align-items: center;
   min-height: 32px;
@@ -10753,6 +11288,92 @@ body[data-lc-sash-drag="horizontal"] {
   border: 1px solid var(--line);
   flex-shrink: 0;
 }
+
+.lc-library-sync-trigger { position: relative; }
+.lc-library-sync-dot {
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--bad);
+}
+.lc-library-sync-trigger { transition: color 160ms ease; }
+.lc-library-sync-trigger.is-bad { color: var(--bad); }
+/* Icon and progress ring trade places with a quick scale and fade. */
+.lc-library-sync-face { animation: lc-sync-face-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@keyframes lc-sync-face-in { from { opacity: 0; transform: scale(0.6) rotate(-30deg); } }
+.lc-library-sync-dot { animation: lc-sync-face-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+@media (prefers-reduced-motion: reduce) {
+  .lc-library-sync-face, .lc-library-sync-dot { animation: none; }
+}
+/* Running: the tab's progress ring, big enough to hold the count of books
+   synced so far inside it (the tab's 14px ring puts its % beside it). */
+.lc-library-sync-trigger .lc-doc-index-ring { width: 22px; height: 22px; }
+.lc-library-sync-trigger .lc-doc-index-ring svg { width: 22px; height: 22px; }
+.lc-library-sync-trigger .lc-doc-index-ring-pct {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font: 600 9px/1 var(--lc-sans);
+  font-variant-numeric: tabular-nums;
+}
+/* The Succeeded | Failed groups inside the tab-style sync notification.
+   No scrollbar: a very long list still scrolls on a small screen, unmarked. */
+.lc-library-sync-groups { display: grid; gap: 4px; min-width: 0; max-height: min(60dvh, 420px); overflow-y: auto; scrollbar-width: none; }
+.lc-library-sync-groups::-webkit-scrollbar { display: none; }
+.lc-library-sync-group { min-width: 0; }
+.lc-library-sync-summary {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  width: 100%;
+  min-height: 0;
+  padding: 1px 0;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.lc-library-sync-caret { display: inline-block; transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.lc-library-sync-group[data-open] .lc-library-sync-caret { transform: rotate(90deg); }
+/* Height slides from 0 to the list's own: grid rows 0fr -> 1fr. */
+.lc-library-sync-fold { display: grid; grid-template-rows: 0fr; transition: grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1); }
+.lc-library-sync-group[data-open] .lc-library-sync-fold { grid-template-rows: 1fr; }
+.lc-library-sync-fold > .lc-library-sync-list { min-height: 0; overflow: hidden; }
+@media (prefers-reduced-motion: reduce) {
+  .lc-library-sync-fold, .lc-library-sync-caret { transition: none; }
+}
+.lc-library-sync-list { list-style: none; padding: 0; margin: 2px 0 0; }
+.lc-library-sync-list > li { margin: 0; padding: 0; }
+.lc-library-sync-row {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  width: 100%;
+  /* The app's buttons have a touch-size minimum; these rows are a list. */
+  min-height: 0;
+  padding: 1px 2px;
+  border: 0;
+  border-radius: var(--lc-r-block);
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  font: inherit;
+  line-height: 1.35;
+}
+button.lc-library-sync-row { cursor: pointer; }
+button.lc-library-sync-row:hover { background: var(--bg); }
+/* Title shortens with an ellipsis; the reason keeps a small slot on the right. */
+.lc-library-sync-book { display: flex; gap: 8px; min-width: 0; flex: 1 1 auto; white-space: nowrap; }
+.lc-library-sync-title { min-width: 0; flex: 1 1 0; overflow: hidden; text-overflow: ellipsis; }
+.lc-library-sync-book small { flex: 0 0 auto; max-width: 45%; overflow: hidden; text-overflow: ellipsis; color: var(--muted); font-size: inherit; }
+.lc-library-sync-ok { color: var(--ok); }
+.lc-library-sync-bad { color: var(--bad); }
 
 .lc-palette-popover {
   position: absolute;
@@ -10955,7 +11576,7 @@ body[data-lc-sash-drag="horizontal"] {
 
 .lc-side {
   position: absolute;
-  top: 38px;
+  top: var(--lc-header-height, 38px);
   right: 0;
   bottom: 0;
   z-index: 40;
@@ -15194,12 +15815,28 @@ button.lc-row-selected:hover:not(:disabled) {
   z-index: 135;
   display: grid;
   place-items: center;
-  background: color-mix(in srgb, var(--overlay-bg) 55%, transparent);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
-  color: color-mix(in srgb, var(--ink) 55%, transparent);
+  /*
+   * Dark whatever the palette: it follows Android's splash (the icon on its
+   * own near-black), so a launch is one dark screen with the mark, then a fade
+   * into the palette, never black, white, then the palette.
+   */
+  background: #0c0a08;
+  color: rgb(237 237 240 / 62%);
   overflow: hidden;
   touch-action: none;
+}
+
+/* The icon's mark, where the splash left it: centred, above the status line. */
+.lc-boot-mark {
+  position: absolute;
+  left: 50%;
+  top: calc(50% - 230px);
+  width: 160px;
+  height: 160px;
+  translate: -50% 0;
+  pointer-events: none;
+  user-select: none;
+  z-index: 2;
 }
 
 /*
@@ -15338,13 +15975,78 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 /*
- * Home has no coach, so the Agent chip is invisible there, but it keeps its
- * slot: removing it shifted the globe/file/gear cluster sideways every time
- * the reader moved between Home and a tab.
+ * Home has no coach, so the Agent chip folds away there, in steps.
+ *
+ * Into a document: its slot opens (the header buttons slide left), the status
+ * circle appears in it, then "Agent" unrolls out of the circle. Back to Home:
+ * the word rolls into the circle, the circle goes, the slot closes and the
+ * buttons slide back. Each step's timing belongs to the state it leads to.
  */
+.lc-header .lc-agent-toggle {
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 140px;
+  transition:
+    max-width 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    padding 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    margin 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    border-width 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    visibility 0s;
+}
+.lc-header .lc-agent-toggle .lc-agent-live-dot {
+  transition: transform 140ms cubic-bezier(0.34, 1.56, 0.64, 1) 160ms, opacity 140ms ease 160ms;
+}
+.lc-header .lc-agent-toggle .lc-agent-toggle-label {
+  display: inline-block;
+  clip-path: inset(0 0 0 0);
+  transition: clip-path 200ms cubic-bezier(0.22, 1, 0.36, 1) 240ms, opacity 160ms ease 240ms;
+}
 .lc-agent-toggle.is-vacant {
-  visibility: hidden;
   pointer-events: none;
+}
+.lc-header .lc-agent-toggle.is-vacant {
+  max-width: 0;
+  padding-left: 0;
+  padding-right: 0;
+  border-width: 0;
+  visibility: hidden;
+  transition:
+    max-width 200ms cubic-bezier(0.22, 1, 0.36, 1) 220ms,
+    padding 200ms cubic-bezier(0.22, 1, 0.36, 1) 220ms,
+    margin 200ms cubic-bezier(0.22, 1, 0.36, 1) 220ms,
+    border-width 200ms cubic-bezier(0.22, 1, 0.36, 1) 220ms,
+    visibility 0s linear 420ms;
+}
+.lc-header .lc-agent-toggle.is-vacant .lc-agent-live-dot {
+  transform: scale(0);
+  opacity: 0;
+  transition: transform 120ms ease-in 120ms, opacity 120ms ease 120ms;
+}
+.lc-header .lc-agent-toggle.is-vacant .lc-agent-toggle-label {
+  clip-path: inset(0 100% 0 0);
+  opacity: 0;
+  transition: clip-path 140ms ease-in, opacity 120ms ease;
+}
+/*
+ * A tab switch replaces the header, so the chip cannot transition; it plays
+ * these once instead (Workspace `agentChipMotion`). Each keyframe names only
+ * the empty end; the other end is the chip's own shown style.
+ */
+.lc-header .lc-agent-toggle.is-folding { animation: lc-agent-slot-close 200ms cubic-bezier(0.22, 1, 0.36, 1) 220ms both; pointer-events: none; }
+.lc-header .lc-agent-toggle.is-folding .lc-agent-live-dot { animation: lc-agent-dot-out 120ms ease-in 120ms both; }
+.lc-header .lc-agent-toggle.is-folding .lc-agent-toggle-label { animation: lc-agent-label-out 140ms ease-in both; }
+.lc-header .lc-agent-toggle.is-unfolding { animation: lc-agent-slot-open 200ms cubic-bezier(0.22, 1, 0.36, 1) both; }
+.lc-header .lc-agent-toggle.is-unfolding .lc-agent-live-dot { animation: lc-agent-dot-in 140ms cubic-bezier(0.34, 1.56, 0.64, 1) 160ms both; }
+.lc-header .lc-agent-toggle.is-unfolding .lc-agent-toggle-label { animation: lc-agent-label-in 200ms cubic-bezier(0.22, 1, 0.36, 1) 240ms both; }
+@keyframes lc-agent-slot-close { to { max-width: 0; padding-left: 0; padding-right: 0; border-width: 0; } }
+@keyframes lc-agent-slot-open { from { max-width: 0; padding-left: 0; padding-right: 0; border-width: 0; } }
+@keyframes lc-agent-dot-out { to { transform: scale(0); opacity: 0; } }
+@keyframes lc-agent-dot-in { from { transform: scale(0); opacity: 0; } }
+@keyframes lc-agent-label-out { to { clip-path: inset(0 100% 0 0); opacity: 0; } }
+@keyframes lc-agent-label-in { from { clip-path: inset(0 100% 0 0); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .lc-header .lc-agent-toggle,
+  .lc-header .lc-agent-toggle * { transition: none !important; animation: none !important; }
 }
 
 .lc-agent-toggle .lc-agent-live-dot {
@@ -15357,7 +16059,8 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 .lc-server-gate-boot-exit {
-  animation: lc-server-gate-out 160ms ease-in both;
+  /* Long enough to read as dark fading into the palette, not a cut. */
+  animation: lc-server-gate-out 320ms ease-in both;
   pointer-events: none;
 }
 
@@ -16169,8 +16872,12 @@ button.lc-row-selected:hover:not(:disabled) {
 
 .lc-mobile .lc-side,
 .lc-mobile.lc-app-problem .lc-side {
-  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 240ms cubic-bezier(0.22, 1, 0.36, 1), visibility 240ms;
-  clip-path: inset(calc(100% - 24px) 40% 0 40% round var(--lc-r-block));
+  /* Closing keeps the sheet above the board chrome (z-index 99) until it has
+     shrunk away; dropping to 40 at once put the toolbar over a closing sheet. */
+  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 240ms cubic-bezier(0.22, 1, 0.36, 1), visibility 240ms, z-index 0s linear 240ms;
+  /* Full shape open or closed: it slides (see useAgentSheet), it never grows
+     out of a pill, which only cropped the full-size panel inside. */
+  clip-path: inset(0 0 0 0 round var(--lc-r-block) var(--lc-r-block) 0 0);
   transform-origin: bottom center;
   top: auto;
   left: 0;
@@ -16196,6 +16903,8 @@ button.lc-row-selected:hover:not(:disabled) {
 
 .lc-mobile.lc-app-agent-open .lc-side,
 .lc-mobile .lc-side-sheet-dragging {
+  /* Opening raises it at once (no z-index delay). */
+  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), transform 240ms cubic-bezier(0.22, 1, 0.36, 1), visibility 240ms;
   clip-path: inset(0 0 0 0 round var(--lc-r-block) var(--lc-r-block) 0 0);
   bottom: var(--lc-keyboard-inset, 0px);
   /* Above board chrome (95–98). Those controls fade as the sheet opens but
@@ -16239,7 +16948,12 @@ button.lc-row-selected:hover:not(:disabled) {
     4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
       var(--lc-map-above-coach)
   );
-  transition: bottom 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  /* Back after the sheet has closed, as a quick fade: it used to pop in at
+     full size over a sheet that was still shrinking. */
+  transition:
+    bottom 240ms cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 160ms ease 220ms,
+    visibility 0s linear 220ms;
 }
 
 /*
@@ -16271,6 +16985,9 @@ button.lc-row-selected:hover:not(:disabled) {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
+  /* Covered straight away on open (mobile only), so the sheet rises over
+     nothing; uncovering waits for the sheet (see `.lc-mobile .lc-map-controls`). */
+  transition: bottom 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 90ms ease, visibility 0s linear 90ms;
 }
 
 .lc-mobile .lc-agent-toggle-open {
@@ -21969,6 +22686,20 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-agent-draw-offer:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .lc-agent-messages { overflow-anchor: none; }
 .lc-agent-word-reveal { animation: lc-agent-word-in 180ms ease-out both; }
+.lc-agent-paragraph-reveal { animation: lc-agent-word-in 180ms ease-out both; }
+.lc-agent-run-progress { display: grid; gap: 8px; min-width: 0; font-size: 12px; color: var(--muted-ink, var(--muted)); }
+.lc-agent-waiting { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+.lc-agent-waiting-time { font-variant-numeric: tabular-nums; }
+.lc-agent-waiting-dance { display: inline-flex; align-items: center; gap: 3px; height: 18px; margin-right: 5px; color: var(--accent); }
+.lc-agent-waiting-dance i { width: 5px; height: 5px; border-radius: var(--lc-r-block); background: currentColor; animation: lc-agent-hop 1.2s ease-in-out infinite; }
+.lc-agent-waiting-dance i:nth-child(2) { animation-delay: 140ms; }
+.lc-agent-waiting-dance i:nth-child(3) { animation-delay: 280ms; }
+.lc-agent-step-chips { display: flex; flex-wrap: wrap; gap: 5px; list-style: none; padding: 0; margin: 0; }
+.lc-agent-step-chip { padding: 3px 7px; border: 1px solid var(--chrome-edge); border-radius: var(--lc-r-block); background: color-mix(in srgb, var(--accent) 8%, transparent); color: var(--ink); overflow-wrap: anywhere; }
+@keyframes lc-agent-hop { 0%, 45%, 100% { transform: translateY(0) rotate(0); } 22% { transform: translateY(-4px) rotate(12deg); } }
+@media (prefers-reduced-motion: reduce) {
+  .lc-agent-waiting-dance i, .lc-agent-paragraph-reveal { animation: none; }
+}
 @keyframes lc-agent-word-in { from { opacity: 0; } to { opacity: 1; } }
 .lc-saved-conversation { position: absolute; inset: 0; padding: 20px; overflow: auto; }
 @media (prefers-reduced-motion: reduce) { .lc-agent-word-reveal { animation: none; } }
@@ -22760,4 +23491,305 @@ html[data-corners="rounded"] {
 .lc-footnote-overview .lc-footnote-overview-hub > .lc-footnote-overview-section,
 .lc-footnote-overview .lc-footnote-overview-hub > .lc-footnote-type-key {
   flex-shrink: 0;
+}
+
+/* ------------------------------------------------ header rail (1 + 4) --- */
+
+/*
+ * Every control in the header is a full-height cell, so what you can press is
+ * exactly what you see: no 28 px chip inside a taller invisible target.
+ *
+ * The bottom edge is drawn inside the header (an inset line) instead of as a
+ * border under it, so the cells reach the last pixel row. The active tab's and
+ * the active mode's 2 px underline then sits on the edge row itself, not 1 px
+ * above it. At rest every tab and mode carries a faint 1 px tick of its own
+ * colour on that same row, so the header reads as one coloured baseline.
+ *
+ * Height is unchanged (38 px plus the safe area).
+ */
+.lc-app .lc-header {
+  /* Narrow cells: the icons butt together, so they cost no more width than
+   * the old 28 px boxes with gaps did. Full height keeps them easy to hit. */
+  --lc-rail-cell: 30px;
+  --lc-rail-tick: 38%;
+  --lc-rail-hair: color-mix(in srgb, var(--chrome-edge) 70%, transparent);
+  --lc-rail-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  align-items: stretch;
+  /* Cells butt together; only real centre content gets room around it. */
+  column-gap: 0;
+  padding: 0;
+  border-bottom: 0;
+  box-shadow: inset 0 -1px 0 var(--chrome-edge);
+}
+
+/*
+ * The tablet header is 44 px, so every cell is a full 44 px touch target.
+ * Nothing saved depends on it: ink layout and page fit follow the width, and
+ * Pages reading recuts its view-sized pages on every open anyway.
+ */
+.lc-app.lc-mobile {
+  --lc-header-height: 44px;
+}
+
+.lc-mobile .lc-header {
+  --lc-rail-cell: 32px;
+  padding: var(--lc-safe-top, 0px) var(--lc-safe-right, 0px) 0 var(--lc-safe-left, 0px);
+}
+
+.lc-mobile .lc-header .lc-tab .lc-tab-hit,
+.lc-mobile .lc-header .lc-header-right .lc-agent-toggle {
+  font-size: 13px;
+}
+
+.lc-mobile .lc-header .lc-header-right .lc-icon .lc-icon-svg {
+  width: 18px;
+  height: 18px;
+}
+
+.lc-mobile .lc-header .lc-tab .lc-tab-close {
+  width: 26px;
+  min-width: 26px;
+  height: 26px;
+  min-height: 26px;
+  font-size: 16px;
+}
+
+.lc-android:not(.lc-mobile) .lc-header {
+  padding-top: var(--lc-safe-top, 0px);
+}
+
+.lc-header .lc-header-center {
+  align-self: center;
+}
+
+.lc-header .lc-header-center:not(:empty) {
+  padding: 0 8px;
+}
+
+.lc-header .lc-header-left,
+.lc-header .lc-header-right {
+  align-self: stretch;
+  gap: 0;
+}
+
+/* Home and Agent are the two edge cells: a hairline joins each to the strip. */
+.lc-header .lc-header-left > .lc-brand-home {
+  align-self: stretch;
+  width: calc(var(--lc-rail-cell) + 6px);
+  min-width: calc(var(--lc-rail-cell) + 6px);
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  border-right: 1px solid var(--lc-rail-hair);
+  border-radius: 0;
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--lc-mode-whiteboard) var(--lc-rail-tick), transparent);
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+/* Active cells are marked by the underline alone; no fill. */
+.lc-header .lc-header-left > .lc-brand-home.is-active {
+  box-shadow: inset 0 -2px 0 var(--lc-mode-whiteboard);
+}
+
+.lc-header .lc-tab-strip {
+  align-self: stretch;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+
+.lc-header .lc-tab-row {
+  align-self: stretch;
+  align-items: stretch;
+  transition: flex-grow 220ms var(--lc-rail-ease);
+}
+
+/* Each tab is in its own row, so the active one's larger share goes on the row. */
+.lc-header .lc-tab-row:not(.is-group):has(> .lc-tab.is-active) {
+  flex-grow: 1.6;
+}
+
+.lc-header .lc-tab-row .lc-tab {
+  border-right-color: var(--lc-rail-hair);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--lc-tab-mode, var(--accent)) var(--lc-rail-tick), transparent);
+  transition:
+    flex-grow 220ms var(--lc-rail-ease),
+    background-color 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.lc-header .lc-tab-row .lc-tab.is-active {
+  flex-grow: 1.6;
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--lc-tab-mode, var(--accent));
+}
+
+.lc-header .lc-tab .lc-tab-hit {
+  align-self: stretch;
+  height: auto;
+  min-height: 0;
+  padding: 0 4px 0 10px;
+  border-radius: 0;
+  color: var(--muted);
+  transition: color 160ms ease;
+}
+
+.lc-header .lc-tab.is-active .lc-tab-hit,
+.lc-header .lc-tab .lc-tab-hit:hover {
+  color: var(--ink);
+}
+
+/*
+ * The whole cell is the tab: its button reaches under the Sync pill and the
+ * close cross, so a tap above or below either still selects the tab. The
+ * pill and the cross sit on top and keep exactly their own size.
+ */
+.lc-header .lc-tab .lc-tab-hit {
+  position: static;
+}
+
+.lc-header .lc-tab .lc-tab-hit::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+}
+
+.lc-header .lc-tab .lc-doc-index-chip-row,
+.lc-header .lc-tab .lc-tab-close,
+.lc-header .lc-tab .lc-tab-title-input {
+  position: relative;
+  z-index: 1;
+}
+
+/* Only the pill itself is on top; the row's gaps belong to the tab. */
+.lc-header .lc-tab .lc-doc-index-chip-row {
+  pointer-events: none;
+}
+
+.lc-header .lc-tab .lc-doc-index-chip-row > * {
+  pointer-events: auto;
+}
+
+/* Inside a tinted tab the Sync pill keeps its outline and drops its fill. */
+.lc-header .lc-tab .lc-doc-index-chip-row > button.lc-doc-index-sync:not(:hover):not(:focus-visible):not(.is-attention) {
+  background: transparent;
+}
+
+/* Sized for a full-height cell, not the old 28 px chip: 22 px, 44 % of it. */
+.lc-header .lc-tab .lc-doc-index-chip-row > button.lc-doc-index-sync {
+  gap: 4px;
+  height: 22px;
+  min-height: 22px;
+  padding: 0 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lc-mobile .lc-header .lc-tab .lc-doc-index-chip-row > button.lc-doc-index-sync {
+  gap: 5px;
+  height: 28px;
+  min-height: 28px;
+  padding: 0 10px;
+  font-size: 13px;
+}
+
+/* Mode buttons and Settings: butted cells, no boxes. */
+.lc-header .lc-header-right .lc-icon {
+  --lc-head-mode: transparent;
+  align-self: stretch;
+  width: var(--lc-rail-cell);
+  min-width: var(--lc-rail-cell);
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--lc-head-mode) var(--lc-rail-tick), transparent);
+  transition: background-color 160ms ease, box-shadow 160ms ease, color 160ms ease;
+}
+
+.lc-header .lc-header-right .lc-head-mode-browse { --lc-head-mode: var(--lc-mode-browse); }
+.lc-header .lc-header-right .lc-head-mode-annotate { --lc-head-mode: var(--lc-mode-annotate); }
+.lc-header .lc-header-right .lc-head-mode-whiteboard { --lc-head-mode: var(--lc-mode-whiteboard); }
+.lc-header .lc-header-right .lc-head-mode-practice { --lc-head-mode: var(--lc-mode-practice); }
+.lc-header .lc-header-right .lc-head-mode-explore { --lc-head-mode: var(--lc-mode-explore); }
+
+.lc-header .lc-header-right .lc-icon:not(:disabled):hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--lc-head-mode) 8%, transparent);
+}
+
+.lc-header .lc-header-right .lc-icon.is-active {
+  color: var(--lc-head-mode);
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--lc-head-mode);
+}
+
+/* Agent: a dot and a word in the last cell, edged like Home. */
+.lc-header .lc-header-right .lc-agent-toggle {
+  align-self: stretch;
+  height: auto;
+  min-height: 0;
+  max-height: none;
+  gap: 6px;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid var(--lc-rail-hair);
+  border-radius: 0;
+  background: transparent;
+  color: var(--muted);
+  box-shadow: inset 0 -1px 0 color-mix(in srgb, var(--accent) var(--lc-rail-tick), transparent);
+  transition:
+    max-width 200ms var(--lc-rail-ease),
+    padding 200ms var(--lc-rail-ease),
+    border-width 200ms var(--lc-rail-ease),
+    background-color 160ms ease,
+    box-shadow 160ms ease,
+    color 160ms ease,
+    visibility 0s;
+}
+
+.lc-header .lc-header-right .lc-agent-toggle:not(:disabled):hover {
+  color: var(--ink);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.lc-header .lc-header-right .lc-agent-toggle.lc-agent-toggle-open {
+  color: var(--ink);
+  background: transparent;
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.lc-header .lc-header-right .lc-agent-toggle.is-vacant {
+  padding-left: 0;
+  padding-right: 0;
+  border-width: 0;
+  /* Folds after the word and dot have gone, as before. */
+  transition:
+    max-width 200ms var(--lc-rail-ease) 220ms,
+    padding 200ms var(--lc-rail-ease) 220ms,
+    border-width 200ms var(--lc-rail-ease) 220ms,
+    visibility 0s linear 420ms;
+}
+
+/* Cells reach the header's edge, so focus rings sit inside them. */
+.lc-header .lc-header-left > .lc-brand-home:focus-visible,
+.lc-header .lc-tab .lc-tab-hit:focus-visible,
+.lc-header .lc-header-right .lc-icon:focus-visible,
+.lc-header .lc-header-right .lc-agent-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-header .lc-header-left > .lc-brand-home,
+  .lc-header .lc-tab-row,
+  .lc-header .lc-tab-row .lc-tab,
+  .lc-header .lc-tab .lc-tab-hit,
+  .lc-header .lc-header-right .lc-icon {
+    transition: none;
+  }
 }

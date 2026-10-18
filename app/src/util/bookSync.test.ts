@@ -7,14 +7,14 @@ import { captureBook, acknowledgeBook } from "./bookSnapshot";
 import { mutateLocalBook } from "./localBookStore";
 import { listRecoveryCopies } from "./syncRecovery";
 import { restoreRetainedRecord } from "./recoveryRestore";
-import { saveWhiteboardNotebook, renameWhiteboardNotebook } from "./whiteboardStore";
+import { saveWhiteboardNotebook, renameWhiteboardNotebook, trashWhiteboardNotebook } from "./whiteboardStore";
 import { putInkPages, getInkPageRecord, encodedFromRecord } from "./inkPageStore";
 import { closeDbForTests, withStore, STORE_INK_PAGES } from "./idb";
 import { inkPageKey } from "./inkPageStore";
 import { resetBookCoordinatorForTests } from "./bookCoordinator";
 import { resetLocalBookStoreForTests } from "./localBookStore";
 import { getBookSyncState } from "./syncState";
-import { encodeInkOps, packEncodedInk, type EncodedInk } from "../canvas/inkCodec";
+import { encodeInkOps, packEncodedInk, unpackEncodedInk, type EncodedInk } from "../canvas/inkCodec";
 import { recordHash, validateInk } from "./syncContent";
 import { b64ToBytes, bytesToB64 } from "../api/nativeHttp";
 import { bookFailureMessage } from "./bookSyncMessages";
@@ -88,6 +88,8 @@ beforeEach(async () => {
       receipts.set(body.upload_id, result); return result;
     }),
     getPadCommit: vi.fn(async id => structuredClone(receipts.get(id) ?? null)),
+    listSnapshotCopies: vi.fn(async () => []),
+    putSnapshotCopy: vi.fn(async (_kind, _id, hash) => ({ content_hash: hash, tier: "2h", written_at: 1, name: "Retained hub head" })),
     putInkPage: vi.fn(async () => { throw new Error("Modern choices cannot write live ink"); }),
   } as unknown as LcClient;
 });
@@ -325,6 +327,54 @@ describe("modern current-state book sync", () => {
     const capture = await captureBook({ kind: "whiteboard", id: "book" }); expect(capture.record?.title).toBe("Hub rename");
     expect((capture.record?.board as typeof board).appState.scrollX).toBe(432); expect(ask).toHaveBeenCalledOnce();
   });
+  it("a record choice also brings the hub's new pages its record lists", async () => {
+    await initial(); await renameWhiteboardNotebook("book", "Local rename");
+    await remotePage(114, drawing());
+    const record = { id: "book", title: "Hub rename", page_count: 2, board: { ...board, inkPages: { v: 1, pageIds: [113, 114] } }, agent: [], updated_at: 6, sync_seq: 0 };
+    remote = { ...remote, record, record_hash: await recordHash(record), record_rev: ++revision, book_rev: revision };
+    const ask = vi.fn(async (_conflict: BookConflict, lifecycle: ConflictUiLifecycle) => { lifecycle.onMounted(); return { record: "server" as const }; });
+    const result = await syncBook(api, "whiteboard", "book", undefined, { ...options, manual: true, requestChoice: ask });
+    expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/); expect(ask).toHaveBeenCalledOnce();
+    const capture = await captureBook({ kind: "whiteboard", id: "book" }); expect(capture.record?.title).toBe("Hub rename");
+    expect((await getInkPageRecord("wb:book", 114))?.dirty).toBe(false);
+  });
+  it("a listed page missing here is downloaded when the hub has it, and fails only when it is missing everywhere", async () => {
+    await initial(); await remotePage(114, drawing());
+    await saveWhiteboardNotebook({ id: "book", title: "Book", pageCount: 2, agent: [], board: { ...board, inkPages: { v: 1, pageIds: [113, 114] } } });
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.message).toBeUndefined(); expect((await getInkPageRecord("wb:book", 114))?.dirty).toBe(false);
+    await saveWhiteboardNotebook({ id: "book", title: "Book", pageCount: 3, agent: [], board: { ...board, inkPages: { v: 1, pageIds: [113, 114, 115] } } });
+    const lost = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(lost.error?.message).toBe("A saved handwriting page is missing"); expect(lost.error?.pages).toEqual([{ key: "book", pageId: 115 }]);
+  });
+  it("a book gone on the hub with nothing left here settles instead of reporting kept content", async () => {
+    // The tablet state after an older pass: metadata and content purged, no pending lifecycle.
+    await initial(); await mutateLocalBook({ kind: "whiteboard", id: "book" }, { authored: false }, ctx => { ctx.setMetadata(null); ctx.setContent(null); });
+    remote = { ...remote, state: "gone", record: null, record_hash: null, record_rev: 0, pages: [], gone_seq: 9, book_rev: ++revision }; pages.clear();
+    await withStore(STORE_INK_PAGES, "readwrite", store => store.clear());
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/);
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
+  });
+  it("a book deleted here after another device deleted it settles without a choice", async () => {
+    await initial(); await trashWhiteboardNotebook("book");
+    remote = { ...remote, state: "gone", record: null, record_hash: null, record_rev: 0, pages: [], gone_seq: 9, book_rev: ++revision }; pages.clear();
+    vi.mocked(api.commitPad).mockClear();
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/); expect(api.commitPad).not.toHaveBeenCalled();
+    const capture = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(capture.state.lifecycle).toBeNull(); expect(capture.metadata?.deletedAt).toBeDefined(); expect(capture.metadata?.deleteAcked).toBe(true);
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
+  });
+  it("keeping the hub copy of a book deleted here brings it back, once", async () => {
+    await initial(); await trashWhiteboardNotebook("book"); await remoteRecord("Hub rename");
+    const ask = vi.fn(async (conflict: BookConflict, lifecycle: ConflictUiLifecycle) => { lifecycle.onMounted(); expect(conflict.lifecycle).toBe(true); return { lifecycle: "server" as const }; });
+    const result = await syncBook(api, "whiteboard", "book", undefined, { ...options, manual: true, requestChoice: ask });
+    expect(result.error?.message).toBeUndefined(); expect(ask).toHaveBeenCalledOnce();
+    const capture = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(capture.metadata?.deletedAt).toBeUndefined(); expect(capture.record?.title).toBe("Hub rename");
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
+  });
   it("refuses to recreate a previously synchronized page omitted by the hub", async () => {
     await initial(); pages.clear(); remote = { ...remote, pages: [], book_rev: ++revision }; const before = await captureBook({ kind: "whiteboard", id: "book" });
     vi.mocked(api.commitPad).mockClear(); const result = await syncBook(api, "whiteboard", "book", undefined, options);
@@ -377,11 +427,52 @@ describe("modern current-state book sync", () => {
     expect(result.status).toBe("synced"); expect(remote.state).toBe("gone"); expect((await getBookSyncState("whiteboard", "book"))?.lifecycle).toBeNull();
     expect((await listRecoveryCopies()).some(copy => copy.type === "record" && copy.record?.ink?.some(row => row.pageId === 44))).toBe(true);
   });
-  it("retains a live local copy when another device deleted its hub book", async () => {
+  it("deletes against an advanced hub head without a choice when its content is unchanged", async () => {
+    await initial();
+    await trashWhiteboardNotebook("book");
+    const before = await captureBook({ kind: "whiteboard", id: "book" });
+    remote = { ...remote, book_rev: ++revision, record_rev: revision, record: { ...remote.record!, sync_seq: 8 } };
+    const head = remote.book_rev;
+    vi.mocked(api.commitPad).mockClear();
+    const requestChoice = vi.fn();
+    const result = await syncBook(api, "whiteboard", "book", undefined, { ...options, manual: true, requestChoice });
+    expect(result.status).toBe("synced"); expect(requestChoice).not.toHaveBeenCalled();
+    expect(remote.state).toBe("gone");
+    expect(api.commitPad).toHaveBeenCalledWith(expect.objectContaining({ action: "delete", base_book_rev: head, seq: 8 }), expect.anything());
+    const after = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(after.metadata).toMatchObject({ deletedAt: before.metadata!.deletedAt, deleteAcked: true });
+    expect(after.payload).toEqual(before.payload); expect(after.pages).toEqual(before.pages);
+  });
+  it("trashes an unchanged local copy when another device deleted its hub book", async () => {
     await initial(); const before = await captureBook({ kind: "whiteboard", id: "book" });
     remote = { ...remote, state: "gone", record: null, record_rev: 0, record_hash: null, pages: [], gone_seq: 1, book_rev: ++revision };
-    expect((await syncBook(api, "whiteboard", "book", undefined, options)).error?.kind).toBe("gone");
+    expect(await syncBook(api, "whiteboard", "book", undefined, options)).toMatchObject({ status: "synced", notice: "deleted_elsewhere" });
+    const after = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(after.metadata).toMatchObject({ deletedAt: expect.any(Number), deleteAcked: true, deleteFollowed: true });
+    expect(after.state.lifecycle).toBeNull(); expect(after.payload).toEqual(before.payload); expect(after.pages).toEqual(before.pages);
+  });
+  it("commits an explicit restore even when its content equals the old applied base", async () => {
+    // This restores its applied snapshot; the explicit edit still commits and retains its predecessor even when the bytes match.
+    await initial();
+    Object.assign(api, { listSnapshotCopies: vi.fn(async () => []), putSnapshotCopy: vi.fn(async () => ({ stored: true })) });
+    const head = remote.book_rev;
+    await mutateLocalBook({ kind: "whiteboard", id: "book" }, { requireIdb: true }, ctx => ctx.markLifecycle("restore", 1, head));
+    vi.mocked(api.commitPad).mockClear();
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.status, result.error?.message).toBe("synced");
+    expect(result.committed).toBe(true);
+    expect(api.putSnapshotCopy).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.commitPad).mock.calls[0]![0].pages.map(page => page.page_id)).toEqual([113]);
+  });
+  it("asks about an unseen page-only edit after an offline restore of unchanged content", async () => {
+    // This restores its applied snapshot offline; the other device changes only ink; reconnect must ask before either edit wins.
+    await initial();
+    await mutateLocalBook({ kind: "whiteboard", id: "book" }, { requireIdb: true }, ctx => ctx.markLifecycle("restore", 1, remote.book_rev));
+    await remotePage(113, drawing());
+    const before = await captureBook({ kind: "whiteboard", id: "book" }); vi.mocked(api.commitPad).mockClear();
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("needs_choice");
     expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
+    expect(api.commitPad).not.toHaveBeenCalled();
   });
   it.each(["local", "server", "merged"] as const)("restores retained gone ink with actual revisions after an explicit %s choice", async choice => {
     await initial(); await remotePage(113, drawing()); await remotePage(44, empty);
@@ -434,6 +525,25 @@ describe("modern current-state book sync", () => {
     expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("synced");
     expect((await encodedFromRecord((await getInkPageRecord("wb:book", 1))!))!.ops[0]!.c).toBe(choice === "pages" ? "#0000aa" : "#aa0000");
     expect((await listRecoveryCopies()).some(copy => copy.id === selected.id)).toBe(true);
+  });
+  it.each(["pages", "inline"] as const)("a hub whose own inline ink and pages differ syncs the restored %s choice over it", async choice => {
+    await remoteRecord("Legacy book");
+    remote.record = { ...remote.record!, board: { ...board, inkC: JSON.parse(JSON.stringify(drawing("#aa0000"))) } };
+    remote.record_hash = await recordHash(remote.record);
+    await remotePage(1, drawing("#0000aa"));
+    expect((await syncBook(api, "whiteboard", "book", undefined, { ...options, allowCreate: true })).status).toBe("needs_choice");
+    expect(api.commitPad).not.toHaveBeenCalled();
+    const copies = await listRecoveryCopies();
+    const selected = copies.find(copy => copy.provenance.source === (choice === "pages" ? "legacy-saved-page-choice" : "legacy-inline-page-choice"))!;
+    await restoreRetainedRecord(selected.id);
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("synced");
+    expect((remote.record!.board as Record<string, unknown>).inkC).toBeUndefined();
+    const hubPage = pages.get(pageKey("book", 1))!;
+    const hubInk = unpackEncodedInk((await validateInk(b64ToBytes(hubPage.gz!))).packed);
+    expect(hubInk!.ops[0]!.c).toBe(choice === "pages" ? "#0000aa" : "#aa0000");
+    const before = (await listRecoveryCopies()).length;
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).not.toBe("needs_choice");
+    expect((await listRecoveryCopies()).length).toBe(before);
   });
   it("a recovered older receipt cannot regress an already published baseline", async () => {
     await initial(); const captured = await captureBook({ kind: "whiteboard", id: "book" });

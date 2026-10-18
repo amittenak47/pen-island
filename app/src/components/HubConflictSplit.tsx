@@ -424,6 +424,20 @@ function notesOf(body: HubPadConflict["local"] | HubPadConflict["server"]): DocF
     : [];
 }
 
+/** Whole-book delete/restore decisions: two options instead of the diff. */
+const LIFECYCLE_CHOICES: Record<NonNullable<HubPadConflict["lifecycleChoice"]>,
+  { title: string; local: { label: string; detail?: string }; server: { label: string; detail?: string } }> = {
+  deleted_elsewhere: { title: "Deleted on another device.",
+    local: { label: "Keep mine", detail: "Brings it back everywhere with your edits." },
+    server: { label: "Delete", detail: "Moves it to trash here. Restorable for 3 days." } },
+  stale_delete: { title: "Changed on another device after you deleted it.",
+    local: { label: "Delete anyway", detail: "Their newer version is deleted too." },
+    server: { label: "Keep newer version", detail: "Brings the book back with their changes." } },
+  stale_restore: { title: "Changed on another device after you restored it.",
+    local: { label: "Restore anyway", detail: "Their version is kept as a snapshot." },
+    server: { label: "Keep theirs", detail: "Your restored version stays in Retained copies." } },
+};
+
 export function HubConflictSplit({
   conflict,
   onMounted,
@@ -448,6 +462,8 @@ export function HubConflictSplit({
     return () => onUnavailable?.();
   }, [conflict, onMounted, onUnavailable]);
   const [manualPicks, setManualPicks] = useState<Record<string, SidePick>>({});
+  /** With no rows to pick (only the book's details differ), the column choice is the whole copy. */
+  const [wholePick, setWholePick] = useState<Side | null>(null);
   const [differencesOnly, setDifferencesOnly] = useState(true);
   const [revealInk, setRevealInk] = useState(false);
   /** The change lists sit over the page; folding them away shows the whole page. */
@@ -777,6 +793,9 @@ export function HubConflictSplit({
     const visible = idsOnSide(side, true);
     return visible.length > 0 ? visible : idsOnSide(side);
   };
+  // Nothing to list on either side: the choice is between the two copies.
+  // Keep used to resolve this silently to this device's copy.
+  const recordOnly = idsOnSide("local").length === 0 && idsOnSide("server").length === 0;
 
   const paneFilled = (side: Side, value: boolean): boolean => {
     const ids = columnIds(side);
@@ -802,6 +821,7 @@ export function HubConflictSplit({
   const onPaneKeep = (side: Side) => {
     const other: Side = side === "local" ? "server" : "local";
     if (side === "server" && serverMissing) return;
+    if (recordOnly) { setWholePick(current => current === side ? null : side); return; }
     setPicks((current) => {
       const ids = columnIds(side);
       const otherIds = columnIds(other);
@@ -826,10 +846,17 @@ export function HubConflictSplit({
   };
 
   const onPaneDrop = (side: Side) => {
+    if (recordOnly) {
+      const other: Side = side === "local" ? "server" : "local";
+      if (other === "server" && serverMissing) return;
+      setWholePick(current => current === other ? null : other);
+      return;
+    }
     setSideAll(side, paneFilled(side, false) ? undefined : false);
   };
 
   const paneVerdict = (side: Side): "undecided" | "keep" | "reject" => {
+    if (recordOnly) return wholePick === null ? "undecided" : wholePick === side ? "keep" : "reject";
     if (paneFilled(side, true)) return "keep";
     if (paneFilled(side, false)) return "reject";
     return "undecided";
@@ -881,7 +908,7 @@ export function HubConflictSplit({
   // No attachment choice may remove the only authored version. Reconciliation
   // retains the other active version as a conflict copy, including tombstones.
   const catalogHomed = !hasCatalogRow || Boolean(picks[ARTIFACT_CATALOG_ROW_ID]?.local || picks[ARTIFACT_CATALOG_ROW_ID]?.server);
-  const valid = Boolean(conflict) && notesHomed && inkHomed && catalogHomed;
+  const valid = Boolean(conflict) && notesHomed && inkHomed && catalogHomed && (!recordOnly || wholePick !== null);
 
   /*
    * What each pane draws, entry by entry.
@@ -1045,6 +1072,7 @@ export function HubConflictSplit({
     });
 
   const overallPick = (): HubConflictResolution["pick"] => {
+    if (recordOnly && wholePick) return wholePick;
     if (conflict?.kind === "annotate" && Object.keys(manualPicks).some(id => parseFootnotePartRowId(id))) return "merged";
     const choices = [inkChoice(), ...(hasCatalogRow && !catalogs.same ? [inkChoiceFromPick(picks[ARTIFACT_CATALOG_ROW_ID])] : [])].filter(choice => choice !== "none");
     const ink = choices.length === 0 ? "none" : choices.every(choice => choice === choices[0]) ? choices[0] : "merged";
@@ -1243,7 +1271,7 @@ export function HubConflictSplit({
     unlistedFieldsMatch(conflict.local, conflict.server);
   const autoResolvedRef = useRef<HubPadConflict | null>(null);
   useEffect(() => {
-    if (!conflict || !nothingToChoose || !valid || busy || error) return;
+    if (!conflict || conflict.lifecycleChoice || !nothingToChoose || !valid || busy || error) return;
     if (autoResolvedRef.current === conflict) return;
     autoResolvedRef.current = conflict;
     showNotification("No differences — kept this copy");
@@ -1420,7 +1448,7 @@ export function HubConflictSplit({
     const shown = paneShows[side];
     const appState = padBoardAppState(body);
     const lined = linedPitchStateFromAppState(appState);
-    const hasChoices = columnIds(side).length > 0;
+    const hasChoices = columnIds(side).length > 0 || recordOnly;
     const at = updatedAtOf(body);
     const verdict = paneVerdict(side);
     const label = sideLabel(side);
@@ -1488,6 +1516,7 @@ export function HubConflictSplit({
         </header>
         <div className="lc-hub-conflict-pane-body">
           {!hasChoices && !inkLoading && <p className="lc-muted">No differing marks, handwriting or attachments on this side.</p>}
+          {recordOnly && !inkLoading && <p className="lc-muted">Only the book's details differ. Tick the copy to keep.</p>}
           <ConflictPagePreview
             hash={docHash}
             documentType={conflict.kind === "annotate" ? (body as AnnotatePadDto | null)?.doc_type : undefined}
@@ -1539,7 +1568,7 @@ export function HubConflictSplit({
           >
             <span className="lc-hub-conflict-dock-title">Changes</span>
             <span className="lc-hub-conflict-dock-count">{idsOnSide(side, true).length}</span>
-            <span className="lc-hub-conflict-dock-hint">{listOpen ? "Fold to see the whole page" : "Show changes"}</span>
+            {!listOpen && <span className="lc-hub-conflict-dock-hint">Show changes</span>}
             <svg className="lc-hub-conflict-dock-chevron" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="square" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
           </button>
           <div className="lc-hub-conflict-dock-fold">
@@ -1665,6 +1694,39 @@ export function HubConflictSplit({
   const navigationIds = choiceIds.filter(rowVisible);
   const navigationIndex = navigationIds.indexOf(focusedId);
 
+  if (conflict.lifecycleChoice) {
+    const copy = LIFECYCLE_CHOICES[conflict.lifecycleChoice];
+    return (
+      <div className="lc-hub-conflict lc-hub-lifecycle" data-mode={conflict.kind} role="dialog" aria-modal="true" aria-label={copy.title}>
+        <div className="lc-hub-lifecycle-body">
+          <h2 className="lc-hub-lifecycle-title">{copy.title}</h2>
+          <div className="lc-hub-lifecycle-options">
+            {(["local", "server"] as const).map((side) => (
+              <button key={side} type="button" className="lc-hub-lifecycle-option" data-side={side} disabled={busy}
+                onClick={() => onResolve({ pick: side })}>
+                <strong>{copy[side].label}</strong>
+                {copy[side].detail && <span>{copy[side].detail}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+        <footer className="lc-hub-conflict-actions">
+          <div className="lc-hub-conflict-progress">
+            {(busy || error) && <span role={error ? "alert" : "status"} className={error && !busy ? "lc-hub-conflict-error" : "lc-muted"}>
+              {busy ? "Saving..." : error}
+            </span>}
+          </div>
+          {onCancel && (
+            <button type="button" disabled={busy} className="lc-hub-conflict-cancel"
+              title="Stop this sync. Nothing is written here or on the hub." onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+        </footer>
+      </div>
+    );
+  }
+
   return (
     <div
       className={["lc-hub-conflict", pickingStarted && !valid ? "is-picking" : ""]
@@ -1727,7 +1789,7 @@ export function HubConflictSplit({
             />
           )}
           {(busy || error || !valid) && <span role={error ? "alert" : "status"} className={error && !busy ? "lc-hub-conflict-error" : "lc-muted"}>
-            {busy ? "Saving..." : error || (serverMissing || serverInkUnread || !catalogHomed ? whyDisabled : `${remainingChoices} changes still need a choice`)}
+            {busy ? "Saving..." : error || (serverMissing || serverInkUnread || !catalogHomed ? whyDisabled : recordOnly && wholePick === null ? "Tick the copy to keep." : `${remainingChoices} changes still need a choice`)}
           </span>}
         </div>
         {onCancel && (

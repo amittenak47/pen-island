@@ -31,8 +31,13 @@ export async function askBookConflict(
     return { local: localInk ? dto(bytesToB64(packEncodedInk(localInk)), local!.changeSeq ?? 1) : null,
       server: dto(bytesToB64(packEncodedInk(serverInk)), page.rev) };
   };
+  const intent = capture.state?.lifecycle?.action;
+  const lifecycleChoice = conflict.lifecycle && remote.state === "gone" && !intent ? "deleted_elsewhere" as const
+    : conflict.lifecycle && intent === "delete" ? "stale_delete" as const
+      : intent === "restore" && remote.state === "live" ? "stale_restore" as const : undefined;
   const pad: HubPadConflict = {
     modernChoice: true, fetchPreviewInk: preview,
+    ...(lifecycleChoice ? { lifecycleChoice } : {}),
     kind: capture.kind === "problem" ? "whiteboard" : capture.kind, id: capture.id,
     ...(capture.kind === "problem" ? { wholeCanvas: true } : {}),
     stage: conflict.record || conflict.lifecycle ? "pad" : "ink",

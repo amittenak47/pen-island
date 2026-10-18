@@ -51,11 +51,11 @@ import {
 import { MorphBar } from "./MorphBar";
 import { HubStatusDot } from "./HubStatusDot";
 import { prepareConflictUi, waitForConflictUi, type ConflictUiLifecycle } from "../util/conflictUiWait";
-import { syncBookPass, isModernBookHub, takeOldBookHubNotice } from "../util/bookSyncPass";
+import { syncBookPass, isModernBookHub, takeOldBookHubNotice, beginBookSyncWalk } from "../util/bookSyncPass";
 import { boundedBookRequest } from "../util/bookSync";
 import { askBookConflict } from "../util/bookConflictUi";
 import type { BookIdentity } from "../util/syncState";
-import { bookPassSummary, bookNoticeMessage } from "../util/bookSyncMessages";
+import { bookPassSummary, bookFailureMessage, bookNoticeMessage } from "../util/bookSyncMessages";
 
 /**
  * What the walk is doing, for the tab chip beside the document's name.
@@ -424,6 +424,7 @@ export function HubSyncControl({
     if (walkingRef.current) return;
     walkingRef.current = true;
     const abort = new AbortController();
+    const endActivity = beginBookSyncWalk();
     walkAbortRef.current = abort;
     const throwIfAborted = () => {
       if (abort.signal.aborted) throw new WalkAborted();
@@ -476,6 +477,7 @@ export function HubSyncControl({
         const selected = await host?.book?.() ?? await host?.pad();
         goStage("pad");
         const result = await syncBookPass(client!, { ping, signal: abort.signal,
+          only: true,
           selected: selected ? { kind: selected.kind, id: selected.id } : undefined,
           requestChoice: async (conflict, lifecycle) => {
             hostRef.current?.onWalkProgress({stage:"pad",progress:null,waiting:"conflict"});
@@ -488,7 +490,7 @@ export function HubSyncControl({
         const failed = result.books.filter(book => book.status === "failed" || book.status === "needs_choice");
         if (failed.length) {
           await host?.emitReload(); throwIfAborted();
-          throw new Error(bookPassSummary(result)!);
+          throw new Error(selected ? bookFailureMessage(failed[0]!) : bookPassSummary(result)!);
         }
         if (selected && result.books.some(book => book.kind === selected.kind && book.id === selected.id && book.status === "cancelled")) {
           await host?.emitReload(); throwIfAborted(); goStage("idle"); walkingRef.current = false; return;
@@ -937,6 +939,8 @@ export function HubSyncControl({
         progress: null,
         error: message,
       });
+    } finally {
+      endActivity();
     }
   };
 

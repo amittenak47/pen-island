@@ -68,6 +68,7 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
     }
   }
   return { ...common, name: meta.name, hash: meta.hash, doc_type: meta.docType ?? "markdown",
+    ...(meta.localFileHash ? { local_file_hash: meta.localFileHash } : {}),
     ...(typeof meta.label === "string" && meta.label.trim() ? { label: meta.label } : {}),
     source: payload.source ?? "", footnotes, footnote_boards: children,
     updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
@@ -114,8 +115,8 @@ function readCapture(tx: IDBTransaction, owner: BookIdentity, done: (capture: Bo
       for (const request of [meta, payload, state, ...pages]) request.onsuccess = loaded;
 }
 
-function retainedRecord(capture: BookCapture, id: string, source: string) {
-  return { id, type: "record", kind: capture.kind, bookId: capture.id, provenance: { source },
+function retainedRecord(capture: BookCapture, id: string, source: string, hubRecordHash?: string) {
+  return { id, type: "record", kind: capture.kind, bookId: capture.id, provenance: hubRecordHash ? { source, hubRecordHash } : { source },
     record: { meta: capture.metadata ?? { kind: capture.kind, id: capture.id }, payload: capture.payload ?? {},
       children: capture.children, ink: capture.pages, wire: capture.record } };
 }
@@ -127,10 +128,14 @@ export async function retainInlineChoices(capture: BookCapture, converted: Recor
     children: converted.footnote_boards as BookCapture["children"] ?? capture.children };
   const replaced = new Map(saved.map(page => [pageIdentity(page.docKey, page.pageId), page]));
   for (const page of inline) replaced.set(pageIdentity(page.docKey, page.pageId), page);
-  const fingerprint = await hashBytes(new TextEncoder().encode(JSON.stringify({ original, saved, inline })));
+  // The hub's own record disagreeing with its pages: name the copies after
+  // that record, so a retry before anyone chooses keeps one pair, not a pair
+  // per attempt, and a restored choice can tell sync which record it beats.
+  const hubRecordHash = original && original !== capture.record ? await recordHash(original) : undefined;
+  const fingerprint = hubRecordHash ? `hub-${hubRecordHash}` : await hashBytes(new TextEncoder().encode(JSON.stringify({ original, saved, inline })));
   const key = `inline-choice:${capture.kind}:${capture.id}:${fingerprint}`;
-  const copies = [retainedRecord({ ...candidate, pages: saved }, `${key}:pages`, "legacy-saved-page-choice"),
-    retainedRecord({ ...candidate, pages: [...replaced.values()] }, `${key}:inline`, "legacy-inline-page-choice")];
+  const copies = [retainedRecord({ ...candidate, pages: saved }, `${key}:pages`, "legacy-saved-page-choice", hubRecordHash),
+    retainedRecord({ ...candidate, pages: [...replaced.values()] }, `${key}:inline`, "legacy-inline-page-choice", hubRecordHash)];
   await withBookWrite(capture.kind, capture.id, () => withTransaction<void>(
     [STORE_BOOK_META, STORE_CONTENT, STORE_PROBLEM_BOARDS, STORE_INK_PAGES, STORE_SYNC_STATE, STORE_SYNC_RECOVERY], "readwrite", (tx, done) => {
       readCapture(tx, capture, actual => {
@@ -188,6 +193,7 @@ function localRecordParts(owner: BookIdentity, record: Record<string, unknown>, 
     updatedAt: record.updated_at ?? capture.metadata?.updatedAt ?? 0, syncSeq: record.sync_seq ?? capture.metadata?.syncSeq ?? 0,
     hubAckUpdatedAt: record.updated_at ?? 0, lastSyncedAt: Date.now() };
   if (owner.kind === "annotate") Object.assign(metadata, { name: record.name, hash: record.hash, docType: record.doc_type,
+    localFileHash: typeof record.local_file_hash === "string" ? record.local_file_hash : undefined,
     ...(record.label !== undefined ? { label: record.label } : { label: undefined }) });
   else if (owner.kind === "whiteboard") Object.assign(metadata, { title: record.title, pageCount: record.page_count });
   else Object.assign(metadata, { dataset: record.dataset, taskId: record.task_id });
@@ -261,6 +267,14 @@ export interface BookPublication {
   alternative?: unknown;
   authored?: boolean;
   lifecycle?: SyncState["lifecycle"];
+  /** An explicit hub choice brings back a book deleted on this device. */
+  restoreFromHub?: boolean;
+  /** A remote restoration supplies a complete active page set. */
+  replacePages?: boolean;
+  /** This device's deletion agrees with the hub's: mark it acknowledged. */
+  settleDelete?: boolean;
+  /** Keep the complete book in local trash after observing or choosing the hub delete. */
+  trashFromHub?: { followed: boolean };
 }
 /** One CAS protects the entire read set. Every hash and decoded page is prepared. */
 export async function publishBook(capture: BookCapture, prepared: BookPublication): Promise<void> {
@@ -273,7 +287,7 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
             || !equalStored(actual.metadata, capture.metadata) || !equalStored(actual.payload, capture.payload)
             || !equalStored(actual.children, capture.children) || !equalStored(actual.pages, capture.pages)) throw new LocalBookConflictError("This book changed during sync. Its newer edits were kept.");
           // Observations cannot restore a local tombstone or purge.
-          if (prepared.record && (capture.metadata?.deletedAt !== undefined || capture.metadata?.purgedAt !== undefined) && capture.state.lifecycle?.action !== "restore") throw new LocalBookConflictError();
+          if (prepared.record && !prepared.restoreFromHub && (capture.metadata?.deletedAt !== undefined || capture.metadata?.purgedAt !== undefined) && capture.state.lifecycle?.action !== "restore") throw new LocalBookConflictError();
           allocateChangeSeqRange(tx, prepared.pages.length + 1, first => {
             try {
               if (prepared.alternative !== undefined) {
@@ -302,11 +316,25 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
               }
               if (prepared.record) {
                 const { metadata, payload } = localRecordParts(capture, prepared.record, capture);
+                if (prepared.restoreFromHub) { delete metadata.deletedAt; delete metadata.deleteAcked; delete metadata.deleteFollowed; delete metadata.purgedAt; }
                 tx.objectStore(STORE_BOOK_META).put(metadata, syncStateKey(capture.kind, capture.id));
                 tx.objectStore(capture.kind === "problem" ? STORE_PROBLEM_BOARDS : STORE_CONTENT).put(capture.kind === "problem" ? { ...metadata, ...payload } : payload, capture.id);
                 if (capture.kind === "annotate" && object(prepared.record.footnote_boards)) for (const [id, value] of Object.entries(prepared.record.footnote_boards)) {
                   localPageKey(capture, `${capture.id}/fn/${id}`);
                   tx.objectStore(STORE_CONTENT).put(value, `fnwb:${capture.id}:${id}`);
+                }
+              }
+              if (prepared.settleDelete && capture.metadata) {
+                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deleteAcked: true }, syncStateKey(capture.kind, capture.id));
+              }
+              if (prepared.trashFromHub && capture.metadata) {
+                const now = Date.now();
+                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deletedAt: now, deleteAcked: true,
+                  deleteFollowed: prepared.trashFromHub.followed, lastTouch: now }, syncStateKey(capture.kind, capture.id));
+              }
+              if (prepared.replacePages) for (const row of capture.pages) {
+                if (!prepared.pages.some(page => page.row.docKey === row.docKey && page.row.pageId === row.pageId)) {
+                  tx.objectStore(STORE_INK_PAGES).delete(inkPageKey(row.docKey, row.pageId));
                 }
               }
               for (let index = 0; index < prepared.pages.length; index++) {

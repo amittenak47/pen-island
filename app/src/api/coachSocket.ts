@@ -88,6 +88,8 @@ interface PendingRun {
   timeoutReason: string | null;
   /** True once the daemon has named a stage — the run is picked up. */
   acked: boolean;
+  /** Answered by an AI application or assistant, not a model: longer silences. */
+  agent: boolean;
   /** The last stage named, so a stall can say where it happened. */
   stage: string | null;
   /** The last tool that reported, and whether it went badly. */
@@ -121,6 +123,21 @@ const RUN_ACK_TIMEOUT_MS = 20_000;
  * to fail.
  */
 const RUN_STAGE_TIMEOUT_MS = 210_000;
+
+/**
+ * Silence allowed on a run answered by an AI application or assistant.
+ *
+ * Those runs wait on a CLI or a bot that may take minutes between steps; the
+ * hub gives them their own deadline (5 minutes for an app, 10 for a bot) and
+ * ends them with a clear error when it passes. This only has to outlast that,
+ * so it stays the backstop for a hub that went away, not what ends a slow bot.
+ */
+const AGENT_RUN_TIMEOUT_MS = 11 * 60_000;
+
+/** The hub names an agent run's first wait this way (`serve/agent_socket.rs`). */
+function isAgentStage(stage: string, detail: string | undefined): boolean {
+  return stage === "agent_step" || /^Waiting for the AI (application|assistant)\b/.test(detail ?? "");
+}
 const CANCEL_ACK_TIMEOUT_MS = 5_000;
 
 export interface AmbientHandlers {
@@ -366,6 +383,7 @@ export class AmbientCoach {
         watchdog: null,
         timeoutReason: null,
         acked: false,
+        agent: false,
         stage: null,
         tool: null,
       });
@@ -412,7 +430,9 @@ export class AmbientCoach {
     const run = this.pending.get(requestId);
     if (!run || run.timeoutReason) return;
     if (run.watchdog !== null) clearTimeout(run.watchdog);
-    const budget = run.acked ? RUN_STAGE_TIMEOUT_MS : RUN_ACK_TIMEOUT_MS;
+    const budget = run.agent
+      ? AGENT_RUN_TIMEOUT_MS
+      : run.acked ? RUN_STAGE_TIMEOUT_MS : RUN_ACK_TIMEOUT_MS;
     run.watchdog = setTimeout(() => {
       // Keep FIFO ownership while the daemon releases its one-run slot.
       // Rejecting here used to let the next queued question hit "busy".
@@ -477,6 +497,7 @@ export class AmbientCoach {
         if (run) {
           run.stage = frame.stage;
           run.acked = true;
+          if (isAgentStage(frame.stage, frame.detail ?? undefined)) run.agent = true;
         }
         this.touch(frame.request_id);
         this.pending.get(frame.request_id)?.handlers.onProcess?.({

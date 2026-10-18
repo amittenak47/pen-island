@@ -250,6 +250,10 @@ export interface CoachFlags {
   planner_enabled: boolean;
   draw_review_enabled: boolean;
   approach_commitment: boolean;
+  /** Include the rendered board with application / assistant requests. */
+  agent_send_board_image?: boolean;
+  agent_mcp_tools?: boolean;
+  agent_bot_timeout_secs?: number;
 }
 
 export const DEFAULT_COACH_FLAGS: CoachFlags = {
@@ -258,6 +262,7 @@ export const DEFAULT_COACH_FLAGS: CoachFlags = {
   planner_enabled: false,
   draw_review_enabled: false,
   approach_commitment: true,
+  agent_send_board_image: true,
 };
 
 export interface LlmStatus {

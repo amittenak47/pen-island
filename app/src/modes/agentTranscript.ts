@@ -56,7 +56,7 @@ export function restoreAgentMessages(stored: unknown[]): AgentChatMessage[] {
         at: typeof message.at === "number" ? message.at : Date.now(),
         deletedAt,
         pending: false,
-        queued: undefined,
+        queued: false,
         ...(sessionId ? { sessionId } : {}),
         ...(replyTo ? { replyTo } : {}),
       };
@@ -89,7 +89,7 @@ export function restoreAgentMessages(stored: unknown[]): AgentChatMessage[] {
         requestState: message.requestState && ["preparing", "queued", "running"].includes(message.requestState)
           ? "interrupted" : message.requestState,
         ...(message.pending !== undefined || message.requestState ? { pending: false } : {}),
-        queued: undefined,
+        queued: false,
         ...(requestNote ? { requestNote } : {}),
         review: message.review,
         bridge: message.bridge,

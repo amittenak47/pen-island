@@ -30,7 +30,7 @@ import {
 } from "../util/whiteboardStore";
 import { LibraryPadlock } from "./LibraryPadlock";
 import { PadNameField } from "./PadNameField";
-import { TOMBSTONE_COPY } from "../util/padSync";
+import { TOMBSTONE_COPY, type DeletePadResult } from "../util/padSync";
 import {
   listPadSnapshots,
   PAD_SNAPSHOT_TIERS,
@@ -61,7 +61,7 @@ interface LeaveProps extends NotebookContextProps {
   defaultName?: string;
   onChoose: (choice: ScratchLeaveChoice, notebookId?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | Promise<void>;
+  onDelete?: (id: string, options?: { force?: boolean }) => void | DeletePadResult | Promise<void | DeletePadResult>;
 }
 
 interface EntryProps extends NotebookContextProps {
@@ -81,7 +81,7 @@ interface EntryProps extends NotebookContextProps {
   defaultName?: string;
   onChoose: (choice: ScratchEntryChoice, notebookId?: string, snapshotId?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | Promise<void>;
+  onDelete?: (id: string, options?: { force?: boolean }) => void | DeletePadResult | Promise<void | DeletePadResult>;
   onRestoreTrash?: (id: string) => void | Promise<void>;
   onRename?: (id: string, title: string) => void | Promise<void>;
 }
@@ -124,6 +124,10 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
   const [pickingRecovery, setPickingRecovery] = useState(false);
   const [snapshots, setSnapshots] = useState<PadSnapshotMeta[]>([]);
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [removeError, setRemoveError] = useState<string | null>(null);
+  /** A delete the hub refused because another device changed the notebook since the last sync. */
+  const [staleId, setStaleId] = useState<string | null>(null);
+  const [removing, setRemoving] = useState(false);
   const [saveTitle, setSaveTitle] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -229,18 +233,32 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
   };
 
   const removeNotebook = (id: string) => {
+    setRemoveError(null);
     setPendingId(id);
   };
 
-  const confirmRemove = async (id: string) => {
+  const confirmRemove = async (id: string, force = false) => {
+    if (removing) return;
+    setRemoving(true);
     try {
-      if (props.onDelete) await props.onDelete(id);
+      if (props.onDelete) {
+        const result = force ? await props.onDelete(id, { force: true }) : await props.onDelete(id);
+        if (result?.status === "stale") {
+          setPendingId(null);
+          setStaleId(id);
+          return;
+        }
+      }
       else await deleteWhiteboardNotebook(id);
       arm();
-    } catch {
-      /* ignore */
+    } catch (cause) {
+      setRemoveError(cause instanceof Error ? cause.message : "Could not remove this notebook. Try again.");
+      return;
+    } finally {
+      setRemoving(false);
     }
     setPendingId(null);
+    setStaleId(null);
     refreshList();
   };
 
@@ -291,7 +309,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
 
           {saveTitle !== null ? (
             <div className="lc-settings-choice">
-              <p className="lc-muted lc-whiteboard-name-hint">Name this notebook. Hold Save to keep the suggested name.</p>
+              <p className="lc-muted lc-whiteboard-name-hint">Hold to save.</p>
               <PadNameField
                 value={saveTitle}
                 placeholder={defaultName || "Untitled"}
@@ -510,8 +528,23 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
           message="It leaves the live library."
           detail={TOMBSTONE_COPY}
           confirmLabel="Delete"
+          pending={removing}
+          pendingLabel="Deleting…"
+          error={removeError}
           onConfirm={() => void confirmRemove(pendingId)}
           onCancel={() => setPendingId(null)}
+        />
+      )}</DialogPresence>
+      <DialogPresence>{staleId && (
+        <ConfirmDialog
+          title="Changed on another device"
+          message="It changed since your last sync. Delete anyway?"
+          confirmLabel="Delete anyway"
+          pending={removing}
+          pendingLabel="Deleting…"
+          error={removeError}
+          onConfirm={() => void confirmRemove(staleId, true)}
+          onCancel={() => { setStaleId(null); setRemoveError(null); }}
         />
       )}</DialogPresence>
     </DialogBackdrop>

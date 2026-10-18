@@ -321,6 +321,7 @@ export function footnoteFromItem(
   const base: DocFootnote = {
     id: freshFootnoteId(existing, now),
     kind: "ai",
+    notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [],
     anchor: {
       kind: "text",
       start: at.start,
@@ -352,15 +353,15 @@ export interface PlaceOutcome {
   placed: number;
   /** Items whose quote is not on its page; acknowledged and reported, not guessed. */
   unplaced: number;
-  /** Items left for later, because their document's PDF is not open here. */
+  /** Items left for later, because their book is trashed or its PDF is not open here. */
   waiting: number;
 }
 
 /**
  * Fetch finished items for this device and place each on its page.
  *
- * Only documents whose PDF is open can be placed (their page text comes from
- * the open file); the rest stay on the hub until the document is opened.
+ * Only live documents whose PDF is open can be placed (their page text comes
+ * from the open file); the rest stay on the hub until opened or restored.
  */
 export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOutcome> {
   const outcome: PlaceOutcome = { placed: 0, unplaced: 0, waiting: 0 };
@@ -375,7 +376,7 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
   const done: number[] = [];
   for (const [docId, docItems] of byDoc) {
     const doc = await getAnnotateDoc(docId).catch(() => null);
-    if (!doc || doc.docType !== "pdf" || !borrowPdfDocument(doc.hash)) {
+    if (!doc || doc.deletedAt !== undefined || doc.docType !== "pdf" || !borrowPdfDocument(doc.hash)) {
       for (const item of docItems) {
         if (isSuppressed(docId, item.job_id)) suppressed.push(item);
         else outcome.waiting += 1;
@@ -386,9 +387,19 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
     for (const item of docItems) {
       if (!streams.has(item.page)) streams.set(item.page, await pdfPageStream(doc.hash, item.page).catch(() => null));
     }
+    // Reading the page can outlive a delete; keep those items for a restore.
+    const currentDoc = await getAnnotateDoc(docId).catch(() => null);
+    if (!currentDoc || currentDoc.deletedAt !== undefined) {
+      for (const item of docItems) {
+        if (isSuppressed(docId, item.job_id)) suppressed.push(item);
+        else outcome.waiting += 1;
+      }
+      continue;
+    }
     const placedItems: AnnotationJobItemDto[] = [];
     const write = await writeFootnotes(docId, (footnotes) => {
       let next = [...footnotes];
+      let merged = false;
       placedItems.length = 0;
       for (const item of docItems) {
         // Undo may have finished while the poll was reading this PDF's text.
@@ -397,18 +408,22 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
         const footnote = stream ? footnoteFromItem(item, stream, next) : null;
         if (!footnote) continue;
         placedItems.push(item);
-        // A retried delivery, or a mark the reader already has there: keep theirs.
-        if (next.some((existing) => samePlace(existing, footnote))) continue;
-        next = addFootnote(next, footnote);
+        const at = next.findIndex((existing) => samePlace(existing, footnote));
+        if (at < 0) { next = addFootnote(next, footnote); continue; }
+        // Another run's footnote is already on this sentence: add this run's
+        // notes to it instead of dropping them. A retried delivery adds nothing.
+        const combined = mergeRunNotes(next[at]!, footnote);
+        if (combined !== next[at]) { merged = true; next = next.map((entry, index) => index === at ? combined : entry); }
       }
-      return next.length === footnotes.length ? (footnotes as DocFootnote[]) : next;
+      return next.length === footnotes.length && !merged ? (footnotes as DocFootnote[]) : next;
     });
     const currentItems = docItems.filter((item) => {
       if (!isSuppressed(docId, item.job_id)) return true;
       suppressed.push(item);
       return false;
     });
-    if (write === "failed") {
+    const latestDoc = write === "gone" ? await getAnnotateDoc(docId).catch(() => null) : null;
+    if (write === "failed" || write === "gone" && (!latestDoc || latestDoc.deletedAt !== undefined)) {
       outcome.waiting += currentItems.length;
       continue;
     }
@@ -424,11 +439,34 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
   for (const item of suppressed) {
     // A failed Undo restores delivery; keep its queued items until the save ends.
     await pendingUndos.get(undoKey(item.doc_id, item.job_id));
-    if (isSuppressed(item.doc_id, item.job_id)) done.push(item.item_id);
+    const doc = await getAnnotateDoc(item.doc_id).catch(() => null);
+    if (doc?.deletedAt !== undefined) outcome.waiting += 1;
+    else if (isSuppressed(item.doc_id, item.job_id)) done.push(item.item_id);
     else outcome.waiting += 1;
   }
   if (done.length) await client.ackAnnotationJobItems([...new Set(done)]);
   return outcome;
+}
+
+/**
+ * `existing` with `incoming`'s notes appended, each tagged with the run that
+ * wrote it. The existing title, colour and the reader's own notes stay. Notes
+ * this run already added, or with the same text, are not added twice.
+ */
+export function mergeRunNotes(existing: DocFootnote, incoming: DocFootnote): DocFootnote {
+  const runId = incoming.jobId;
+  if (!runId || existing.jobId === runId) return existing;
+  const notes = existing.notes ?? [];
+  if (notes.some((note) => note.jobId === runId)) return existing;
+  const texts = new Set(notes.map((note) => note.text.trim()));
+  const ids = new Set(notes.map((note) => note.id));
+  const added = (incoming.notes ?? []).filter((note) => note.text.trim() && !texts.has(note.text.trim()))
+    .map((note, index) => ({ ...note, id: ids.has(note.id) ? `${note.id}-${runId}-${index}` : note.id, by: note.by ?? "ai" as const, jobId: runId }));
+  if (!added.length) return existing;
+  const links = existing.userLinks ?? [];
+  const extraLinks = (incoming.userLinks ?? []).filter((link) => !links.some((own) => own.url === link.url));
+  return { ...existing, notes: [...notes, ...added], ...(extraLinks.length ? { userLinks: [...links, ...extraLinks] } : {}),
+    updatedAt: Math.max(existing.updatedAt ?? 0, ...added.map((note) => note.updatedAt)) };
 }
 
 /** Remove every footnote a run created on this document, and nothing else. */
@@ -442,9 +480,16 @@ export async function undoAnnotationJob(docId: string, jobId: string): Promise<n
   pendingUndos.set(key, pending);
   try {
     const write = await writeFootnotes(docId, (footnotes) => {
-      const kept = footnotes.filter((footnote) => footnote.jobId !== jobId);
-      removed = footnotes.length - kept.length;
-      return removed ? kept : (footnotes as DocFootnote[]);
+      let changed = false;
+      removed = 0;
+      const kept = footnotes.filter((footnote) => footnote.jobId !== jobId).map((footnote) => {
+        // Notes this run added to another run's footnote come back out too.
+        if (!footnote.notes?.some((note) => note.jobId === jobId)) return footnote;
+        changed = true; removed += 1;
+        return { ...footnote, notes: footnote.notes.filter((note) => note.jobId !== jobId) };
+      });
+      removed += footnotes.length - kept.length;
+      return removed || changed ? kept : (footnotes as DocFootnote[]);
     });
     if (write === "failed") throw new Error("Couldn't save the document after undoing this run.");
     return removed;

@@ -476,6 +476,19 @@ function turnBody(message: AgentChatMessage): string {
   return message.content;
 }
 
+/**
+ * The latest turn already says this failure.
+ *
+ * A failed run is kept in the conversation as its own turn, and the same text
+ * was raised in the panel's alert as well: a run that missed its deadline read
+ * the message twice, one above the other. The alert stays for failures with
+ * no turn to carry them.
+ */
+function failureShownInTurn(messages: readonly AgentChatMessage[], error: string): boolean {
+  const last = messages[messages.length - 1];
+  return Boolean(last && last.requestState === "failed" && last.content.trim() === error.trim());
+}
+
 function statusTip(message: AgentChatMessage): string | null {
   if (message.requestState === "failed") {
     return message.requestNote?.trim() || "This message was not sent.";
@@ -2480,7 +2493,7 @@ export function AgentSidePanel({
         </div>
         </div>
 
-        {error?.trim() ? (
+        {error?.trim() && !failureShownInTurn(messages, error) ? (
           <p className="lc-agent-panel-error" role="alert">
             {error.trim()}
           </p>

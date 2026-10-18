@@ -1,6 +1,6 @@
 import { IDBFactory, IDBKeyRange, IDBObjectStore, IDBDatabase } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
-import { captureBook } from "./bookSnapshot";
+import { captureBook, publishBook } from "./bookSnapshot";
 import { closeDbForTests, withStore, STORE_INK_PAGES } from "./idb";
 import { inkPageKey, type InkPageRecord } from "./inkPageStore";
 import { inkBookIdentity, resetBookCoordinatorForTests } from "./bookCoordinator";
@@ -38,4 +38,32 @@ it.each(["annotate", "whiteboard", "problem"] as const)("captures identical %s r
     expect(range).toBeInstanceOf(IDBKeyRange);
     for (const row of all) if ((range as IDBKeyRange).includes(inkPageKey(row.docKey, row.pageId))) expect(expected).toContainEqual(row);
   }
+});
+
+
+it("captures the local HTML marker beside the original-file hash in a normal web record", async () => {
+  const { saveAnnotateDoc } = await import("./annotateStore");
+  await saveAnnotateDoc({ id: "local-html", name: "guide.html", docType: "web", hash: "original-hash", localFileHash: "original-hash",
+    source: "<p>Rendered DOM</p>", board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } } });
+  const capture = await captureBook({ kind: "annotate", id: "local-html" });
+  expect(capture.record).toMatchObject({ doc_type: "web", hash: "original-hash", local_file_hash: "original-hash", source: "<p>Rendered DOM</p>" });
+});
+
+it("replaces the complete local page set when bringing acknowledged trash back from the hub", async () => {
+  // Trash contains a local-only page; a later hub restore replaces active pages and retains the complete old local book.
+  const { saveWhiteboardNotebook, trashWhiteboardNotebook } = await import("./whiteboardStore");
+  const { putInkPages } = await import("./inkPageStore");
+  const { listRecoveryCopies } = await import("./syncRecovery");
+  await saveWhiteboardNotebook({ id: "book", title: "Local trash", pageCount: 1,
+    board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } } });
+  await putInkPages("wb:book", [[44, encodeInkOps([])]]); await trashWhiteboardNotebook("book");
+  const before = await captureBook({ kind: "whiteboard", id: "book" });
+  const record = { ...before.record!, title: "Restored hub book" };
+  const book = { kind: "whiteboard" as const, id: "book", state: "live" as const, book_rev: 8,
+    record_rev: 8, record_hash: "hub-record", record, pages: [], gone_seq: null };
+  await publishBook(before, { book, record, recordLocalHash: "hub-record", pages: [], restoreFromHub: true,
+    replacePages: true, alternative: { book, pages: [] } } as Parameters<typeof publishBook>[1]);
+  const after = await captureBook({ kind: "whiteboard", id: "book" });
+  expect(after.metadata?.deletedAt).toBeUndefined(); expect(after.pages).toEqual([]);
+  expect((await listRecoveryCopies()).some(copy => copy.record?.ink?.some(page => page.pageId === 44))).toBe(true);
 });

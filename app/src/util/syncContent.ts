@@ -1,6 +1,12 @@
 /** Atomic-sync content contract, mirrored by src/pads/sync_content.rs.
  * UTF-16 key order, ECMAScript finite-number formatting, no implicit omission.
- * Only root transport fields and named board view/manifests are excluded.
+ * Excludes root transport fields, board view/manifests and page-frame layout.
+ * Empty defaults canonicalize to absence only at these paths: root agent
+ * and footnote_boards; agent[].attachments/artifacts/artifactProposals/
+ * flags/processEvents, agent[].pending/queued/bridgePending=false,
+ * agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
+ * footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
+ * footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
  * Values are actual IEEE-754 JSON Numbers, not original decimal spellings.
  * A previously rounded JSON literal cannot be reconstructed by this helper.
  */
@@ -65,26 +71,74 @@ export function canonicalJson(value: unknown): string {
   return visit(value);
 }
 
+/** Each device lays out the document page frame itself: its size comes from
+ * that screen's layout and its version stamps from the editor. Handwriting
+ * carries its own layout tag; the record's width is only a hint for pages
+ * saved before tags, and sync keeps each device's own frame on download. */
+export const PAGE_FRAME_LOCAL_KEYS = ["width", "height", "version", "versionNonce", "updated", "seed"] as const;
+/** Agent message flags whose `false` is the same as leaving them out. */
+export const MESSAGE_FALSE_DEFAULT_KEYS = ["pending", "queued", "bridgePending"] as const;
+export const MESSAGE_EMPTY_LIST_KEYS = ["attachments", "artifacts", "artifactProposals", "flags", "processEvents"] as const;
+export const FOOTNOTE_EMPTY_LIST_KEYS = ["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"] as const;
+
+const plainObject = (value: unknown): value is Record<string, unknown> =>
+  value != null && typeof value === "object" && !Array.isArray(value);
+
+function isPageFrame(element: Record<string, unknown>): boolean {
+  if (element.id === "lcmdink-0-frame") return true;
+  const meta = element.customData;
+  if (!plainObject(meta)) return false;
+  return meta.lcMdInkFrame === true || meta.lcDocumentPage === true || (meta.lcRegionFrame === true && meta.lcRegion === "mdink-0");
+}
+
 export function normalizeRecord(value: unknown): Record<string, unknown> {
   check(value != null && typeof value === "object" && !Array.isArray(value), "book record must be an object");
   const record = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
   for (const key of RECORD_TRANSPORT_KEYS) delete record[key];
+  const emptyLists = (row: Record<string, unknown>, keys: readonly string[]) => {
+    for (const key of keys) if (Array.isArray(row[key]) && row[key].length === 0) delete row[key];
+  };
   const board = (value: unknown) => {
-    if (value == null || typeof value !== "object" || Array.isArray(value)) return;
-    const row = value as Record<string, unknown>;
+    if (!plainObject(value)) return;
+    const row = value;
     delete row.inkPages;
-    if (row.appState != null && typeof row.appState === "object" && !Array.isArray(row.appState)) {
-      for (const key of LOCAL_VIEW_KEYS) delete (row.appState as Record<string, unknown>)[key];
+    if (plainObject(row.appState)) {
+      for (const key of LOCAL_VIEW_KEYS) delete row.appState[key];
       // A camera-only addition has no shared state after exclusions.
       if (Object.keys(row.appState).length === 0) delete row.appState;
     }
+    if (Array.isArray(row.elements)) for (const element of row.elements) {
+      if (plainObject(element) && isPageFrame(element)) for (const key of PAGE_FRAME_LOCAL_KEYS) delete element[key];
+    }
   };
   board(record.board);
-  if (record.footnote_boards != null && typeof record.footnote_boards === "object" && !Array.isArray(record.footnote_boards)) {
+  if (plainObject(record.footnote_boards)) {
     for (const value of Object.values(record.footnote_boards)) {
-      if (value != null && typeof value === "object") board((value as Record<string, unknown>).board);
+      if (plainObject(value)) board(value.board);
+    }
+    // The hub's book format defaults an absent map to empty and omits it when empty.
+    if (Object.keys(record.footnote_boards).length === 0) delete record.footnote_boards;
+  }
+  if (Array.isArray(record.agent)) for (const message of record.agent) {
+    if (!plainObject(message)) continue;
+    emptyLists(message, MESSAGE_EMPTY_LIST_KEYS);
+    for (const key of MESSAGE_FALSE_DEFAULT_KEYS) if (message[key] === false) delete message[key];
+    if (plainObject(message.drawing) && message.drawing.redacted === false) delete message.drawing.redacted;
+    if (Array.isArray(message.artifactProposals)) for (const proposal of message.artifactProposals) {
+      if (plainObject(proposal)) emptyLists(proposal, ["programs", "messages"]);
     }
   }
+  if (Array.isArray(record.footnotes)) for (const note of record.footnotes) {
+    if (!plainObject(note)) continue;
+    emptyLists(note, FOOTNOTE_EMPTY_LIST_KEYS);
+    if (Array.isArray(note.notes)) for (const entry of note.notes) {
+      if (plainObject(entry)) emptyLists(entry, ["images"]);
+    }
+    if (Array.isArray(note.subMarks)) for (const mark of note.subMarks) {
+      if (plainObject(mark)) emptyLists(mark, ["bands"]);
+    }
+  }
+  emptyLists(record, ["agent"]);
   return record;
 }
 

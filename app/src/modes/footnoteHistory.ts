@@ -18,6 +18,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { DocFootnote } from "../util/docFootnotes";
+import { bookWireRecord } from "../util/bookWireRecord";
+import { canonicalJson, normalizeRecord } from "../util/syncContent";
 
 export type HistoryStep =
   | { kind: "footnote"; before: DocFootnote; after: DocFootnote; at: number }
@@ -30,7 +32,7 @@ const HISTORY_LIMIT = 50;
 /** A footnote as undo sees it: whiteboards and the edit stamp left out. */
 export function historyKey(footnote: DocFootnote): string {
   const { whiteboards: _boards, updatedAt: _stamp, ...rest } = footnote;
-  return JSON.stringify(rest);
+  return canonicalJson(normalizeRecord(bookWireRecord({ footnotes: [rest] })));
 }
 
 export interface FootnoteHistoryOptions {
@@ -83,8 +85,7 @@ export function useFootnoteHistory({ footnote, onChange, onRemoveLink, onRestore
 
   const restore = useCallback((target: DocFootnote) => {
     const live = current.current;
-    const next: DocFootnote = { ...target, whiteboards: live.whiteboards, updatedAt: now() };
-    if (!next.whiteboards) delete next.whiteboards;
+    const next: DocFootnote = { ...target, whiteboards: live.whiteboards ?? [], updatedAt: now() };
     expected.current = historyKey(next);
     sealed.current = true;
     onChange(next);

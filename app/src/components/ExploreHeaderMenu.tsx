@@ -44,7 +44,7 @@ export function ExploreHeaderMenu({ active, disabled, onOpen, onPull, getGraph }
   };
   return <>
     <HoldButton label="Explore" ariaLabel="Explore: tap to open the graph, hold for menu"
-      className={`lc-icon lc-hold-icon${active ? " is-active" : ""}`} pressed={active}
+      className={`lc-icon lc-hold-icon lc-head-mode-explore${active ? " is-active" : ""}`} pressed={active}
       disabled={disabled} onTap={onOpen} onConfirm={() => { setMessage(""); setError(""); setOpen(true); }}><ExploreIcon /></HoldButton>
     {createPortal(<DialogPresence>{open && <DialogBackdrop className="lc-settings-backdrop" role="presentation"
       onClick={event => { if (event.target === event.currentTarget) close(); }}>

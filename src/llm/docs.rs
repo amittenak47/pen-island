@@ -1,11 +1,17 @@
 //! Document Ask: tutor prompt, slash presets, optional OpenAI tools.
 
+#[cfg(test)]
+#[path = "coach/document_tools_characterization.rs"]
+mod tool_characterization;
+
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 
 use crate::config::Config;
-use crate::docs_index;
-use crate::llm::coach::{EventSink, ToolStatus};
+use crate::llm::coach::EventSink;
+#[cfg(test)]
+use crate::llm::coach_tools::dispatch_tool;
+use crate::llm::coach_tools::{execute_tool, ToolContext, ToolEnvelope};
 use crate::llm::viz::{ask_draw_tools, parse_tool_calls, VizProgram};
 use crate::llm::{is_tool_calling_unsupported, ChatMessage, ChatRequest, LlmProvider};
 use crate::llm::reasoning::ReasoningEffort;
@@ -204,22 +210,6 @@ pub struct ArtifactProposal {
     pub programs: Vec<VizProgram>,
 }
 
-impl ArtifactProposal {
-    fn validate(&self) -> Result<()> {
-        anyhow::ensure!(matches!(self.kind.as_str(), "whiteboard" | "code" | "markdown"), "unsupported attachment kind");
-        anyhow::ensure!(!self.title.trim().is_empty() && self.title.len() <= 256, "attachment title must be 1–256 bytes");
-        anyhow::ensure!(self.source.len() <= 512_000 && self.programs.len() <= 8, "attachment is too large");
-        anyhow::ensure!(self.kind == "whiteboard" || self.programs.is_empty(), "document attachments use source, not diagram programs");
-        anyhow::ensure!(self.kind != "whiteboard" || self.source.is_empty(), "whiteboard attachments use programs, not source");
-        let mut ids = std::collections::HashSet::new();
-        for program in &self.programs {
-            anyhow::ensure!(ids.insert(&program.id), "duplicate diagram ID");
-            if let Some(why) = program.rejection() { anyhow::bail!("{why}"); }
-        }
-        Ok(())
-    }
-}
-
 fn artifact_tools() -> Vec<serde_json::Value> {
     let program_schemas: Vec<_> = ask_draw_tools().into_iter()
         .filter(|schema| matches!(schema["function"]["name"].as_str(), Some("draw_structure" | "animate_trace")))
@@ -341,9 +331,12 @@ fn run_tooled_ask(
         ChatMessage::system(system),
         ChatMessage::user(user.clone()).with_images(images.clone()),
     ];
-    let mut proposed = Vec::new();
-    let mut artifacts = Vec::new();
-    let mut programs = Vec::new();
+    let context = ToolContext::Ask {
+        cfg,
+        document: ctx,
+        max_attachments: 8,
+    };
+    let mut envelope = ToolEnvelope::default();
     let mut reply = match provider.chat_ex_with_events(
         &ChatRequest::new(messages.clone())
             .with_tools(tools.clone())
@@ -370,11 +363,11 @@ fn run_tooled_ask(
             }
             if parsed.tool_calls.is_empty() {
                 return Ok(AskOutcome {
-                    artifacts,
+                    artifacts: envelope.artifacts,
                     reasoning: parsed.reasoning,
                     reply: parsed.content.trim().to_string(),
-                    proposed,
-                    programs,
+                    proposed: envelope.proposed,
+                    programs: envelope.programs,
                 });
             }
             messages = fb_messages;
@@ -390,101 +383,8 @@ fn run_tooled_ask(
         }
         let mut results = Vec::new();
         for call in &reply.tool_calls {
-            events.tool(call.name.as_str(), ToolStatus::Proposed, tool_summary(&call.name), None);
-            match call.name.as_str() {
-                "create_attachment" => {
-                    let result = serde_json::from_value::<ArtifactProposal>(call.arguments.clone()).map_err(anyhow::Error::from)
-                        .and_then(|proposal| { proposal.validate()?; anyhow::ensure!(artifacts.len() < 8, "too many attachments in one answer"); Ok(proposal) });
-                    match result {
-                        Ok(proposal) => {
-                            events.tool(&call.name, ToolStatus::Accepted, format!("Preparing {}", proposal.title), None);
-                            results.push(format!("{}: prepared attachment content for the client to save; persistence is not yet confirmed", call.name));
-                            artifacts.push(proposal);
-                        }
-                        Err(error) => {
-                            events.tool(&call.name, ToolStatus::Rejected, "Invalid attachment", Some(error.to_string()));
-                            results.push(format!("{}: rejected: {error}", call.name));
-                        }
-                    }
-                }
-                "draw_structure" | "animate_trace" => {
-                    match serde_json::from_value::<VizProgram>(call.arguments.clone()) {
-                        Ok(program) => match program.rejection() {
-                            None => {
-                                let detail = if program.title.trim().is_empty() {
-                                    program.id.clone()
-                                } else {
-                                    program.title.clone()
-                                };
-                                events.tool(
-                                    call.name.as_str(),
-                                    ToolStatus::Accepted,
-                                    detail.clone(),
-                                    None,
-                                );
-                                results.push(format!(
-                                    "{}: queued a diagram ({detail}) for the board",
-                                    call.name
-                                ));
-                                programs.push(program);
-                            }
-                            Some(why) => {
-                                events.tool(
-                                    call.name.as_str(),
-                                    ToolStatus::Rejected,
-                                    call.name.clone(),
-                                    Some(why.clone()),
-                                );
-                                results.push(format!("{}: dropped a diagram: {why}", call.name));
-                            }
-                        },
-                        Err(err) => {
-                            let why = format!("unreadable {} call: {err}", call.name);
-                            events.tool(
-                                call.name.as_str(),
-                                ToolStatus::Rejected,
-                                call.name.clone(),
-                                Some(why.clone()),
-                            );
-                            results.push(format!("{}: {why}", call.name));
-                        }
-                    }
-                }
-                "annotate_region" => {
-                    let text = "this pad has no named regions (approach/walkthrough/…). \
-                                skip annotate_region rather than inventing Practice board pages.";
-                    events.tool(
-                        call.name.as_str(),
-                        ToolStatus::Accepted,
-                        clip_tool_detail(text),
-                        None,
-                    );
-                    results.push(format!("{}: {text}", call.name));
-                }
-                "cite_test_case" => {
-                    let text = "cite_test_case is only for corpus problems with sample cases.";
-                    events.tool(
-                        call.name.as_str(),
-                        ToolStatus::Accepted,
-                        clip_tool_detail(text),
-                        None,
-                    );
-                    results.push(format!("{}: {text}", call.name));
-                }
-                _ => {
-                    let (text, maybe_ann) =
-                        dispatch_tool(cfg, ctx, call.name.as_str(), &call.arguments)?;
-                    events.tool(
-                        call.name.as_str(),
-                        ToolStatus::Accepted,
-                        clip_tool_detail(&text),
-                        None,
-                    );
-                    if let Some(ann) = maybe_ann {
-                        proposed.push(ann);
-                    }
-                    results.push(format!("{}: {}", call.name, text));
-                }
+            if let Some(feedback) = execute_tool(call, &context, &mut envelope, events)? {
+                results.push(feedback);
             }
         }
         // Keep the attempted arguments beside their results. A name alone
@@ -526,11 +426,11 @@ fn run_tooled_ask(
         reasoning_parts.push(reply.reasoning.clone());
     }
     Ok(AskOutcome {
-        artifacts,
+        artifacts: envelope.artifacts,
         reasoning: reasoning_parts.into_iter().filter(|part| !part.trim().is_empty()).collect::<Vec<_>>().join("\n\n"),
         reply: reply.content.trim().to_string(),
-        proposed,
-        programs,
+        proposed: envelope.proposed,
+        programs: envelope.programs,
     })
 }
 
@@ -539,211 +439,6 @@ pub fn run_problem_artifact_ask(provider: &dyn LlmProvider, cfg: &Config, system
     user: String, images: Vec<String>, events: &EventSink, reasoning: bool, effort: Option<ReasoningEffort>) -> Result<AskOutcome> {
     let ctx = AskContext { document_hash: None, page: None, highlight: String::new(), page_text: String::new(), marks_prose: String::new(), retrieved: String::new() };
     run_tooled_ask(provider, cfg, system, user, images, &ctx, events, reasoning, effort, Vec::new())
-}
-
-fn tool_summary(name: &str) -> &'static str {
-    match name {
-        "query_document_vectors" => "searching the book",
-        "query_library_vectors" => "searching your library",
-        "get_document_section" => "opening a section",
-        "lookup_reference" => "checking a citation",
-        "get_current_page" => "reading this page",
-        "get_highlight" => "re-reading the highlight",
-        "list_document_marks" => "listing annotations",
-        "save_annotation" => "pinning a tab",
-        "search_web" => "searching the web",
-        "draw_structure" => "drawing a structure",
-        "animate_trace" => "animating a trace",
-        "annotate_region" => "annotating a region",
-        _ => "calling a tool",
-    }
-}
-
-fn clip_tool_detail(text: &str) -> String {
-    let t = text.trim();
-    let mut out: String = t.chars().take(280).collect();
-    if t.chars().count() > 280 {
-        out.push('…');
-    }
-    out
-}
-
-fn dispatch_tool(
-    cfg: &Config,
-    ctx: &AskContext,
-    name: &str,
-    args: &serde_json::Value,
-) -> Result<(String, Option<ProposedAnnotation>)> {
-    match name {
-        "query_document_vectors" => {
-            let Some(hash) = ctx.document_hash.as_deref() else {
-                return Ok(("no document index on this Ask".into(), None));
-            };
-            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
-            let path = docs_index::db_path()?;
-            let conn = docs_index::open(&path)?;
-            let hits = docs_index::retrieve(&conn, hash, query, k, cfg)?;
-            Ok((docs_index::format_retrieval(&hits), None))
-        }
-        /*
-         * The library, not the open book.
-         *
-         * Deliberately a separate tool rather than a flag on the first one. The
-         * model picks by what the question is about, and the two have different
-         * costs: this scans every eligible document, and its answer has to name
-         * which book each passage came from or it is no use in a library.
-         *
-         * The scope line comes back with the passages, so an answer built from
-         * a partial library says so instead of sounding complete.
-         */
-        "query_library_vectors" => {
-            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let k = args.get("k").and_then(|v| v.as_u64()).unwrap_or(4) as usize;
-            let path = docs_index::db_path()?;
-            let conn = docs_index::open(&path)?;
-            let (hits, scope) = docs_index::retrieve_library(&conn, query, k, cfg)?;
-            if hits.is_empty() {
-                return Ok((docs_index::library_scope_line(&scope), None));
-            }
-            Ok((docs_index::format_library_retrieval(&hits, &scope), None))
-        }
-        "get_document_section" => {
-            let Some(hash) = ctx.document_hash.as_deref() else {
-                return Ok(("no document index on this Ask".into(), None));
-            };
-            let name = args
-                .get("section_name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            let path = docs_index::db_path()?;
-            let conn = docs_index::open(&path)?;
-            match docs_index::section_text(&conn, hash, name) {
-                Ok(text) => Ok((text, None)),
-                Err(err) => Ok((err.to_string(), None)),
-            }
-        }
-        "lookup_reference" => {
-            let Some(hash) = ctx.document_hash.as_deref() else {
-                return Ok(("no document index on this Ask".into(), None));
-            };
-            let n = args.get("n").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-            let path = docs_index::db_path()?;
-            let conn = docs_index::open(&path)?;
-            match docs_index::lookup_reference(&conn, hash, n) {
-                Ok(text) => Ok((text, None)),
-                Err(err) => Ok((err.to_string(), None)),
-            }
-        }
-        "get_current_page" => {
-            let text = ctx.page_text.trim();
-            if text.is_empty() {
-                Ok(("no page text was sent with this Ask".into(), None))
-            } else {
-                let clipped: String = text.chars().take(4000).collect();
-                Ok((clipped, None))
-            }
-        }
-        "get_highlight" => {
-            if ctx.highlight.trim().is_empty() {
-                Ok(("no highlight was sent".into(), None))
-            } else {
-                Ok((ctx.highlight.clone(), None))
-            }
-        }
-        "list_document_marks" => {
-            if ctx.marks_prose.trim().is_empty() {
-                Ok(("no annotations packed into this Ask".into(), None))
-            } else {
-                Ok((ctx.marks_prose.clone(), None))
-            }
-        }
-        "save_annotation" => {
-            let ann = ProposedAnnotation {
-                excerpt: args
-                    .get("excerpt")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                note: args
-                    .get("note")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                tags: args
-                    .get("tags")
-                    .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-                page: args.get("page").and_then(|v| v.as_u64()).map(|n| n as u32),
-                links: args
-                    .get("links")
-                    .and_then(|v| v.as_array())
-                    .map(|a| {
-                        a.iter()
-                            .filter_map(|v| v.as_str().map(|s| s.to_string()))
-                            .collect()
-                    })
-                    .unwrap_or_default(),
-            };
-            Ok((
-                "queued an AI book-tab; the tablet will place it".into(),
-                Some(ann),
-            ))
-        }
-        "search_web" => {
-            let Some(base) = cfg.searxng_url() else {
-                return Ok(("web search is not configured".into(), None));
-            };
-            let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("");
-            let n = args.get("num_results").and_then(|v| v.as_u64()).unwrap_or(3) as usize;
-            Ok((search_web_snippets(base, query, n)?, None))
-        }
-        other => Ok((format!("unknown tool {other}"), None)),
-    }
-}
-
-fn search_web_snippets(base: &str, query: &str, n: usize) -> Result<String> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(20))
-        .build()?;
-    let url = format!(
-        "{}/search",
-        base.trim_end_matches('/')
-    );
-    let value: serde_json::Value = client
-        .get(&url)
-        .query(&[("q", query), ("format", "json")])
-        .send()?
-        .json()?;
-    let results = value
-        .get("results")
-        .and_then(|r| r.as_array())
-        .cloned()
-        .unwrap_or_default();
-    let mut lines = Vec::new();
-    for item in results.iter().take(n.max(1).min(5)) {
-        let title = item.get("title").and_then(|v| v.as_str()).unwrap_or("");
-        let content = item
-            .get("content")
-            .or_else(|| item.get("snippet"))
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
-        let href = item.get("url").and_then(|v| v.as_str()).unwrap_or("");
-        if title.is_empty() && content.is_empty() {
-            continue;
-        }
-        lines.push(format!("{title} — {href}\n{content}"));
-    }
-    if lines.is_empty() {
-        Ok("no snippets".into())
-    } else {
-        Ok(lines.join("\n\n"))
-    }
 }
 
 #[cfg(test)]

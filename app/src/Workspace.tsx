@@ -12,6 +12,7 @@ import { DialogPresence } from "./components/DialogMotion";
  * and every request that names a task id names the dataset too.
  */
 
+import { useCloseOnDeletedElsewhere } from "./workspace/useCloseOnDeletedElsewhere";
 import { resumePictureFor, type ResumePicture } from "./util/resumePicture";
 import type { EncodedInk } from "./canvas/inkCodec";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -19,6 +20,9 @@ import { createPortal, flushSync } from "react-dom";
 
 import { useShell } from "./shellContext";
 import { useWebCapture } from "./workspace/useWebCapture";
+import { usePdfSession } from "./workspace/usePdfSession";
+import { useAnnotateSession } from "./workspace/useAnnotateSession";
+import { useHubSync } from "./workspace/useHubSync";
 
 import { LcApiError, type AnnotatePadDto, type DocIndexStatus, type ProposedAnnotation, type SearchOptions } from "./api/client";
 import { AmbientCoach, defaultCoachSocketFactory, type AmbientProbe } from "./api/coachSocket";
@@ -29,10 +33,6 @@ import { afterBootSettled } from "./util/bootSettled";
 import { etaLabel, etaMs, newEta, recordBatch } from "./util/embedEta";
 import type { DocWorkProgress } from "./components/DocIndexChip";
 import { fetchDocHubHint, type DocHubHint } from "./util/hubHint";
-import { askBookConflict } from "./util/bookConflictUi";
-import { conflictUiSession } from "./util/conflictUiSession";
-import type { BookSyncOptions } from "./util/bookSync";
-import type { HubSyncWalkHost, HubWalkReport } from "./components/HubSyncControl";
 import { HubConflictSplit } from "./components/HubConflictSplit";
 import { PageTurn } from "./canvas/pageTurn/PageTurn";
 import { loadPageFit, loadReadingMode, loadTextSpread, pageFitShare, READING_MODE_EVENT, saveTextSpread, type ReadingMode } from "./util/readingModePref";
@@ -62,18 +62,14 @@ import { ExploreHeaderMenu } from "./components/ExploreHeaderMenu";
 import { useHeaderModes } from "./util/headerModesPref";
 import { collectExploreGraph } from "./util/exploreGraphExport";
 import { HubSyncControl, padTabSync, tabOffersHubSync } from "./components/HubSyncControl";
-import { BOOK_PASS_STATUS_EVENT, type BookPassResult } from "./util/bookSyncPass";
-import { bookNoticeMessage } from "./util/bookSyncMessages";
+import { LibrarySyncControl } from "./components/LibrarySyncControl";
+import { getCachedBookMeta } from "./util/localBookStore";
 import { LoadingDoodle } from "./components/LoadingDoodle";
 import { waitForTopBannersIdle } from "./components/StatusBanner";
 import {
   AUTOSAVE_EVENT,
   loadAutosaveInterval,
 } from "./util/autosavePref";
-import {
-  HUB_SYNC_WINDOW_PILL_EVENT,
-  loadHubSyncWindowPill,
-} from "./util/hubSyncWindowPillPref";
 import { loadBoardComponent, peekBoardComponent, type BoardComponent } from "./canvas/boardChunk";
 import { inkOpsFrom } from "./canvas/inkCodec";
 import { inkRestoreSource } from "./canvas/inkRestore";
@@ -169,6 +165,7 @@ import { splitProblemKey } from "./util/datasetKey";
 import {
   addFootnote,
   footnoteRevision,
+  removeFootnote,
   stampFootnoteEdits,
   freshFootnoteId,
   freshNoteId,
@@ -176,7 +173,6 @@ import {
   googleSearchUrl,
   noteById,
   numberFootnotes,
-  removeFootnote,
   searchQueryFor,
   threadTitleFrom,
   type DocFootnote,
@@ -202,14 +198,11 @@ import {
   flushFootnoteQueue,
   freshFootnoteRequestId,
   pageNumberFor,
-  registerOpenAnnotateFootnotes,
 } from "./util/footnoteRequests";
 import { forgetFootnoteRequest } from "./util/footnoteOutbox";
 import {
-  completeAnnotateSave,
   footnotesPendingSave,
   partitionHeldAsks,
-  settleOpenFootnoteWrite,
   type HeldFootnoteAsk,
   type SelectionFootnoteOptions,
 } from "./util/footnoteSaveBaseline";
@@ -253,25 +246,15 @@ import {
 } from "./util/noteLinks";
 import { WorkspaceLinkPicker, groupLabel, type LinkTarget } from "./modes/WorkspaceLinkPicker";
 import { resolveWikiLinks } from "./util/wikiLinks";
-import {
-  PAGE_GAP,
-  PDF_DOC_PAD_TOP,
-  PdfDocument,
-  layoutPdfPages,
-  pdfStackFrames,
-  type PdfNav,
-  type PdfThumbRenderer,
-} from "./modes/PdfDocument";
-import { pdfInkRestoreSpread, pdfLayoutIsSpread } from "./modes/pdfInkSpread";
-import { remapPdfFootnotes } from "./modes/pdfFootnoteLayout";
+import { PdfDocument } from "./modes/PdfDocument";
+import { pdfInkRestoreSpread } from "./modes/pdfInkSpread";
 import { PdfPageRail } from "./modes/PdfPageRail";
-import { loadReadingPage, saveReadingPage } from "./util/readingPosition";
-import { savePdfFilmPref, loadPdfSpreadPref, savePdfSpreadPref, clearPdfFilmScope, peekPdfPageSizes, publishPdfFilmCurrent, peekPdfFilmCurrent, subscribePdfFilmCurrent, peekPdfReadingFrames, pdfSpreadSlotCountChanged, resetPdfFilmPredicted, publishPdfLayoutBusy, subscribePdfLayoutBusy } from "./modes/pdfFilm";
+import { publishPdfFilmCurrent, peekPdfFilmCurrent, peekPdfReadingFrames } from "./modes/pdfFilm";
 import { AnnotateDialog, type AnnotateDialogKind } from "./modes/AnnotateDialog";
 import { DocumentExportDialog } from "./modes/DocumentExportDialog";
 import { SidecarChooser, type SidecarChoice } from "./modes/SidecarChooser";
 import { AnnotateDocument } from "./modes/AnnotateDocument";
-import { AnnotateMarkdownEditor, isFreshOwnedNote, type AnnotateMarkdownEditorHandle } from "./modes/AnnotateMarkdownEditor";
+import { AnnotateMarkdownEditor, isFreshOwnedNote } from "./modes/AnnotateMarkdownEditor";
 import { LiveWebPane } from "./modes/LiveWebPane";
 import { FreezeKindDialog } from "./modes/FreezeKindDialog";
 import {
@@ -359,28 +342,22 @@ import {
 import {
   deletePadEverywhere,
   scheduleIdlePadSyncPing,
-  PAD_HUB_WINDOW_EVENT,
   applyHubAnnotate,
   applyHubWhiteboard,
   pushProblemPad,
   restoreTrashedPad,
   sweepPadTrash,
-  type PadHubWindowDetail,
 } from "./util/padSync";
-import { annotatePadBody, whiteboardPadBody } from "./util/padSync";
 import { renameLibraryPad } from "./util/libraryPadRename";
-import { loadPadHub, loadPadSyncSince } from "./util/padHub";
+import { loadPadHub } from "./util/padHub";
 import { resolveProblemLeave } from "./util/problemLeave";
-import { isPadHubOffline } from "./util/padHubStatus";
-import { pullMissingHubFiles, waitForPadPushes } from "./util/padSync";
-import { hubReloadAppState, hubReloadDocumentElements } from "./util/boardHubReload";
+import { pullMissingHubFiles } from "./util/padSync";
 import { loadChatBotAnswerMode } from "./util/chatBotClient";
 import { assistantPendingMessage, useAssistantRunnerStatus } from "./util/useAssistantRunnerStatus";
 import {
   applyConflictFootnoteBoards,
   deleteFootnoteWhiteboard,
   emitFootnoteWhiteboardSaved,
-  FNWB_SAVED_EVENT,
   getFootnoteWhiteboard,
   putFootnoteWhiteboard,
   createFootnoteWhiteboard,
@@ -392,7 +369,7 @@ import type {
   HubConflictResolution,
   HubPadConflict,
 } from "./util/hubConflictStash";
-import { HubSyncCancelled, inkChoiceOf } from "./util/hubConflictStash";
+import { inkChoiceOf } from "./util/hubConflictStash";
 import { loadDeviceId, otherDeviceLabel } from "./util/devicePrefs";
 import { getParkedDocSource, parkDocSource } from "./util/parkedDocSource";
 import { MAX_SOURCE_CHARS } from "./util/tabPersist";
@@ -524,6 +501,9 @@ const WHITEBOARD_PROBLEM: ProblemDetail = {
   entry_point: null,
   cases: [],
 };
+
+/** The Agent chip as the last header on screen left it (see `agentChipMotion`). */
+let lastAgentChipShown = false;
 
 function isWhiteboard(problem: ProblemDetail | null | undefined): boolean {
   return (
@@ -851,23 +831,19 @@ export const Workspace = memo(function Workspace({
    */
   const whiteboardPristineHashRef = useRef<number | null>(null);
 
-  /** The document being annotated: its text, its name, and its content hash. */
-  const [annotateSource, setAnnotateSource] = useState<{
-    name: string;
-    /** Markdown/code text, or captured HTML for web; empty for PDF and EPUB. */
-    text: string;
-    hash: string;
-    docType: DocType;
-    /**
-     * The file's bytes for PDF and EPUB, held for as long as the pad is open.
-     *
-     * A copy is in IndexedDB under {@link hash} for the next session; this one
-     * is what the renderer parses now. Reading it back out of the store just to
-     * hand it to a component in the same tick would be a round trip for
-     * nothing.
-     */
-    bytes?: ArrayBuffer | null;
-  } | null>(null);
+  const boardRef = useRef<BoardHandle | null>(null);
+  const {
+    annotateSource, setAnnotateSource, annotateSourceRef,
+    annotateDocId, setAnnotateDocId, annotateDocIdRef,
+    annotateOwned, setAnnotateOwned, annotateOwnedRef,
+    editMarkdown, setEditMarkdown, editBuffer, setEditBuffer, editBufferRef, mdEditorRef,
+    annotateHeight, setAnnotateHeight, annotateHeightRef, onMdInkMeasure,
+    annotatePageWidth, setAnnotatePageWidth, annotatePageWidthRef,
+    annotateBaselineRef, annotatePristineHashRef, annotatePristineMarksRef, annotatePristineAgentRef,
+    heldFootnoteAsksRef, deliverHeldFootnoteAsksRef,
+    createAnnotateUntouched, createSaveAnnotateSession,
+    trackFootnoteBoardSaves, registerAnnotateFootnotes, mirrorAnnotateDocId, mirrorAnnotateTitle,
+  } = useAnnotateSession({ tab, boardRef, patchTab, setError });
   /** Address bar for a web snapshot — kept outside the camera-scaled page. */
   const webUrlRef = useRef("");
   const paneTabRef = useRef(tab);
@@ -881,25 +857,6 @@ export const Workspace = memo(function Workspace({
   webHtmlSourceRef.current = webHtmlSource;
   /** Why the rendered capture was skipped, when it was. */
   const [webHtmlNote, setWebHtmlNote] = useState<string | null>(null);
-  /** Library entry this session is writing to, once it has one. */
-  const [annotateDocId, setAnnotateDocId] = useState<string | null>(null);
-  /** This set is an owned note — its `source` is the document, not a copy. */
-  const [annotateOwned, setAnnotateOwned] = useState(false);
-  const annotateOwnedRef = useRef(false);
-  annotateOwnedRef.current = annotateOwned;
-  /**
-   * Editing the note's markdown rather than drawing on it.
-   *
-   * Owned markdown only. Mutually exclusive with the pen: Monaco and the ink
-   * layer both want the pointer, and a caret that sometimes draws is worse
-   * than either mode on its own.
-   */
-  const [editMarkdown, setEditMarkdown] = useState(false);
-  /** The live buffer while Edit is open — `content.source` until it is saved. */
-  const [editBuffer, setEditBuffer] = useState("");
-  const editBufferRef = useRef("");
-  editBufferRef.current = editBuffer;
-  const mdEditorRef = useRef<AnnotateMarkdownEditorHandle | null>(null);
   /*
    * The open is parked on a question: which of this file's annotation sets?
    *
@@ -917,6 +874,7 @@ export const Workspace = memo(function Workspace({
    *
    * State as well as a ref: the ribbons are rendered from it, and the autosave
    * tick — which runs outside React — writes it to the library entry.
+   * Practice statements use these marks too, so their state stays here.
    */
   const [annotateFootnotes, setAnnotateFootnotesRaw] = useState<DocFootnote[]>([]);
   const assistantRunnerStatus = useAssistantRunnerStatus(client,
@@ -1285,256 +1243,22 @@ export const Workspace = memo(function Workspace({
    * ref would not re-render it. Bumped from the same place the tab's unsaved
    * dot is set, so it means exactly what that dot means.
    */
-  /** How far the Sync walk has got, for the chip beside the document name. */
-  const [walkReport, setWalkReport] = useState<HubWalkReport | null>(null);
-  const sharedWalkRef = useRef(walkReport);
-  sharedWalkRef.current = walkReport;
-  useEffect(() => {
-    if (!active) return;
-    let disposed=false;
-    const onPass = async (event: Event) => {
-      const detail = (event as CustomEvent<{ passive: boolean; result: BookPassResult; summary: string | null }>).detail;
-      if (!detail?.passive || detail.result.cancelled || !detail.result.books.length && !detail.result.notices.length) return;
-      const current = sharedWalkRef.current;
-      if (current && !current.error && current.stage !== "idle" && current.stage !== "synced") return;
-      const message=detail.result.notices.map(bookNoticeMessage).join(" ")||null;
-      let owner:{kind:string;id:string}|null=null;
-      try{owner=await hubSyncHostRef.current?.book?.()??null;}catch{/* Displaying a notice must not hide a storage failure. */}
-      if(disposed)return;
-      const latest=sharedWalkRef.current;
-      if(latest&&!latest.error&&latest.stage!=="idle"&&latest.stage!=="synced")return;
-      if(detail.summary)setWalkReport({stage:"pad",progress:null,error:detail.summary});
-      else if(owner&&detail.result.books.some(book=>book.kind===owner.kind&&book.id===owner.id&&["synced","unchanged"].includes(book.status)))setWalkReport({stage:"synced",progress:null,message});
-      else if(message)setWalkReport(previous=>({...previous,stage:previous?.stage??"idle",progress:null,message}));
-    };
-    window.addEventListener(BOOK_PASS_STATUS_EVENT, onPass);
-    return () => {disposed=true;window.removeEventListener(BOOK_PASS_STATUS_EVENT, onPass);};
-  }, [active]);
-
-  const [padEditSeq, setPadEditSeq] = useState(0);
-  const bumpPadEdit = useCallback(() => setPadEditSeq((n) => n + 1), []);
-  const hubSyncTapRef = useRef<(() => void) | null>(null);
-  const onHubSync = useCallback(() => {
-    hubSyncTapRef.current?.();
-  }, []);
-  const [hubSyncWindowPill, setHubSyncWindowPill] = useState(loadHubSyncWindowPill);
-  useEffect(() => {
-    const onPref = () => setHubSyncWindowPill(loadHubSyncWindowPill());
-    window.addEventListener(HUB_SYNC_WINDOW_PILL_EVENT, onPref);
-    return () => window.removeEventListener(HUB_SYNC_WINDOW_PILL_EVENT, onPref);
-  }, []);
-
-  const hubSyncHostRef = useRef<HubSyncWalkHost | null>(null);
-  const lifecycleSyncOptions: BookSyncOptions = {
-    manual: true, requestChoice: (conflict, lifecycle) => askBookConflict(conflict, lifecycle,
-      (shown, mounted) => hubSyncHostRef.current!.onConflict(shown, mounted)),
-  };
-  const syncWorkingRevisionRef = useRef<(() => string)>(() => "");
-  const syncPreparedRevisionRef = useRef<string | null>(null);
-  /**
-   * Live rehydrate after a walk (and after auto-sync apply).
-   *
-   * Held in a ref because the host object is created once, on first render,
-   * and must call whatever this is *now* — not the empty stub from mount.
-   */
-  const applyHubReloadRef = useRef<(detail: PadHubWindowDetail) => Promise<void>>(
-    async () => {},
-  );
-  if (!hubSyncHostRef.current) {
-    hubSyncHostRef.current = {
-      book: async () => {
-        if (footnoteBoardRef.current) return null;
-        if (whiteboardNotebookIdRef.current && await getWhiteboardNotebook(whiteboardNotebookIdRef.current)) return { kind: "whiteboard", id: whiteboardNotebookIdRef.current };
-        if (annotateDocIdRef.current && await getAnnotateDoc(annotateDocIdRef.current)) return { kind: "annotate", id: annotateDocIdRef.current };
-        const current = problemRef.current;
-        return current && !isLocalPad(current) ? { kind: "problem", id: problemPadId(current.dataset, current.task_id) } : null;
-      },
-      prepare: async () => {
-        const board = boardRef.current;
-        const notebookId = whiteboardNotebookIdRef.current;
-        const docId = annotateDocIdRef.current;
-        if (!board || footnoteBoardRef.current) return;
-        if (footnoteBoardSessionRef.current) throw new Error("Close the scratch board before syncing the document.");
-        if (!notebookId && !docId) {
-          const current = problemRef.current;
-          if (!current || isLocalPad(current)) return;
-          const id = problemPadId(current.dataset, current.task_id), previous = await getProblemBoard(id);
-          if (!previous) return;
-          const revision = syncWorkingRevisionRef.current();
-          await putProblemBoard({ ...previous, board: board.saveBoard(), agent: persistableAgentMessages(agentMessagesRef.current), updatedAt: Date.now() });
-          if (revision !== syncWorkingRevisionRef.current()) throw new Error("The page changed while preparing sync. Your edits are kept; sync again.");
-          syncPreparedRevisionRef.current = revision; return;
-        }
-        const id = notebookId ?? docId;
-        if (!id) return;
-        const kind = notebookId ? "whiteboard" : "annotate";
-        if (!isPadHubOffline()) await waitForPadPushes(kind, id);
-        // A rerender refreshes the handle without replacing the mounted board.
-        if (boardRef.current?.instanceId !== board.instanceId || (notebookId ? whiteboardNotebookIdRef.current : annotateDocIdRef.current) !== id) {
-          throw new Error("The open pad changed. Sync the current pad again.");
-        }
-        await flushDirtyInk(board, notebookId ? whiteboardDocKey(id) : annotateDocKey(id), 0, true);
-        const revision = syncWorkingRevisionRef.current();
-        const live = board.saveBoard({ assembleInk: false });
-        const agent = persistableAgentMessages(agentMessagesRef.current);
-        if (notebookId) {
-          const previous = await getWhiteboardNotebook(id);
-          if (!previous) return;
-          await saveWhiteboardNotebook({
-            id, board: live, agent,
-            pageCount: Math.max(previous.pageCount, countWhiteboardPages(live.elements)),
-          });
-        } else {
-          const source = annotateSourceRef.current;
-          if (!source) return;
-          await saveAnnotateDoc({
-            id, name: source.name, hash: source.hash, source: source.text,
-            docType: source.docType, board: live, agent,
-            footnotes: annotateFootnotesRef.current,
-          });
-        }
-        // This is the working copy. Explicit Save alone owns the baseline.
-        if (revision !== syncWorkingRevisionRef.current()) {
-          throw new Error("The page changed while preparing sync. Your edits are kept; sync again.");
-        }
-        syncPreparedRevisionRef.current = revision;
-      },
-      doc: () => {
-        const job = indexInputsRef.current;
-        if (!job) return null;
-        return {
-          hash: job.hash,
-          name: job.name,
-          docType: job.docType,
-          text: job.text,
-          bytes: job.bytes,
-        };
-      },
-      /*
-       * The open pad, read live from IDB so the walk pushes what is on the
-       * device right now — not what was there when the pill mounted. Null on
-       * boards that are not a hub pad (home, problem sets for now).
-       */
-      pad: async () => {
-        if (footnoteBoardRef.current) return null;
-        // Refs, not the first-render `problem`: this host object is created
-        // once, and a whiteboard opened later would otherwise look like
-        // "no pad" for the rest of the tab's life.
-        const notebookId = whiteboardNotebookIdRef.current;
-        if (notebookId) {
-          const notebook = await getWhiteboardNotebook(notebookId);
-          if (!notebook) return null;
-          return {
-            kind: "whiteboard" as const,
-            id: notebook.id,
-            hubAckUpdatedAt: () => notebook.hubAckUpdatedAt ?? 0,
-            buildBody: () => whiteboardPadBody(notebook),
-            markHubAck: (updatedAt: number) =>
-              markWhiteboardHubAck(notebook.id, updatedAt),
-          };
-        }
-        const docId = annotateDocIdRef.current;
-        if (!docId) return null;
-        const doc = await getAnnotateDoc(docId);
-        if (!doc) return null;
-        return {
-          kind: "annotate" as const,
-          id: doc.id,
-          hubAckUpdatedAt: () => doc.hubAckUpdatedAt ?? 0,
-          buildBody: () => annotatePadBody(doc),
-          markHubAck: (updatedAt: number) => markAnnotateHubAck(doc.id, updatedAt),
-        };
-      },
-      emitReload: () => {
-        if (syncPreparedRevisionRef.current !== null &&
-            syncPreparedRevisionRef.current !== syncWorkingRevisionRef.current()) {
-          throw new Error("The page changed during sync. Your edits are kept; sync again to send them.");
-        }
-        const notebookId = whiteboardNotebookIdRef.current;
-        if (notebookId) {
-          return applyHubReloadRef.current({
-            kind: "whiteboard",
-            id: notebookId,
-            op: "reload",
-          });
-        }
-        const docId = annotateDocIdRef.current;
-        if (!docId) {
-          const current = problemRef.current;
-          if (current && !isLocalPad(current)) return loadProblem(current.task_id, { dataset: current.dataset }, { tabId: tab.id, userLoad: false }).then(() => {});
-          return;
-        }
-        return applyHubReloadRef.current({
-          kind: "annotate",
-          id: docId,
-          op: "reload",
-        });
-      },
-      inkSince: () => loadPadSyncSince(),
-      /*
-       * A conflict stopped the walk. Park the split over this workspace and
-       * hold the walk until the reader has chosen and the choice is written
-       * into IDB — the pill resumes from there and owns any hub traffic.
-       */
-      onConflict: (conflict, lifecycle) =>
-        new Promise<HubConflictResolution>((resolve, reject) => {
-          if (lifecycle?.signal.aborted) { reject(new Error("Sync stopped.")); return; }
-          const ui = conflictUiSession(lifecycle);
-          setHubConflictError(null);
-          const clear = () => {
-            if (hubConflictAskRef.current !== ask) return;
-            hubConflictAskRef.current = null;
-            setHubConflictAsk(null);
-            setHubConflictError(null);
-          };
-          const finish = (resolution?: HubConflictResolution) => {
-            ui.complete();
-            lifecycle?.signal.removeEventListener("abort", onAbort);
-            clear();
-            if (resolution) resolve(resolution);
-            else reject(new HubSyncCancelled());
-          };
-          const onAbort = () => { ui.complete(); clear(); reject(new Error("Sync stopped. Tap Sync to retry.")); };
-          const ask = { conflict, resolve: (value: HubConflictResolution) => finish(value), cancel: () => finish(),
-            onMounted: ui.onMounted, onUnavailable: ui.onUnavailable };
-          lifecycle?.signal.addEventListener("abort", onAbort, { once: true });
-          hubConflictAskRef.current = ask;
-          setHubConflictAsk(ask);
-        }),
-      onIndexProgress: (progress) => setDocIndexProgress(progress),
-      onWalkProgress: (report) => setWalkReport(report),
-      // The hub has an index for this document now, whether the walk built it
-      // or found it already there. Nothing used to say so, so the chip kept
-      // reading "not indexed" about a document that was.
-      onIndexDone: () => {
-        setDocIndexStatus("indexed");
-        setDocIndexError(null);
-        /*
-         * And the numbers, not only the word.
-         *
-         * The chip's popover reads pages, chunks and embed state off `meta`.
-         * Saying "indexed" without refreshing it left the card describing
-         * whatever was there before the walk — usually nothing at all, for a
-         * document the walk had just indexed.
-         */
-        const hash = indexInputsRef.current?.hash;
-        if (!hash) return;
-        void client
-          .getDocIndex(hash)
-          .then((meta) => setDocIndexMeta(meta))
-          .catch(() => {});
-      },
-      onIndexError: (message) => {
-        if (message) {
-          setDocIndexStatus("error");
-          setDocIndexError(message);
-        } else {
-          setDocIndexStatus("idle");
-          setDocIndexError(null);
-        }
-      },
-    };
-  }
+  const {
+    walkReport, padEditSeq, bumpPadEdit, hubSyncTapRef, onHubSync, hubSyncWindowPill,
+    hubSyncHostRef, lifecycleSyncOptions, syncWorkingRevisionRef, syncPreparedRevisionRef,
+    applyHubReloadRef, trackBookPass, trackHubSyncWindowPill, createHubSyncHost,
+    bindSyncWorkingRevision, bindHubReload, listenPadHubWindow,
+  } = useHubSync({
+    client, tab, boardRef, whiteboardNotebookIdRef, annotateDocIdRef,
+    annotateSourceRef, annotateFootnotesRef, footnoteBoardRef, footnoteBoardSessionRef,
+    hubConflictAskRef, setHubConflictAsk, setHubConflictError,
+    setDocIndexStatus, setDocIndexError, setDocIndexMeta, isLocalPad, flushDirtyInk,
+  });
+  useEffect(() => trackBookPass(active), [active]);
+  useEffect(trackHubSyncWindowPill, []);
+  createHubSyncHost(() => ({
+    problemRef, agentMessagesRef, indexInputsRef, loadProblem, setDocIndexProgress,
+  }));
   const [chunkSyncIssue, setChunkSyncIssue] = useState<string | null>(null);
   /*
    * Two jobs, two units, two bars.
@@ -1719,206 +1443,18 @@ export const Workspace = memo(function Workspace({
       }
     })();
   }, [client]);
-  // Read from the autosave interval, which must not be torn down and rebuilt
-  // every time one of these changes — a restarted timer is a skipped save.
-  const annotateSourceRef = useRef<{
-    name: string;
-    text: string;
-    hash: string;
-    docType: DocType;
-  } | null>(null);
-  const annotateDocIdRef = useRef<string | null>(null);
-  /**
-   * Measured document height, in scene units, driving the page frame.
-   *
-   * A page that ended before the text did would clip ink off the bottom of a
-   * long document, so the frame is grown to the markdown rather than the other
-   * way round.
-   */
-  const [annotateHeight, setAnnotateHeight] = useState<number | null>(null);
-  /**
-   * Open-gate copy of the measure. Must not be assigned from `annotateHeight`
-   * each render — that stomps `onMdInkMeasure`'s same-tick write, so
-   * `waitForAnnotateLaidOut` never sees three stable readings and text files
-   * reveal at the 1100 floor with the pan clamp pinned.
-   */
-  const annotateHeightRef = useRef<number | null>(null);
-  /** pdf.js failure during open — abort the layout gate instead of "smaller file". */
-  const annotatePdfErrorRef = useRef<string | null>(null);
-  const [pdfNav, setPdfNav] = useState<PdfNav | null>(null);
-  const pdfNavRef = useRef<PdfNav | null>(null);
-  pdfNavRef.current = pdfNav;
-  const [pdfSessionPage, setPdfSessionPage] = useState(0);
-  const pdfThumbRef = useRef<PdfThumbRenderer | null>(null);
-  const [pdfThumbReady, setPdfThumbReady] = useState(false);
-  const onPdfThumbRenderer = useCallback((render: PdfThumbRenderer | null) => {
-    pdfThumbRef.current = render;
-    setPdfThumbReady(Boolean(render));
-  }, []);
-  const renderPdfThumb = useCallback((page: number) => {
-    return pdfThumbRef.current?.(page) ?? Promise.resolve(null);
-  }, [pdfThumbReady]);
-  const togglePdfFilm = useCallback(() => {
-    setPdfFilmOpen((on) => {
-      const next = !on;
-      savePdfFilmPref(next);
-      return next;
-    });
-  }, []);
-  const [pdfSpreadByHash, setPdfSpreadByHash] = useState<Record<string, boolean>>(
-    {},
-  );
-  const [pdfLayoutBusy, setPdfLayoutBusy] = useState(false);
-  useEffect(() => subscribePdfLayoutBusy(tab.id, setPdfLayoutBusy), [tab.id]);
-  /*
-   * Where this tab was in its PDF is this tab's, and dies with it.
-   *
-   * Not on park: a parked workspace stays mounted precisely so that coming
-   * back is showing the page again rather than finding it. Closing the tab is
-   * the only thing that makes the place meaningless — and leaving it behind
-   * would grow the nav map by one record, with its listener sets and layout
-   * timers, for every document ever opened.
-   */
-  useEffect(() => () => clearPdfFilmScope(tab.id), [tab.id]);
-  const spreadToggleAtRef = useRef(0);
-  const spreadLayoutRunRef = useRef(0);
-  const annotatePdfHash =
-    annotateSource?.docType === "pdf" ? annotateSource.hash : null;
-  const pdfSpread = annotatePdfHash
-    ? (pdfSpreadByHash[annotatePdfHash] ?? loadPdfSpreadPref(annotatePdfHash))
-    : false;
-  const togglePdfSpread = useCallback(() => {
-    const hash = annotateSourceRef.current?.hash;
-    if (!hash || boardRef.current?.isPdfInkLayoutPending()) return;
-    const now = performance.now();
-    if (now - spreadToggleAtRef.current < 180) return;
-    spreadToggleAtRef.current = now;
-    setPdfLayoutBusy(true);
-    publishPdfLayoutBusy(tab.id, true);
-    const focused = document.activeElement;
-    if (focused instanceof HTMLElement) focused.blur();
-    const page = peekPdfFilmCurrent(tab.id);
-    const fromFrames = peekPdfReadingFrames(tab.id);
-    if (!fromFrames.length) { publishPdfLayoutBusy(tab.id, false); return; }
-    // Keep page filing and flushing in the ink's source layout until the
-    // remap installs coordinates and target frames together.
-    boardRef.current?.setInkSpread(pdfLayoutIsSpread(fromFrames));
-    const run = ++spreadLayoutRunRef.current;
-    const loadGen = workspaceLoadGenRef.current;
-    setPdfSpreadByHash((prev) => {
-      const on = prev[hash] ?? loadPdfSpreadPref(hash);
-      const next = !on;
-      savePdfSpreadPref(hash, next);
-      return { ...prev, [hash]: next };
-    });
-    setPdfFilmOpen(false);
-    requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        const started = performance.now();
-        const fromCount = fromFrames.length;
-        let remapped = false;
-        const tick = () => {
-          if (run !== spreadLayoutRunRef.current || loadGen !== workspaceLoadGenRef.current) return;
-          const toFrames = peekPdfReadingFrames(tab.id);
-          const nowCount = toFrames.length;
-          const layoutReady =
-            nowCount > 0 && (fromCount < 1 || (pdfSpreadSlotCountChanged(fromCount, nowCount) &&
-              pdfLayoutIsSpread(toFrames) !== pdfLayoutIsSpread(fromFrames) &&
-              nowCount >= (pdfLayoutIsSpread(fromFrames) ? fromCount / 2 : fromCount * 2)));
-          if (layoutReady && !remapped) {
-            remapped = boardRef.current?.remapPdfInkAcrossPdfLayout(fromFrames) === true;
-            if (!remapped) {
-              if (performance.now() - started > 8000) {
-                reconcilePdfInkLayout(pdfLayoutIsSpread(fromFrames), loadGen);
-                publishPdfLayoutBusy(tab.id, false);
-              } else requestAnimationFrame(tick);
-              return;
-            }
-            const marks = remapPdfFootnotes(annotateFootnotesRef.current, fromFrames, toFrames, annotatePageWidthRef.current);
-            annotateFootnotesRef.current = marks;
-            setAnnotateFootnotesRaw(marks);
-            if (page >= 1) boardRef.current?.aimPdfPage(page, { hold: false });
-          }
-          const ok =
-            layoutReady && remapped &&
-            (!(page >= 1) || boardRef.current?.scrollToPdfPage(page, { hold: false }) === true);
-          if (ok || performance.now() - started > 8000) {
-            if (!remapped) reconcilePdfInkLayout(pdfLayoutIsSpread(fromFrames), loadGen);
-            if (!ok) boardRef.current?.scrollToPdfPage(page, { hold: false });
-            publishPdfLayoutBusy(tab.id, false);
-            return;
-          }
-          requestAnimationFrame(tick);
-        };
-        tick();
-      });
-    });
-  }, []);
-  /*
-   * Ink written on the other layout, moved onto this one.
-   *
-   * The spread setting is per device, and a stroke's scene point depends on
-   * it — so a copy synced from a tablet reading split sheets carries its ink
-   * in split coordinates, and on a PC showing whole sheets it drew pages away
-   * from where it was written. The copy stamps its layout (`pdfSpread`); once
-   * every page's size is known here, a mismatched copy is remapped the same way
-   * the spread toggle remaps.
-   */
-  const reconcilePdfInkLayout = (stamp: boolean, loadGen: number, marksStamp = stamp) => {
-    const started = performance.now();
-    const tick = () => {
-      if (workspaceLoadGenRef.current !== loadGen) return;
-      const board = boardRef.current;
-      const frames = peekPdfReadingFrames(tab.id);
-      const sizes = peekPdfPageSizes(tab.id);
-      const total = pdfNavRef.current?.count ?? 0;
-      if (!board || frames.length === 0 || total === 0 || sizes.length < total) {
-        if (performance.now() - started < 30_000) window.setTimeout(tick, 250);
-        return;
-      }
-      if (pdfLayoutIsSpread(frames) !== stamp) {
-        const from = pdfStackFrames(
-          layoutPdfPages(sizes, annotatePageWidthRef.current, stamp),
-          stamp,
-          PAGE_GAP,
-          PDF_DOC_PAD_TOP,
-        );
-        if (!board.remapPdfInkAcrossPdfLayout(from)) {
-          if (performance.now() - started < 30_000) window.setTimeout(tick, 250);
-          return;
-        }
-      }
-      if (pdfLayoutIsSpread(frames) !== marksStamp) {
-        const from = pdfStackFrames(layoutPdfPages(sizes, annotatePageWidthRef.current, marksStamp), marksStamp, PAGE_GAP, PDF_DOC_PAD_TOP);
-        const marks = remapPdfFootnotes(annotateFootnotesRef.current, from, frames, annotatePageWidthRef.current);
-        annotateFootnotesRef.current = marks;
-        setAnnotateFootnotesRaw(marks);
-      }
-      board.setInkSpread(null);
-    };
-    tick();
-  };
+  const workspaceLoadGenRef = useRef(0);
+  const {
+    annotatePdfErrorRef, pdfNav, setPdfNav, pdfNavRef, pdfSessionPage,
+    onPdfThumbRenderer, renderPdfThumb, togglePdfFilm, pdfSpread,
+    pdfLayoutBusy, togglePdfSpread, reconcilePdfInkLayout,
+    restorePdfSessionPage, trackPdfReadingPage, jumpPdfFilmPage,
+  } = usePdfSession({
+    tab, annotateSource, annotateSourceRef, annotateDocIdRef, boardRef,
+    workspaceLoadGenRef, annotateFootnotesRef, setAnnotateFootnotesRaw,
+    annotatePageWidthRef, setPdfFilmOpen,
+  });
 
-  /** Scene width of the open markdown page — viewport-sized on fresh opens. */
-  const [annotatePageWidth, setAnnotatePageWidth] = useState(ANNOTATE_PAGE_W);
-  /** The width marks were placed at — recorded in an exported sidecar. */
-  const annotatePageWidthRef = useRef(ANNOTATE_PAGE_W);
-  annotatePageWidthRef.current = annotatePageWidth;
-  const onMdInkMeasure = useCallback((height: number) => {
-    // Only the suspicious reading is logged. A zero from a reader that has a
-    // column is an empty note; a zero from one that has not laid out is how a
-    // page gets stuck at `MD_INK_MIN_PAGE_H`, and the two are told apart in the
-    // reader (see `MIN_MEASURABLE_WIDTH_PX`). If one still arrives here, it is
-    // worth a line — it decides the height of the page and the ink clip on it.
-    if (!(height > 0)) traceOpen("md-ink measured zero", { height });
-    // Write the ref in this tick. The copy from React state only lands on the
-    // next render, and `waitForAnnotateLaidOut` polls the ref — so a first
-    // real height that sat only in state was invisible to the open gate.
-    annotateHeightRef.current = height;
-    setAnnotateHeight((prev) =>
-      prev !== null && Math.abs(prev - height) < 1 ? prev : height,
-    );
-  }, []);
   /** Problem statement HTML measure — same paper path as md-ink. */
   const [statementHeight, setStatementHeight] = useState<number | null>(null);
   const onStatementMeasure = useCallback((height: number) => {
@@ -1926,26 +1462,6 @@ export const Workspace = memo(function Workspace({
       prev !== null && Math.abs(prev - height) < 1 ? prev : height,
     );
   }, []);
-  /** Same discard contract as the scratchpad — see `whiteboardBaselineRef`. */
-  const annotateBaselineRef = useRef<{ id: string | null; entry: AnnotateDoc | null }>({
-    id: null,
-    entry: null,
-  });
-  const annotatePristineHashRef = useRef<number | null>(null);
-  /** Footnote revision at open / last explicit save — not merely "any footnotes". */
-  const annotatePristineMarksRef = useRef("");
-  /** Asks whose pending mark has not yet been stored, so they must not be posted. */
-  const heldFootnoteAsksRef = useRef<HeldFootnoteAsk[]>([]);
-  const deliverHeldFootnoteAsksRef = useRef<
-    (
-      saved: { id: string; footnotes?: readonly DocFootnote[] | null },
-      asks: readonly HeldFootnoteAsk[],
-    ) => Promise<void>
-  >(async () => {});
-  /** Persistable coach thread at open / last explicit save. */
-  const annotatePristineAgentRef = useRef("");
-  annotateSourceRef.current = annotateSource;
-  annotateDocIdRef.current = annotateDocId;
 
 
   /**
@@ -2050,29 +1566,13 @@ export const Workspace = memo(function Workspace({
     };
   }, [whiteboardNotebookId]);
 
-  useEffect(() => {
-    const onSaved = (event: Event) => {
-      const detail = (event as CustomEvent<{ docId: string; wbId: string }>).detail;
-      if (!detail || detail.docId !== annotateDocIdRef.current) return;
-      setAnnotateFootnotes((current) =>
-        current.map((entry) => ({
-          ...entry,
-          whiteboards: (entry.whiteboards ?? []).map((row) =>
-            row.id === detail.wbId ? { ...row, updatedAt: Date.now() } : row,
-          ),
-        })),
-      );
-    };
-    window.addEventListener(FNWB_SAVED_EVENT, onSaved);
-    return () => window.removeEventListener(FNWB_SAVED_EVENT, onSaved);
-  }, []);
+  useEffect(() => trackFootnoteBoardSaves(setAnnotateFootnotes), []);
 
   /** In-process daemon is assumed up; this flag still gates pad sync / tests. */
 
   /** Something the student should know, but which did not stop the request. */
   /** Boot overlay still waiting for LLM probe → checkmark before dismiss. */
 
-  const boardRef = useRef<BoardHandle | null>(null);
   /** Scroll or a page at a time — Settings › UI › Reading. */
   const [readingMode, setReadingMode] = useState<ReadingMode>(loadReadingMode);
   const [pageFit, setPageFit] = useState(loadPageFit);
@@ -2149,6 +1649,30 @@ export const Workspace = memo(function Workspace({
   /** Home chooser vs today's problem browser when no board is open. */
   const [practiceOpen, setPracticeOpen] = useState(false);
   const [problem, setProblem] = useState<ProblemDetail | null>(null);
+  /*
+   * The Agent chip's fold or unfold when this tab's header comes on screen.
+   *
+   * Every tab draws its own header buttons and only the active tab's are on
+   * screen, so a tab switch replaces the chip instead of changing it, and a
+   * CSS transition has nothing to animate from. When the previous header
+   * showed the chip differently, the new one plays a one-shot keyframe
+   * animation from the old look to its own (`is-folding` / `is-unfolding`).
+   */
+  const [agentChipMotion, setAgentChipMotion] = useState<"fold" | "unfold" | null>(null);
+  useLayoutEffect(() => {
+    if (!active) return;
+    const want = Boolean(problem);
+    const motion = lastAgentChipShown === want ? null : want ? "unfold" : "fold";
+    lastAgentChipShown = want;
+    setAgentChipMotion(motion);
+    if (!motion) return;
+    // The longest step (the label, or the slot closing) ends by 460ms.
+    const timer = window.setTimeout(() => setAgentChipMotion(null), 480);
+    return () => window.clearTimeout(timer);
+    // `problem` changing inside the same tab uses the ordinary transitions.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active]);
+  useEffect(() => { if (active) lastAgentChipShown = Boolean(problem); }, [active, problem]);
   const problemRef = useRef<ProblemDetail | null>(null);
   useEffect(() => {
     const id = problem && !isLocalPad(problem) ? problemPadId(problem.dataset, problem.task_id) : null;
@@ -2197,7 +1721,6 @@ export const Workspace = memo(function Workspace({
    */
   const padOpenLockRef = useRef(0);
   const browsePickQuietUntilRef = useRef(0);
-  const workspaceLoadGenRef = useRef(0);
   /**
    * The `beginWorkspaceLoad` gen that currently owns the overlay.
    *
@@ -2436,18 +1959,7 @@ export const Workspace = memo(function Workspace({
    */
   const agentMessagesRef = useRef<AgentChatMessage[]>([]);
   agentMessagesRef.current = agentMessages;
-  syncWorkingRevisionRef.current = () => {
-    const board = boardRef.current;
-    if (!board) return "";
-    return JSON.stringify([
-      whiteboardNotebookIdRef.current, annotateDocIdRef.current,
-      padContentFingerprint(board.getElements(), boardInkMix(board)),
-      footnoteRevision(annotateFootnotesRef.current),
-      persistableAgentMessages(agentMessagesRef.current),
-      annotateSourceRef.current?.text,
-      board.saveBoard({ assembleInk: false }).appState.linedPaperMode,
-    ]);
-  };
+  bindSyncWorkingRevision(agentMessagesRef);
   /** FIFO coach sends waiting while a turn is in flight. */
   const coachSignalRef = useRef<AbortSignal | null>(null);
   const coachRequestRef = useRef<CoachSendQueueItem | null>(null);
@@ -2496,6 +2008,12 @@ export const Workspace = memo(function Workspace({
   const suppressCoachPanelOpenRef = useRef(false);
   /** How a red test run is handed to the coach. Default wait (card only). */
   const testForwardRef = useRef(testForward);
+  // Another device deleted the book this tab shows and sync moved it to trash here.
+  useCloseOnDeletedElsewhere(() => {
+    if (tab.kind === "whiteboard" && whiteboardNotebookIdRef.current) return { kind: "whiteboard", id: whiteboardNotebookIdRef.current };
+    if (annotateDocIdRef.current) return { kind: "annotate", id: annotateDocIdRef.current };
+    return null;
+  }, () => closeTab(tab.id));
   testForwardRef.current = testForward;
   useEffect(() => {
     const onChange = (event: Event) => {
@@ -4060,6 +3578,7 @@ export const Workspace = memo(function Workspace({
     async (input: {
       name: string;
       docType?: DocType;
+      localFileHash?: string;
       /** Markdown, code, or captured web HTML. */
       text?: string;
       /** PDF and EPUB only. */
@@ -4171,7 +3690,7 @@ export const Workspace = memo(function Workspace({
           ? input.hash
           : bytes && docType !== "web"
             ? await hashBytesAsync(bytes)
-            : docIdentityHash({ docType, name: input.name, text, bytes });
+            : docIdentityHash({ docType, name: input.name, text, bytes, localFileHash: input.localFileHash });
         traceOpen("hashed", { hash, bytes: bytes ? bytes.byteLength : null, ms: openMs() });
 
         /*
@@ -4270,21 +3789,12 @@ export const Workspace = memo(function Workspace({
         lastSavedHashRef.current = null;
         lastEditSeqHashRef.current = null;
         lastEditSeqMarksRef.current = "";
-        const savedPdfPage = Math.floor(
-          Number((existing?.board.appState as { pdfPage?: number } | undefined)?.pdfPage),
-        );
-        // Where it was last read, if that was after its last save: a session
-        // saved since keeps the page it was saved at.
-        const readPage = docType === "pdf" ? loadReadingPage(sessionDocId, existing?.updatedAt ?? 0) : 0;
-        const sessionPage =
-          readPage >= 1 ? readPage : Number.isFinite(savedPdfPage) && savedPdfPage >= 1 ? savedPdfPage : 0;
-        setPdfSessionPage(sessionPage);
-        if (sessionPage >= 1) {
-          publishPdfFilmCurrent(tab.id, sessionPage);
-          boardRef.current?.aimPdfPage(sessionPage);
-        }
-        setAnnotateSource({ name: input.name, text, hash, docType, bytes });
-        if (docType === "web") {
+        const sessionPage = restorePdfSessionPage(docType, sessionDocId, existing);
+        const localFileHash = input.localFileHash ?? existing?.localFileHash;
+        // Restores keep the original-file identity, never the varying frozen DOM.
+        if (localFileHash) hash = localFileHash;
+        setAnnotateSource({ name: input.name, text, hash, docType, bytes, localFileHash });
+        if (docType === "web" && !localFileHash) {
           setWebUrl(input.name);
           /*
            * Which capture the pad is showing, and what it is.
@@ -4338,6 +3848,11 @@ export const Workspace = memo(function Workspace({
           // A file pad is never a live webview. This used to run for every
           // annotate open and fired extra keepY fits on md/pdf/epub.
           setWebLive(false);
+          if (localFileHash) {
+            setWebHtmlSource("capture");
+            webHtmlSourceRef.current = "capture";
+            setWebHtmlNote(null);
+          }
         }
         /*
          * Give this document a tab, or claim the one it arrived on.
@@ -4881,163 +4396,15 @@ export const Workspace = memo(function Workspace({
     ],
   );
 
-  /*
-   * Put the walk's result on the board that is already open.
-   *
-   * A full loadAnnotate remounts the PDF (and used to do it without the bytes,
-   * so the paper went blank). This keeps the document, the camera, and the
-   * search-index chip, and only replaces ink, marks, and board elements from
-   * the row the walk just wrote. Auto-sync still fires the window event;
-   * the pill calls this directly so Pull can await it.
-   */
-  applyHubReloadRef.current = async (detail) => {
-    if (detail.op !== "reload") return;
-    const board = boardRef.current;
-    if (!board) return;
-    const beforeReload = syncWorkingRevisionRef.current();
-    if (detail.kind === "whiteboard") {
-      if (whiteboardNotebookIdRef.current !== detail.id) return;
-      const notebook = await getWhiteboardNotebook(detail.id);
-      if (!notebook) return;
-      if (boardRef.current?.instanceId !== board.instanceId || whiteboardNotebookIdRef.current !== detail.id) return;
-      if (beforeReload !== syncWorkingRevisionRef.current()) throw new Error("The page changed during reload. Sync again.");
-      padHubApplyRef.current = true;
-      boardSaveSuspendedRef.current = true;
-      try {
-        const live = board.saveBoard({ assembleInk: false });
-        const pages = Math.min(
-          WHITEBOARD_PAGE_LIMIT,
-          Math.max(1, notebook.pageCount, countWhiteboardPages(notebook.board.elements)),
-        );
-        board.restoreBoard(notebook.board.elements, hubReloadAppState(live.appState, notebook.board.appState), {
-          skeletons: buildWhiteboardTemplate(pages, isDarkTheme(themeId)),
-          files: notebook.board.files,
-          inkPalettes: notebook.board.inkPalettes,
-          skipFit: true,
-        });
-        setWhiteboardPageCount(pages);
-        await restoreInk(board, whiteboardDocKey(notebook.id), notebook.board);
-        /*
-         * Open width-fits after ink so the lined page is the ink's screen box.
-         * Reload used to keep the camera from under the conflict overlay, which
-         * cropped the title off the left and locked X, so a flick could not
-         * reach it. Leave annotate: Ink Lab on the pad ate the scroll gesture.
-         */
-        await board.settleFitView();
-        board.armReadingScroll();
-        agentMessagesRef.current = restoreAgentMessages(notebook.agent);
-        setAgentMessages(agentMessagesRef.current);
-        const inkMix = boardInkMix(board);
-        lastEditSeqHashRef.current = sceneFingerprint(board.getElements(), inkMix);
-        lastEditSeqMarksRef.current = "";
-      } finally {
-        padHubApplyRef.current = false;
-        boardSaveSuspendedRef.current = false;
-      }
-      requestAnimationFrame(() => {
-        const live = boardRef.current;
-        if (!live) return;
-        live.nudgeViewportFit();
-        lastEditSeqHashRef.current = sceneFingerprint(
-          live.getElements(),
-          boardInkMix(live),
-        );
-      });
-      return;
-    }
-    if (detail.kind !== "annotate") return;
-    if (annotateDocIdRef.current !== detail.id) return;
-    const doc = await getAnnotateDoc(detail.id);
-    if (!doc) return;
-    if (boardRef.current?.instanceId !== board.instanceId || annotateDocIdRef.current !== detail.id) return;
-    if (beforeReload !== syncWorkingRevisionRef.current()) throw new Error("The page changed during reload. Sync again.");
-    padHubApplyRef.current = true;
-    boardSaveSuspendedRef.current = true;
-    try {
-      const live = board.saveBoard({ assembleInk: false });
-      const pageWidth = annotateFrameWidthFromElements(doc.board.elements as {
-        width?: number;
-        customData?: { lcMdInkFrame?: boolean } | null;
-      }[]);
-      if (pageWidth != null && pageWidth !== annotatePageWidthRef.current) {
-        annotatePageWidthRef.current = pageWidth;
-        setAnnotatePageWidth(pageWidth);
-        annotateHeightRef.current = null;
-        setAnnotateHeight(null);
-      }
-      board.restoreBoard(hubReloadDocumentElements(doc.board.elements, live.elements),
-        hubReloadAppState(live.appState, doc.board.appState), {
-        skipFit: true,
-        files: doc.board.files,
-        inkPalettes: doc.board.inkPalettes,
-      });
-      await restoreInk(board, annotateDocKey(doc.id), doc.board);
-      board.syncDocumentScrollBounds();
-      agentMessagesRef.current = restoreAgentMessages(doc.agent ?? []);
-      setAgentMessages(agentMessagesRef.current);
-      setAnnotateFootnotesRaw(doc.footnotes ?? []);
-      annotateFootnotesRef.current = doc.footnotes ?? [];
-      const source = annotateSourceRef.current;
-      if (source && !isBinaryDocType(doc.docType) && doc.source !== source.text) {
-        setAnnotateSource({ ...source, text: doc.source });
-      }
-      board.armReadingScroll();
-      const inkMix = boardInkMix(board);
-      lastEditSeqHashRef.current = sceneFingerprint(board.getElements(), inkMix);
-      lastEditSeqMarksRef.current = footnoteRevision(annotateFootnotesRef.current);
-    } finally {
-      padHubApplyRef.current = false;
-      boardSaveSuspendedRef.current = false;
-    }
-  };
-
-  useEffect(() => {
-    const onHub = (event: Event) => {
-      const detail = (event as CustomEvent<PadHubWindowDetail>).detail;
-      if (!detail) return;
-      if (detail.op === "close") {
-        if (detail.kind === "whiteboard" && whiteboardNotebookIdRef.current === detail.id) {
-          closeTab(tab.id);
-        }
-        if (detail.kind === "annotate" && annotateDocIdRef.current === detail.id) {
-          closeTab(tab.id);
-        }
-        if (detail.kind === "problem") {
-          const current = problemRef.current;
-          if (current && !isLocalPad(current) && problemPadId(current.dataset, current.task_id) === detail.id) {
-            closeTab(tab.id);
-          }
-        }
-        return;
-      }
-      if (detail.kind === "problem") {
-        const current = problemRef.current;
-        if (!current || isLocalPad(current)) return;
-        if (problemPadId(current.dataset, current.task_id) !== detail.id) return;
-        const board = boardRef.current;
-        if (dirtyRef.current || (board && lastEditSeqHashRef.current !==
-            sceneFingerprint(board.getElements(), boardInkMix(board)))) return;
-        padHubApplyRef.current = true;
-        void loadProblem(current.task_id, { dataset: current.dataset }, {
-          tabId: tab.id,
-          userLoad: false,
-        }).finally(() => {
-          padHubApplyRef.current = false;
-        });
-        return;
-      }
-      // Background delivery must not replace an unsaved live page. Explicit
-      // Sync prepares the working copy and awaits the guarded reload itself.
-      const board = boardRef.current;
-      if (dirtyRef.current || (board && lastEditSeqHashRef.current !==
-          sceneFingerprint(board.getElements(), boardInkMix(board)))) return;
-      void applyHubReloadRef.current(detail).catch(() => {
-        setNotice("The page changed during sync. Tap Sync to try again.");
-      });
-    };
-    window.addEventListener(PAD_HUB_WINDOW_EVENT, onHub);
-    return () => window.removeEventListener(PAD_HUB_WINDOW_EVENT, onHub);
-  }, [closeTab, loadProblem, setNotice, tab.id]);
+  bindHubReload({
+    themeId, padHubApplyRef, boardSaveSuspendedRef, setWhiteboardPageCount,
+    agentMessagesRef, setAgentMessages, lastEditSeqHashRef, lastEditSeqMarksRef,
+    annotatePageWidthRef, setAnnotatePageWidth, annotateHeightRef, setAnnotateHeight,
+    setAnnotateFootnotesRaw, setAnnotateSource, restoreInk,
+  });
+  useEffect(() => listenPadHubWindow({
+    closeTab, setNotice, problemRef, dirtyRef, lastEditSeqHashRef, padHubApplyRef, loadProblem,
+  }), [closeTab, loadProblem, setNotice, tab.id]);
 
   /**
    * Write the annotation set out as a file the writer can keep.
@@ -5264,6 +4631,7 @@ export const Workspace = memo(function Workspace({
     async (input: {
       name: string;
       docType?: DocType;
+      localFileHash?: string;
       text?: string;
       bytes?: ArrayBuffer;
       docId?: string | null;
@@ -5276,6 +4644,8 @@ export const Workspace = memo(function Workspace({
         return;
       }
       const docType = input.docType ?? "markdown";
+      const meta = input.docId ? getAnnotateDocMeta(input.docId) : null;
+      const localFileHash = input.localFileHash ?? meta?.localFileHash;
       /*
        * Library / file opens are annotate tabs, even when the sidecar is a
        * captured page. A web *tab* is only the globe / address bar path —
@@ -5294,6 +4664,7 @@ export const Workspace = memo(function Workspace({
               name: input.name,
               text: input.text,
               bytes: input.bytes,
+              localFileHash,
             });
 
       /*
@@ -5331,6 +4702,15 @@ export const Workspace = memo(function Workspace({
        * genuinely in the library can be read back from it.
        */
       const newSet = !sidecarId || !getAnnotateDocMeta(sidecarId);
+      if (docType === "web" && localFileHash && newSet) {
+        // Keep the marker and frozen body together before another pane mounts.
+        // A local file has no address from which an unmarked tab can refetch it.
+        await saveAnnotateDoc({
+          id: sidecarId ?? undefined, name: input.name, hash, docType, localFileHash,
+          source: input.text ?? "",
+          board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } },
+        });
+      }
 
       const proposed: TabRecord = {
         id: newTabId("annotate"),
@@ -5770,6 +5150,7 @@ export const Workspace = memo(function Workspace({
       await openAnnotate({
         name: picked.name,
         docType: picked.docType,
+        localFileHash: picked.localFileHash,
         text: picked.text,
         bytes: picked.bytes,
       });
@@ -5824,7 +5205,7 @@ export const Workspace = memo(function Workspace({
     try {
       setShellLoadActive(true);
       setWorkspaceLoadActive(true);
-      await openAnnotate({ name: picked.name, docType: picked.docType, text: picked.text, bytes: picked.bytes });
+      await openAnnotate({ ...picked });
     } catch (cause) {
       setError(messageOf(cause));
       setShellLoadActive(false);
@@ -5939,6 +5320,8 @@ export const Workspace = memo(function Workspace({
               role: "assistant",
               content: frame.nudge,
               at: Date.now(),
+              attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [],
+              pending: false, queued: false, bridgePending: false,
             },
           ]);
           openCoachPanel();
@@ -6002,6 +5385,8 @@ export const Workspace = memo(function Workspace({
         content: "",
         at: Date.now(),
         pending: true,
+        queued: false, bridgePending: false,
+        attachments: [], artifacts: [], artifactProposals: [], flags: [],
         requestState: "running",
         ...(requestId ? { requestId, ...(sessionId ? { sessionId } : {}) } : {}),
         processEvents: [],
@@ -6078,6 +5463,12 @@ export const Workspace = memo(function Workspace({
               }
             : {}),
           ...part,
+          attachments: part.attachments ?? (offset === 0 ? placeholder.attachments : undefined) ?? [],
+          artifacts: part.artifacts ?? (offset === 0 ? placeholder.artifacts : undefined) ?? [],
+          artifactProposals: part.artifactProposals ?? (offset === 0 ? placeholder.artifactProposals : undefined) ?? [],
+          flags: part.flags ?? (offset === 0 ? placeholder.pendingAck?.flags ?? placeholder.flags : undefined) ?? [],
+          processEvents: part.processEvents ?? (offset === 0 ? placeholder.processEvents : undefined) ?? [],
+          queued: part.queued ?? false, bridgePending: part.bridgePending ?? false,
         }));
         const next = [...current.slice(0, index), ...built, ...current.slice(index + 1)];
         return built.some((message) => message.drawing?.expanded)
@@ -6172,6 +5563,9 @@ export const Workspace = memo(function Workspace({
             content,
             at: Date.now(),
             ...extra,
+            attachments: extra?.attachments ?? [], artifacts: [], artifactProposals: [],
+            flags: extra?.flags ?? [], processEvents: [],
+            pending: false, queued: extra?.queued ?? false, bridgePending: extra?.bridgePending ?? false,
           },
         ];
         if (extra?.drawing?.expanded) {
@@ -6626,6 +6020,7 @@ export const Workspace = memo(function Workspace({
               {
                 id: freshNoteId(next.flatMap((entry) => entry.notes ?? [])),
                 text: note,
+                images: [],
                 by: "ai" as const,
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
@@ -6635,11 +6030,12 @@ export const Workspace = memo(function Workspace({
         next = addFootnote(next, {
           id: freshFootnoteId(next),
           kind: "ai",
+          whiteboards: [], artifacts: [], subMarks: [], threads: [], bands: [],
           anchor,
           excerpt: excerpt || note.slice(0, 80),
           createdAt: Date.now(),
-          ...(notes ? { notes } : {}),
-          ...(links.length > 0 ? { userLinks: links } : {}),
+          notes: notes ?? [],
+          userLinks: links,
           ...footnoteThemeSeed(next),
         });
       }
@@ -6806,7 +6202,9 @@ export const Workspace = memo(function Workspace({
                 : "The model returned an empty reply."),
             ...(result.reasoning?.trim() ? { reasoning: result.reasoning.trim() } : {}),
             ...(firstDrawing ? { drawing: withNewDrawing(firstDrawing, drawingPage) } : {}),
-            artifactProposals: sanitizeArtifactProposals(result.artifacts),
+            artifactProposals: (sanitizeArtifactProposals(result.artifacts) ?? []).map(proposal => ({
+              ...proposal, programs: proposal.programs ?? [], messages: proposal.messages ?? [],
+            })),
             artifactFootnoteIds,
           },
           ...moreDrawings.map((drawable, index) => ({
@@ -7183,13 +6581,14 @@ export const Workspace = memo(function Workspace({
           addFootnote(current, {
             id: freshFootnoteId(current),
             kind: "coach",
+            notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [],
             anchor: quoted.anchor,
             excerpt: quoted.excerpt,
             createdAt: now,
             threadRootId: rootId,
             threads: [thread],
             ...footnoteThemeSeed(current),
-            ...(quoted.hitRects.length > 0 ? { bands: quoted.hitRects } : {}),
+            bands: quoted.hitRects,
             ...(quoted.text.trim() ? { blockText: quoted.text } : {}),
           }),
         );
@@ -7232,7 +6631,7 @@ export const Workspace = memo(function Workspace({
 
         setAgentMessages((current) =>
           current.map((message) =>
-            message.id === userMessageId ? { ...message, queued: undefined } : message,
+            message.id === userMessageId ? { ...message, queued: false } : message,
           ),
         );
 
@@ -7540,7 +6939,7 @@ export const Workspace = memo(function Workspace({
       }
       if (![...drop].some((dropped) => current.some((message) => message.id === dropped && !message.deletedAt))) return current;
       return current.map((message) => drop.has(message.id) && !message.deletedAt
-        ? { ...message, deletedAt: now, pending: false, queued: undefined }
+        ? { ...message, deletedAt: now, pending: false, queued: false }
         : message);
     });
   };
@@ -8122,42 +7521,7 @@ export const Workspace = memo(function Workspace({
     setWhiteboardNotebookId(null);
   }, [whiteboardNotebookId]);
 
-  /** Nothing drawn on this document since it opened. */
-  /**
-   * Nothing about this session is worth keeping.
-   *
-   * An untouched *board* is not an untouched *document*: a reading session can
-   * quote a passage to the coach or drop a search footnote without ever putting
-   * the pen down, and those are exactly as worth keeping as ink. Counting only
-   * the board here is what made leaving throw a footnote-only session away
-   * without so much as offering to save it — the leave dialog never appeared,
-   * because from the board's point of view nothing had happened.
-   */
-  const annotateUntouched = useCallback(() => {
-    const board = boardRef.current;
-    const pristine = annotatePristineHashRef.current;
-    if (!board || pristine === null) return false;
-    /*
-     * An edited buffer is a change even when nothing was drawn.
-     *
-     * The board fingerprint cannot see Monaco, so a note whose text was
-     * rewritten but never inked would read as "only read" and be discarded on
-     * the way out without so much as a prompt.
-     */
-    if (annotateOwnedRef.current && editBufferRef.current !== (annotateSourceRef.current?.text ?? "")) {
-      return false;
-    }
-    if (footnotesPendingSave(annotateFootnotesRef.current, annotatePristineMarksRef.current)) {
-      return false;
-    }
-    if (
-      JSON.stringify(persistableAgentMessages(agentMessagesRef.current)) !==
-      annotatePristineAgentRef.current
-    ) {
-      return false;
-    }
-    return padContentFingerprint(board.getElements(), boardInkMix(board)) === pristine;
-  }, []);
+  const annotateUntouched = useCallback(createAnnotateUntouched({ agentMessagesRef, annotateFootnotesRef }), []);
 
   /**
    * Throw away this session's annotations — and only those.
@@ -8256,105 +7620,14 @@ export const Workspace = memo(function Workspace({
     }
   }, [restoreDocumentBoard]);
 
-  /** Commit the annotations to the library. Returns the entry, or null on failure. */
-  const saveAnnotateSession = useCallback(async (opts?: { label?: string; throwOnError?: boolean }): Promise<AnnotateDoc | null> => {
-    const board = boardRef.current;
-    let source = annotateSource;
-    if (!board || !source) return null;
-    if (footnoteBoardSessionRef.current) {
-      await closeFootnoteBoardSession(false, opts?.throwOnError);
-    }
-    // Commit the buffer first: the write below sends `source.text`, which is
-    // still the pre-edit copy until `saveEditBuffer` has moved it.
-    if (annotateOwnedRef.current && editBufferRef.current !== source.text) {
-      const editedText = editBufferRef.current;
-      if (await saveEditBuffer()) {
-        // React state updates do not replace this callback's captured source.
-        source = { ...source, text: editedText, hash: hashMarkdown(editedText) };
-      } else if (opts?.throwOnError) {
-        throw new Error("Could not save the edited document. Your changes are still open.");
-      }
-    }
-    await flushDirtyInk(board, annotateDocId ? annotateDocKey(annotateDocId) : null, 0, opts?.throwOnError);
-    const blob = board.saveBoard({ assembleInk: false });
-    if (!blob) return null;
-    try {
-      const namedLabel = opts?.label?.trim();
-      const saved = await saveAnnotateDoc({
-        id: annotateDocId ?? undefined,
-        name: source.name,
-        hash: source.hash,
-        source: source.text,
-        docType: source.docType,
-        ...(namedLabel ? { label: namedLabel, metadataIntent: "rename" as const } : {}),
-        board: blob,
-        footnotes: annotateFootnotesRef.current,
-        agent: persistableAgentMessages(agentMessagesRef.current),
-      });
-      annotateDocIdRef.current = saved.id;
-      setAnnotateDocId(saved.id);
-      const tabTitle = saved.label?.trim()
-        ? saved.label.trim()
-        : tab.kind === "web"
-          ? undefined
-          : (() => {
-              const siblings = listAnnotateDocsByHash(saved.hash);
-              return siblings.length > 1 ? annotateDocLabel(saved) : saved.name;
-            })();
-      patchTab(tab.id, {
-        docId: saved.id,
-        ...(tabTitle ? { title: tabTitle } : {}),
-      });
-      annotateBaselineRef.current = { id: saved.id, entry: saved };
-      annotatePristineHashRef.current = padContentFingerprint(
-        board.getElements(),
-        boardInkMix(board),
-      );
-      const delivered = completeAnnotateSave({
-        saved,
-        live: annotateFootnotesRef.current,
-        pristine: annotatePristineMarksRef,
-        held: heldFootnoteAsksRef.current,
-      });
-      heldFootnoteAsksRef.current = delivered.keep;
-      await deliverHeldFootnoteAsksRef.current(saved, delivered.send);
-      annotatePristineAgentRef.current = JSON.stringify(persistableAgentMessages(agentMessages));
-      await recordPadSnapshotsWithExtras({
-            kind: "annotate",
-            key: saved.id,
-            name: saved.name,
-            board: blob,
-            footnotes: saved.footnotes,
-            agent: saved.agent,
-      });
-      return saved;
-    } catch (cause) {
-      if (opts?.throwOnError) throw cause;
-      if (cause instanceof AnnotateLibraryFullError) {
-        setError(cause.message);
-        return null;
-      }
-      setError(messageOf(cause));
-      return null;
-    }
-  }, [annotateDocId, annotateFootnotes, annotateSource, agentMessages, client, patchTab, saveEditBuffer, closeFootnoteBoardSession, tab.id, tab.kind]);
+  const saveAnnotateSession = useCallback(createSaveAnnotateSession({
+    agentMessages, agentMessagesRef, saveEditBuffer, closeFootnoteBoardSession,
+    footnoteBoardSessionRef, annotateFootnotesRef, flushDirtyInk,
+  }), [annotateDocId, annotateFootnotes, annotateSource, agentMessages, client, patchTab, saveEditBuffer, closeFootnoteBoardSession, tab.id, tab.kind]);
 
-  useLayoutEffect(() => {
-    return registerOpenAnnotateFootnotes({
-      docId: () => annotateDocIdRef.current,
-      write: (docId, mutate) => settleOpenFootnoteWrite({
-        docId,
-        openDocId: annotateDocIdRef.current,
-        live: annotateFootnotesRef,
-        pristine: annotatePristineMarksRef,
-        mutate,
-        publish: (next) => {
-          flushSync(() => setAnnotateFootnotes(next));
-        },
-        save: () => saveAnnotateSession(),
-      }),
-    });
-  }, [saveAnnotateSession, setAnnotateFootnotes]);
+  useLayoutEffect(() => registerAnnotateFootnotes(
+    saveAnnotateSession, annotateFootnotesRef, setAnnotateFootnotes,
+  ), [saveAnnotateSession, setAnnotateFootnotes]);
 
   /*
    * In-place session: stash the PDF overlay and load scratch on this tab.
@@ -8564,12 +7837,13 @@ export const Workspace = memo(function Workspace({
         addFootnote(current, {
           id,
           kind: "note",
+          notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
           anchor: selection.anchor,
           excerpt: selection.excerpt,
           createdAt: Date.now(),
           ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
           ...footnoteThemeSeed(current),
-          ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+          bands: selection.hitRects,
           ...(selection.text.trim() ? { blockText: selection.text } : {}),
         }),
       );
@@ -8658,13 +7932,14 @@ export const Workspace = memo(function Workspace({
         addFootnote(current, {
           id,
           kind: "search",
+          notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
           anchor: selection.anchor,
           excerpt: selection.excerpt,
           createdAt: Date.now(),
           query,
           url,
           ...footnoteThemeSeed(current),
-          ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+          bands: selection.hitRects,
           ...(selection.text.trim() ? { blockText: selection.text } : {}),
         }),
       );
@@ -8747,6 +8022,7 @@ export const Workspace = memo(function Workspace({
       const next = addFootnote(existing, {
         id: footnoteId,
         kind: "ai",
+        notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
         anchor,
         excerpt: excerpt.slice(0, 4000),
         createdAt: Date.now(),
@@ -8755,7 +8031,7 @@ export const Workspace = memo(function Workspace({
         ...(options ? { jobId: requestId } : {}),
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(existing),
-        ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+        bands: selection.hitRects,
         ...(selection.text.trim() ? { blockText: selection.text } : {}),
       });
       heldFootnoteAsksRef.current = [
@@ -8879,7 +8155,7 @@ export const Workspace = memo(function Workspace({
         assertArtifactParentActive(context.parent);
         agentMessagesRef.current = agentMessagesRef.current.map(turn => turn.id === message.id ? { ...turn,
           artifacts: [...(turn.artifacts ?? []), reference],
-          artifactProposals: index === undefined ? turn.artifactProposals : turn.artifactProposals?.filter((_, i) => i !== index),
+          artifactProposals: (index === undefined ? turn.artifactProposals : turn.artifactProposals?.filter((_, i) => i !== index)) ?? [],
         } : turn);
         setAgentMessages(agentMessagesRef.current);
         const marks = context.associations.flatMap(association => association.kind === "footnote" ? [association.footnoteId] : []);
@@ -8972,6 +8248,7 @@ export const Workspace = memo(function Workspace({
           minted = freshSubMarkId(existing);
           const next = {
             ...mark,
+            bands: mark.bands ?? [],
             id: minted,
             ...(theme ? { color: theme.color, palette: theme.palette } : {}),
           };
@@ -8995,12 +8272,13 @@ export const Workspace = memo(function Workspace({
       addFootnote(current, {
         id: freshFootnoteId(current),
         kind: "note",
+        notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
         anchor: selection.anchor,
         excerpt: selection.excerpt,
         createdAt: Date.now(),
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(current),
-        ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+        bands: selection.hitRects,
         ...(selection.text.trim() ? { blockText: selection.text } : {}),
       }),
     );
@@ -9594,6 +8872,7 @@ export const Workspace = memo(function Workspace({
               name,
               docType,
               text,
+              localFileHash: entry?.localFileHash,
               docId: restoreDocId,
               existingDoc,
               tabId: tab.id,
@@ -9724,24 +9003,7 @@ export const Workspace = memo(function Workspace({
    * is only the discard of the text that has to wait for the receipt, which is
    * the same guard the title effect below already applies for the same reason.
    */
-  useEffect(() => {
-    const docId = annotateDocId;
-    if (!docId) {
-      patchTab(tab.id, { docId });
-      return;
-    }
-    let cancelled = false;
-    void getAnnotateDoc(docId).then((doc) => {
-      if (cancelled) return;
-      patchTab(tab.id, {
-        docId,
-        ...(doc?.source ? { source: null } : {}),
-      });
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [annotateDocId, patchTab, tab.id]);
+  useEffect(mirrorAnnotateDocId, [annotateDocId, patchTab, tab.id]);
 
   /*
    * Two sets on one file would otherwise be two chips reading `dp.pdf`.
@@ -9751,18 +9013,7 @@ export const Workspace = memo(function Workspace({
    * name. `annotateDocLabel` falls back to "{name} — {date}", which says which
    * session it was rather than merely that it was not the first.
    */
-  useEffect(() => {
-    if (!annotateDocId) return;
-    const meta = getAnnotateDocMeta(annotateDocId);
-    if (!meta) return;
-    if (meta.label?.trim()) {
-      patchTab(tab.id, { title: meta.label.trim() });
-      return;
-    }
-    if (tab.kind === "web") return;
-    const siblings = listAnnotateDocsByHash(meta.hash);
-    patchTab(tab.id, { title: siblings.length > 1 ? annotateDocLabel(meta) : meta.name });
-  }, [annotateDocId, patchTab, tab.id, tab.kind]);
+  useEffect(mirrorAnnotateTitle, [annotateDocId, patchTab, tab.id, tab.kind]);
 
   useEffect(() => {
     patchTab(tab.id, { indexed: docIndexStatus });
@@ -9794,7 +9045,7 @@ export const Workspace = memo(function Workspace({
    * object in the header banner, then the fetched copy shown without a word —
    * the copy that does not look like the page.
    */
-  const canBrowseLive = webPadLive && isTauriRuntime() && liveWebviewSupported();
+  const canBrowseLive = webPadLive && !annotateSource?.localFileHash && isTauriRuntime() && liveWebviewSupported();
   /**
    * A live page on screen in a pane that does not have focus.
    *
@@ -9815,17 +9066,7 @@ export const Workspace = memo(function Workspace({
   const pdfReading = annotateSource?.docType === "pdf" && !boardPreparing && switchMotion === "idle";
   useEffect(() => {
     if (!pdfReading) return;
-    let timer = 0;
-    const unsubscribe = subscribePdfFilmCurrent(tab.id, () => {
-      window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        saveReadingPage(annotateDocIdRef.current, peekPdfFilmCurrent(tab.id));
-      }, 700);
-    });
-    return () => {
-      window.clearTimeout(timer);
-      unsubscribe();
-    };
+    return trackPdfReadingPage();
   }, [pdfReading, tab.id]);
 
   const canvasLoading =
@@ -10353,7 +9594,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Web"
               ariaLabel="Web pad: tap for a new page, hold for recent pages"
-              className="lc-icon lc-hold-icon"
+              className="lc-icon lc-hold-icon lc-head-mode-browse"
               disabled={busy !== null || canvasLoading}
               fillIndeterminate={spawning === "web"}
               onTap={() => {
@@ -10391,7 +9632,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Document"
               ariaLabel="Document pad: tap to open a file, hold for recent documents"
-              className="lc-icon lc-hold-icon"
+              className="lc-icon lc-hold-icon lc-head-mode-annotate"
               disabled={busy !== null || canvasLoading}
               onTap={() => void pickAndOpenAnnotate()}
               onConfirm={() => {
@@ -10423,7 +9664,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Web"
               ariaLabel="Web documents: tap to save now, hold for save / open menu"
-              className="lc-icon lc-hold-icon is-active"
+              className="lc-icon lc-hold-icon lc-head-mode-browse is-active"
               pressed
               disabled={busy !== null || canvasLoading}
               onTap={() => {
@@ -10459,7 +9700,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Markdown"
               ariaLabel="Markdown documents: tap to save now, hold for save / open menu"
-              className="lc-icon lc-hold-icon is-active"
+              className="lc-icon lc-hold-icon lc-head-mode-annotate is-active"
               pressed
               disabled={busy !== null || canvasLoading}
               onTap={() => {
@@ -10498,7 +9739,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Whiteboard"
               ariaLabel="Whiteboard: tap for a new notebook, hold to open the library"
-              className="lc-icon lc-hold-icon"
+              className="lc-icon lc-hold-icon lc-head-mode-whiteboard"
               disabled={busy !== null || canvasLoading}
               onTap={() => void openWhiteboard({ fresh: true })}
               onConfirm={() => setWhiteboardEntryOpen(true)}
@@ -10533,7 +9774,7 @@ export const Workspace = memo(function Workspace({
             <HoldButton
               label="Whiteboard"
               ariaLabel="Whiteboard: tap to save now, hold for save / load menu"
-              className="lc-icon lc-hold-icon is-active"
+              className="lc-icon lc-hold-icon lc-head-mode-whiteboard is-active"
               pressed
               disabled={busy !== null || canvasLoading}
               onTap={() => void saveWhiteboardNow()}
@@ -10558,7 +9799,7 @@ export const Workspace = memo(function Workspace({
               </svg>
             </HoldButton>
           )}
-          {!hidePadMenu && headerModes.practice && FEATURE_LEETCODE && <button type="button" className="lc-icon"
+          {!hidePadMenu && headerModes.practice && FEATURE_LEETCODE && <button type="button" className="lc-icon lc-head-mode-practice"
             aria-label="Practice: open the problem library" disabled={busy !== null || canvasLoading} onClick={() => openPracticePicker?.()}>
             <svg className="lc-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
               <path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18" />
@@ -10605,7 +9846,9 @@ export const Workspace = memo(function Workspace({
               coachOpen && !hubConflictAsk
                 ? "lc-secondary lc-agent-toggle lc-agent-toggle-open lc-tip-target"
                 : "lc-secondary lc-agent-toggle lc-tip-target",
-              problem ? "" : "is-vacant",
+              // While folding it keeps its shown style; the fold animates to empty.
+              problem || agentChipMotion === "fold" ? "" : "is-vacant",
+              agentChipMotion === "fold" ? "is-folding" : agentChipMotion === "unfold" ? "is-unfolding" : "",
               llmLink === "online" && "lc-agent-toggle-llm-on",
               llmLink === "offline" && "lc-agent-toggle-llm-off",
             ]
@@ -10630,7 +9873,7 @@ export const Workspace = memo(function Workspace({
             onClick={() => chooseCoachOpen(!coachOpen)}
           >
             <span className="lc-agent-live-dot" aria-hidden />
-            Agent
+            <span className="lc-agent-toggle-label">Agent</span>
           </button>
       </>, headerSlots.right) : null}
       {active && headerSlots.chrome ? createPortal(<>
@@ -10640,7 +9883,7 @@ export const Workspace = memo(function Workspace({
         the `+` that asks for another page, which stays here beside the address
         it is about rather than becoming a bare `+` on a strip of mixed kinds.
       */}
-      {webPadLive && (
+      {webPadLive && !annotateSource?.localFileHash && (
         <form
           className="lc-web-omnibox"
           onSubmit={(event) => {
@@ -11018,7 +10261,7 @@ export const Workspace = memo(function Workspace({
               <span className="lc-live-web-focus-host">
                 {hostLabelFromUrl(annotateSource.name)}
               </span>
-              <span className="lc-live-web-focus-hint">Tap to use this pane</span>
+              <span className="lc-live-web-focus-hint">Tap to use.</span>
             </button>
           )}
           {canBrowseLive && webLive && annotateSource?.docType === "web" && (
@@ -11290,11 +10533,12 @@ export const Workspace = memo(function Workspace({
                     <WebDocument
                       html={annotateSource.text}
                       url={annotateSource.name}
+                      localFile={Boolean(annotateSource.localFileHash)}
                       source={webHtmlSource ?? undefined}
                       note={webHtmlNote ?? undefined}
                       onMeasure={onMdInkMeasure}
                       selectable={!annotateCode || Boolean(openFootnote) || highlighting}
-                      onNavigate={(href) => void openWebPage(href)}
+                      onNavigate={annotateSource.localFileHash ? undefined : (href) => void openWebPage(href)}
                     />
                   ) : (
                     <AnnotateDocument
@@ -11387,12 +10631,7 @@ export const Workspace = memo(function Workspace({
               aspects={pdfNav.aspects}
               fillThumbs={active}
               renderThumb={renderPdfThumb}
-              onJump={(page) => {
-                resetPdfFilmPredicted(tab.id);
-                boardRef.current?.aimPdfPage(page);
-                boardRef.current?.scrollToPdfPage(page);
-                setPdfFilmOpen(false);
-              }}
+              onJump={jumpPdfFilmPage}
             />
           )}
           {!problem &&
@@ -11475,6 +10714,11 @@ export const Workspace = memo(function Workspace({
                     covered={annotateEntryOpen || whiteboardEntryOpen}
                     tabsRef={tabsRef}
                     onOpenRecent={openRecentWorkspace}
+                    startAction={loadPadHub() ? <LibrarySyncControl client={client}
+                      canOpen={book => book.kind === "annotate" ? listAnnotateDocs().some(doc => doc.id === book.id)
+                        : book.kind === "whiteboard" ? listWhiteboardNotebooks().some(notebook => notebook.id === book.id)
+                        : !!getCachedBookMeta(book.kind, book.id) && getCachedBookMeta(book.kind, book.id)?.deletedAt === undefined}
+                      onOpen={book => openLinkedNode({ type: book.kind === "problem" ? "practice" : book.kind, id: book.id })} /> : null}
                     busy={busy !== null || boardPreparing || workspaceLoadActive}
                     onPractice={() => setPracticeOpen(true)}
                     onWhiteboard={() => setWhiteboardEntryOpen(true)}
@@ -11995,8 +11239,8 @@ export const Workspace = memo(function Workspace({
           defaultName={padDefaultName}
           onRestoreTrash={(id) => handleRestoreTrash("annotate", id)}
           onRename={(id, title) => handleLibraryRename("annotate", id, title)}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "annotate", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "annotate", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, docId, snapshotId) => {
             if (choice === "save") {
@@ -12057,6 +11301,7 @@ export const Workspace = memo(function Workspace({
               void openAnnotate({
                 name: source.name,
                 docType: source.docType,
+                localFileHash: source.localFileHash,
                 text: source.text,
                 bytes: source.bytes ?? undefined,
                 docId: freshAnnotateId(),
@@ -12128,8 +11373,8 @@ export const Workspace = memo(function Workspace({
           defaultName={padDefaultName}
           onRestoreTrash={(id) => handleRestoreTrash("whiteboard", id)}
           onRename={(id, title) => handleLibraryRename("whiteboard", id, title)}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "whiteboard", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, notebookId, snapshotId) => {
             if (choice === "save") {
@@ -12192,9 +11437,14 @@ export const Workspace = memo(function Workspace({
 
       {whiteboardLibOpen && (
         <WhiteboardLibraryDialog
-          onDelete={(id) =>
-            deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions)
-          }
+          onDelete={async (id) => {
+            const result = await deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions);
+            if (result.status === "stale") {
+              const message = "Changed on another device since your last sync. Sync first.";
+              setError(message);
+              throw new Error(message);
+            }
+          }}
           onFreed={() => {
             setWhiteboardLibOpen(false);
             const resume = whiteboardLibResumeRef.current;
@@ -12231,8 +11481,8 @@ export const Workspace = memo(function Workspace({
           error={leavingError}
           needsName={padNeedsName}
           defaultName={padDefaultName}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "whiteboard", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, notebookId) => {
             if (choice === "load" && notebookId) {
@@ -12263,8 +11513,8 @@ export const Workspace = memo(function Workspace({
           error={leavingError}
           needsName={padNeedsName}
           defaultName={padDefaultName}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "annotate", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "annotate", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, name) => void resolveLeave(choice === "save", name)}
           onCancel={() => {

@@ -39,7 +39,7 @@ import { LibraryPadlock } from "./LibraryPadlock";
 import { PadNameField } from "./PadNameField";
 import { LibraryMenuRow, LibrarySearch } from "./LibrarySearch";
 import { LibraryTimes } from "./LibraryTimes";
-import { TOMBSTONE_COPY } from "../util/padSync";
+import { TOMBSTONE_COPY, type DeletePadResult } from "../util/padSync";
 import {
   listPadSnapshots,
   PAD_SNAPSHOT_TIERS,
@@ -92,7 +92,7 @@ interface LeaveProps {
   defaultName?: string;
   onChoose: (choice: MdInkLeaveChoice, name?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | Promise<void>;
+  onDelete?: (id: string, options?: { force?: boolean }) => void | DeletePadResult | Promise<void | DeletePadResult>;
   /** Same as the entry dialog — web leave still offers the first-Save name step. */
   kind?: AnnotateDialogKind;
 }
@@ -116,7 +116,7 @@ interface EntryProps {
   defaultName?: string;
   onChoose: (choice: MdInkEntryChoice, docId?: string, snapshotId?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | Promise<void>;
+  onDelete?: (id: string, options?: { force?: boolean }) => void | DeletePadResult | Promise<void | DeletePadResult>;
   onRestoreTrash?: (id: string) => void | Promise<void>;
   onRename?: (id: string, title: string) => void | Promise<void>;
 }
@@ -162,6 +162,8 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const [snapshots, setSnapshots] = useState<PadSnapshotMeta[]>([]);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [removing, setRemoving] = useState(false);
+  /** A delete the hub refused because another device changed the book since the last sync. */
+  const [staleId, setStaleId] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
   const removingRef = useRef<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -295,19 +297,27 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     setPendingId(id);
   };
 
-  const confirmRemove = async (id: string) => {
+  const confirmRemove = async (id: string, force = false) => {
     if (removingRef.current) return;
     removingRef.current = id;
     setRemoving(true);
     setRemoveError(null);
     try {
-      if (props.onDelete) await props.onDelete(id);
+      if (props.onDelete) {
+        const result = force ? await props.onDelete(id, { force: true }) : await props.onDelete(id);
+        if (result?.status === "stale") {
+          setPendingId((pending) => pending === id ? null : pending);
+          setStaleId(id);
+          return;
+        }
+      }
       else await trashAnnotateDoc(id);
       if (listAnnotateDocs().some((row) => row.id === id)) {
         throw new Error("This document could not be removed. It may be locked.");
       }
       arm();
       setPendingId((pending) => pending === id ? null : pending);
+      setStaleId((stale) => stale === id ? null : stale);
     } catch (cause) {
       if (removingRef.current === id) {
         setRemoveError(cause instanceof Error ? cause.message : "Could not remove this document. Try again.");
@@ -608,9 +618,22 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           detail={TOMBSTONE_COPY}
           confirmLabel="Delete"
           pending={removing}
+          pendingLabel="Deleting…"
           error={removeError}
           onConfirm={() => void confirmRemove(pendingId)}
           onCancel={() => setPendingId(null)}
+        />
+      )}</DialogPresence>
+      <DialogPresence>{staleId && (
+        <ConfirmDialog
+          title="Changed on another device"
+          message="It changed since your last sync. Delete anyway?"
+          confirmLabel="Delete anyway"
+          pending={removing}
+          pendingLabel="Deleting…"
+          error={removeError}
+          onConfirm={() => void confirmRemove(staleId, true)}
+          onCancel={() => { setStaleId(null); setRemoveError(null); }}
         />
       )}</DialogPresence>
     </DialogBackdrop>

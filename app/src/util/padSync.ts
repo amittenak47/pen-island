@@ -7,13 +7,12 @@
 import { requireAtomicInkHub } from "./atomicInkHub";
 import type {
   AnnotatePadDto,
-  LcClient,
   PadSyncPingDto,
   PadSnapshotDto,
   ProblemPadDto,
   WhiteboardPadDto,
 } from "../api/client";
-import { LcApiError as ApiError } from "../api/client";
+import { LcApiError as ApiError, LcClient } from "../api/client";
 import { putPadRecord } from "./padRecordUpload";
 import { recordAuthoredExtras } from "./recordAuthoredExtras";
 import { resetPadWritersForTests, withPadWriter } from "./padWriter";
@@ -48,7 +47,7 @@ import {
   collectFootnoteBoards,
 } from "./footnoteWhiteboardStore";
 import { run, STORE_SYNC_STATE } from "./idb";
-import { getBookSyncState, type SyncState } from "./syncState";
+import { getBookSyncState, type BookIdentity, type SyncState } from "./syncState";
 import { mutateLocalBook } from "./localBookStore";
 import {
   HUB_MAX_BODY_BYTES,
@@ -295,6 +294,8 @@ export async function applyHubAnnotate(
     name: row.name,
     hash: row.hash,
     docType: (row.doc_type as DocType) || "markdown",
+    ...(typeof (row as unknown as Record<string, unknown>).local_file_hash === "string"
+      ? { localFileHash: (row as unknown as Record<string, unknown>).local_file_hash as string } : {}),
     updatedAt: row.updated_at,
     source: row.source ?? "",
     board: row.board as BoardBlob,
@@ -470,6 +471,7 @@ export async function annotatePadBody(doc: AnnotateDoc): Promise<AnnotatePadDto>
     ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
     hash: doc.hash,
     doc_type: doc.docType,
+    ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
     updated_at: doc.updatedAt,
     sync_seq: doc.syncSeq ?? 0,
     base_updated_at: doc.hubAckUpdatedAt ?? 0,
@@ -719,25 +721,105 @@ export async function pushDocBytes(client: LcClient, hash: string, bytes: ArrayB
   await client.putDocBytes(hash, bytes).catch(() => {});
 }
 
+export type DeletePadResult = { status: "deleted" } | { status: "queued" } | { status: "stale" };
+export type DeletePadOptions = import("./bookSync").BookSyncOptions & { force?: boolean };
+
+export type RestorePadResult = { status: "restored" | "queued" } | { status: "stale" };
+export type RestorePadOptions = import("./bookSync").BookSyncOptions & { client?: LcClient; force?: boolean };
+interface PadRestorePreparation {
+  status: "ready" | "queued" | "stale";
+  capture: import("./bookSnapshot").BookCapture;
+  client?: LcClient;
+  baseBookRev: number | null;
+  goneSeq: number | null;
+}
+
+/** A restore may replace a checked head only after that full head is immutable on the hub. */
+export async function preparePadRestore(owner: BookIdentity, options: RestorePadOptions = {}): Promise<PadRestorePreparation> {
+  const { captureBook } = await import("./bookSnapshot");
+  const capture = await captureBook(owner);
+  const prepared: PadRestorePreparation = { status: "queued", capture,
+    baseBookRev: capture.state.bootstrap ? null : capture.state.appliedBookRev,
+    goneSeq: capture.state.lifecycle?.goneSeq ?? null };
+  if (owner.kind === "problem" || isPadHubOffline() || !options.client && !loadPadHub()) return prepared;
+  const client = options.client ?? new LcClient();
+  const { boundedBookRequest, BookSyncError, hasUnseenHubContent, saveHubSnapshotCopy } = await import("./bookSync");
+  const { recordHash } = await import("./syncContent");
+  const signal = options.signal ?? new AbortController().signal;
+  let remote;
+  try { remote = await boundedBookRequest(() => client.getBookState(owner.kind, owner.id, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs); }
+  catch (cause) {
+    if (cause instanceof ApiError && cause.status === 0) return prepared;
+    throw cause;
+  }
+  if (remote.kind !== owner.kind || remote.id !== owner.id) throw new BookSyncError("invalid", "Wrong book identity returned by hub");
+  if (remote.record && await recordHash(remote.record) !== remote.record_hash) throw new BookSyncError("invalid", "The hub record doesn't match its advertised content hash");
+  if (remote.state === "live" && hasUnseenHubContent(capture, remote) && !options.force) return { ...prepared, status: "stale" };
+  if (remote.state === "live") await saveHubSnapshotCopy(client, capture, remote, options, signal);
+  const knownGone = remote.state === "gone" && (!capture.record
+    || (capture.metadata?.deletedAt !== undefined || capture.metadata?.purgedAt !== undefined) && capture.state.appliedBookRev === remote.book_rev);
+  return { ...prepared, status: "ready", client,
+    ...(remote.state === "live" || knownGone ? { baseBookRev: remote.book_rev, goneSeq: remote.gone_seq } : {}) };
+}
+
+/** The local commit is durable before this single-book publication is attempted. */
+export async function finishPadRestore(owner: BookIdentity, prepared: PadRestorePreparation, options: RestorePadOptions = {}): Promise<RestorePadResult> {
+  if (prepared.status !== "ready" || !prepared.client) return { status: "queued" };
+  const { syncBook } = await import("./bookSync");
+  const result = await syncBook(prepared.client, owner.kind, owner.id, undefined, options);
+  return { status: result.status === "synced" || result.status === "unchanged" ? "restored" : "queued" };
+}
+
 export async function deletePadEverywhere(
   client: LcClient,
   kind: PadKindSync,
   padId: string,
   _localDelete?: () => Promise<void>,
-  options?: import("./bookSync").BookSyncOptions,
-): Promise<void> {
+  options?: DeletePadOptions,
+): Promise<DeletePadResult> {
   if (kind === "problem") {
     await deleteProblemBoard(padId);
     const state = await getBookSyncState(kind, padId);
     if (state?.lifecycle) await sendDeletePad(client, kind, padId, state.lifecycle.seq, options);
-    return;
+    return { status: (await getBookSyncState(kind, padId))?.lifecycle ? "queued" : "deleted" };
   }
-  const seq =
-    kind === "whiteboard"
-      ? await trashWhiteboardNotebook(padId)
-      : await trashAnnotateDoc(padId);
-  if (seq == null) return;
+  let offline = isPadHubOffline(), baseBookRev: number | undefined;
+  if (!offline && client.getBookState) {
+    const [{ captureBook, wirePageKey, pageIdentity }, { boundedBookRequest, BookSyncError }, { recordHash }] = await Promise.all([
+      import("./bookSnapshot"), import("./bookSync"), import("./syncContent"),
+    ]);
+    const capture = await captureBook({ kind, id: padId });
+    let remote;
+    try {
+      remote = await boundedBookRequest(() => client.getBookState(kind, padId, { timeoutMs: options?.timeoutMs }),
+        options?.signal ?? new AbortController().signal, options?.timeoutMs);
+    } catch (cause) {
+      if (!(cause instanceof ApiError) || cause.status !== 0) throw cause;
+      offline = true;
+    }
+    if (remote) {
+      if (remote.kind !== kind || remote.id !== padId) throw new BookSyncError("invalid", "Wrong book identity returned by hub");
+      if (remote.record && await recordHash(remote.record) !== remote.record_hash) throw new BookSyncError("invalid", "The hub record doesn't match its advertised content hash");
+      if (remote.state === "live" && remote.book_rev > capture.state.appliedBookRev && !options?.force) {
+        const pages = new Map(remote.pages.map(page => [pageIdentity(page.key, page.page_id), page]));
+        let changed = remote.record_hash !== capture.state.baseRecordWireHash;
+        for (const row of capture.pages) {
+          if (!(row.syncedRev && row.syncedRev > 0)) continue;
+          const key = pageIdentity(wirePageKey(capture, row.docKey), row.pageId), page = pages.get(key);
+          if (!page || (row.baseWireHash ? page.hash !== row.baseWireHash : page.rev !== row.syncedRev)) changed = true;
+          pages.delete(key);
+        }
+        if (changed || pages.size) return { status: "stale" };
+      }
+      baseBookRev = remote.book_rev;
+    }
+  }
+  const trash = kind === "whiteboard" ? trashWhiteboardNotebook : trashAnnotateDoc;
+  const seq = baseBookRev === undefined ? await trash(padId) : await trash(padId, Date.now(), baseBookRev);
+  if (seq == null) return { status: "deleted" };
+  if (offline) return { status: "queued" };
   await sendDeletePad(client, kind, padId, seq, options);
+  return { status: (await getBookSyncState(kind, padId))?.lifecycle ? "queued" : "deleted" };
 }
 
 export type RestoreTrashedPadResult =
@@ -772,7 +854,8 @@ async function sendDeletePad(client: LcClient, kind: PadKindSync, padId: string,
       const { syncBookPass, isModernBookHub } = await import("./bookSyncPass");
       const { boundedBookRequest } = await import("./bookSync");
       const ping = await boundedBookRequest(() => client.pingPadSync(0, {}), new AbortController().signal);
-      if (isModernBookHub(ping)) { await syncBookPass(client, { ...options, ping, selected: { kind, id: padId } }); return; }
+      // Only this book: a delete must not wait on (or push) the rest of the library.
+      if (isModernBookHub(ping)) { await syncBookPass(client, { ...options, ping, selected: { kind, id: padId }, only: true }); return; }
     } catch { return; } // The current durable intent remains pending.
   }
   const captured = await getBookSyncState(kind, padId);
@@ -818,7 +901,7 @@ async function pushRestoreAllFour(
       const { boundedBookRequest } = await import("./bookSync");
       const ping = await boundedBookRequest(() => client.pingPadSync(0, {}), new AbortController().signal);
       if (isModernBookHub(ping)) {
-        const result = await syncBookPass(client, { ...options, ping, selected: { kind, id: padId } });
+        const result = await syncBookPass(client, { ...options, ping, selected: { kind, id: padId }, only: true });
         return result.books.some(book => book.kind === kind && book.id === padId && ["synced", "unchanged"].includes(book.status));
       }
     } catch { return false; }
@@ -851,6 +934,7 @@ async function pushRestoreAllFour(
       ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
       hash: doc.hash,
       doc_type: doc.docType,
+      ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
       updated_at: doc.updatedAt,
       sync_seq: seq,
       source: doc.source,
@@ -1073,6 +1157,8 @@ export async function pullPads(client: LcClient): Promise<void> {
       name: row.name,
       hash: row.hash,
       docType: (row.doc_type as DocType) || "markdown",
+      ...(typeof (row as unknown as Record<string, unknown>).local_file_hash === "string"
+        ? { localFileHash: (row as unknown as Record<string, unknown>).local_file_hash as string } : {}),
       updatedAt: row.updated_at,
       source: row.source ?? "",
       board: row.board as BoardBlob,

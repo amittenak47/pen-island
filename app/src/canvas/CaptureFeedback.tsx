@@ -145,7 +145,7 @@ export const CaptureFeedback = forwardRef<CaptureFeedbackHandle, Record<never, n
               <span className="lc-capture-countdown-number">{phase.remaining}</span>
             </div>
             <div className="lc-capture-countdown-label">{phase.label}</div>
-            <div className="lc-capture-countdown-hint">Tap to shoot now · Esc cancels</div>
+            <div className="lc-capture-countdown-hint">Tap to capture. Press Esc to cancel.</div>
           </div>
         )}
         {phase.kind === "flash" && <div className="lc-capture-flash" aria-hidden />}

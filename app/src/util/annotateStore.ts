@@ -82,6 +82,8 @@ export interface AnnotateDocMeta {
   /** Hash of the document this was drawn over — text for markdown/code/web, bytes otherwise. */
   hash: string;
   docType: DocType;
+  /** Original local HTML hash. Presence means the web document is a file, not an address. */
+  localFileHash?: string;
   updatedAt: number;
   /**
    * What to call this set of annotations, when its file name is not enough.
@@ -116,6 +118,8 @@ export interface AnnotateDocMeta {
   purgedAt?: number;
   syncSeq?: number;
   deleteAcked?: boolean;
+  /** Trashed by following another device's delete, rather than a local choice. */
+  deleteFollowed?: boolean;
   lastTouch?: number;
   hubAckUpdatedAt?: number;
   /** Wall-clock time of the last successful exchange, distinct from content time. */
@@ -256,7 +260,9 @@ export function docIdentityHash(input: {
   name: string;
   text?: string;
   bytes?: ArrayBuffer | null;
+  localFileHash?: string;
 }): string {
+  if (input.docType === "web" && input.localFileHash) return input.localFileHash;
   if (input.docType === "web") {
     const url = webIdentityUrl(input.name);
     // A web pad with an unparseable name is not a page anyone navigated to;
@@ -651,6 +657,7 @@ export async function saveAnnotateDoc(input: {
   hash: string;
   metadataIntent?: "rename";
   docType?: DocType;
+  localFileHash?: string;
   /** Undefined keeps whatever the set is already called. */
   label?: string;
   /** Undefined keeps whatever the set already claims. */
@@ -679,7 +686,7 @@ export async function saveAnnotateDoc(input: {
    * now carry as many sets as the library holds.
    */
   const existing = input.id ? index.find((entry) => entry.id === input.id) ?? null : null;
-  const id = input.id ?? freshId(index.filter((entry) => !entry.deletedAt), now);
+  const id = input.id ?? freshId(index, now);
   if (!existing && liveAnnotateCount() >= ANNOTATE_LIBRARY_LIMIT) {
     throw new AnnotateLibraryFullError(
       `At most ${ANNOTATE_LIBRARY_LIMIT} annotated documents — delete one to keep another.`,
@@ -713,6 +720,7 @@ export async function saveAnnotateDoc(input: {
     updatedAt: now,
     ...(label ? { label } : {}),
     ...(owned ? { owned: true } : {}),
+    ...((input.localFileHash ?? existing?.localFileHash) ? { localFileHash: input.localFileHash ?? existing?.localFileHash } : {}),
     ...(existing?.locked ? { locked: true } : {}),
     syncSeq: existing?.syncSeq ?? 0,
     lastTouch: now,
@@ -798,12 +806,12 @@ export async function setAnnotateDocLocked(id: string, locked: boolean): Promise
   });
 }
 
-export async function trashAnnotateDoc(id: string, now = Date.now()): Promise<number | null> {
+export async function trashAnnotateDoc(id: string, now = Date.now(), baseBookRev?: number): Promise<number | null> {
   return editMetadata(id, (meta, ctx) => {
     if (!meta || meta.locked) return null;
     const seq = (meta.syncSeq ?? 0) + 1;
-    ctx.setMetadata({ ...meta, kind: "annotate", deletedAt: now, syncSeq: seq, deleteAcked: false, lastTouch: now });
-    ctx.markLifecycle("delete", seq, ctx.state.bootstrap ? null : ctx.state.appliedBookRev, ctx.state.lifecycle?.goneSeq ?? null);
+    ctx.setMetadata({ ...meta, kind: "annotate", deletedAt: now, syncSeq: seq, deleteAcked: false, deleteFollowed: false, lastTouch: now });
+    ctx.markLifecycle("delete", seq, baseBookRev ?? (ctx.state.bootstrap ? null : ctx.state.appliedBookRev), ctx.state.lifecycle?.goneSeq ?? null);
     return seq;
   });
 }
@@ -820,7 +828,7 @@ export async function restoreAnnotateFromTrash(id: string): Promise<AnnotateDoc 
     if (liveAnnotateCount() >= ANNOTATE_LIBRARY_LIMIT) throw new AnnotateLibraryFullError(`At most ${ANNOTATE_LIBRARY_LIMIT} annotated documents ? delete one to restore another.`);
     const seq = Math.max(meta.syncSeq ?? 0, ctx.state.lifecycle?.goneSeq ?? 0) + 1;
     const next = { ...meta, kind: "annotate" as const, syncSeq: seq, lastTouch: Date.now() };
-    delete next.deletedAt; delete next.deleteAcked;
+    delete next.deletedAt; delete next.deleteAcked; delete next.deleteFollowed;
     ctx.setMetadata(next);
     ctx.markLifecycle("restore", seq, ctx.state.bootstrap ? null : ctx.state.appliedBookRev, ctx.state.lifecycle?.goneSeq ?? null);
     return next;

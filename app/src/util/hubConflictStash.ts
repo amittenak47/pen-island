@@ -24,6 +24,8 @@ import type {
   DocFootnoteWhiteboard,
 } from "./docFootnotes";
 import { freshWhiteboardId } from "./docFootnotes";
+import { bookWireRecord } from "./bookWireRecord";
+import { canonicalJson, normalizeRecord } from "./syncContent";
 
 export type HubPadKind = "annotate" | "whiteboard";
 
@@ -46,6 +48,12 @@ export interface HubPadConflict {
   fetchPreviewInk?: (pageId: number) => Promise<{ local: InkPageDto | null; server: InkPageDto | null }>;
   /** Problem canvases use one whole-canvas choice in the existing split. */
   wholeCanvas?: boolean;
+  /**
+   * A whole-book delete or restore decision, shown as two options instead of
+   * the diff: deleted elsewhere with edits here, a queued delete meeting a
+   * newer hub version, or a restore meeting a newer hub version.
+   */
+  lifecycleChoice?: "deleted_elsewhere" | "stale_delete" | "stale_restore";
   kind: HubPadKind;
   id: string;
   /** Which stage parked: the pad-JSON push (E) or the ink sync (F). */
@@ -446,7 +454,13 @@ export function footnoteOwnsBoard(row: FootnoteDiffRow, wbId: string): boolean {
   );
 }
 
-function jsonEqual(a: unknown, b: unknown): boolean {
+function jsonEqual(a: unknown, b: unknown, kind?: FootnotePartKind): boolean {
+  if (kind === undefined || kind === "notes" || kind === "underlines") {
+    const content = (value: unknown) => canonicalJson(normalizeRecord(bookWireRecord({ footnotes: [
+      kind === undefined ? value : { [kind === "notes" ? "notes" : "subMarks"]: [value] },
+    ] })));
+    return content(a) === content(b);
+  }
   // Hub serialization can reorder object keys without changing a link or note.
   const stable = (value: unknown): unknown => {
     if (Array.isArray(value)) return value.map(stable);
@@ -498,7 +512,7 @@ function collectPartDiffs<T>(
   for (const itemId of ids) {
     const local = localBy.get(itemId);
     const server = serverBy.get(itemId);
-    const same = local != null && server != null && jsonEqual(local, server);
+    const same = local != null && server != null && jsonEqual(local, server, kind);
     if (same && !includeSame) continue;
     out.push({
       id: footnotePartRowId(noteId, kind, itemId),
@@ -801,12 +815,11 @@ export function combineFootnotePair(
     (at): at is number => typeof at === "number",
   );
   if (touched.length > 0) combined.updatedAt = Math.max(...touched);
-  // Keep the shape a single-sided keep would have produced.
-  if (combined.notes === undefined) delete combined.notes;
-  if (combined.whiteboards === undefined) delete combined.whiteboards;
-  if (combined.threads === undefined) delete combined.threads;
-  if (combined.userLinks === undefined) delete combined.userLinks;
-  if (combined.subMarks === undefined) delete combined.subMarks;
+  combined.notes ??= [];
+  combined.whiteboards ??= [];
+  combined.threads ??= [];
+  combined.userLinks ??= [];
+  combined.subMarks ??= [];
   if (combined.png === undefined) delete combined.png;
   return combined;
 }

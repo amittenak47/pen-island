@@ -7,6 +7,21 @@ function msg(id: string, overrides: Partial<AgentChatMessage> = {}): AgentChatMe
   return { id, role: "user", content: id, at: 0, ...overrides };
 }
 
+it("merges explicit message defaults with a legacy missing-field copy without a conflict turn", () => {
+  const missing = msg("turn");
+  const explicit = { ...missing, attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [], pending: false, queued: false, bridgePending: false };
+  expect(mergeAgentMessages([missing], [explicit])).toHaveLength(1);
+  expect(mergeAgentMessages([explicit], [missing])).toHaveLength(1);
+  expect(mergeAgentMessages([missing], [{ ...missing, artifactFootnoteIds: [] }])).toHaveLength(2);
+  expect(mergeAgentMessages([missing], [{ ...missing, future: [] }])).toHaveLength(2);
+});
+
+it("restores off request flags as false while leaving untouched legacy list omissions alone", () => {
+  const [saved] = persistableAgentMessages(restoreAgentMessages([msg("turn")]));
+  expect(saved.queued).toBe(false);
+  expect(saved.attachments).toBeUndefined();
+});
+
 describe("organizeIntoSessions", () => {
   it("starts a session at each question and keeps the answer with it", () => {
     const next = organizeIntoSessions([

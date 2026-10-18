@@ -110,7 +110,7 @@ function mount(
       />,
     ),
   );
-  return { root, onResolve };
+  return { root, onResolve, host };
 }
 
 function resolveButton(): HTMLButtonElement {
@@ -183,6 +183,19 @@ describe("HubConflictSplit", () => {
     act(() => keep.click());
     expect(paneButton(0, "keep").className).toContain("lc-doc-confirm-yes");
     expect(paneButton(1, "drop").className).toContain("lc-doc-confirm-no");
+  });
+
+  it("with only the book's details differing, a side tick chooses the whole copy and Keep waits for it", () => {
+    const { onResolve } = mount({ ...CONFLICT, local: annotateBody("book", 900, []), server: annotateBody("book renamed", 500, []) });
+    expect(paneButton(1, "keep").disabled).toBe(false);
+    expect(resolveButton().disabled).toBe(true);
+    expect(document.body.textContent).toContain("Tick the copy to keep.");
+    act(() => paneButton(1, "keep").click());
+    expect(paneButton(1, "keep").getAttribute("aria-pressed")).toBe("true");
+    expect(paneButton(0, "drop").getAttribute("aria-pressed")).toBe("true");
+    act(() => resolveButton().click());
+    expect(onResolve).toHaveBeenCalledTimes(1);
+    expect(onResolve.mock.calls[0]![0].pick).toBe("server");
   });
 
   it("top ✓ keeps that whole copy and discards the other column", () => {
@@ -1353,5 +1366,42 @@ describe("HubConflictSplit cancel", () => {
     const { root } = mount();
     expect(document.querySelector(".lc-hub-conflict-cancel")).toBeNull();
     act(() => root.unmount());
+  });
+});
+
+describe("delete and restore choices", () => {
+  const cases = [
+    { kind: "deleted_elsewhere" as const, title: "Deleted on another device.", local: "Keep mine", localDetail: "Brings it back everywhere with your edits.",
+      server: "Delete", serverDetail: "Moves it to trash here. Restorable for 3 days.", server_: null },
+    { kind: "stale_delete" as const, title: "Changed on another device after you deleted it.", local: "Delete anyway", localDetail: null,
+      server: "Keep newer version", serverDetail: null, server_: CONFLICT.server },
+    { kind: "stale_restore" as const, title: "Changed on another device after you restored it.", local: "Restore anyway", localDetail: null,
+      server: "Keep theirs", serverDetail: "Your restored version stays in Retained copies.", server_: CONFLICT.server },
+  ];
+  for (const c of cases) {
+    it(`${c.kind}: shows two whole-book options instead of the diff and resolves each side`, async () => {
+      for (const side of ["local", "server"] as const) {
+        const { host, root, onResolve } = mount({ ...CONFLICT, server: c.server_, lifecycleChoice: c.kind });
+        await act(async () => { await Promise.resolve(); });
+        expect(host.textContent).toContain(c.title);
+        if (c.localDetail) expect(host.textContent).toContain(c.localDetail);
+        if (c.serverDetail) expect(host.textContent).toContain(c.serverDetail);
+        expect(host.querySelector(".lc-hub-conflict-split")).toBeNull();
+        expect(host.textContent).not.toContain("could not be read");
+        const label = side === "local" ? c.local : c.server;
+        const button = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(node => node.querySelector("strong")?.textContent === label);
+        expect(button, label).toBeTruthy();
+        act(() => button!.click());
+        expect(onResolve).toHaveBeenCalledOnce();
+        expect(onResolve.mock.calls[0]![0]).toEqual({ pick: side });
+        act(() => root.unmount()); roots.delete(root); host.remove();
+      }
+    });
+  }
+  it("never auto-resolves a delete choice even when nothing differs", async () => {
+    const { host, onResolve } = mount({ ...CONFLICT, server: CONFLICT.local, lifecycleChoice: "deleted_elsewhere" });
+    await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+    expect(onResolve).not.toHaveBeenCalled();
+    expect(host.textContent).toContain("Deleted on another device.");
   });
 });

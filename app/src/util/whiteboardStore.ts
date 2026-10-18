@@ -47,6 +47,8 @@ export interface WhiteboardNotebookMeta {
   purgedAt?: number;
   syncSeq?: number;
   deleteAcked?: boolean;
+  /** Trashed by following another device's delete, rather than a local choice. */
+  deleteFollowed?: boolean;
   lastTouch?: number;
   /** Last hub `updated_at` this device ACK'd. CAS base for the next live PUT. */
   hubAckUpdatedAt?: number;
@@ -323,12 +325,12 @@ export async function setWhiteboardNotebookLocked(id: string, locked: boolean): 
   });
 }
 
-export async function trashWhiteboardNotebook(id: string, now = Date.now()): Promise<number | null> {
+export async function trashWhiteboardNotebook(id: string, now = Date.now(), baseBookRev?: number): Promise<number | null> {
   return editMetadata(id, (meta, ctx) => {
     if (!meta || meta.locked) return null;
     const seq = (meta.syncSeq ?? 0) + 1;
-    ctx.setMetadata({ ...meta, kind: "whiteboard", deletedAt: now, syncSeq: seq, deleteAcked: false, lastTouch: now });
-    ctx.markLifecycle("delete", seq, ctx.state.bootstrap ? null : ctx.state.appliedBookRev, ctx.state.lifecycle?.goneSeq ?? null);
+    ctx.setMetadata({ ...meta, kind: "whiteboard", deletedAt: now, syncSeq: seq, deleteAcked: false, deleteFollowed: false, lastTouch: now });
+    ctx.markLifecycle("delete", seq, baseBookRev ?? (ctx.state.bootstrap ? null : ctx.state.appliedBookRev), ctx.state.lifecycle?.goneSeq ?? null);
     return seq;
   });
 }
@@ -354,7 +356,7 @@ export async function restoreWhiteboardFromTrash(id: string): Promise<Whiteboard
     if (liveCount() >= WHITEBOARD_LIBRARY_LIMIT) throw new WhiteboardLibraryFullError(`At most ${WHITEBOARD_LIBRARY_LIMIT} whiteboard notebooks ? delete one to restore another.`);
     const seq = Math.max(meta.syncSeq ?? 0, ctx.state.lifecycle?.goneSeq ?? 0) + 1;
     const next = { ...meta, kind: "whiteboard" as const, syncSeq: seq, lastTouch: Date.now() };
-    delete next.deletedAt; delete next.deleteAcked;
+    delete next.deletedAt; delete next.deleteAcked; delete next.deleteFollowed;
     ctx.setMetadata(next);
     ctx.markLifecycle("restore", seq, ctx.state.bootstrap ? null : ctx.state.appliedBookRev, ctx.state.lifecycle?.goneSeq ?? null);
     return next;

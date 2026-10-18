@@ -148,8 +148,9 @@ export async function applyPadSnapshotExtras(
 ): Promise<void> {
   const bundle = parseArtifactSnapshotBundle(snap.artifactBundle, { kind, id: key });
   const { restoreArtifactSnapshot, restorePadSnapshotLocally } = await import("./artifactSnapshotRestore");
-  if (bundle) await restoreArtifactSnapshot({ kind, id: key }, snap, bundle);
-  else await restorePadSnapshotLocally({ kind, id: key }, snap);
+  const result = bundle ? await restoreArtifactSnapshot({ kind, id: key }, snap, bundle)
+    : await restorePadSnapshotLocally({ kind, id: key }, snap);
+  if (result.status === "stale") throw new Error("Changed on another device since your last sync. Sync first.");
   // Links are supplemental: restore their union after the book transaction.
   for (const edge of parseSnapshotEdges(snap.edges)) {
     if (!await edgeIsGone(edge.id, edge.createdAt)) await putEdge(edge);

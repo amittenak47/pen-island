@@ -8,10 +8,13 @@
 import { useEffect, useRef } from "react";
 
 import { promoteLazyImages, type WebHtmlSource } from "../util/webPage";
+import { columnIsMeasurable } from "./AnnotateDocument";
 
 export interface WebDocumentProps {
   html: string;
   url: string;
+  /** A frozen file has no address to browse, including through its links. */
+  localFile?: boolean;
   onMeasure?: (height: number) => void;
   selectable?: boolean;
   /** Reading-mode taps on links fetch a new snapshot instead of leaving the app. */
@@ -25,6 +28,7 @@ export interface WebDocumentProps {
 export function WebDocument({
   html,
   url,
+  localFile = false,
   onMeasure,
   selectable = false,
   onNavigate,
@@ -35,12 +39,20 @@ export function WebDocument({
   onMeasureRef.current = onMeasure;
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const localFileRef = useRef(localFile);
+  localFileRef.current = localFile;
 
   useEffect(() => {
     const node = nodeRef.current;
     if (!node) return;
     promoteLazyImages(node);
     const report = () => {
+      // Mounted in a slot that has no width yet, the page lays out a few
+      // pixels wide and measures tens of thousands tall. That height became
+      // the board's scroll limit, and the board kept it after the page settled,
+      // so the page scrolled far past its end. Wait for a real column, as the
+      // markdown reader does; the observer reports again when it arrives.
+      if (!columnIsMeasurable(node.clientWidth)) return;
       const height = node.scrollHeight;
       if (height > 0) onMeasureRef.current?.(height);
     };
@@ -61,11 +73,19 @@ export function WebDocument({
       if (!anchor) return;
       event.preventDefault();
       const href = anchor.getAttribute("href");
-      if (!href || href.startsWith("#") || href.startsWith("mailto:")) return;
+      if (localFileRef.current || !href || href.startsWith("#") || href.startsWith("mailto:")) return;
       onNavigateRef.current?.(href);
     };
+    const onAuxClick = (event: MouseEvent) => {
+      const anchor = event.target instanceof Element ? event.target.closest("a") : null;
+      if (anchor && (localFileRef.current || anchor.getAttribute("href")?.startsWith("#"))) event.preventDefault();
+    };
     node.addEventListener("click", onClick);
-    return () => node.removeEventListener("click", onClick);
+    node.addEventListener("auxclick", onAuxClick);
+    return () => {
+      node.removeEventListener("click", onClick);
+      node.removeEventListener("auxclick", onAuxClick);
+    };
   }, [html]);
 
   /*

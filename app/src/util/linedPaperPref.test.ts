@@ -19,6 +19,7 @@ import {
   loadLinedPaperMode,
   nextLinedPaperMode,
   saveLinedPaperMode,
+  storedLinedPitch,
   LINED_PAPER_COLLEGE_SCREEN_PX,
   LINED_PAPER_SIT_ABOVE_FRAC,
   LINED_PAPER_WIDE_SCREEN_PX,
@@ -170,5 +171,14 @@ describe("lined paper scene pitch", () => {
     expect(
       linedFirstRuleScene(10, collegePitch, true) - linedFirstRuleScene(10, collegePitch, false),
     ).toBeCloseTo(linedSitAboveScene(collegePitch));
+  });
+});
+
+describe("storedLinedPitch", () => {
+  it("stores a round trip between rulings as the same number", () => {
+    const wide = 201.02564102564105;
+    const back = linedPitchPairFromRuling(linedPitchPairFromRuling(wide, "wide")!.college, "college")!.wide;
+    expect(storedLinedPitch(back)).toBe(storedLinedPitch(wide));
+    expect(storedLinedPitch(wide)).toBe(201.025641);
   });
 });

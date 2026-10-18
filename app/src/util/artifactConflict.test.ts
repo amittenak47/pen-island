@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactCatalog, ArtifactParent, PadArtifact } from "./padArtifacts";
 import { editArtifactCatalog, requireArtifactCatalogTransition } from "./artifactCatalogEdits";
-import { reconcileArtifactConflict } from "./artifactConflict";
+import { prepareArtifactConflict, reconcileArtifactConflict } from "./artifactConflict";
 const state = vi.hoisted(() => ({ local: undefined as ArtifactCatalog | undefined, fail: false, staged: 0 }));
 vi.mock("./artifactRepository", () => ({
   readArtifactCatalog: async () => state.local,
@@ -32,6 +32,13 @@ describe("attachment conflict recovery", () => {
     const merged = await reconcileArtifactConflict({} as never, parent, deleted, "local");
     expect(merged!.artifacts[0].deletedAt).toBe(2);
     expect(merged!.artifacts[1].deletedAt).toBeUndefined();
+  });
+  it("choosing a side whose entries differ only in stamps keeps that side as it is", async () => {
+    // The book sync path: prepare only, published with the parent record.
+    const local = state.local!, remote = catalog({ ...item("local"), revision: "remote-stamp", updatedAt: 9 });
+    expect(await prepareArtifactConflict({} as never, parent, local, remote, "server")).toEqual(remote);
+    expect(await prepareArtifactConflict({} as never, parent, local, remote, "local")).toEqual(local);
+    expect(state.staged).toBe(0);
   });
   it("does not mutate the catalog when remote content is unavailable", async () => {
     state.fail = true; const before = state.local;

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
-import { LcApiError, type LcClient } from "../api/client";
+import { LcApiError, type LcClient, type BookStateDto, type CommitRequestDto, type CommitResultDto } from "../api/client";
 import { savePadHub, setHostLoopback } from "./padHub";
 import { beginPadHubStatusRequest, refreshPadHubStatus, reportPadHubStatus } from "./padHubStatus";
 import { closeDbForTests, openDb, run, STORE_CONTENT, STORE_SNAPSHOTS, STORE_BYTES } from "./idb";
@@ -9,9 +9,12 @@ import { mutateLocalBook, resetLocalBookStoreForTests } from "./localBookStore";
 import { resetBookCoordinatorForTests } from "./bookCoordinator";
 import { saveWhiteboardNotebook, getWhiteboardNotebook, trashWhiteboardNotebook } from "./whiteboardStore";
 import { saveAnnotateDoc, getAnnotateDoc } from "./annotateStore";
+import { captureBook } from "./bookSnapshot";
+import { syncBook } from "./bookSync";
+import { recordHash } from "./syncContent";
 import { putProblemBoard, getProblemBoard, deleteProblemBoard } from "./problemBoardStore";
 import { applyPadSyncPing, pushAnnotatePad, pushDocBytes, pushPadSnapshot, pushProblemPad,
-  pushWhiteboardPad, resetPadSyncForTests, restoreTrashedPad, syncLegacySnapshots, tombstonePad, waitForPadPushes } from "./padSync";
+  pushWhiteboardPad, deletePadEverywhere, resetPadSyncForTests, restoreTrashedPad, syncLegacySnapshots, tombstonePad, waitForPadPushes } from "./padSync";
 import { LEGACY_QUEUE_STORE } from "./queueMigration";
 import { listRecoveryCopies } from "./syncRecovery";
 import { getPadSnapshot, listPadSnapshots } from "./padSnapshotStore";
@@ -65,6 +68,99 @@ beforeEach(async () => {
   setHostLoopback(null); savePadHub(HUB); refreshPadHubStatus(); status("offline");
 });
 afterEach(async () => { await closeDbForTests(); savePadHub(null); refreshPadHubStatus(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+async function deletionHub(kind: "annotate" | "whiteboard") {
+  const id = kind === "annotate" ? "a1" : "w1";
+  if (kind === "annotate") await saveAnnotateDoc(annotation);
+  else await saveWhiteboardNotebook(notebook);
+  let remote: BookStateDto = { kind, id, state: "absent", book_rev: 0, record_rev: 0, record_hash: null, record: null, gone_seq: null, pages: [] };
+  const api = {
+    ...client(),
+    getBookState: vi.fn(async () => structuredClone(remote)),
+    checkBookHead: vi.fn(async (_kind, _id, rev) => {
+      if (rev !== remote.book_rev) throw new LcApiError("head changed", 409);
+      return { unchanged: true, book_rev: rev };
+    }),
+    commitPad: vi.fn(async (body: CommitRequestDto): Promise<CommitResultDto> => {
+      if (body.action === "delete") {
+        if (body.base_book_rev !== remote.book_rev) throw new LcApiError("head changed", 409);
+        if (body.seq! < Number(remote.record?.sync_seq ?? 0)) throw new LcApiError("sequence changed", 409);
+        remote = { ...remote, state: "gone", book_rev: remote.book_rev + 1, gone_seq: body.seq!, record: null, record_hash: null, record_rev: 0, pages: [] };
+      } else if (body.record) {
+        const rev = remote.book_rev + 1;
+        remote = { ...remote, state: "live", book_rev: rev, record_rev: rev, record: structuredClone(body.record.value), record_hash: await recordHash(body.record.value) };
+      }
+      return { status: "committed", upload_id: body.upload_id, book: structuredClone(remote), record_rev: body.record ? remote.record_rev : null, page_revs: [] };
+    }),
+    getPadCommit: vi.fn(async () => null),
+    pingPadSync: vi.fn(async () => ({ now: 50, features: ["atomic_book_sync_v1"], whiteboard: [], annotate: [], problem: [], snapshots: [], gone: [], ink: [], edges: [], books: [structuredClone(remote)] })),
+  } as unknown as LcClient;
+  status("online");
+  expect((await syncBook(api, kind, id, undefined, { wait: async () => {}, timeoutMs: 50 })).status).toBe("synced");
+  vi.mocked(api.commitPad).mockClear();
+  return { api, id, get remote() { return remote; }, set remote(value: BookStateDto) { remote = value; } };
+}
+
+describe("delete preflight", () => {
+  it.each(["annotate", "whiteboard"] as const)("keeps stale %s content live until a forced deletion uses the current hub head", async kind => {
+    // This device syncs; the other device changes the record; this device deletes, then forces.
+    const hub = await deletionHub(kind), before = await captureBook({ kind, id: hub.id });
+    const record = { ...hub.remote.record!, sync_seq: 20, agent: [{ id: "other", role: "assistant", content: "New content" }] };
+    hub.remote = { ...hub.remote, record, record_hash: await recordHash(record), record_rev: 7, book_rev: 7 };
+    expect(await deletePadEverywhere(hub.api, kind, hub.id)).toEqual({ status: "stale" });
+    expect(await captureBook({ kind, id: hub.id })).toEqual(before);
+    expect(hub.api.commitPad).not.toHaveBeenCalled();
+    expect(await deletePadEverywhere(hub.api, kind, hub.id, undefined, { force: true } as import("./bookSync").BookSyncOptions & { force: true })).toEqual({ status: "deleted" });
+    expect(hub.api.commitPad).toHaveBeenCalledWith(expect.objectContaining({ action: "delete", base_book_rev: 7 }), expect.anything());
+    expect(vi.mocked(hub.api.commitPad).mock.calls[0][0].seq).toBeGreaterThanOrEqual(20);
+    expect(hub.remote.state).toBe("gone");
+    expect((await captureBook({ kind, id: hub.id })).metadata).toMatchObject({ deletedAt: expect.any(Number), deleteAcked: true });
+    expect((await state(kind, hub.id)).lifecycle).toBeNull();
+  });
+  it.each(["annotate", "whiteboard"] as const)("rejects a stale %s deletion after a rename alone", async kind => {
+    // This device syncs; the other device only renames; this device tries to delete.
+    const hub = await deletionHub(kind), before = await captureBook({ kind, id: hub.id });
+    const record = { ...hub.remote.record!, [kind === "annotate" ? "label" : "title"]: "Renamed elsewhere" };
+    hub.remote = { ...hub.remote, record, record_hash: await recordHash(record), record_rev: 8, book_rev: 8 };
+    expect(await deletePadEverywhere(hub.api, kind, hub.id)).toEqual({ status: "stale" });
+    expect(await captureBook({ kind, id: hub.id })).toEqual(before);
+    expect(hub.api.commitPad).not.toHaveBeenCalled();
+  });
+  it.each(["annotate", "whiteboard"] as const)("rejects a stale %s deletion when only a handwriting page changed", async kind => {
+    // This device syncs; the other device adds handwriting without changing the record; this device deletes.
+    const hub = await deletionHub(kind), before = await captureBook({ kind, id: hub.id });
+    hub.remote = { ...hub.remote, book_rev: 9, pages: [{ key: hub.id, page_id: 19, rev: 9, hash: "changed-page" }] };
+    expect(await deletePadEverywhere(hub.api, kind, hub.id)).toEqual({ status: "stale" });
+    expect(await captureBook({ kind, id: hub.id })).toEqual(before);
+    expect(hub.api.commitPad).not.toHaveBeenCalled();
+  });
+  it.each(["annotate", "whiteboard"] as const)("queues an offline %s delete without asking the hub", async kind => {
+    // This device syncs; it goes offline and deletes; the durable delete waits for reconnect.
+    const hub = await deletionHub(kind); status("offline");
+    vi.mocked(hub.api.getBookState).mockClear(); vi.mocked(hub.api.pingPadSync).mockClear();
+    expect(await deletePadEverywhere(hub.api, kind, hub.id)).toEqual({ status: "queued" });
+    expect((await captureBook({ kind, id: hub.id })).metadata).toMatchObject({ deletedAt: expect.any(Number), deleteAcked: false });
+    expect((await state(kind, hub.id)).lifecycle).toMatchObject({ action: "delete", baseBookRev: hub.remote.book_rev });
+    expect(hub.api.getBookState).not.toHaveBeenCalled(); expect(hub.api.pingPadSync).not.toHaveBeenCalled(); expect(hub.api.commitPad).not.toHaveBeenCalled();
+  });
+  it.each(["annotate", "whiteboard"] as const)("accepts a newer %s hub revision when its content is unchanged", async kind => {
+    // This device syncs; the hub revision advances with identical authored content; this device deletes.
+    const hub = await deletionHub(kind);
+    hub.remote = { ...hub.remote, book_rev: 11, record_rev: 11 };
+    expect(await deletePadEverywhere(hub.api, kind, hub.id)).toEqual({ status: "deleted" });
+    expect(hub.api.commitPad).toHaveBeenCalledWith(expect.objectContaining({ action: "delete", base_book_rev: 11 }), expect.anything());
+    expect(hub.remote.state).toBe("gone");
+    expect((await state(kind, hub.id)).lifecycle).toBeNull();
+  });
+  it.each(["annotate", "whiteboard"] as const)("keeps %s content live if the delete preflight is rejected", async kind => {
+    // This device syncs; its delete preflight receives an authorization failure; no deletion is authorized.
+    const hub = await deletionHub(kind), before = await captureBook({ kind, id: hub.id });
+    vi.mocked(hub.api.getBookState).mockRejectedValue(new LcApiError("Unauthorized", 401));
+    await expect(deletePadEverywhere(hub.api, kind, hub.id)).rejects.toThrow("Unauthorized");
+    expect(await captureBook({ kind, id: hub.id })).toEqual(before);
+    expect(hub.api.commitPad).not.toHaveBeenCalled();
+  });
+});
 
 describe("offline current-state sync and legacy recovery", () => {
   it("retains every kind of saved write without requests or a false acknowledgement", async () => {

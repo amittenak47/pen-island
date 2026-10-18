@@ -3,6 +3,8 @@
  */
 
 import { useEffect, useRef, useState, type ReactNode } from "react";
+import { usePopPlacement } from "./usePopPlacement";
+import { usePresence } from "./usePresence";
 import { createPortal } from "react-dom";
 
 import type { DocIndexStatus } from "../api/client";
@@ -25,7 +27,11 @@ export interface DocWorkProgress {
  * first measurement there is genuinely nothing to report, and a ring showing
  * "0%" or an invented figure would be claiming otherwise.
  */
-function WorkRing({ progress }: { progress: DocWorkProgress | null }) {
+export function WorkRing({ progress, count }: {
+  progress: DocWorkProgress | null;
+  /** Shown inside instead of the percentage (Home's Sync all: books synced so far). */
+  count?: number | null;
+}) {
   /*
    * A working chip never claims 100%.
    *
@@ -59,7 +65,7 @@ function WorkRing({ progress }: { progress: DocWorkProgress | null }) {
           />
         </svg>
       </span>
-      {pct != null && <b className="lc-doc-index-ring-pct">{pct}</b>}
+      {count != null ? <b className="lc-doc-index-ring-pct">{count}</b> : pct != null && <b className="lc-doc-index-ring-pct">{pct}</b>}
     </>
   );
 }
@@ -183,6 +189,10 @@ export function DocIndexChip({
 }: DocIndexChipProps) {
   const [open, setOpen] = useState(false);
   const [syncOpen, setSyncOpen] = useState(false);
+  /** Mouse or pen over Sync: show its status without syncing (touch has no hover). */
+  const [syncHover, setSyncHover] = useState(false);
+  const syncLeaveRef = useRef(0);
+  useEffect(() => () => window.clearTimeout(syncLeaveRef.current), []);
   const { status: hubStatus } = usePadHubStatus();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const popRef = useRef<HTMLDivElement | null>(null);
@@ -265,6 +275,10 @@ export function DocIndexChip({
           ? meta?.embedded === false ? "indexed · words" : "indexed"
           : onIndex ? "not indexed" : null;
   const indexRing = status === "indexing" || embedding;
+  const syncShown = syncOpen || syncHover;
+  // Opens and closes with motion: mounted until the fade-out has played.
+  const syncPresence = usePresence(Boolean(onSync) && syncShown);
+  const syncPlaced = usePopPlacement(buttonRef, syncPopRef, syncPresence.mounted, `${syncText}|${indexText}`);
   const working = !walkError && walkWaiting !== "conflict" && (walking || indexRing);
   const workProgress = walking ? walkProgress : status === "indexing" ? indexProgress : embedProgress;
   const syncBtn = onSync ? (
@@ -278,6 +292,16 @@ export function DocIndexChip({
       aria-haspopup="dialog"
       data-error={walkError ?? undefined}
       title={walkError ?? (walkWaiting === "conflict" ? "Both copies changed — pick which stays." : undefined)}
+      onPointerEnter={(event) => {
+        if (event.pointerType === "touch") return;
+        window.clearTimeout(syncLeaveRef.current);
+        setOpen(false);
+        setSyncHover(true);
+      }}
+      onPointerLeave={() => {
+        window.clearTimeout(syncLeaveRef.current);
+        syncLeaveRef.current = window.setTimeout(() => setSyncHover(false), 220);
+      }}
       onClick={(event) => {
         event.stopPropagation();
         if (walkError) {
@@ -471,14 +495,19 @@ export function DocIndexChip({
       </button>,
       syncBtn,
       )}
-      {onSync && syncOpen && typeof document !== "undefined" && createPortal(
+      {onSync && syncPresence.mounted && typeof document !== "undefined" && createPortal(
         <div
           ref={syncPopRef}
-          className="lc-doc-sync-pop"
+          className={syncPresence.leaving ? "lc-doc-sync-pop is-leaving" : "lc-doc-sync-pop"}
           role="status"
           aria-live="polite"
-          // Tabs near the right edge would push the 280px overlay off screen.
-          style={anchor ? { top: anchor.top, left: Math.max(8, Math.min(anchor.left, window.innerWidth - 288)) } : undefined}
+          // Placed next to Sync on any screen: below or above, never off the edge.
+          style={syncPlaced}
+          onPointerEnter={() => window.clearTimeout(syncLeaveRef.current)}
+          onPointerLeave={() => {
+            window.clearTimeout(syncLeaveRef.current);
+            syncLeaveRef.current = window.setTimeout(() => setSyncHover(false), 220);
+          }}
         >
           <div className="lc-doc-sync-line">{syncText}</div>
           {indexText && (

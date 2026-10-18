@@ -11,7 +11,7 @@ export function pruneDeletedThreadLinks(notes: DocFootnote[], messages: readonly
   const result = notes.map(note => {
     if (!note || !note.threads?.some(thread => deleted.has(thread.rootId)) && !(note.threadRootId && deleted.has(note.threadRootId))) return note;
     changed = true;
-    const threads = note.threads?.filter(thread => !deleted.has(thread.rootId));
+    const threads = (note.threads ?? []).filter(thread => !deleted.has(thread.rootId));
     return {...note,threads,threadRootId: note.threadRootId && deleted.has(note.threadRootId) ? threads?.[0]?.rootId : note.threadRootId};
   });
   return changed ? result : notes;

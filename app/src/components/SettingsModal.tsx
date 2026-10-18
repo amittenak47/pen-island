@@ -29,6 +29,7 @@ import { countSettingsChanges } from "../util/settingsChanges";
 import "./settingsDialog.css";
 import { SettingsSlider } from "./SettingsSlider";
 import { SettingsChoices } from "./SettingsChoices";
+import { loadLlmAskAtStartup, saveLlmAskAtStartup } from "../util/llmStartupPref";
 import { loadShowBooktabs, saveShowBooktabs, loadShowFootnoteTitles, saveShowFootnoteTitles, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes, type BooktabPosition, type BooktabFootnotes } from "../util/booktabsPref";
 import { HoldButton } from "./HoldButton";
 import { HEADER_MODES, loadHeaderModes, saveHeaderModes, type HeaderModes } from "../util/headerModesPref";
@@ -238,6 +239,11 @@ function SettingsFold({id,title,children}: {id:string;title:string;children:Reac
 }
 
 const PROVIDERS = ["local", "ollama", "openai", "groq"] as const;
+const COACH_PROVIDERS = [...PROVIDERS, "app", "bot"] as const;
+const AGENT_PROVIDER_HINTS = {
+  app: "Uses the app chosen for ChatBot on this PC",
+  bot: "Answered by the assistant chosen for ChatBot; can take a few minutes",
+};
 
 const VOICE_ENGINES: { id: VoiceConfig["engine"]; label: string; blurb: string }[] = [
   { id: "android", label: "Android", blurb: "Built into the tablet. Text appears as you speak." },
@@ -284,11 +290,12 @@ const MODES = ["ambient", "review", "bridge", "viz", "planner"] as const;
  * because there are three questions: what does it know going in, how does it
  * hold its ground, and how does it talk back.
  */
+type CoachToggle = Exclude<keyof CoachFlags, "agent_bot_timeout_secs">;
 const COACH_FLAG_GROUPS: Array<{
   id: string;
   title: string;
   blurb: string;
-  flags: Array<[keyof CoachFlags, string, string]>;
+  flags: Array<[CoachToggle, string, string]>;
 }> = [
   {
     id: "coach-knows",
@@ -317,7 +324,7 @@ const COACH_FLAG_GROUPS: Array<{
   },
 ];
 
-const SHARED_AGENT_FLAGS: Array<[keyof CoachFlags, string, string]> = [
+const SHARED_AGENT_FLAGS: Array<[CoachToggle, string, string]> = [
       [
         "ws_runs",
         "Show replies as they’re written",
@@ -348,11 +355,13 @@ const MODE_LABELS: Record<(typeof MODES)[number], string> = {
   viz: "Diagrams",
   planner: "Planner",
 };
-const PROVIDER_LABELS: Record<(typeof PROVIDERS)[number], string> = {
+const PROVIDER_LABELS: Record<(typeof COACH_PROVIDERS)[number], string> = {
   local: "Local",
   ollama: "Ollama",
   openai: "OpenAI",
   groq: "Groq",
+  app: "AI application",
+  bot: "AI assistant",
 };
 
 /**
@@ -494,6 +503,7 @@ interface DevicePrefs {
   pageFit: PageFitPref;
   showBooktabs: boolean;
   showFootnoteTitles: boolean;
+  llmAskAtStartup: boolean;
   booktabPosition: BooktabPosition;
   booktabFootnotes: BooktabFootnotes;
   handedness: InkHandedness;
@@ -569,6 +579,7 @@ function loadDevicePrefs(): DevicePrefs {
     pageFit: loadPageFit(),
     showBooktabs: loadShowBooktabs(),
     showFootnoteTitles: loadShowFootnoteTitles(),
+    llmAskAtStartup: loadLlmAskAtStartup(),
     booktabPosition: loadBooktabPosition(),
     booktabFootnotes: loadBooktabFootnotes(),
     handedness: loadInkHandedness(),
@@ -619,6 +630,7 @@ function prefsEqual(a: DevicePrefs, b: DevicePrefs): boolean {
     a.pageFit === b.pageFit &&
     a.showBooktabs === b.showBooktabs &&
     a.showFootnoteTitles === b.showFootnoteTitles &&
+    a.llmAskAtStartup === b.llmAskAtStartup &&
     a.booktabPosition === b.booktabPosition &&
     a.booktabFootnotes === b.booktabFootnotes &&
     a.handedness === b.handedness &&
@@ -996,6 +1008,7 @@ export function SettingsModal({
   const [pageFit, setPageFit] = useState<PageFitPref>(loadPageFit);
   const [showBooktabs, setShowBooktabs] = useState(loadShowBooktabs);
   const [showFootnoteTitles, setShowFootnoteTitles] = useState(loadShowFootnoteTitles);
+  const [llmAskAtStartup, setLlmAskAtStartup] = useState(loadLlmAskAtStartup);
   const [booktabPosition, setBooktabPosition] = useState(loadBooktabPosition);
   // "Same row as footnote" needs the margin; edge to edge the tabs sit on top.
   const shownPosition = booktabPosition === "beside" && pageFit !== "margin" ? "top" : booktabPosition;
@@ -1228,6 +1241,7 @@ export function SettingsModal({
     setPageFit(prefs.pageFit);
     setShowBooktabs(prefs.showBooktabs);
     setShowFootnoteTitles(prefs.showFootnoteTitles);
+    setLlmAskAtStartup(prefs.llmAskAtStartup);
     setBooktabPosition(prefs.booktabPosition);
     setBooktabFootnotes(prefs.booktabFootnotes);
     setAgentDisplay(prefs.agentDisplay);
@@ -1360,6 +1374,7 @@ export function SettingsModal({
     pageFit,
     showBooktabs,
     showFootnoteTitles,
+    llmAskAtStartup,
     booktabPosition,
     booktabFootnotes,
     handedness,
@@ -1427,6 +1442,7 @@ export function SettingsModal({
     ui: ["headerModes", "uiHandedness", "uiCorners", "startupTabs", "readingMode", "pageFit", "showBooktabs", "booktabPosition", "booktabFootnotes", "showFootnoteTitles", "agentDisplay", "notificationCards"],
     diagnostics: ["inkDisplayHz", "inkPerfOverlay", "inkPerfBar", "pdfFlickHud", "hubSyncWindowPill"],
     tests: ["testForward"],
+    llm: ["llmAskAtStartup"],
   };
   const configGroups: Record<string, (keyof LcConfig)[]> = {
     paths: ["data_json_dir", "workspace_dir"], datasets: ["dataset_dirs"], tests: ["stop_on_first_failure"],
@@ -1446,15 +1462,17 @@ export function SettingsModal({
   changes.storage = (changes.storage ?? 0) + Number(hubUrl.trim() !== baselineHubUrl) + Number(hubToken.trim() !== baselineHubToken);
   changes.diagnostics = (changes.diagnostics ?? 0) + Number(debugLog !== baselineDebugLog);
   changes.llm = (changes.llm ?? 0) + Number(Boolean(openaiKeyDraft.trim()) || clearOpenaiKey) + Number(Boolean(groqKeyDraft.trim()) || clearGroqKey);
+  changes.llm += coachChanges(["agent_send_board_image"]) + countSettingsChanges(
+    { timeout: draft.coach?.agent_bot_timeout_secs ?? 600 }, { timeout: baselineConfig.coach?.agent_bot_timeout_secs ?? 600 });
   changes.chatbot = Number(chatBotClient !== baselineChatBotClient) + Number(chatBotAnswerMode !== baselineChatBotAnswerMode)
     + countSettingsChanges(runnerConfig ?? {}, baselineRunnerConfig ?? {});
   changes.voice = (changes.voice ?? 0) + Number(Boolean(deepgramKeyDraft.trim()) || clearDeepgramKey);
   const resetGroup = (id: string) => {
     if (saving) return;
     restoreDeviceDraft({...draftPrefs, ...select(baselinePrefs, prefGroups[id] ?? [])});
-    const coachFields = id === "ui" ? sharedUiFlags : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
+    const coachFields = id === "ui" ? sharedUiFlags : id === "llm" ? ["agent_send_board_image", "agent_bot_timeout_secs"] as (keyof CoachFlags)[] : COACH_FLAG_GROUPS.find(group => group.id === id)?.flags.map(([key]) => key) ?? [];
     setDraft(prev => ({...prev, ...select(baselineConfig, configGroups[id] ?? []),
-      coach: {...DEFAULT_COACH_FLAGS, ...prev.coach, ...select({...DEFAULT_COACH_FLAGS, ...baselineConfig.coach}, coachFields)}}));
+      coach: {...DEFAULT_COACH_FLAGS, ...prev.coach, ...select({...DEFAULT_COACH_FLAGS, agent_bot_timeout_secs: 600, ...baselineConfig.coach}, coachFields)}}));
     if (id === "chatbot") { setChatBotClient(baselineChatBotClient); setChatBotAnswerMode(baselineChatBotAnswerMode); setRunnerConfig(baselineRunnerConfig); }
     if (id === "storage") { setHubUrl(baselineHubUrl); setHubToken(baselineHubToken); }
     if (id === "diagnostics") setDebugLog(baselineDebugLog);
@@ -1517,6 +1535,7 @@ export function SettingsModal({
         savePageFit(pageFit);
         saveShowBooktabs(showBooktabs);
         saveShowFootnoteTitles(showFootnoteTitles);
+        saveLlmAskAtStartup(llmAskAtStartup);
         saveBooktabPosition(booktabPosition);
         saveBooktabFootnotes(booktabFootnotes);
         saveAgentDisplayPrefs(agentDisplay);
@@ -2122,7 +2141,7 @@ export function SettingsModal({
                   </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Countdown</div>
-              <p className="lc-settings-hint">Wait a few seconds before capturing. Tap the countdown to capture right away.</p>
+              <p className="lc-settings-hint">Tap the countdown to skip it.</p>
                   <SettingsChoices
                     className="lc-settings-choice lc-settings-choice-compact"
                     role="radiogroup"
@@ -3167,6 +3186,11 @@ export function SettingsModal({
                 </span>
               </p>
               {coachDetail && <p className="lc-settings-hint">{coachDetail}</p>}
+              <SettingsChoices className="lc-settings-choice" aria-label="Startup question">
+                <button type="button" role="switch" aria-checked={llmAskAtStartup}
+                  className={llmAskAtStartup ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                  onClick={() => setLlmAskAtStartup(!llmAskAtStartup)}><strong>Ask at startup when the model is offline</strong></button>
+              </SettingsChoices>
 
               </div>
 <div className="lc-setting-row">
@@ -3402,6 +3426,7 @@ export function SettingsModal({
                 <label key={mode}>
                   <span>{MODE_LABELS[mode]}</span>
                   <select
+                    aria-label={`${MODE_LABELS[mode]} provider`}
                     value={draft.modes[mode]}
                     onChange={(e) =>
                       setDraft((prev) => ({
@@ -3410,16 +3435,35 @@ export function SettingsModal({
                       }))
                     }
                   >
-                    {PROVIDERS.map((p) => (
+                    {COACH_PROVIDERS.map((p) => (
                       <option key={p} value={p}>
                         {PROVIDER_LABELS[p]}
                       </option>
                     ))}
                   </select>
                   <p className="lc-settings-hint">{MODE_HINTS[mode]}</p>
+                  {(draft.modes[mode] === "app" || draft.modes[mode] === "bot") &&
+                    <p className="lc-settings-hint">{AGENT_PROVIDER_HINTS[draft.modes[mode] as "app" | "bot"]}</p>}
                 </label>
               ))}
-
+              <p className="lc-settings-hint">AI application: {AGENT_PROVIDER_HINTS.app}.<br />AI assistant: {AGENT_PROVIDER_HINTS.bot}.</p>
+              <label>
+                <span>Give the assistant up to</span>
+                <select aria-label="Give the assistant up to" value={draft.coach?.agent_bot_timeout_secs ?? 600}
+                  onChange={e => setDraft(prev => ({ ...prev, coach: { ...DEFAULT_COACH_FLAGS, ...prev.coach,
+                    agent_bot_timeout_secs: Number(e.target.value) } }))}>
+                  {[1, 2, 5, 10].map(minutes => <option key={minutes} value={minutes * 60}>{minutes} {minutes === 1 ? "minute" : "minutes"}</option>)}
+                </select>
+              </label>
+              <button type="button" className="lc-secondary" onClick={() => { setSettingsQuery(""); setPage("chatbot"); }}>
+                Choose application or assistant in ChatBot
+              </button>
+              <button type="button" role="switch" aria-checked={draft.coach?.agent_send_board_image ?? true}
+                className={(draft.coach?.agent_send_board_image ?? true) ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
+                onClick={() => setDraft(prev => ({ ...prev, coach: { ...DEFAULT_COACH_FLAGS, ...prev.coach,
+                  agent_send_board_image: !(prev.coach?.agent_send_board_image ?? true) } }))}>
+                Send the board image to agents
+              </button>
               </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Built-in model</div>

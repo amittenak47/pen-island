@@ -23,7 +23,12 @@ describe("drawingState", () => {
     const drawing = withNewDrawing(program("a"), 47);
     expect(drawing.expanded).toBe(true);
     expect(drawing.page).toBe(47);
-    expect(drawing.redacted).toBeUndefined();
+    expect(drawing.redacted).toBe(false);
+  });
+
+  it("writes false when collapsing a legacy drawing with no redacted flag", () => {
+    const [saved] = setDrawingExpanded([{ id: "m", drawing: { program: program("old"), expanded: true } }], "m", false);
+    expect(saved.drawing).toMatchObject({ expanded: false, redacted: false });
   });
 
   it("redacts oldest when the visible cap is exceeded", () => {

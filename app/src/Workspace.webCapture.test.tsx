@@ -17,8 +17,17 @@ const mocks = vi.hoisted(() => ({
   native: true, existing: null as AnnotateDoc | null, fetch: vi.fn(), serialize: vi.fn(), fromHtml: vi.fn(),
   shell: {} as ShellValue,
   api: null as WorkspaceApi | null,
-  reset: vi.fn(), finish: vi.fn(), reveal: vi.fn(),
+  reset: vi.fn(), finish: vi.fn(), reveal: vi.fn(), setWebUrl: vi.fn(),
 }));
+// Observe the real address state setter while leaving React's state behavior intact.
+vi.mock("react", async original => {
+  const react = await original<typeof import("react")>();
+  return { ...react, useState: ((initial: unknown) => {
+    const [value, setValue] = react.useState(initial);
+    if (initial !== "https://www.google.com/") return [value, setValue];
+    return [value, (next: unknown) => { mocks.setWebUrl(next); setValue(next); }];
+  }) as typeof react.useState };
+});
 vi.mock("./shellContext", () => ({ useShell: () => mocks.shell }));
 vi.mock("./canvas/boardChunk", () => ({ peekBoardComponent: () => () => null }));
 vi.mock("./components/LoadingDoodle", () => ({ LoadingDoodle: () => null }));
@@ -337,4 +346,32 @@ it("native Back with no history and native errors expose the frozen copy", async
   await click("Fail live view"); expect(live()).toBeNull();
   expect(mocks.shell.setError).toHaveBeenLastCalledWith("Live view failed");
   expect(address().value).toBe(url);
+});
+
+
+it("a local web file restores its original identity without touching the address or offering browsing", async () => {
+  withMarks();
+  const localFileHash = "original-file-content-hash";
+  mocks.existing = { ...mocks.existing!, name: "guide.html", hash: localFileHash, localFileHash, footnotes: [] };
+  const fileTab: TabRecord = { id: "local-file", kind: "annotate", title: "guide.html", docType: "web",
+    hash: localFileHash, docId: mocks.existing.id, dirty: false, lastActive: 0, indexed: "idle", source: null };
+  await mount(fileTab);
+  expect(mocks.setWebUrl).not.toHaveBeenCalled();
+  expect(mocks.fetch).not.toHaveBeenCalled();
+  expect(mocks.serialize).not.toHaveBeenCalled();
+  expect(live()).toBeNull();
+  expect(document.querySelector('[aria-label="Page address"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Browse the live page"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Freeze this page"]')).toBeNull();
+  expect(document.querySelector('[aria-label="Reload page"]')).toBeNull();
+  expect(mocks.shell.patchTab).toHaveBeenCalledWith(fileTab.id, expect.objectContaining({ hash: localFileHash, docType: "web" }));
+});
+
+it("an address web document still sets its URL and offers live browsing and reload", async () => {
+  await mount();
+  expect(mocks.setWebUrl).toHaveBeenCalledWith(url);
+  expect(address().value).toBe(url);
+  expect(live()).toBeTruthy();
+  expect(button("Freeze this page")).toBeTruthy();
+  expect(button("Reload page")).toBeTruthy();
 });

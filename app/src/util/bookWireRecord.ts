@@ -1,10 +1,13 @@
-/** Defined optional DTO members use omission on the wire. Unknown values are
+/** Legacy undefined optional DTO members use omission on the wire; explicit
+ * empty defaults stay intact. Unknown values are
  * left intact so canonical JSON still rejects unrepresentable user fields. */
 const messageOptional = ["requestId", "retryOf", "requestState", "requestNote", "queued", "review", "bridge", "attachments",
   "artifacts", "artifactProposals", "artifactFootnoteIds", "flags", "processEvents", "reasoning", "drawing", "replyTo", "sessionId", "deletedAt", "pending", "pendingAck", "bridgePending", "bridgeError"];
 const noteOptional = ["captureId", "updatedAt", "threads", "threadRootId", "png", "query", "url", "notes", "whiteboards", "artifacts", "userLinks", "color", "palette", "title", "bands", "blockText", "subMarks"];
 const processOptional = ["updateId", "detail", "status"];
 const drawingOptional = ["page", "redacted", "frameIndex"];
+/** A reader note saved without pictures carried `images: undefined`. */
+const readerNoteOptional = ["images"];
 export function bookWireRecord(value: Record<string, unknown>): Record<string, unknown> {
   const record = structuredClone(value);
   const omit = (rows: unknown, names: string[]) => {
@@ -13,11 +16,19 @@ export function bookWireRecord(value: Record<string, unknown>): Record<string, u
       if (Object.hasOwn(row, name) && row[name] === undefined) delete row[name];
     }
   };
+  omit([record], ["agent", "footnotes", "footnote_boards"]);
   omit(record.agent, messageOptional); omit(record.footnotes, noteOptional);
+  if (Array.isArray(record.footnotes)) for (const note of record.footnotes) {
+    if (note && typeof note === "object") {
+      omit(note.notes, readerNoteOptional);
+      omit(note.subMarks, ["bands"]);
+    }
+  }
   if (Array.isArray(record.agent)) for (const message of record.agent) {
     if (message && typeof message === "object") {
       omit(message.processEvents, processOptional);
       omit([message.drawing], drawingOptional);
+      omit(message.artifactProposals, ["programs", "messages"]);
     }
   }
   // Inline saved ink remains authored record content. Its known codec

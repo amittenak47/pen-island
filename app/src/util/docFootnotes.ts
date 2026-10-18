@@ -63,6 +63,8 @@ export interface DocFootnoteNote {
   by?: "ai" | "reader";
   /** The preset field this note fills ("Character"); its text opens "**Field:**". */
   field?: string;
+  /** The ChatBot run that added this note to an earlier footnote, so Undo can take it back out. */
+  jobId?: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -86,7 +88,7 @@ export function combinedNote(footnote: { notes?: readonly DocFootnoteNote[] }): 
   return {
     id: ALL_NOTES_ID,
     text: notes.map((note) => note.text.trim()).filter(Boolean).join("\n\n---\n\n"),
-    ...(images.length ? { images } : {}),
+    images,
     createdAt: Math.min(...notes.map((note) => note.createdAt)),
     updatedAt: Math.max(...notes.map((note) => note.updatedAt)),
   };
@@ -733,9 +735,10 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
           {
             id: candidate.id,
             text: candidate.text,
-            ...(images.length > 0 ? { images } : {}),
+            ...(Array.isArray(candidate.images) ? { images } : {}),
             ...(candidate.by === "ai" || candidate.by === "reader" ? { by: candidate.by } : {}),
             ...(typeof candidate.field === "string" && candidate.field.trim() && candidate.field.length <= 40 ? { field: candidate.field.trim() } : {}),
+            ...(typeof candidate.jobId === "string" && candidate.jobId ? { jobId: candidate.jobId } : {}),
             createdAt,
             updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : createdAt,
           },
@@ -743,7 +746,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
       })
     : [];
   if (entries.length === 0 && typeof legacy === "string" && legacy.trim()) {
-    entries.push({ id: "nt-legacy", text: legacy, createdAt: now, updatedAt: now });
+    entries.push({ id: "nt-legacy", text: legacy, images: [], createdAt: now, updatedAt: now });
   }
   return entries.length > 0 ? entries : undefined;
 }
@@ -865,17 +868,17 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
         {
           ...(rest as DocFootnote),
           anchor,
-          notes,
-          whiteboards,
-          ...(artifacts ? { artifacts } : {}),
-          threads,
-          ...(userLinks ? { userLinks } : {}),
+          notes: notes ?? (Array.isArray(candidate.notes) ? [] : undefined),
+          whiteboards: whiteboards ?? (Array.isArray(rawWhiteboards) ? [] : undefined),
+          ...(artifacts || Array.isArray(rawArtifacts) ? { artifacts: artifacts ?? [] } : {}),
+          threads: threads ?? (Array.isArray(candidate.threads) ? [] : undefined),
+          ...(userLinks || Array.isArray(candidate.userLinks) ? { userLinks: userLinks ?? [] } : {}),
           ...(color ? { color } : {}),
           ...(palette ? { palette } : {}),
           ...(title ? { title } : {}),
-          ...(bands ? { bands } : {}),
+          ...(bands || Array.isArray(candidate.bands) ? { bands: bands ?? [] } : {}),
           ...(blockText ? { blockText } : {}),
-          ...(subMarks ? { subMarks } : {}),
+          ...(subMarks || Array.isArray(candidate.subMarks) ? { subMarks: subMarks ?? [] } : {}),
           ...(updatedAt != null ? { updatedAt } : {}),
           ...(pending ? { pending } : {}),
           ...(answerMode ? { answerMode } : {}),
@@ -944,7 +947,7 @@ function sanitizeSubMarks(value: unknown): DocFootnoteSubMark[] | undefined {
       ...(textAnchor ? { anchor: textAnchor } : {}),
       ...(color ? { color } : {}),
       ...(palette ? { palette } : {}),
-      ...(bands ? { bands } : {}),
+      ...(bands || Array.isArray(mark.bands) ? { bands: bands ?? [] } : {}),
     });
   }
   return out.length > 0 ? out : undefined;

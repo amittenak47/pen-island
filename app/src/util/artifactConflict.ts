@@ -51,9 +51,16 @@ export async function prepareArtifactConflict(client: LcClient, parent: Artifact
       else if (incoming.deletedAt !== undefined) merged.restoredFrom = incoming.revision;
       merged.associations = [...new Map([...current.associations, ...incoming.associations].map(entry => [JSON.stringify(entry), entry])).values()];
     }
-    entries.set(incoming.id, merged);
+    // A merge that changes nothing about the winner keeps its stamps, so
+    // choosing a side does not make every attachment look edited.
+    const { revision: _mergedRevision, updatedAt: _mergedUpdatedAt, ...mergedBody } = merged;
+    const { revision: _winnerRevision, updatedAt: _winnerUpdatedAt, ...winnerBody } = winner;
+    entries.set(incoming.id, JSON.stringify(mergedBody) === JSON.stringify(winnerBody) ? winner : merged);
   }
-  const catalog: ArtifactCatalog = { v: 1, parent, revision: crypto.randomUUID(), artifacts: [...entries.values(), ...copies] };
+  const artifacts = [...entries.values(), ...copies];
+  // A result identical to one side is that side, revision included.
+  for (const side of [remote, local]) if (side && JSON.stringify(side.artifacts) === JSON.stringify(artifacts)) return side;
+  const catalog: ArtifactCatalog = { v: 1, parent, revision: crypto.randomUUID(), artifacts };
   requireArtifactCatalogTransition(local, catalog, parent);
   requireArtifactCatalogTransition(remote, catalog, parent);
   return catalog;

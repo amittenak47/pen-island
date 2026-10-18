@@ -674,3 +674,14 @@ it("permanent trash removal keeps sync deletion metadata but cannot restore cont
   const { getAnnotateDocMeta } = await import("./annotateStore");
   expect(getAnnotateDocMeta(saved.id)).toMatchObject({deletedAt:expect.any(Number),purgedAt:expect.any(Number)});
 });
+
+
+it("preserves the local web marker and original hash through ink saves", async () => {
+  const hash = hashMarkdown("<script>render()</script>");
+  const saved = await saveAnnotateDoc({ name: "guide.html", hash, docType: "web", localFileHash: hash,
+    source: "<p>First render</p>", board: board("one") });
+  await saveAnnotateDoc({ id: saved.id, name: saved.name, hash, docType: "web",
+    source: "<p>Second render</p>", board: board("two") });
+  expect(await getAnnotateDoc(saved.id)).toMatchObject({ localFileHash: hash, hash, docType: "web", source: "<p>Second render</p>" });
+  expect(listAnnotateDocs().find(doc => doc.id === saved.id)).toMatchObject({ localFileHash: hash, hash });
+});

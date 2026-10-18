@@ -119,6 +119,15 @@ export function linedPitchPairFromZoom(zoom: number): LinedPitchPair | null {
 
 const COLLEGE_FROM_WIDE = LINED_PAPER_COLLEGE_SCREEN_PX / LINED_PAPER_WIDE_SCREEN_PX;
 
+/**
+ * Line spacing as stored on a book. Converting between rulings leaves
+ * last-digit float differences (201.02564102564102 vs ...105) that differ by
+ * device and read as an edit to sync; a millionth of a scene unit is invisible.
+ */
+export function storedLinedPitch(pitch: number): number {
+  return Math.round(pitch * 1e6) / 1e6;
+}
+
 /** Complete the other ruling from one known source pitch (same capture zoom). */
 export function linedPitchPairFromRuling(
   pitch: number,

@@ -54,7 +54,8 @@ export function mayClearParkedPreparing(loadInFlight: boolean): boolean {
 export const BOOT_MIN_SHOW_MS = 180;
 /** Checkmark beat after the workspace snap is actually on screen. */
 export const BOOT_DONE_HOLD_MS = 180;
-export const BOOT_EXIT_MS = 160;
+/** Matches `.lc-server-gate-boot-exit`: the dark boot screen fading into the palette. */
+export const BOOT_EXIT_MS = 320;
 /** Home with nothing to restore may finish after this, not the old 1s theatre. */
 export const BOOT_EMPTY_READY_MS = 400;
 /**

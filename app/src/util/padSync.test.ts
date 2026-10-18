@@ -304,7 +304,7 @@ describe("padSync pull", () => {
     for (const restore of [restoreWhiteboardNotebook, restoreAnnotateDoc]) {
       const saved = restore.mock.calls[0]![0] as { agent: unknown[] };
       const reopened = restoreAgentMessages(saved.agent);
-      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...message, sessionId: "session-question" })));
+      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...message, sessionId: "session-question", queued: false })));
       expect(visibleDrawings(reopened)).toHaveLength(expanded ? 1 : 0);
     }
   });
@@ -662,7 +662,8 @@ describe("padSync ping", () => {
     expect(restoreAnnotateDoc).not.toHaveBeenCalled();
   });
 
-  it("does not undelete local trash from a live hub row", async () => {
+  it("does not undelete local trash from an unversioned live hub row", async () => {
+    // An unversioned legacy row cannot establish a restore newer than this device's acknowledged delete.
     listWhiteboardTrash.mockReturnValue([{ id: "w1", deletedAt: 1 }]);
     getWhiteboardNotebook.mockResolvedValue({
       id: "w1",
@@ -1187,4 +1188,13 @@ describe("unknown authored wire fields", () => {
     expect(await annotatePadBody(restored)).toMatchObject({ hash: "authored source", future: { source: "nested source" } });
     expect(restored.authoredExtras).not.toHaveProperty("record_rev");
   });
+});
+
+
+it("round trips a local web file marker using the existing annotate record", async () => {
+  await applyHubAnnotate({ id: "local-html", name: "guide.html", hash: "original-hash", local_file_hash: "original-hash",
+    doc_type: "web", updated_at: 3, source: "<table><tr><td>Generated</td></tr></table>", board: emptyBoard, footnotes: [], agent: [] }, { emitReload: false });
+  const restored = restoreAnnotateDoc.mock.calls.at(-1)![0] as Parameters<typeof annotatePadBody>[0];
+  expect(restored).toMatchObject({ docType: "web", localFileHash: "original-hash", hash: "original-hash" });
+  expect(await annotatePadBody(restored)).toMatchObject({ doc_type: "web", local_file_hash: "original-hash", hash: "original-hash", source: restored.source });
 });

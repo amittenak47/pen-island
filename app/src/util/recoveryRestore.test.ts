@@ -10,6 +10,7 @@ import { putInkPages } from "./inkPageStore";
 import { encodeInkOps } from "../canvas/inkCodec";
 import { migrateLegacyWhiteboard, saveWhiteboardNotebook } from "./whiteboardStore";
 import type { RecoveryCopy } from "./syncRecovery";
+import { timelineHarness, timelineOptions } from "./bookSyncTestHarness";
 
 const board = { v: 1 as const, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } };
 const copy = (): RecoveryCopy => ({ id: "copy", type: "record", kind: "annotate", bookId: "book",
@@ -38,7 +39,7 @@ describe("explicit local recovery restore", () => {
 
   it("restores a complete missing-parent record and children while retaining the source copy", async () => {
     const original = copy(); await retainRecoveryCopy(original);
-    expect(await restoreRetainedRecord(original.id)).toEqual({ kind: "annotate", id: "book" });
+    expect(await restoreRetainedRecord(original.id)).toEqual({ kind: "annotate", id: "book", status: "queued" });
     expect(await run(STORE_CONTENT, "readonly", store => store.get("book"))).toEqual(original.record!.payload);
     expect(await run(STORE_CONTENT, "readonly", store => store.get("fnwb:book:scratch"))).toEqual(original.record!.children!.scratch);
     expect(await readRecoveryCopy(original.id)).toEqual(original);
@@ -87,5 +88,45 @@ describe("explicit local recovery restore", () => {
     const value = { source: "saved", future: { bytes: new Uint16Array([5, 400]) }, original: new Uint8Array([1, 2, 3]).buffer };
     const exported = await recoveryExportValue(value);
     expect(exported).toEqual({ source: "saved", future: { bytes: { type: "Uint16Array", bytes: [...new Uint8Array(value.future.bytes.buffer)] } }, original: { type: "ArrayBuffer", bytes: [1, 2, 3] } });
+  });
+});
+
+describe("retained restore publication", () => {
+  it("checks the hub before restoring and pushes the full retained book immediately", async () => {
+    // Synced book -> choose retained book -> previous hub saved and retained content becomes head.
+    const h = await timelineHarness("annotate"); await h.initial(); await retainRecoveryCopy(copy()); h.clearCalls();
+    expect(await restoreRetainedRecord("copy", { client: h.api, ...timelineOptions })).toEqual({ kind: "annotate", id: "book", status: "restored" });
+    expect(h.get().record?.source).toBe("# retained"); expect(h.api.commitPad).toHaveBeenCalledOnce();
+    expect(h.api.putSnapshotCopy).toHaveBeenCalled(); expect(await readRecoveryCopy("copy")).toEqual(copy());
+  });
+
+  it("returns stale without replacing local state when the retained restore did not see the hub edit", async () => {
+    // Synced book -> another device edits -> retained restore refuses before writing local state.
+    const h = await timelineHarness("annotate"); await h.initial(); await retainRecoveryCopy(copy()); await h.otherRecord("Unseen");
+    const before = await h.capture(), retained = await listRecoveryCopies(); h.clearCalls();
+    expect(await restoreRetainedRecord("copy", { client: h.api, ...timelineOptions })).toEqual({ status: "stale" });
+    expect(await h.capture()).toEqual(before); expect(await listRecoveryCopies()).toEqual(retained);
+    expect(h.api.commitPad).not.toHaveBeenCalled();
+  });
+
+  it("restores a complete pre-restore conflict copy as an authored undo", async () => {
+    // Restore saved a complete losing local alternative -> explicitly restore that alternative offline.
+    const h = await timelineHarness("annotate"); await h.initial(); const before = await h.capture(); h.status("offline");
+    await retainRecoveryCopy({ id: "undo", type: "conflict", kind: h.kind, bookId: h.id, provenance: { source: "snapshot-restore" },
+      content: { metadata: before.metadata, payload: { ...before.payload, source: "# undo" }, children: {}, ink: before.pages } });
+    expect(await restoreRetainedRecord("undo", { client: h.api, ...timelineOptions })).toMatchObject({ status: "queued", kind: h.kind, id: h.id });
+    expect((await h.capture()).record?.source).toBe("# undo"); expect(await readRecoveryCopy("undo")).not.toBeNull();
+  });
+
+  it("keeps the last applied page baselines when a retained restore waits offline", async () => {
+    // Restore an older retained book offline -> an identical hub page gets a newer revision -> reconnect publishes without a false conflict.
+    const h = await timelineHarness(); await h.initial(); const before = await h.capture();
+    await retainRecoveryCopy({ id: "older-book", type: "record", kind: h.kind, bookId: h.id, provenance: { source: "timeline" },
+      record: { meta: { ...before.metadata!, title: "Older retained book" }, payload: before.payload!, children: before.children, ink: before.pages } });
+    h.status("offline");
+    expect(await restoreRetainedRecord("older-book", { client: h.api, ...timelineOptions })).toMatchObject({ status: "queued" });
+    await h.otherPage(1, encodeInkOps([])); h.status("online");
+    const result = await h.sync(); expect(result.status, result.error?.message).toBe("synced");
+    expect(h.get().record?.title).toBe("Older retained book"); expect((await h.capture()).state.lifecycle).toBeNull();
   });
 });

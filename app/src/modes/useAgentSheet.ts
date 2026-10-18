@@ -21,9 +21,24 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
   const drag = useRef<{ id: number; y: number; height: number; next: number; shell: number; travel: number } | null>(null);
   const raf = useRef(0);
   const apply = (height: number) => { if (panel.current) panel.current.style.height = `${height}px`; };
+  /*
+   * The shell stays on the screen bottom and its top is clipped to the
+   * pointer. Sliding the whole shell down instead pushed the composer off the
+   * screen and stretched the transcript over the panel: dragging, and even a
+   * tap on the handle, showed a "maximized" chat for as long as it lasted.
+   * The handle rides the clip edge (`--lc-sheet-clip`) so the bar stays under
+   * the finger.
+   */
   const translate = () => {
     const d = drag.current;
-    if (d && panel.current) panel.current.style.transform = `translate3d(0,${d.shell - d.next}px,0)`;
+    if (!d || !panel.current) return;
+    const top = Math.max(0, d.shell - d.next);
+    panel.current.style.setProperty("--lc-sheet-clip", `${top}px`);
+    panel.current.style.clipPath = `inset(${top}px 0 0 0 round var(--lc-r-block) var(--lc-r-block) 0 0)`;
+  };
+  const unclip = () => {
+    panel.current?.style.removeProperty("--lc-sheet-clip");
+    panel.current?.style.removeProperty("clip-path");
   };
   useLayoutEffect(() => {
     const node = panel.current;
@@ -34,7 +49,11 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
     // Mounting the inactive panel on a tab switch otherwise forces layout of
     // the entire PDF before the new tab can paint.
     if (!open) {
-      node.style.transform = "translate3d(0,12px,0) scale(.98)";
+      // Closed, the whole sheet waits just below the screen and slides up as
+      // one piece. It used to sit 12px down and clipped to a small pill, so
+      // opening grew a window out of the middle of the full-size panel: a
+      // cropped slice of messages and the sessions column with no sheet edge.
+      node.style.transform = "translate3d(0,100%,0)";
       node.style.visibility = "hidden";
       node.style.pointerEvents = "none";
       document.documentElement.style.setProperty("--lc-agent-open", "0");
@@ -74,7 +93,8 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
     return () => {
       cancelAnimationFrame(raf.current); raf.current = 0; drag.current = null;
       node.style.removeProperty("transition");
-      node.style.removeProperty("will-change");
+      node.style.removeProperty("--lc-sheet-clip");
+      node.style.removeProperty("clip-path");
       document.documentElement.style.removeProperty("--lc-agent-peek");
       window.removeEventListener("resize", resize); window.visualViewport?.removeEventListener("resize", resize); observer?.disconnect();
       document.documentElement.style.removeProperty("--lc-agent-open");
@@ -88,7 +108,6 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
     initial.current ||= height;
     drag.current = { id: e.pointerId, y: e.clientY, height, next: height, shell: available.current, travel: 0 };
     panel.current.style.transition = "none";
-    panel.current.style.willChange = "transform";
     document.documentElement.classList.add("lc-agent-dragging");
     // Lay the chat out once at the largest reachable size. Moving that fixed
     // shell keeps its visible top on the pointer without relaying out every turn.
@@ -108,10 +127,17 @@ export function useAgentSheet(panel: RefObject<HTMLElement | null>, mobile: bool
     const cancel = e.type === "pointercancel" || e.type === "lostpointercapture";
     saved.current = cancel ? d.height : settleSheetHeight(d.height + d.y - e.clientY, available.current, initial.current, true);
     apply(saved.current);
+    unclip();
     if (panel.current) {
-      panel.current.style.transform = "translate3d(0,0,0)";
+      // Commit the unclipped style while transitions are still off: dropping
+      // both at once let the sheet's clip-path transition replay the drag
+      // clip back to zero, a 240ms wipe (a flash) after every lift-off.
+      // The sessions column rides the clip; settle it to zero now too, or it
+      // eases back up from the drag offset once its transition returns.
+      void getComputedStyle(panel.current).clipPath;
+      const col = panel.current.querySelector(".lc-agent-sessions-col");
+      if (col) void getComputedStyle(col).transform;
       panel.current.style.removeProperty("transition");
-      panel.current.style.removeProperty("will-change");
     }
     document.documentElement.classList.remove("lc-agent-dragging");
     document.dispatchEvent(new Event("lc-agent-drag-end"));
