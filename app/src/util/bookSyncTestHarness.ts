@@ -1,6 +1,6 @@
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { expect, vi } from "vitest";
-import { LcApiError, type BookStateDto, type CommitRequestDto, type CommitResultDto, type InkPageDto, type LcClient } from "../api/client";
+import { LcApiError, type BookStateDto, type CommitRequestDto, type CommitResultDto, type InkPageDto, type LcClient, type PadSnapshotDto } from "../api/client";
 import { bytesToB64, b64ToBytes } from "../api/nativeHttp";
 import { encodeInkOps, packEncodedInk, unpackEncodedInk, type EncodedInk } from "../canvas/inkCodec";
 import { captureBook } from "./bookSnapshot";
@@ -30,19 +30,27 @@ const pageIdentity = (kind: string, key: string, pageId: number) => JSON.stringi
 /** Copied from bookSync.test.ts, with the real hub's gone/restore CAS rules. */
 export async function timelineHarness(kind: TimelineKind = "whiteboard", id = "book") {
   await closeDbForTests(); resetBookCoordinatorForTests(); resetLocalBookStoreForTests(); resetPadSyncForTests();
-  vi.stubGlobal("indexedDB", new IDBFactory()); vi.stubGlobal("IDBKeyRange", IDBKeyRange);
-  const values = new Map<string, string>(), locks = new Map<string, Promise<unknown>>();
-  vi.stubGlobal("localStorage", { get length() { return values.size; }, key: (index: number) => [...values.keys()][index] ?? null,
-    getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
+  vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+  const devices = new Map<string, { db: IDBFactory; values: Map<string, string> }>(), locks = new Map<string, Promise<unknown>>();
   vi.stubGlobal("navigator", { locks: { request: (key: string, option: (() => Promise<unknown>) | LockOptions, callback?: () => Promise<unknown>) => {
     const work = typeof option === "function" ? option : callback!, prior = locks.get(key) ?? Promise.resolve(), result = prior.catch(() => {}).then(work);
     locks.set(key, result); return result;
   } } });
-  setHostLoopback(null); savePadHub(HUB); refreshPadHubStatus();
   const status = (value: "online" | "offline") => reportPadHubStatus(beginPadHubStatusRequest(HUB), value);
-  status("online");
+  const switchDevice = async (name: string) => {
+    await closeDbForTests(); resetBookCoordinatorForTests(); resetLocalBookStoreForTests(); resetPadSyncForTests();
+    let device = devices.get(name);
+    if (!device) { device = { db: new IDBFactory(), values: new Map() }; devices.set(name, device); }
+    const { db, values } = device;
+    vi.stubGlobal("indexedDB", db);
+    vi.stubGlobal("localStorage", { get length() { return values.size; }, key: (index: number) => [...values.keys()][index] ?? null,
+      getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => values.set(key, value), removeItem: (key: string) => values.delete(key) });
+    setHostLoopback(null); savePadHub(HUB); refreshPadHubStatus(); status("online");
+  };
+  await switchDevice("this");
   let revision = 0;
   const books = new Map<string, BookStateDto>(), pages = new Map<string, InkPageDto>(), staged = new Map<string, InkPageDto>(), receipts = new Map<string, CommitResultDto>();
+  const copies = new Map<string, PadSnapshotDto>();
   const get = (bookKind: TimelineKind = kind, bookId = id): BookStateDto => books.get(identity(bookKind, bookId)) ?? {
     kind: bookKind, id: bookId, book_rev: 0, state: "absent", gone_seq: null, record_rev: 0, record_hash: null, record: null, pages: [],
   };
@@ -98,6 +106,16 @@ export async function timelineHarness(kind: TimelineKind = "whiteboard", id = "b
       receipts.set(body.upload_id, result); return result;
     }),
     getPadCommit: vi.fn(async (uploadId: string) => structuredClone(receipts.get(uploadId) ?? null)),
+    putSnapshotCopy: vi.fn(async (bookKind: TimelineKind, bookId: string, contentHash: string, body: PadSnapshotDto) => {
+      const key = JSON.stringify([bookKind, bookId, contentHash]), prior = copies.get(key);
+      if (prior && JSON.stringify(prior) !== JSON.stringify(body)) throw new LcApiError("immutable copy changed", 409);
+      copies.set(key, structuredClone(body));
+      return { content_hash: contentHash, tier: body.tier, written_at: body.written_at, name: (body.payload as { name?: string })?.name ?? "" };
+    }),
+    listSnapshotCopies: vi.fn(async (bookKind: TimelineKind, bookId: string) => [...copies].filter(([key]) => {
+      const [candidateKind, candidateId] = JSON.parse(key); return candidateKind === bookKind && candidateId === bookId;
+    }).map(([key, body]) => ({ content_hash: JSON.parse(key)[2], tier: body.tier, written_at: body.written_at, name: (body.payload as { name?: string })?.name ?? "" }))),
+    getSnapshotCopy: vi.fn(async (bookKind: TimelineKind, bookId: string, contentHash: string) => structuredClone(copies.get(JSON.stringify([bookKind, bookId, contentHash])) ?? null)),
     pingPadSync: vi.fn(async () => ({ now: 5, features: ["atomic_book_sync_v1"], books: [...books.values()].map(book => structuredClone(book)), whiteboard: [], annotate: [], problem: [], snapshots: [], gone: [], ink: [], edges: [] })),
     docBytesOnHub: vi.fn(async () => false),
     putDocBytes: vi.fn(async () => {}),
@@ -122,8 +140,13 @@ export async function timelineHarness(kind: TimelineKind = "whiteboard", id = "b
     const book = get(); return set({ ...book, book_rev: revision, pages: ownedPages(book) });
   };
   const hubInk = async (pageId: number, bookKind: TimelineKind = kind, bookId = id) => unpackEncodedInk((await validateInk(b64ToBytes(pages.get(pageIdentity(bookKind, bookId, pageId))!.gz!))).packed);
+  const sweepHub = () => {
+    const book = get();
+    for (const [key, page] of pages) if (page.kind === kind && (page.key === id || page.key.startsWith(`${id}/fn/`))) pages.delete(key);
+    set({ ...book, retained_restore_pages: [], book_rev: ++revision });
+  };
   const clearCalls = () => { for (const value of Object.values(api)) if (vi.isMockFunction(value)) value.mockClear(); };
-  return { api, kind, id, localKey, get, capture, save, sync, initial, trash, status, otherRecord, otherPage, otherDelete, hubInk, clearCalls };
+  return { api, kind, id, localKey, get, capture, save, sync, initial, trash, status, otherRecord, otherPage, otherDelete, hubInk, clearCalls, switchDevice, sweepHub };
 }
 
 export async function closeTimelineHarness() {

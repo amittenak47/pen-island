@@ -1,29 +1,40 @@
-/** Explicit retained-copy choices restore local state; no network is involved. */
+/** Explicit retained-copy choices create a new authored version and publish it when online. */
 import { readRecoveryCopy, type RecoveryCopy } from "./syncRecovery";
 import { STORE_CONTENT, STORE_INK_PAGES, STORE_SYNC_RECOVERY, run, withStore } from "./idb";
-import { getBookSyncState, type BookIdentity, type BookMeta } from "./syncState";
+import { type BookIdentity, type BookMeta } from "./syncState";
 import { mutateLocalBook, ensureBookReadyForAtomicSync } from "./localBookStore";
 import { newBookToken, hasBookLocks } from "./bookCoordinator";
 import { getDocBytes } from "./docBytes";
 import { artifactCatalogFields } from "./padArtifacts";
 import { downloadArtifactAssets } from "./artifactAssetSync";
-import { encodedFromRecord, getInkPageRecords, inkPageKey, type InkPageRecord } from "./inkPageStore";
+import { authoredInkRow, encodedFromRecord, getInkPageRecords, inkPageKey, type InkPageRecord } from "./inkPageStore";
 import { packEncodedInk } from "../canvas/inkCodec";
 import { validatePackedInk } from "./syncContent";
 import { notifyBookMetadataChanged } from "./localBookStore";
+import { preparePadRestore, finishPadRestore, type RestorePadOptions } from "./padSync";
+import { encodeInkOps } from "../canvas/inkCodec";
 
 function object(value: unknown): value is Record<string, unknown> { return !!value && typeof value === "object" && !Array.isArray(value); }
 function board(value: unknown): value is Record<string, unknown> {
   return object(value) && value.v === 1 && Array.isArray(value.elements) && object(value.appState);
 }
-export async function restoreRetainedRecord(id: string): Promise<BookIdentity> {
+export async function restoreRetainedRecord(id: string, options: RestorePadOptions = {}): Promise<(BookIdentity & { status: "restored" | "queued" }) | { status: "stale" }> {
   const copy = await readRecoveryCopy(id);
-  if (!copy?.record || copy.type !== "record" || !copy.kind || !copy.bookId) throw new Error("This retained copy is not a complete book.");
+  if (!copy || !copy.kind || !copy.bookId) throw new Error("This retained copy is not a complete book.");
   const owner = { kind: copy.kind, id: copy.bookId };
   if (hasBookLocks()) await ensureBookReadyForAtomicSync(owner);
-  const record = copy.record;
+  let record = copy.record;
+  if (!record && copy.type === "conflict" && object(copy.content) && object(copy.content.metadata) && object(copy.content.payload)) {
+    const prefix = `fnwb:${owner.id}:`, children = object(copy.content.children) ? copy.content.children : {};
+    record = { meta: copy.content.metadata as BookMeta, payload: copy.content.payload,
+      children: Object.fromEntries(Object.entries(children).map(([key, child]) => [key.startsWith(prefix) ? key.slice(prefix.length) : key, child])),
+      ...(Array.isArray(copy.content.ink) ? { ink: copy.content.ink as InkPageRecord[] } : {}) };
+  }
+  if (!record || !["record", "conflict"].includes(copy.type)) throw new Error("This retained copy is not a complete book.");
   if (record.meta.kind !== owner.kind || record.meta.id !== owner.id || !board(record.payload.board)) throw new Error("This retained book is unreadable. The copy was kept.");
-  const capturedState = await getBookSyncState(owner.kind, owner.id);
+  const prepared = await preparePadRestore(owner, options);
+  if (prepared.status === "stale") return { status: "stale" };
+  const capturedState = prepared.capture.state;
   const contentStore = owner.kind === "problem" ? "problem_boards" : STORE_CONTENT;
   const current = await run(contentStore, "readonly", store => store.get(owner.id));
   const children: Record<string, unknown> = {};
@@ -86,25 +97,31 @@ export async function restoreRetainedRecord(id: string): Promise<BookIdentity> {
         content: { metadata: ctx.metadata, payload: ctx.content, children, ink } };
       ctx.tx.objectStore(STORE_SYNC_RECOVERY).add(retained, retained.id);
     }
-    const metadata: BookMeta = { ...record.meta, ...owner, deletedAt: undefined, purgedAt: undefined,
-      deleteAcked: false, updatedAt: Date.now(), lastTouch: Date.now(), syncSeq: Math.max(Number(record.meta.syncSeq ?? 0), ctx.state.lifecycle?.seq ?? 0) + 1 };
+    const metadata: BookMeta = { ...record.meta, ...owner, deletedAt: undefined, purgedAt: undefined, deleteFollowed: undefined,
+      deleteAcked: false, updatedAt: Date.now(), lastTouch: Date.now(), syncSeq: Math.max(Number(record.meta.syncSeq ?? 0), Number(ctx.metadata?.syncSeq ?? 0), ctx.state.lifecycle?.seq ?? 0, prepared.goneSeq ?? 0) + 1 };
     ctx.setMetadata(metadata);
     ctx.setContent(owner.kind === "problem" ? { ...metadata, ...record.payload } : record.payload);
     // A choice between the hub's own disagreeing versions: the next sync
     // commits it over that hub record (see `inlineChoiceHubHash`).
     const hubRecordHash = (copy.provenance as { hubRecordHash?: unknown } | undefined)?.hubRecordHash;
     if (typeof hubRecordHash === "string") ctx.setState({ ...ctx.state, inlineChoiceHubHash: hubRecordHash });
+    if (owner.kind === "annotate") ctx.tx.objectStore(STORE_CONTENT).delete(IDBKeyRange.bound(`fnwb:${owner.id}:`, `fnwb:${owner.id}:\uffff`));
     for (const [childId, child] of Object.entries(record.children ?? {})) ctx.tx.objectStore(STORE_CONTENT).put(child, `fnwb:${owner.id}:${childId}`);
-    if (record.ink) for (const page of restoreInk) ctx.tx.objectStore(STORE_INK_PAGES).put({ ...page,
-      changeSeq: ctx.seq, syncedChangeSeq: 0, syncedRev: 0, baseWireHash: null, baseLocalHash: null, bootstrap: true, dirty: true },
-      inkPageKey(page.docKey, page.pageId));
-    if (ctx.state.lifecycle?.action === "delete" || record.meta.deletedAt !== undefined || record.meta.purgedAt !== undefined) {
-      ctx.markLifecycle("restore", Number(metadata.syncSeq), ctx.state.bootstrap ? null : ctx.state.appliedBookRev, ctx.state.lifecycle?.goneSeq ?? null);
+    const desiredInk = [...restoreInk];
+    if (record.ink) for (const previous of ink) if (!desiredInk.some(page => page.docKey === previous.docKey && page.pageId === previous.pageId)) {
+      desiredInk.push({ v: 1, docKey: previous.docKey, pageId: previous.pageId, inkC: encodeInkOps([]), dirty: true, updatedAt: Date.now() });
     }
+    if (record.ink) for (const page of desiredInk) {
+      const current = ink.find(row => row.docKey === page.docKey && row.pageId === page.pageId);
+      ctx.tx.objectStore(STORE_INK_PAGES).put(authoredInkRow({ ...page,
+        updatedAt: Math.max(Date.now(), (current?.updatedAt ?? 0) + 1) }, current, ctx.seq), inkPageKey(page.docKey, page.pageId));
+    }
+    ctx.markLifecycle("restore", Number(metadata.syncSeq), prepared.baseBookRev, prepared.goneSeq);
   });
   await notifyBookMetadataChanged(owner.kind, owner.id);
   if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("lc-pad-hub", { detail: { ...owner, op: "reload" } }));
-  return owner;
+  const result = await finishPadRestore(owner, prepared, options);
+  return result.status === "stale" ? result : { ...owner, status: result.status };
 }
 
 /** Export binary values without silently serializing them to empty JSON objects. */

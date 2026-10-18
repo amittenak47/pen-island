@@ -662,7 +662,8 @@ describe("padSync ping", () => {
     expect(restoreAnnotateDoc).not.toHaveBeenCalled();
   });
 
-  it("does not undelete local trash from a live hub row", async () => {
+  it("does not undelete local trash from an unversioned live hub row", async () => {
+    // An unversioned legacy row cannot establish a restore newer than this device's acknowledged delete.
     listWhiteboardTrash.mockReturnValue([{ id: "w1", deletedAt: 1 }]);
     getWhiteboardNotebook.mockResolvedValue({
       id: "w1",

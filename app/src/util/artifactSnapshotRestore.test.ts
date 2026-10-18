@@ -11,6 +11,8 @@ import { resetContentRepairForTests } from "./contentStore";
 import { restorePadSnapshotLocally } from "./artifactSnapshotRestore";
 import type { PadSnapshot } from "./padSnapshotStore";
 import { listRecoveryCopies } from "./syncRecovery";
+import { timelineHarness, timelineOptions, drawing } from "./bookSyncTestHarness";
+import { LcApiError } from "../api/client";
 
 const board = { v: 1 as const, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } };
 const empty = encodeInkOps([]);
@@ -135,4 +137,74 @@ it("restoring frozen HTML preserves the local file's original hash and marker", 
     docType: "web", hash: "original-hash", localFileHash: "original-hash",
   });
   expect(await run(STORE_CONTENT, "readonly", store => store.get("book"))).toMatchObject({ source: "<p>Varying rendered HTML</p>" });
+});
+
+it.each([true, false])("restores a hub snapshot's captured source identity over the current PDF metadata (optional fields: %s)", async optional => {
+  // A shared full-version snapshot predates a source replacement -> restoring it restores its source identity too.
+  const h = await timelineHarness("annotate"); h.status("offline"); await seed("annotate");
+  await mutateLocalBook({ kind: "annotate", id: "book" }, { requireIdb: true }, ctx => {
+    ctx.setMetadata({ ...ctx.metadata!, docType: "pdf", hash: "current-source", localFileHash: "current-source", label: "Current label" });
+  });
+  const saved = { ...snapshot(), kind: "annotate" as const, source: "", bookRecord: { id: "book", name: "Saved.pdf",
+    doc_type: "pdf", hash: "saved-source", board, future: { author: "saved" },
+    ...(optional ? { local_file_hash: "saved-source", label: "Saved label" } : {}) } };
+  expect(await restorePadSnapshotLocally({ kind: "annotate", id: "book" }, saved)).toEqual({ status: "queued" });
+  const restored = (await h.capture()).record!;
+  expect(restored.hash).toBe("saved-source"); expect(restored.doc_type).toBe("pdf");
+  expect(restored.local_file_hash).toBe(optional ? "saved-source" : undefined);
+  expect(restored.label).toBe(optional ? "Saved label" : undefined); expect(restored.future).toEqual({ author: "saved" });
+});
+
+describe("snapshot restore hub checks", () => {
+  it("returns queued offline and leaves the restore authored for the next sync", async () => {
+    // Synced book -> offline snapshot restore -> durable new local edit without a request.
+    const h = await timelineHarness(); await h.initial(); h.status("offline"); h.clearCalls();
+    expect(await restorePadSnapshotLocally({ kind: h.kind, id: h.id }, snapshot(), undefined, { client: h.api, ...timelineOptions })).toEqual({ status: "queued" });
+    expect((await h.capture()).record?.title).toBe("Old book");
+    expect((await h.capture()).state.changeSeq).toBeGreaterThan((await h.capture()).state.syncedChangeSeq);
+    expect(h.api.getBookState).not.toHaveBeenCalled(); expect(h.api.commitPad).not.toHaveBeenCalled();
+  });
+
+  it("pushes immediately and preserves the replaced hub head as a shared snapshot copy", async () => {
+    // Synced book -> online snapshot restore -> new hub head and immutable previous hub version.
+    const h = await timelineHarness(); await h.initial(); const previous = structuredClone(h.get()); h.clearCalls();
+    expect(await restorePadSnapshotLocally({ kind: h.kind, id: h.id }, snapshot(), undefined, { client: h.api, ...timelineOptions })).toEqual({ status: "restored" });
+    expect(h.get().record?.title).toBe("Old book"); expect(h.api.commitPad).toHaveBeenCalledOnce();
+    expect(h.api.putSnapshotCopy).toHaveBeenCalled();
+    const saved = vi.mocked(h.api.putSnapshotCopy).mock.calls.at(-1)!;
+    expect(saved[3].payload).toMatchObject({ name: previous.record?.title, ink: expect.arrayContaining([expect.objectContaining({ pageId: 1 }), expect.objectContaining({ pageId: 2 })]) });
+  });
+
+  it.each(["record", "page"] as const)("refuses an unseen %s change without changing local data", async change => {
+    // Synced book -> another device changes one component -> stale restore leaves all stores untouched.
+    const h = await timelineHarness(); await h.initial();
+    if (change === "record") await h.otherRecord("Unseen edit"); else await h.otherPage(1, drawing());
+    const before = await h.capture(), retained = await listRecoveryCopies(); h.clearCalls();
+    expect(await restorePadSnapshotLocally({ kind: h.kind, id: h.id }, snapshot(), undefined, { client: h.api, ...timelineOptions })).toEqual({ status: "stale" });
+    expect(await h.capture()).toEqual(before); expect(await listRecoveryCopies()).toEqual(retained);
+    expect(h.api.commitPad).not.toHaveBeenCalled(); expect(h.api.putSnapshotCopy).not.toHaveBeenCalled();
+  });
+
+  it("accepts a newer revision with unchanged record and page content", async () => {
+    // Synced book -> hub revision advances without content changes -> restore still commits immediately.
+    const h = await timelineHarness(); await h.initial(); h.get().book_rev += 100;
+    expect(await restorePadSnapshotLocally({ kind: h.kind, id: h.id }, snapshot(), undefined, { client: h.api, ...timelineOptions })).toEqual({ status: "restored" });
+    expect(h.get().record?.title).toBe("Old book");
+  });
+
+  it("keeps the local book unchanged if preserving the hub snapshot fails", async () => {
+    // Unseen hub edit -> force restore -> failed shared backup prevents local replacement.
+    const h = await timelineHarness(); await h.initial(); await h.otherRecord("Unseen edit"); const before = await h.capture();
+    vi.mocked(h.api.putSnapshotCopy).mockRejectedValueOnce(new Error("snapshot backup failed"));
+    await expect(restorePadSnapshotLocally({ kind: h.kind, id: h.id }, snapshot(), undefined, { client: h.api, force: true, ...timelineOptions })).rejects.toThrow("snapshot backup failed");
+    expect(await h.capture()).toEqual(before); expect(h.get().record?.title).toBe("Unseen edit");
+  });
+
+  it("does not treat an authorization failure as an offline restore", async () => {
+    // Online restore -> hub refuses its preflight -> current local book stays intact.
+    const h = await timelineHarness(); await h.initial(); const before = await h.capture();
+    vi.mocked(h.api.getBookState).mockRejectedValueOnce(new LcApiError("Unauthorized", 401));
+    await expect(restorePadSnapshotLocally({ kind: h.kind, id: h.id }, snapshot(), undefined, { client: h.api, ...timelineOptions })).rejects.toThrow("Unauthorized");
+    expect(await h.capture()).toEqual(before);
+  });
 });

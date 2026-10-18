@@ -166,7 +166,10 @@ async function executePass(client: LcClient, options: BookPassOptions): Promise<
       }
       for (const state of states) if ("kind" in state && present.has(identity(state))) {
         const remote = inventory.get(identity(state));
-        if (remote && remote.book_rev !== state.appliedBookRev && present.get(identity(state))?.deletedAt === undefined) candidates.set(identity(state), { kind: state.kind, id: state.id });
+        const local = present.get(identity(state));
+        if (remote && remote.book_rev !== state.appliedBookRev && (local?.deletedAt === undefined
+          || remote.state === "live" && remote.book_rev > state.appliedBookRev && !state.lifecycle
+            && (local?.deleteFollowed === true || local?.deleteAcked === true))) candidates.set(identity(state), { kind: state.kind, id: state.id });
       }
       for (const book of metadata) if (!states.some(state => "kind" in state && identity(state) === identity(book))) candidates.set(identity(book), book);
       if (options.libraryPull) for (const book of inventory.values()) if (book.state === "live" && present.get(identity(book))?.deletedAt === undefined) candidates.set(identity(book), book);

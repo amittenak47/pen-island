@@ -269,6 +269,8 @@ export interface BookPublication {
   lifecycle?: SyncState["lifecycle"];
   /** An explicit hub choice brings back a book deleted on this device. */
   restoreFromHub?: boolean;
+  /** A remote restoration supplies a complete active page set. */
+  replacePages?: boolean;
   /** This device's deletion agrees with the hub's: mark it acknowledged. */
   settleDelete?: boolean;
   /** Keep the complete book in local trash after observing or choosing the hub delete. */
@@ -329,6 +331,11 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
                 const now = Date.now();
                 tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deletedAt: now, deleteAcked: true,
                   deleteFollowed: prepared.trashFromHub.followed, lastTouch: now }, syncStateKey(capture.kind, capture.id));
+              }
+              if (prepared.replacePages) for (const row of capture.pages) {
+                if (!prepared.pages.some(page => page.row.docKey === row.docKey && page.row.pageId === row.pageId)) {
+                  tx.objectStore(STORE_INK_PAGES).delete(inkPageKey(row.docKey, row.pageId));
+                }
               }
               for (let index = 0; index < prepared.pages.length; index++) {
                 const page = prepared.pages[index]!, seq = first + index + 1;

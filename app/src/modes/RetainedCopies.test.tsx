@@ -5,13 +5,14 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { RetainedCopies } from "./RetainedCopies";
 
 const mocks = vi.hoisted(() => ({
-  restore: vi.fn(async () => ({ kind: "annotate", id: "removed" })),
+  copies: vi.fn(async (): Promise<unknown[]> => [{ id: "recovery", type: "record", bookId: "removed", record: { meta: { name: "Removed parent" } } }]),
+  restore: vi.fn(async (): Promise<{ kind?: string; id?: string; status: "queued" | "restored" | "stale" }> => ({ kind: "annotate", id: "removed", status: "queued" })),
   snapshot: vi.fn(async (_kind: string, _key: string, _tier: string, snapshotId?: string) => ({ snapshotId, artifactBundle: { retained: true } })),
-  restoreSnapshot: vi.fn(async () => {}),
+  restoreSnapshot: vi.fn(async (): Promise<{ status: "queued" | "restored" | "stale" }> => ({ status: "queued" })),
   exported: vi.fn(async () => ({ original: new Uint8Array([1, 2]).buffer })),
 }));
 vi.mock("../util/syncRecovery", () => ({
-  listRecoveryCopies: async () => [{ id: "recovery", type: "record", bookId: "removed", record: { meta: { name: "Removed parent" } } }],
+  listRecoveryCopies: mocks.copies,
   exportRecoveryCopy: mocks.exported,
 }));
 vi.mock("../util/padSnapshotStore", () => ({
@@ -53,4 +54,24 @@ it("keeps retained entries reachable and displays a refused restoration", async 
   await click(buttons[1]!); await click(buttons[1]!);
   expect(host.querySelector('[role="alert"]')?.textContent).toBe("Missing handwriting; both copies kept");
   expect(refreshed).not.toHaveBeenCalled(); expect(host.querySelectorAll(".lc-scratch-load-entry")).toHaveLength(3);
+});
+it.each(["record", "snapshot"] as const)("shows the terse stale error for a %s restore and keeps the library unchanged", async type => {
+  // Another device changed the book -> restore reports stale -> show existing error without a success callback.
+  const row = type === "record" ? host.querySelector<HTMLDivElement>(".lc-scratch-load-entry")!
+    : [...host.querySelectorAll<HTMLDivElement>(".lc-scratch-load-entry")].find(entry => entry.querySelector("strong")?.textContent === "first")!;
+  if (type === "record") mocks.restore.mockResolvedValueOnce({ status: "stale" });
+  else mocks.restoreSnapshot.mockResolvedValueOnce({ status: "stale" });
+  await click(row.querySelectorAll("button")[1]!); await click(row.querySelectorAll("button")[1]!);
+  expect(host.querySelector('[role="alert"]')?.textContent).toBe("Changed on another device since your last sync. Sync first.");
+  expect(refreshed).not.toHaveBeenCalled(); expect(host.querySelectorAll(".lc-scratch-load-entry")).toHaveLength(3);
+});
+it("offers a complete pre-restore retained alternative for undo", async () => {
+  // Snapshot restore retains the replaced complete book -> its library row remains explicitly restorable.
+  mocks.copies.mockResolvedValueOnce([{ id: "undo", type: "conflict", kind: "annotate", bookId: "removed",
+    provenance: { source: "snapshot-restore" }, content: { metadata: { kind: "annotate", id: "removed", name: "Previous" }, payload: { board: {} }, children: {}, ink: [] } }]);
+  await act(async () => root.render(<RetainedCopies key="undo" kind="annotate" onRestored={refreshed} />));
+  const row = host.querySelector<HTMLDivElement>(".lc-scratch-load-entry")!;
+  expect(row.querySelectorAll("button")).toHaveLength(2);
+  await click(row.querySelectorAll("button")[1]!); await click(row.querySelectorAll("button")[1]!);
+  expect(mocks.restore).toHaveBeenCalledWith("undo");
 });

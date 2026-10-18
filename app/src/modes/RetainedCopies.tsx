@@ -37,9 +37,12 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
       {(() => { const name = String(copy.record?.meta.label ?? copy.record?.meta.title ?? copy.record?.meta.name ?? "Retained local copy"); return <strong className="lc-library-subtitle" title={name}>{name}</strong>; })()}
       <span className="lc-retained-actions">
       <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => void perform(async () => exportValue(copy.bookId ?? "retained", await exportRecoveryCopy(copy.id)))}>Export copy</button>
-      {copy.type === "record" && <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => {
+      {(copy.type === "record" || copy.type === "conflict" && !!(copy.content as { metadata?: unknown; payload?: unknown } | undefined)?.metadata
+        && !!(copy.content as { payload?: unknown }).payload) && <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => {
         if (selected !== copy.id) { setSelected(copy.id); return; }
-        void perform(async () => { await restoreRetainedRecord(copy.id); onRestored(); setNotice("The book was restored locally. Sync it when ready."); setSelected(null); });
+        void perform(async () => { const result = await restoreRetainedRecord(copy.id);
+          if (result.status === "stale") throw new Error("Changed on another device since your last sync. Sync first.");
+          onRestored(); setNotice("The book was restored."); setSelected(null); });
       }}>{selected === copy.id ? "Confirm restore" : "Restore locally"}</button>}
       {copy.provenance?.source === "fallback-branch" && <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => {
         if (selected !== copy.id) { setSelected(copy.id); return; }
@@ -61,9 +64,10 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
         void perform(async () => {
           const row = await getPadSnapshot(snapshot.kind, snapshot.key, snapshot.tier, snapshot.snapshotId);
           if (!row) throw new Error("This backup cannot be read. Its stored copy was kept.");
-          await restorePadSnapshotLocally({ kind: snapshot.kind, id: snapshot.key }, row, row.artifactBundle);
+          const result = await restorePadSnapshotLocally({ kind: snapshot.kind, id: snapshot.key }, row, row.artifactBundle);
+          if (result.status === "stale") throw new Error("Changed on another device since your last sync. Sync first.");
           if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("lc-pad-hub", { detail: { kind: snapshot.kind, id: snapshot.key, op: "reload" } }));
-          onRestored(); setNotice("The book was restored locally. Sync it when ready."); setSelected(null);
+          onRestored(); setNotice("The book was restored."); setSelected(null);
         });
       }}>{selected === (snapshot.snapshotId ?? `${snapshot.kind}:${snapshot.key}:${snapshot.tier}`) ? "Confirm restore" : "Restore locally"}</button>
       </span>

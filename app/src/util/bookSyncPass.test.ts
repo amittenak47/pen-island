@@ -112,6 +112,17 @@ it("does not import hub-only books except during explicit Library Pull", async (
   expect((await syncBookPass(api, { libraryPull: true })).books.map(book => book.id)).toEqual(["hub-only"]);
   expect(vi.mocked(syncBook).mock.calls[0]![4]).toMatchObject({ allowCreate: true });
 });
+it.each([true, false])("discovers a newer live hub head for acknowledged trash (followed: %s)", async followed => {
+  // This acknowledges a delete, then another device restores and a library pass discovers the newer live head.
+  await save("trashed");
+  await mutateLocalBook({ kind: "whiteboard", id: "trashed" }, { authored: false }, ctx => {
+    ctx.setMetadata({ ...ctx.metadata!, deletedAt: 10, deleteAcked: true, deleteFollowed: followed });
+    ctx.setState({ ...ctx.state, bootstrap: false, syncedChangeSeq: ctx.state.changeSeq, appliedBookRev: 2, lifecycle: null });
+  });
+  ping.books = [inventory("trashed", 3)];
+  expect((await syncBookPass(api)).books.map(book => book.id)).toEqual(["trashed"]);
+  expect(syncBook).toHaveBeenCalledOnce();
+});
 it("isolates a broken inventory book and still attempts its healthy neighbour", async () => {
   await save("bad"); await save("good");
   ping.errors = [{ kind: "whiteboard", id: "bad", book_rev: 1, error: { message: "Unreadable hub ink", status: "unreadable_content" } }];

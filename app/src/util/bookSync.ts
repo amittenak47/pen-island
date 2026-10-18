@@ -1,5 +1,5 @@
 /** Current-state sync. Staging is invisible; one commit publishes one book. */
-import { LcApiError, type LcClient, type BookStateDto, type BookPageStateDto, type CommitRequestDto, type CommitResultDto } from "../api/client";
+import { LcApiError, type LcClient, type BookStateDto, type BookPageStateDto, type CommitRequestDto, type CommitResultDto, type PadSnapshotDto } from "../api/client";
 import { b64ToBytes, bytesToB64 } from "../api/nativeHttp";
 import { captureBook, acknowledgeBook, publishBook, localizedRecordHash, retainInlineChoices, pageIdentity, wirePageKey, localPageKey,
   type BookCapture, type PreparedBookPage } from "./bookSnapshot";
@@ -9,7 +9,7 @@ import { ensureBookReadyForAtomicSync, mutateLocalBook, LocalBookConflictError }
 import { type BookIdentity, type SyncState } from "./syncState";
 import { encodedFromRecord, type InkPageRecord } from "./inkPageStore";
 import { packEncodedInk, encodeInkOps, unpackEncodedInk, summarizeEncodedInk } from "../canvas/inkCodec";
-import { recordHash, hashBytes, canonicalJson, validateInk } from "./syncContent";
+import { recordHash, hashBytes, canonicalJson, validateInk, snapshotCopyHash } from "./syncContent";
 import { gzipBytes } from "./gzip";
 import { localizeEncodedHubInk, pdfInkContextFromRecord, tagOutgoingPdfInk } from "./pdfInkLayout";
 import { artifactCatalogFields } from "./padArtifacts";
@@ -24,6 +24,8 @@ import { stageWhiteboardArtifactSnapshot } from "./artifactWhiteboards";
 import { problemCanvasSnapshot } from "./problemArtifactConflict";
 import type { BoardBlob } from "../canvas/BoardHandle";
 import { bookDisplay, type BookDisplay } from "./bookSyncMessages";
+import { captureArtifactSnapshot } from "./artifactSnapshot";
+import type { SnapshotInkPage } from "./padSnapshotPayload";
 
 export type BookErrorKind = "unreachable" | "storage" | "needs_choice" | "merge_mount" | "local_page" | "hub_page"
   | "stage" | "unconfirmed" | "hub_changed" | "local_changed" | "missing_staging" | "missing_parent" | "dependency" | "gone" | "cap" | "invalid";
@@ -50,7 +52,7 @@ export interface BookResult extends BookIdentity {
   committed: boolean;
   error?: BookSyncError;
   display?: BookDisplay;
-  notice?: "deleted_elsewhere";
+  notice?: "deleted_elsewhere" | "restored_elsewhere";
 }
 export type BookChoice = "local" | "server" | "merged" | "none";
 export interface BookResolution {
@@ -145,6 +147,55 @@ async function retryThree<T>(work: () => Promise<T>, signal: AbortSignal, option
   }
 }
 const vector = (book: BookStateDto) => book.state === "gone" ? book.retained_restore_pages ?? [] : book.pages;
+/** Revisions alone do not imply authored changes (for example, an identical restore). */
+export function hasUnseenHubContent(capture: BookCapture, remote: BookStateDto): boolean {
+  if (remote.state !== "live" || remote.book_rev <= capture.state.appliedBookRev) return false;
+  if (remote.record_hash !== capture.state.baseRecordWireHash) return true;
+  const pages = new Map(remote.pages.map(page => [pageIdentity(page.key, page.page_id), page]));
+  for (const row of capture.pages) {
+    if (!(row.syncedRev && row.syncedRev > 0)) continue;
+    const key = pageIdentity(wirePageKey(capture, row.docKey), row.pageId), page = pages.get(key);
+    if (!page || (row.baseWireHash ? page.hash !== row.baseWireHash : page.rev !== row.syncedRev)) return true;
+    pages.delete(key);
+  }
+  return pages.size > 0;
+}
+
+/** The hub does not archive overwritten heads. Preserve raw pages with their matching record layout. */
+export async function saveHubSnapshotCopy(client: LcClient, capture: BookCapture, remote: BookStateDto,
+  options: BookSyncOptions = {}, signal = options.signal ?? new AbortController().signal): Promise<void> {
+  if (remote.state !== "live" || !remote.record || capture.kind === "problem") return;
+  if (remote.kind !== capture.kind || remote.id !== capture.id || await recordHash(remote.record) !== remote.record_hash) {
+    throw new BookSyncError("invalid", "The hub snapshot identity is invalid");
+  }
+  const ink: SnapshotInkPage[] = [], footnoteInk: Record<string, SnapshotInkPage[]> = {};
+  for (const page of remote.pages) {
+    localPageKey(capture, page.key);
+    const dto = await boundedBookRequest(() => client.getInkPage(capture.kind as "annotate" | "whiteboard", page.key, page.page_id,
+      { bookRev: remote.book_rev, pageRev: page.rev }, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+    if (!dto || dto.rev !== page.rev || (await validateInk(b64ToBytes(dto.gz))).wireHash !== page.hash) {
+      throw new BookSyncError("hub_page", "The hub version could not be retained", [{ key: page.key, pageId: page.page_id }]);
+    }
+    const row = { pageId: page.page_id, updatedAt: dto.updated_at, gz: dto.gz };
+    if (page.key === capture.id) ink.push(row);
+    else (footnoteInk[page.key.slice(`${capture.id}/fn/`.length)] ??= []).push(row);
+  }
+  await prepareDependencies(client, capture, remote.record, false, options, signal);
+  const artifactBundle = await captureArtifactSnapshot(artifactCatalogFields(remote.record.artifacts, capture).artifacts);
+  const payload = { name: String(remote.record.title ?? remote.record.name ?? "Book"), board: remote.record.board,
+    agent: remote.record.agent ?? [], ink, bookRecord: remote.record,
+    ...(remote.record.page_count !== undefined ? { pageCount: remote.record.page_count } : {}),
+    ...(capture.kind === "annotate" ? { source: remote.record.source ?? "", footnotes: remote.record.footnotes ?? [],
+      footnoteBoards: remote.record.footnote_boards ?? {}, footnoteInk } : {}),
+    ...(artifactBundle ? { artifactBundle } : {}) };
+  const body: PadSnapshotDto = { kind: capture.kind, key: capture.id, tier: "2h", written_at: Date.now(), payload };
+  const hash = await snapshotCopyHash(body);
+  await boundedBookRequest(() => client.checkBookHead(capture.kind, capture.id, remote.book_rev, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+  const known = await boundedBookRequest(() => client.listSnapshotCopies(capture.kind, capture.id, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+  if (!known.some(row => row.content_hash === hash)) {
+    await boundedBookRequest(() => client.putSnapshotCopy(capture.kind, capture.id, hash, body, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+  }
+}
 interface LocalPage { row: InkPageRecord; key: string; hash: string; localHash: string; gz: string }
 async function prepareLocalPages(capture: BookCapture): Promise<Map<string, LocalPage>> {
   const pages = new Map<string, LocalPage>();
@@ -244,6 +295,13 @@ async function applyChoices(client: LcClient, conflict: BookConflict, resolution
       ...(keep ? {} : { trashFromHub: { followed: false } }) });
     return;
   }
+  if (conflict.lifecycle && remote.state === "gone" && resolution.lifecycle === "server") {
+    const current = await boundedBookRequest(() => client.getBookState(capture.kind, capture.id, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+    if (current.book_rev !== remote.book_rev) throw new LcApiError("The displayed hub version changed", 409);
+    await publishBook(capture, { book: remote, record: null, recordLocalHash: null, pages: [], lifecycle: null,
+      trashFromHub: { followed: false }, alternative: { book: remote, pages: [] } });
+    return;
+  }
   const displayed = remote.record ? await localizedRecordHash(remote.record, capture, false) : null;
   let record = conflict.lifecycle && capture.state.lifecycle?.action === "delete" ? null : capture.record;
   if (conflict.record) {
@@ -279,7 +337,8 @@ async function applyChoices(client: LcClient, conflict: BookConflict, resolution
       if (!mine) {
         const child = page.key.slice(`${capture.id}/fn/`.length);
         const children = capture.record?.footnote_boards as Record<string, unknown> | undefined;
-        if (capture.kind !== "annotate" || page.key === capture.id || remote.state !== "live" || children?.[child]) throw new BookSyncError("invalid", "A retained hub page has no local alternative");
+        if (capture.state.lifecycle?.action !== "restore"
+          && (capture.kind !== "annotate" || page.key === capture.id || remote.state !== "live" || children?.[child])) throw new BookSyncError("invalid", "A retained hub page has no local alternative");
         const encoded = await encodedFromRecord(server.row);
         row = { ...server.row, gz: undefined, inkC: { ...encodeInkOps([]), ...(encoded?.layout ? { layout: encoded.layout } : {}) } };
       } else {
@@ -350,8 +409,19 @@ async function applyChoices(client: LcClient, conflict: BookConflict, resolution
     }
     else throw new BookSyncError("invalid", "An explicit lifecycle choice is required");
   }
-  await publishBook(capture, { book: remote, record, recordLocalHash: displayed?.hash ?? null, pages,
-    alternative: { book: remote, pages: alternatives }, authored: true, lifecycle, restoreFromHub });
+  let takeCompleteHub = false;
+  if (!conflict.lifecycle && lifecycle?.action === "restore" && remote.state === "live") {
+    // A restore meeting another live edit is a content choice. Keep the
+    // restore intent only when the chosen complete version is authored here.
+    const server = resolution.record === "server" && conflict.pages.every(page =>
+      resolution.pages?.some(choice => choice.key === page.key && choice.pageId === page.page_id && choice.choice === "server"));
+    if (!server) await saveHubSnapshotCopy(client, capture, remote, options, signal);
+    lifecycle = server ? null : { ...lifecycle, baseBookRev: remote.book_rev, goneSeq: null };
+    takeCompleteHub = server;
+  }
+  await publishBook(capture, { book: remote, record, recordLocalHash: displayed?.hash ?? null, pages: takeCompleteHub ? alternatives : pages,
+    alternative: { book: remote, pages: alternatives }, authored: !takeCompleteHub, lifecycle, restoreFromHub,
+    ...(takeCompleteHub ? { replacePages: true } : {}) });
 }
 
 /** At most one promise per context; Web Locks cover cross-context attempts. */
@@ -442,6 +512,23 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
         // Deleted here too, or nothing of it left here at all: record the hub's
         // deletion. Only real local content is "kept" against it.
         const nothingHere = !capture.metadata && !effectiveCapture.record && local.size === 0;
+        if (remote.state === "live" && capture.metadata?.deletedAt !== undefined && !capture.state.lifecycle
+          && remote.book_rev > capture.state.appliedBookRev && (capture.metadata.deleteFollowed === true || capture.metadata.deleteAcked === true)) {
+          await prepareDependencies(client, capture, remote.record, false, options, signal);
+          const downloads: PreparedBookPage[] = [], transfer = bookTransfers(signal);
+          // Legacy spanning page zero can infer its layout from the sheets.
+          for (const page of [...remote.pages].sort((a, b) => Number(a.page_id === 0) - Number(b.page_id === 0))) {
+            downloads.push(await acquirePage(client, capture, remote, page, options, signal, transfer));
+          }
+          const record = remote.record ? await localizedRecordHash(remote.record, capture) : null;
+          await boundedBookRequest(() => client.checkBookHead(owner.kind, owner.id, remote.book_rev, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+          await options.beforePublish?.(capture, remote); stop(signal);
+          await publishBook(capture, { book: remote, record: record?.record ?? null, recordLocalHash: record?.hash ?? null,
+            pages: downloads, restoreFromHub: true, replacePages: true, lifecycle: null,
+            ...(capture.metadata.deleteFollowed === true ? {} : { alternative: { book: remote, pages: downloads } }) });
+          return { ...owner, status: "synced", committed,
+            ...(capture.metadata.deleteFollowed === true ? {} : { notice: "restored_elsewhere" as const }) };
+        }
         if (remote.state === "gone" && (capture.metadata?.deletedAt !== undefined || nothingHere) && !capture.state.lifecycle) {
           await publishBook(capture, { book: remote, record: null, recordLocalHash: null, pages: [] });
           return { ...owner, status: committed ? "synced" : "unchanged", committed };
@@ -486,7 +573,11 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
         const choseOverHub = !!remote.record_hash && capture.state.inlineChoiceHubHash === remote.record_hash;
         const remoteLogicalHash = remoteInline?.converted ? await recordHash(remoteInline.record) : remote.record_hash;
         const recordLocalHash = effectiveCapture.record ? await recordHash(effectiveCapture.record) : null;
-        let recordClass: Classification = deleting ? "skip" : restoring && remote.state === "gone" && capture.record ? "upload" : classifyBookItem(recordLocalHash, capture.state.baseRecordLocalHash, remoteLogicalHash, remote.record_rev, capture.state.recordRev);
+        const restoreContentConflict = restoring && remote.state === "live"
+          && capture.state.lifecycle!.baseBookRev !== remote.book_rev && hasUnseenHubContent(capture, remote);
+        let recordClass: Classification = deleting ? "skip" : restoring && capture.record
+          ? restoreContentConflict ? "conflict" : "upload"
+          : classifyBookItem(recordLocalHash, capture.state.baseRecordLocalHash, remoteLogicalHash, remote.record_rev, capture.state.recordRev);
         const acquired = new Map<string, PreparedBookPage>();
         const conflicts: BookPageStateDto[] = [], uploads: LocalPage[] = [], downloads: PreparedBookPage[] = [];
         const downloadTasks: Array<() => Promise<PreparedBookPage>> = [];
@@ -555,7 +646,14 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
             virtual.delete(identity);
           }
           for (const identity of deleting ? [] : new Set([...local.keys(), ...remotePages.keys()])) {
-            const mine = local.get(identity), page = remotePages.get(identity);
+            let mine = local.get(identity);
+            const page = remotePages.get(identity);
+            if (restoring && remote.state === "live" && !restoreContentConflict && page && !mine) {
+              const ink = encodeInkOps([]), bytes = await gzipBytes(packEncodedInk(ink)), hash = (await validateInk(bytes)).wireHash;
+              mine = { key: page.key, hash, localHash: hash, gz: bytesToB64(bytes), row: { v: 1,
+                docKey: localPageKey(capture, page.key), pageId: page.page_id, inkC: ink, dirty: true, updatedAt: Date.now() } };
+              local.set(identity, mine);
+            }
             if (!page) {
               const child = mine && owner.kind === "annotate" && mine.key !== owner.id ? mine.key.slice(`${owner.id}/fn/`.length) : null;
               const localChildren = effectiveCapture.record?.footnote_boards as Record<string, unknown> | undefined;
@@ -572,7 +670,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
                 // staging a foreign, unreferenced page into a live book.
                 if (!localChildren?.[child] && mine.localHash === hash) { downloadTasks.push(async () => ({ ...absent, row: mine.row })); continue; }
               }
-              if (mine?.row.syncedRev && !(restoring && remote.state === "gone")) throw new BookSyncError("needs_choice", "A previously synchronized page is absent from this hub version", [{ key: mine.key, pageId: mine.row.pageId }]);
+              if (mine?.row.syncedRev && !restoring) throw new BookSyncError("needs_choice", "A previously synchronized page is absent from this hub version", [{ key: mine.key, pageId: mine.row.pageId }]);
               if (mine) uploads.push(mine); continue;
             }
             let classification = classifyBookItem(mine?.localHash ?? null, mine?.row.baseLocalHash ?? null,
@@ -583,6 +681,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
               const prepared = await load(page);
               if (prepared.localHash === mine.localHash) classification = "equal";
             }
+            if (restoring && remote.state === "live") classification = restoreContentConflict ? "conflict" : "upload";
             if (restoring && remote.state === "gone" && !mine) classification = "conflict";
             if (capture.kind === "annotate" && page.key !== capture.id) {
               const child = page.key.slice(`${capture.id}/fn/`.length);
@@ -614,6 +713,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
             try { resolution = await waitForConflictUi(lifecycle => options.requestChoice!(conflict, lifecycle), signal, "The merge window could not open"); }
             catch (cause) { if (cause instanceof HubSyncCancelled || signal.aborted) throw new HubSyncCancelled(); throw new BookSyncError("merge_mount", "The merge window could not open", [], cause); }
             await applyChoices(client, conflict, resolution, local, options, signal);
+            if (lifecycleConflict && remote.state === "gone" && resolution.lifecycle === "server") return { ...owner, status: "synced", committed };
             continue;
           }
           let action: CommitRequestDto["action"] = restoring && remote.state === "gone" ? "restore" : "upsert";
@@ -660,6 +760,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           let final = remote;
           let publicationCapture = capture;
           if (action === "delete" || uploadRecord || uploads.length) {
+            if (restoring && remote.state === "live") await saveHubSnapshotCopy(client, capture, remote, options, signal);
             const uploadId = newBookToken(), failed: Array<{ key: string; pageId: number }> = [];
             const stage = async (page: LocalPage) => {
               const timeoutMs = options.timeoutMs ?? 30_000 + 1_000 * Math.ceil(b64ToBytes(page.gz).byteLength / 262_144);
@@ -674,12 +775,14 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
               failed.push(...results.flat());
             }
             if (failed.length) throw new BookSyncError("stage", "Handwriting pages did not upload", failed);
+            const restoreSeq = Math.max(capture.state.lifecycle?.seq ?? 0, (remote.gone_seq ?? 0) + 1);
             const body: CommitRequestDto = { upload_id: uploadId, ...owner, action,
-              record: uploadRecord && targetRecord && action !== "delete" ? { base_rev: remote.record_rev, value: targetRecord } : null,
+              record: uploadRecord && targetRecord && action !== "delete" ? { base_rev: remote.record_rev,
+                value: action === "restore" ? { ...targetRecord, sync_seq: restoreSeq } : targetRecord } : null,
               pages: action === "delete" ? [] : uploads.map(page => ({ key: page.key, page_id: page.row.pageId,
                 base_rev: remotePages.get(pageIdentity(page.key, page.row.pageId))?.rev ?? 0, hash: page.hash })),
               ...(action !== "upsert" ? { base_book_rev: action === "delete" ? remote.book_rev : capture.state.lifecycle!.baseBookRev!,
-                seq: action === "delete" ? Math.max(capture.state.lifecycle!.seq, Number(remote.record?.sync_seq ?? 0)) : capture.state.lifecycle!.seq,
+                seq: action === "delete" ? Math.max(capture.state.lifecycle!.seq, Number(remote.record?.sync_seq ?? 0)) : restoreSeq,
                 ...(action === "restore" ? { gone_seq: remote.gone_seq! } : {}) } : {}) };
             const attempt: NonNullable<SyncState["lastAttempt"]> = { uploadId, requestHash: await hashBytes(new TextEncoder().encode(canonicalJson(body))),
               record: body.record ? { capturedSeq: capture.state.changeSeq, wireHash: await recordHash(body.record.value), localHash: await recordHash(body.record.value) } : null,

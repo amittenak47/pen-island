@@ -88,6 +88,8 @@ beforeEach(async () => {
       receipts.set(body.upload_id, result); return result;
     }),
     getPadCommit: vi.fn(async id => structuredClone(receipts.get(id) ?? null)),
+    listSnapshotCopies: vi.fn(async () => []),
+    putSnapshotCopy: vi.fn(async (_kind, _id, hash) => ({ content_hash: hash, tier: "2h", written_at: 1, name: "Retained hub head" })),
     putInkPage: vi.fn(async () => { throw new Error("Modern choices cannot write live ink"); }),
   } as unknown as LcClient;
 });
@@ -448,6 +450,29 @@ describe("modern current-state book sync", () => {
     const after = await captureBook({ kind: "whiteboard", id: "book" });
     expect(after.metadata).toMatchObject({ deletedAt: expect.any(Number), deleteAcked: true, deleteFollowed: true });
     expect(after.state.lifecycle).toBeNull(); expect(after.payload).toEqual(before.payload); expect(after.pages).toEqual(before.pages);
+  });
+  it("commits an explicit restore even when its content equals the old applied base", async () => {
+    // This restores its applied snapshot; the explicit edit still commits and retains its predecessor even when the bytes match.
+    await initial();
+    Object.assign(api, { listSnapshotCopies: vi.fn(async () => []), putSnapshotCopy: vi.fn(async () => ({ stored: true })) });
+    const head = remote.book_rev;
+    await mutateLocalBook({ kind: "whiteboard", id: "book" }, { requireIdb: true }, ctx => ctx.markLifecycle("restore", 1, head));
+    vi.mocked(api.commitPad).mockClear();
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.status, result.error?.message).toBe("synced");
+    expect(result.committed).toBe(true);
+    expect(api.putSnapshotCopy).toHaveBeenCalledOnce();
+    expect(vi.mocked(api.commitPad).mock.calls[0]![0].pages.map(page => page.page_id)).toEqual([113]);
+  });
+  it("asks about an unseen page-only edit after an offline restore of unchanged content", async () => {
+    // This restores its applied snapshot offline; the other device changes only ink; reconnect must ask before either edit wins.
+    await initial();
+    await mutateLocalBook({ kind: "whiteboard", id: "book" }, { requireIdb: true }, ctx => ctx.markLifecycle("restore", 1, remote.book_rev));
+    await remotePage(113, drawing());
+    const before = await captureBook({ kind: "whiteboard", id: "book" }); vi.mocked(api.commitPad).mockClear();
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("needs_choice");
+    expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
+    expect(api.commitPad).not.toHaveBeenCalled();
   });
   it.each(["local", "server", "merged"] as const)("restores retained gone ink with actual revisions after an explicit %s choice", async choice => {
     await initial(); await remotePage(113, drawing()); await remotePage(44, empty);

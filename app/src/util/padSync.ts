@@ -7,13 +7,12 @@
 import { requireAtomicInkHub } from "./atomicInkHub";
 import type {
   AnnotatePadDto,
-  LcClient,
   PadSyncPingDto,
   PadSnapshotDto,
   ProblemPadDto,
   WhiteboardPadDto,
 } from "../api/client";
-import { LcApiError as ApiError } from "../api/client";
+import { LcApiError as ApiError, LcClient } from "../api/client";
 import { putPadRecord } from "./padRecordUpload";
 import { recordAuthoredExtras } from "./recordAuthoredExtras";
 import { resetPadWritersForTests, withPadWriter } from "./padWriter";
@@ -48,7 +47,7 @@ import {
   collectFootnoteBoards,
 } from "./footnoteWhiteboardStore";
 import { run, STORE_SYNC_STATE } from "./idb";
-import { getBookSyncState, type SyncState } from "./syncState";
+import { getBookSyncState, type BookIdentity, type SyncState } from "./syncState";
 import { mutateLocalBook } from "./localBookStore";
 import {
   HUB_MAX_BODY_BYTES,
@@ -724,6 +723,52 @@ export async function pushDocBytes(client: LcClient, hash: string, bytes: ArrayB
 
 export type DeletePadResult = { status: "deleted" } | { status: "queued" } | { status: "stale" };
 export type DeletePadOptions = import("./bookSync").BookSyncOptions & { force?: boolean };
+
+export type RestorePadResult = { status: "restored" | "queued" } | { status: "stale" };
+export type RestorePadOptions = import("./bookSync").BookSyncOptions & { client?: LcClient; force?: boolean };
+interface PadRestorePreparation {
+  status: "ready" | "queued" | "stale";
+  capture: import("./bookSnapshot").BookCapture;
+  client?: LcClient;
+  baseBookRev: number | null;
+  goneSeq: number | null;
+}
+
+/** A restore may replace a checked head only after that full head is immutable on the hub. */
+export async function preparePadRestore(owner: BookIdentity, options: RestorePadOptions = {}): Promise<PadRestorePreparation> {
+  const { captureBook } = await import("./bookSnapshot");
+  const capture = await captureBook(owner);
+  const prepared: PadRestorePreparation = { status: "queued", capture,
+    baseBookRev: capture.state.bootstrap ? null : capture.state.appliedBookRev,
+    goneSeq: capture.state.lifecycle?.goneSeq ?? null };
+  if (owner.kind === "problem" || isPadHubOffline() || !options.client && !loadPadHub()) return prepared;
+  const client = options.client ?? new LcClient();
+  const { boundedBookRequest, BookSyncError, hasUnseenHubContent, saveHubSnapshotCopy } = await import("./bookSync");
+  const { recordHash } = await import("./syncContent");
+  const signal = options.signal ?? new AbortController().signal;
+  let remote;
+  try { remote = await boundedBookRequest(() => client.getBookState(owner.kind, owner.id, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs); }
+  catch (cause) {
+    if (cause instanceof ApiError && cause.status === 0) return prepared;
+    throw cause;
+  }
+  if (remote.kind !== owner.kind || remote.id !== owner.id) throw new BookSyncError("invalid", "Wrong book identity returned by hub");
+  if (remote.record && await recordHash(remote.record) !== remote.record_hash) throw new BookSyncError("invalid", "The hub record doesn't match its advertised content hash");
+  if (remote.state === "live" && hasUnseenHubContent(capture, remote) && !options.force) return { ...prepared, status: "stale" };
+  if (remote.state === "live") await saveHubSnapshotCopy(client, capture, remote, options, signal);
+  const knownGone = remote.state === "gone" && (!capture.record
+    || (capture.metadata?.deletedAt !== undefined || capture.metadata?.purgedAt !== undefined) && capture.state.appliedBookRev === remote.book_rev);
+  return { ...prepared, status: "ready", client,
+    ...(remote.state === "live" || knownGone ? { baseBookRev: remote.book_rev, goneSeq: remote.gone_seq } : {}) };
+}
+
+/** The local commit is durable before this single-book publication is attempted. */
+export async function finishPadRestore(owner: BookIdentity, prepared: PadRestorePreparation, options: RestorePadOptions = {}): Promise<RestorePadResult> {
+  if (prepared.status !== "ready" || !prepared.client) return { status: "queued" };
+  const { syncBook } = await import("./bookSync");
+  const result = await syncBook(prepared.client, owner.kind, owner.id, undefined, options);
+  return { status: result.status === "synced" || result.status === "unchanged" ? "restored" : "queued" };
+}
 
 export async function deletePadEverywhere(
   client: LcClient,

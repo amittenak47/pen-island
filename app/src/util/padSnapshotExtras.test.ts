@@ -9,8 +9,8 @@ const putEdge = vi.fn(async (_edge?: unknown) => {});
 const getAnnotateDoc = vi.fn(async (_id?: string): Promise<unknown> => null);
 const saveAnnotateDoc = vi.fn(async (_entry?: unknown) => {});
 const applyFootnoteBoards = vi.fn(async (_docId?: string, _boards?: unknown) => {});
-const restoreArtifactSnapshot = vi.fn(async () => {});
-const restorePadSnapshotLocally = vi.fn(async (_parent: unknown, _snap: unknown) => {});
+const restoreArtifactSnapshot = vi.fn(async (): Promise<{ status: "queued" | "restored" | "stale" }> => ({ status: "queued" }));
+const restorePadSnapshotLocally = vi.fn(async (_parent: unknown, _snap: unknown): Promise<{ status: "queued" | "restored" | "stale" }> => ({ status: "queued" }));
 vi.mock("./artifactSnapshotRestore", () => ({ restoreArtifactSnapshot: () => restoreArtifactSnapshot(),
   restorePadSnapshotLocally: (parent: unknown, snap: unknown) => restorePadSnapshotLocally(parent, snap) }));
 
@@ -64,6 +64,13 @@ beforeEach(() => {
 });
 
 describe("applyPadSnapshotExtras", () => {
+  it("reports a stale restore before applying supplemental links", async () => {
+    // Snapshot restore finds unseen hub content -> no local restore or supplemental edge mutation.
+    restorePadSnapshotLocally.mockResolvedValueOnce({ status: "stale" });
+    await expect(applyPadSnapshotExtras("whiteboard", "w1", { name: "w1", board,
+      edges: [{ id: "edge", from: { type: "whiteboard", id: "w1" }, to: { type: "annotate", id: "a1" }, kind: "picker", createdAt: 1 }] as never })).rejects.toThrow("Changed on another device since your last sync. Sync first.");
+    expect(putEdge).not.toHaveBeenCalled();
+  });
   it("uses the atomic attachment restore instead of separately deleting ink/source", async () => {
     await applyPadSnapshotExtras("annotate", "a1", {
       name: "old", board, source: "older text", artifactBundle: {
