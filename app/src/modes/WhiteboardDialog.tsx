@@ -61,7 +61,7 @@ interface LeaveProps extends NotebookContextProps {
   defaultName?: string;
   onChoose: (choice: ScratchLeaveChoice, notebookId?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | DeletePadResult | Promise<void | DeletePadResult>;
+  onDelete?: (id: string, options?: { force?: boolean }) => void | DeletePadResult | Promise<void | DeletePadResult>;
 }
 
 interface EntryProps extends NotebookContextProps {
@@ -81,7 +81,7 @@ interface EntryProps extends NotebookContextProps {
   defaultName?: string;
   onChoose: (choice: ScratchEntryChoice, notebookId?: string, snapshotId?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | DeletePadResult | Promise<void | DeletePadResult>;
+  onDelete?: (id: string, options?: { force?: boolean }) => void | DeletePadResult | Promise<void | DeletePadResult>;
   onRestoreTrash?: (id: string) => void | Promise<void>;
   onRename?: (id: string, title: string) => void | Promise<void>;
 }
@@ -125,6 +125,8 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
   const [snapshots, setSnapshots] = useState<PadSnapshotMeta[]>([]);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
+  /** A delete the hub refused because another device changed the notebook since the last sync. */
+  const [staleId, setStaleId] = useState<string | null>(null);
   const [saveTitle, setSaveTitle] = useState<string | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameDraft, setRenameDraft] = useState("");
@@ -234,11 +236,15 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
     setPendingId(id);
   };
 
-  const confirmRemove = async (id: string) => {
+  const confirmRemove = async (id: string, force = false) => {
     try {
       if (props.onDelete) {
-        const result = await props.onDelete(id);
-        if (result?.status === "stale") throw new Error("Changed on another device since your last sync. Sync first.");
+        const result = force ? await props.onDelete(id, { force: true }) : await props.onDelete(id);
+        if (result?.status === "stale") {
+          setPendingId(null);
+          setStaleId(id);
+          return;
+        }
       }
       else await deleteWhiteboardNotebook(id);
       arm();
@@ -247,6 +253,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
       return;
     }
     setPendingId(null);
+    setStaleId(null);
     refreshList();
   };
 
@@ -519,6 +526,16 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
           error={removeError}
           onConfirm={() => void confirmRemove(pendingId)}
           onCancel={() => setPendingId(null)}
+        />
+      )}</DialogPresence>
+      <DialogPresence>{staleId && (
+        <ConfirmDialog
+          title="Changed on another device"
+          message="It changed since your last sync. Delete anyway?"
+          confirmLabel="Delete anyway"
+          error={removeError}
+          onConfirm={() => void confirmRemove(staleId, true)}
+          onCancel={() => { setStaleId(null); setRemoveError(null); }}
         />
       )}</DialogPresence>
     </DialogBackdrop>

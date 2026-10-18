@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import { resetLibraryDeleteArmForTests } from "../util/armedDelete";
 import { describe, expect, it, vi, beforeAll, beforeEach, afterEach } from "vitest";
 import { createRoot } from "react-dom/client";
 import { act } from "react";
@@ -126,8 +127,35 @@ async function tap(label: string, host: HTMLElement) {
 }
 
 describe("WhiteboardDialog", () => {
-  it("shows a terse stale-delete error and keeps the notebook live", async () => {
-    // Another device changes this book; deleting here is refused before the local trash changes.
+  it("asks before deleting a notebook changed on another device; Delete anyway forces it", async () => {
+    // Another device changes this book; delete is refused, the reader is asked, Delete anyway forces it.
+    const onDelete = vi.fn(async (id: string, options?: { force?: boolean }) => {
+      if (!options?.force) return { status: "stale" as const };
+      const at = live.rows.findIndex(row => row.id === id); trash.rows.push({ ...live.rows[at]!, deletedAt: 1 }); live.rows.splice(at, 1);
+      return { status: "deleted" as const };
+    });
+    const view = mount({ onDelete: onDelete as unknown as Extract<WhiteboardDialogProps, { mode: "entry" }>["onDelete"] });
+    try {
+      await hold("Load", view.host);
+      const remove = view.host.querySelector<HTMLButtonElement>(".lc-scratch-load-trash")!;
+      await act(async () => {
+        remove.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0 }));
+        await new Promise(resolve => setTimeout(resolve, LIBRARY_HOLD_MS + 50));
+        remove.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0 }));
+      });
+      await hold("Delete", view.host);
+      expect(onDelete).toHaveBeenCalledTimes(1); expect(onDelete.mock.calls[0]![1]?.force).toBeFalsy();
+      expect(view.host.textContent).toContain("Changed on another device");
+      expect(view.host.textContent).toContain("It changed since your last sync. Delete anyway?");
+      expect(live.rows.some(row => row.id === "w1")).toBe(true);
+      await hold("Delete anyway", view.host);
+      await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+      expect(onDelete).toHaveBeenLastCalledWith("w1", { force: true });
+      expect(live.rows.some(row => row.id === "w1")).toBe(false);
+      expect(view.host.querySelector('[aria-label="Changed on another device"]:not([inert])')).toBeNull();
+    } finally { view.unmount(); view.host.remove(); resetLibraryDeleteArmForTests(); }
+  });
+  it("Cancel on the changed-elsewhere prompt keeps the notebook and sends nothing more", async () => {
     const onDelete = vi.fn(async () => ({ status: "stale" as const }));
     const view = mount({ onDelete: onDelete as unknown as Extract<WhiteboardDialogProps, { mode: "entry" }>["onDelete"] });
     try {
@@ -139,10 +167,13 @@ describe("WhiteboardDialog", () => {
         remove.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0 }));
       });
       await hold("Delete", view.host);
-      expect(onDelete).toHaveBeenCalledWith("w1");
-      expect(view.host.textContent).toContain("Changed on another device since your last sync. Sync first.");
+      expect(view.host.textContent).toContain("It changed since your last sync. Delete anyway?");
+      const cancel = Array.from(view.host.querySelectorAll<HTMLButtonElement>(".lc-confirm-dialog button, [role=alertdialog] button, [role=dialog] button"))
+        .filter(button => button.textContent?.trim() === "Cancel").pop()!;
+      await act(async () => { cancel.click(); await new Promise(resolve => setTimeout(resolve, 0)); });
+      expect(onDelete).toHaveBeenCalledTimes(1);
       expect(live.rows.some(row => row.id === "w1")).toBe(true);
-      expect(trash.rows.some(row => row.id === "w1")).toBe(false);
+      expect(view.host.querySelector('[aria-label="Changed on another device"]:not([inert])')).toBeNull();
     } finally { view.unmount(); view.host.remove(); }
   });
   it("uses the PDF's square shell, row subtext and no footer hint, with existing actions at the top level", async () => {

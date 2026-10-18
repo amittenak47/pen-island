@@ -12,6 +12,7 @@ import { DialogPresence } from "./components/DialogMotion";
  * and every request that names a task id names the dataset too.
  */
 
+import { useCloseOnDeletedElsewhere } from "./workspace/useCloseOnDeletedElsewhere";
 import { resumePictureFor, type ResumePicture } from "./util/resumePicture";
 import type { EncodedInk } from "./canvas/inkCodec";
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -2007,6 +2008,12 @@ export const Workspace = memo(function Workspace({
   const suppressCoachPanelOpenRef = useRef(false);
   /** How a red test run is handed to the coach. Default wait (card only). */
   const testForwardRef = useRef(testForward);
+  // Another device deleted the book this tab shows and sync moved it to trash here.
+  useCloseOnDeletedElsewhere(() => {
+    if (tab.kind === "whiteboard" && whiteboardNotebookIdRef.current) return { kind: "whiteboard", id: whiteboardNotebookIdRef.current };
+    if (annotateDocIdRef.current) return { kind: "annotate", id: annotateDocIdRef.current };
+    return null;
+  }, () => closeTab(tab.id));
   testForwardRef.current = testForward;
   useEffect(() => {
     const onChange = (event: Event) => {
@@ -11232,8 +11239,8 @@ export const Workspace = memo(function Workspace({
           defaultName={padDefaultName}
           onRestoreTrash={(id) => handleRestoreTrash("annotate", id)}
           onRename={(id, title) => handleLibraryRename("annotate", id, title)}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "annotate", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "annotate", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, docId, snapshotId) => {
             if (choice === "save") {
@@ -11366,8 +11373,8 @@ export const Workspace = memo(function Workspace({
           defaultName={padDefaultName}
           onRestoreTrash={(id) => handleRestoreTrash("whiteboard", id)}
           onRename={(id, title) => handleLibraryRename("whiteboard", id, title)}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "whiteboard", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, notebookId, snapshotId) => {
             if (choice === "save") {
@@ -11474,8 +11481,8 @@ export const Workspace = memo(function Workspace({
           error={leavingError}
           needsName={padNeedsName}
           defaultName={padDefaultName}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "whiteboard", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, notebookId) => {
             if (choice === "load" && notebookId) {
@@ -11506,8 +11513,8 @@ export const Workspace = memo(function Workspace({
           error={leavingError}
           needsName={padNeedsName}
           defaultName={padDefaultName}
-          onDelete={(id) =>
-            deletePadEverywhere(client, "annotate", id, undefined, lifecycleSyncOptions)
+          onDelete={(id, options) =>
+            deletePadEverywhere(client, "annotate", id, undefined, { ...lifecycleSyncOptions, ...options })
           }
           onChoose={(choice, name) => void resolveLeave(choice === "save", name)}
           onCancel={() => {

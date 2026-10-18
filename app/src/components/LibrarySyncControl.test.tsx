@@ -142,3 +142,13 @@ it("ignores malformed stored results", () => {
   expect(loadLibrarySyncResults()).toBeNull();
   expect(librarySyncSummary({ time: 0, books: [] })).toBe("0 synced");
 });
+it("rows say when a book was deleted or restored on another device", async () => {
+  // Other device deletes an unchanged book (followed), restores another, and deletes an edited one (choice).
+  vi.useFakeTimers(); const finish = holdPass(); mount(); click(trigger());
+  complete([{ ...row("followed", "synced"), notice: "deleted_elsewhere" }, { ...row("back", "synced"), notice: "restored_elsewhere" },
+    { ...row("edited", "needs_choice"), error: new BookSyncError("needs_choice", "x", [], undefined, "deleted_elsewhere") }]);
+  await act(async () => { finish(); });
+  const groups = [...pop()!.querySelectorAll(".lc-library-sync-group")];
+  expect([...groups[0].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✗editedDeleted on another device. Open it to keep or delete."]);
+  expect([...groups[1].querySelectorAll("li")].map(li => li.textContent)).toEqual(["✓followedDeleted on another device. Moved to trash.", "✓backRestored on another device."]);
+});

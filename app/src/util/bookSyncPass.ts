@@ -15,6 +15,7 @@ import { debugLog } from "./debugLog";
 import { bookWireRecord } from "./bookWireRecord";
 import { applyFootnoteAnswers, queueFootnoteDelivery } from "./footnoteRequests";
 import { rememberLibrarySyncResults } from "../components/LibrarySyncResults";
+import { announceBookNotices } from "./bookNotices";
 
 export const BOOK_PASS_STATUS_EVENT = "lc-book-pass-status";
 export const BOOK_PASS_ACTIVITY_EVENT = "lc-book-pass-activity";
@@ -106,7 +107,11 @@ export async function syncBookPass(client: LcClient, options: BookPassOptions = 
   const promise = executePass(client, options);
   active = { promise, silent: options.silent === true };
   publishActivity({ library: !(options.only && options.selected), progress: null });
-  try { return await promise; } finally {
+  try {
+    const result = await promise;
+    announceBookNotices(result.books);
+    return result;
+  } finally {
     if (active?.promise === promise) { active = null; publishActivity({ library: false, progress: null }); }
   }
 }

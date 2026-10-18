@@ -48,6 +48,12 @@ export interface HubPadConflict {
   fetchPreviewInk?: (pageId: number) => Promise<{ local: InkPageDto | null; server: InkPageDto | null }>;
   /** Problem canvases use one whole-canvas choice in the existing split. */
   wholeCanvas?: boolean;
+  /**
+   * A whole-book delete or restore decision, shown as two options instead of
+   * the diff: deleted elsewhere with edits here, a queued delete meeting a
+   * newer hub version, or a restore meeting a newer hub version.
+   */
+  lifecycleChoice?: "deleted_elsewhere" | "stale_delete" | "stale_restore";
   kind: HubPadKind;
   id: string;
   /** Which stage parked: the pad-JSON push (E) or the ink sync (F). */

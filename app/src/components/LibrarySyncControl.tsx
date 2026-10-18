@@ -171,7 +171,7 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
                   const reason = book.reason.startsWith(`${book.title}: `) ? book.reason.slice(book.title.length + 2) : book.reason;
                   const content = <><span className={failed ? "lc-library-sync-bad" : "lc-library-sync-ok"} aria-hidden="true">{failed ? "✗" : "✓"}</span>
                     <span className="lc-library-sync-book" title={failed ? `${book.title}: ${reason}` : book.title}>
-                      <span className="lc-library-sync-title">{book.title}</span>{failed && <small>{reason}</small>}</span></>;
+                      <span className="lc-library-sync-title">{book.title}</span>{(failed || reason) && <small>{reason}</small>}</span></>;
                   return <li key={`${book.kind}:${book.id}`}>{failed && canOpen(book)
                     ? <button type="button" className="lc-library-sync-row" onClick={() => { onOpen({ kind: book.kind, id: book.id }); setOpen(false); }}>{content}</button>
                     : <div className="lc-library-sync-row">{content}</div>}</li>;

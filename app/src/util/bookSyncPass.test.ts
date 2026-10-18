@@ -1,6 +1,7 @@
 import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 vi.mock("./bookSync", async original => ({ ...await original<typeof import("./bookSync")>(), syncBook: vi.fn() }));
+vi.mock("./bookNotices", () => ({ announceBookNotices: vi.fn() }));
 vi.mock("./inkSync", async original => ({ ...await original<typeof import("./inkSync")>(), syncEdges: vi.fn(async () => {}) }));
 const backups = vi.hoisted(() => new Map<string, import("./padSnapshotStore").PadSnapshot>());
 vi.mock("./padSnapshotStore", async original => ({ ...await original<typeof import("./padSnapshotStore")>(),
@@ -173,4 +174,15 @@ it("old hubs get one update notice and never use fabricated modern baselines", a
   await save("book"); ping.features = ["atomic_commit"];
   expect((await syncBookPass(api)).notices).toEqual([{ kind: "old_hub" }]); expect((await syncBookPass(api)).notices).toEqual([]);
   expect(syncBook).not.toHaveBeenCalled(); expect(api.putSnapshotCopy).not.toHaveBeenCalled();
+});
+
+it("announces a book another device deleted once per pass", async () => {
+  // This device's copy was unchanged → another device deletes it → the pass follows it into trash and announces it.
+  const { announceBookNotices } = await import("./bookNotices");
+  await save("followed"); ping.books = [inventory("followed")];
+  vi.mocked(syncBook).mockImplementation(async (_client, kind, id) => ({ kind, id, status: "synced", committed: false, notice: "deleted_elsewhere",
+    display: { title: "Followed", scratchTitles: {} } }));
+  await syncBookPass(api, { selected: { kind: "whiteboard", id: "followed" }, only: true });
+  expect(announceBookNotices).toHaveBeenCalledOnce();
+  expect(vi.mocked(announceBookNotices).mock.calls[0]![0]).toEqual([expect.objectContaining({ id: "followed", notice: "deleted_elsewhere" })]);
 });

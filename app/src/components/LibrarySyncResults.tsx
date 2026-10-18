@@ -31,8 +31,10 @@ export function rememberLibrarySyncResults(books: BookResult[], time = Date.now(
   }
   for (const book of books) rows.set(`${book.kind}:${book.id}`, {
     kind: book.kind, id: book.id, title: (book.display ?? bookDisplay(book)).title, status: book.status,
-    reason: book.status === "needs_choice" ? "Needs your choice" : book.status === "cancelled" ? "Cancelled"
-      : book.status === "failed" ? bookFailureMessage(book) : "",
+    reason: book.status === "needs_choice" ? book.error?.messageKey === "deleted_elsewhere" ? "Deleted on another device. Open it to keep or delete." : "Needs your choice"
+      : book.status === "cancelled" ? "Cancelled" : book.status === "failed" ? bookFailureMessage(book)
+        : book.notice === "deleted_elsewhere" ? "Deleted on another device. Moved to trash."
+          : book.notice === "restored_elsewhere" ? "Restored on another device." : "",
   });
   const result = { time, books: [...rows.values()] };
   try { localStorage.setItem(LIBRARY_SYNC_RESULT_KEY, JSON.stringify(result)); } catch { /* storage unavailable */ }

@@ -4,6 +4,8 @@ import { listAllPadSnapshots, getPadSnapshot, type PadSnapshotMeta } from "../ut
 import { restoreRetainedRecord, recoveryExportValue } from "../util/recoveryRestore";
 import { restorePadSnapshotLocally } from "../util/artifactSnapshotRestore";
 import { chooseRetainedFallbackBranch } from "../util/localBookStore";
+import { ConfirmDialog } from "../components/ConfirmDialog";
+import { DialogPresence } from "../components/DialogMotion";
 
 /** The existing library's backup flow includes removed parents and recovered copies. */
 export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "whiteboard"; onRestored: () => void }) {
@@ -13,6 +15,8 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
   const [pending, setPending] = useState(false);
   const [selected, setSelected] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  /** A restore the hub refused because another device changed the book; retried with force. */
+  const [staleRetry, setStaleRetry] = useState<(() => Promise<void>) | null>(null);
   useEffect(() => {
     let disposed = false;
     void Promise.all([listRecoveryCopies(), listAllPadSnapshots()]).then(([rows, backups]) => {
@@ -40,9 +44,12 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
       {(copy.type === "record" || copy.type === "conflict" && !!(copy.content as { metadata?: unknown; payload?: unknown } | undefined)?.metadata
         && !!(copy.content as { payload?: unknown }).payload) && <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => {
         if (selected !== copy.id) { setSelected(copy.id); return; }
-        void perform(async () => { const result = await restoreRetainedRecord(copy.id);
-          if (result.status === "stale") throw new Error("Changed on another device since your last sync. Sync first.");
-          onRestored(); setNotice("The book was restored."); setSelected(null); });
+        const restore = async (force: boolean) => {
+          const result = force ? await restoreRetainedRecord(copy.id, { force: true }) : await restoreRetainedRecord(copy.id);
+          if (result.status === "stale") { setStaleRetry(() => () => perform(() => restore(true))); return; }
+          setStaleRetry(null); onRestored(); setNotice("The book was restored."); setSelected(null);
+        };
+        void perform(() => restore(false));
       }}>{selected === copy.id ? "Confirm restore" : "Restore locally"}</button>}
       {copy.provenance?.source === "fallback-branch" && <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => {
         if (selected !== copy.id) { setSelected(copy.id); return; }
@@ -61,19 +68,33 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
       <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => {
         const id = snapshot.snapshotId ?? `${snapshot.kind}:${snapshot.key}:${snapshot.tier}`;
         if (selected !== id) { setSelected(id); return; }
-        void perform(async () => {
+        const restore = async (force: boolean) => {
           const row = await getPadSnapshot(snapshot.kind, snapshot.key, snapshot.tier, snapshot.snapshotId);
           if (!row) throw new Error("This backup cannot be read. Its stored copy was kept.");
-          const result = await restorePadSnapshotLocally({ kind: snapshot.kind, id: snapshot.key }, row, row.artifactBundle);
-          if (result.status === "stale") throw new Error("Changed on another device since your last sync. Sync first.");
+          const parent = { kind: snapshot.kind, id: snapshot.key };
+          const result = force ? await restorePadSnapshotLocally(parent, row, row.artifactBundle, { force: true })
+            : await restorePadSnapshotLocally(parent, row, row.artifactBundle);
+          if (result.status === "stale") { setStaleRetry(() => () => perform(() => restore(true))); return; }
           if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent("lc-pad-hub", { detail: { kind: snapshot.kind, id: snapshot.key, op: "reload" } }));
-          onRestored(); setNotice("The book was restored."); setSelected(null);
-        });
+          setStaleRetry(null); onRestored(); setNotice("The book was restored."); setSelected(null);
+        };
+        void perform(() => restore(false));
       }}>{selected === (snapshot.snapshotId ?? `${snapshot.kind}:${snapshot.key}:${snapshot.tier}`) ? "Confirm restore" : "Restore locally"}</button>
       </span>
     </div>)}
     </div>
     {!copies.length && !snapshots.length && !error && <p className="lc-muted">No retained copies on this device.</p>}
     {error && <p className="lc-warning" role="alert">{error}</p>}{notice && <p className="lc-muted" role="status">{notice}</p>}
+    <DialogPresence>{staleRetry && (
+      <ConfirmDialog
+        title="Changed on another device"
+        message="It changed since your last sync. Restore anyway? Their version is kept as a snapshot."
+        confirmLabel="Restore anyway"
+        pending={pending}
+        error={error}
+        onConfirm={() => void staleRetry()}
+        onCancel={() => { setStaleRetry(null); setSelected(null); }}
+      />
+    )}</DialogPresence>
   </>;
 }

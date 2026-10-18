@@ -424,6 +424,20 @@ function notesOf(body: HubPadConflict["local"] | HubPadConflict["server"]): DocF
     : [];
 }
 
+/** Whole-book delete/restore decisions: two options instead of the diff. */
+const LIFECYCLE_CHOICES: Record<NonNullable<HubPadConflict["lifecycleChoice"]>,
+  { title: string; local: { label: string; detail?: string }; server: { label: string; detail?: string } }> = {
+  deleted_elsewhere: { title: "Deleted on another device.",
+    local: { label: "Keep mine", detail: "Brings it back everywhere with your edits." },
+    server: { label: "Delete", detail: "Moves it to trash here. Restorable for 3 days." } },
+  stale_delete: { title: "Changed on another device after you deleted it.",
+    local: { label: "Delete anyway", detail: "Their newer version is deleted too." },
+    server: { label: "Keep newer version", detail: "Brings the book back with their changes." } },
+  stale_restore: { title: "Changed on another device after you restored it.",
+    local: { label: "Restore anyway", detail: "Their version is kept as a snapshot." },
+    server: { label: "Keep theirs", detail: "Your restored version stays in Retained copies." } },
+};
+
 export function HubConflictSplit({
   conflict,
   onMounted,
@@ -1257,7 +1271,7 @@ export function HubConflictSplit({
     unlistedFieldsMatch(conflict.local, conflict.server);
   const autoResolvedRef = useRef<HubPadConflict | null>(null);
   useEffect(() => {
-    if (!conflict || !nothingToChoose || !valid || busy || error) return;
+    if (!conflict || conflict.lifecycleChoice || !nothingToChoose || !valid || busy || error) return;
     if (autoResolvedRef.current === conflict) return;
     autoResolvedRef.current = conflict;
     showNotification("No differences — kept this copy");
@@ -1679,6 +1693,39 @@ export function HubConflictSplit({
 
   const navigationIds = choiceIds.filter(rowVisible);
   const navigationIndex = navigationIds.indexOf(focusedId);
+
+  if (conflict.lifecycleChoice) {
+    const copy = LIFECYCLE_CHOICES[conflict.lifecycleChoice];
+    return (
+      <div className="lc-hub-conflict lc-hub-lifecycle" data-mode={conflict.kind} role="dialog" aria-modal="true" aria-label={copy.title}>
+        <div className="lc-hub-lifecycle-body">
+          <h2 className="lc-hub-lifecycle-title">{copy.title}</h2>
+          <div className="lc-hub-lifecycle-options">
+            {(["local", "server"] as const).map((side) => (
+              <button key={side} type="button" className="lc-hub-lifecycle-option" data-side={side} disabled={busy}
+                onClick={() => onResolve({ pick: side })}>
+                <strong>{copy[side].label}</strong>
+                {copy[side].detail && <span>{copy[side].detail}</span>}
+              </button>
+            ))}
+          </div>
+        </div>
+        <footer className="lc-hub-conflict-actions">
+          <div className="lc-hub-conflict-progress">
+            {(busy || error) && <span role={error ? "alert" : "status"} className={error && !busy ? "lc-hub-conflict-error" : "lc-muted"}>
+              {busy ? "Saving..." : error}
+            </span>}
+          </div>
+          {onCancel && (
+            <button type="button" disabled={busy} className="lc-hub-conflict-cancel"
+              title="Stop this sync. Nothing is written here or on the hub." onClick={onCancel}>
+              Cancel
+            </button>
+          )}
+        </footer>
+      </div>
+    );
+  }
 
   return (
     <div
