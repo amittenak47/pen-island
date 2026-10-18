@@ -372,13 +372,17 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           } else effectiveCapture.pages.push(row);
         }
         const local = await prepareLocalPages(effectiveCapture);
+        // Listed pages absent here are checked against the hub below: a page
+        // the hub holds is downloaded; only one missing everywhere is lost.
+        const unlisted: Array<{ key: string; pageId: number }> = [];
         if (!localInline?.converted && capture.record && capture.kind !== "problem") {
           const validateManifest = (board: unknown, key: string) => {
             const manifest = (board as { inkPages?: { pageIds?: unknown } } | undefined)?.inkPages;
             if (!manifest) return;
             if (!Array.isArray(manifest.pageIds)) throw new BookSyncError("local_page", "The saved handwriting manifest is unreadable");
-            for (const pageId of manifest.pageIds) if (!Number.isSafeInteger(pageId) || pageId < 0 || !local.has(pageIdentity(key, pageId))) {
-              throw new BookSyncError("local_page", "A saved handwriting page is missing", [{ key, pageId }]);
+            for (const pageId of manifest.pageIds) {
+              if (!Number.isSafeInteger(pageId) || pageId < 0) throw new BookSyncError("local_page", "A saved handwriting page is missing", [{ key, pageId }]);
+              if (!local.has(pageIdentity(key, pageId))) unlisted.push({ key, pageId });
             }
           };
           validateManifest(capture.record.board, capture.id);
@@ -390,6 +394,8 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
         display = { title: display.title === "Book" ? hubDisplay.title : display.title, scratchTitles: { ...hubDisplay.scratchTitles, ...display.scratchTitles } };
         if (remote.kind !== owner.kind || remote.id !== owner.id) throw new BookSyncError("invalid", "Wrong book identity returned by hub");
         if (remote.record && await recordHash(remote.record) !== remote.record_hash) throw new BookSyncError("invalid", "The hub record doesn't match its advertised content hash");
+        const missing = unlisted.filter(row => !vector(remote).some(page => page.key === row.key && page.page_id === row.pageId));
+        if (missing.length) throw new BookSyncError("local_page", "A saved handwriting page is missing", [missing[0]!]);
         const seenPages = new Set<string>();
         for (const page of vector(remote)) {
           try { localPageKey(capture, page.key); } catch (cause) { throw new BookSyncError("invalid", "The hub returned another book's handwriting", [], cause); }
@@ -403,7 +409,10 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
         if (!effectiveCapture.record && remote.state === "absent" && local.size > 0 && !deleting) {
           throw new BookSyncError("missing_parent", "Handwriting is retained, but its document record is missing. Restore the document from Retained copies before syncing.");
         }
-        if (remote.state === "gone" && capture.metadata?.deletedAt !== undefined && !capture.state.lifecycle) {
+        // Deleted here too, or nothing of it left here at all: record the hub's
+        // deletion. Only real local content is "kept" against it.
+        const nothingHere = !capture.metadata && !effectiveCapture.record && local.size === 0;
+        if (remote.state === "gone" && (capture.metadata?.deletedAt !== undefined || nothingHere) && !capture.state.lifecycle) {
           await publishBook(capture, { book: remote, record: null, recordLocalHash: null, pages: [] });
           return { ...owner, status: committed ? "synced" : "unchanged", committed };
         }

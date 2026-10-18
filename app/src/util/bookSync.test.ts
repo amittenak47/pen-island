@@ -325,6 +325,35 @@ describe("modern current-state book sync", () => {
     const capture = await captureBook({ kind: "whiteboard", id: "book" }); expect(capture.record?.title).toBe("Hub rename");
     expect((capture.record?.board as typeof board).appState.scrollX).toBe(432); expect(ask).toHaveBeenCalledOnce();
   });
+  it("a record choice also brings the hub's new pages its record lists", async () => {
+    await initial(); await renameWhiteboardNotebook("book", "Local rename");
+    await remotePage(114, drawing());
+    const record = { id: "book", title: "Hub rename", page_count: 2, board: { ...board, inkPages: { v: 1, pageIds: [113, 114] } }, agent: [], updated_at: 6, sync_seq: 0 };
+    remote = { ...remote, record, record_hash: await recordHash(record), record_rev: ++revision, book_rev: revision };
+    const ask = vi.fn(async (_conflict: BookConflict, lifecycle: ConflictUiLifecycle) => { lifecycle.onMounted(); return { record: "server" as const }; });
+    const result = await syncBook(api, "whiteboard", "book", undefined, { ...options, manual: true, requestChoice: ask });
+    expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/); expect(ask).toHaveBeenCalledOnce();
+    const capture = await captureBook({ kind: "whiteboard", id: "book" }); expect(capture.record?.title).toBe("Hub rename");
+    expect((await getInkPageRecord("wb:book", 114))?.dirty).toBe(false);
+  });
+  it("a listed page missing here is downloaded when the hub has it, and fails only when it is missing everywhere", async () => {
+    await initial(); await remotePage(114, drawing());
+    await saveWhiteboardNotebook({ id: "book", title: "Book", pageCount: 2, agent: [], board: { ...board, inkPages: { v: 1, pageIds: [113, 114] } } });
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.message).toBeUndefined(); expect((await getInkPageRecord("wb:book", 114))?.dirty).toBe(false);
+    await saveWhiteboardNotebook({ id: "book", title: "Book", pageCount: 3, agent: [], board: { ...board, inkPages: { v: 1, pageIds: [113, 114, 115] } } });
+    const lost = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(lost.error?.message).toBe("A saved handwriting page is missing"); expect(lost.error?.pages).toEqual([{ key: "book", pageId: 115 }]);
+  });
+  it("a book gone on the hub with nothing left here settles instead of reporting kept content", async () => {
+    // The tablet state after an older pass: metadata and content purged, no pending lifecycle.
+    await initial(); await mutateLocalBook({ kind: "whiteboard", id: "book" }, { authored: false }, ctx => { ctx.setMetadata(null); ctx.setContent(null); });
+    remote = { ...remote, state: "gone", record: null, record_hash: null, record_rev: 0, pages: [], gone_seq: 9, book_rev: ++revision }; pages.clear();
+    await withStore(STORE_INK_PAGES, "readwrite", store => store.clear());
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/);
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
+  });
   it("refuses to recreate a previously synchronized page omitted by the hub", async () => {
     await initial(); pages.clear(); remote = { ...remote, pages: [], book_rev: ++revision }; const before = await captureBook({ kind: "whiteboard", id: "book" });
     vi.mocked(api.commitPad).mockClear(); const result = await syncBook(api, "whiteboard", "book", undefined, options);
