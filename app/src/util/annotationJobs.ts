@@ -353,15 +353,15 @@ export interface PlaceOutcome {
   placed: number;
   /** Items whose quote is not on its page; acknowledged and reported, not guessed. */
   unplaced: number;
-  /** Items left for later, because their document's PDF is not open here. */
+  /** Items left for later, because their book is trashed or its PDF is not open here. */
   waiting: number;
 }
 
 /**
  * Fetch finished items for this device and place each on its page.
  *
- * Only documents whose PDF is open can be placed (their page text comes from
- * the open file); the rest stay on the hub until the document is opened.
+ * Only live documents whose PDF is open can be placed (their page text comes
+ * from the open file); the rest stay on the hub until opened or restored.
  */
 export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOutcome> {
   const outcome: PlaceOutcome = { placed: 0, unplaced: 0, waiting: 0 };
@@ -376,7 +376,7 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
   const done: number[] = [];
   for (const [docId, docItems] of byDoc) {
     const doc = await getAnnotateDoc(docId).catch(() => null);
-    if (!doc || doc.docType !== "pdf" || !borrowPdfDocument(doc.hash)) {
+    if (!doc || doc.deletedAt !== undefined || doc.docType !== "pdf" || !borrowPdfDocument(doc.hash)) {
       for (const item of docItems) {
         if (isSuppressed(docId, item.job_id)) suppressed.push(item);
         else outcome.waiting += 1;
@@ -386,6 +386,15 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
     const streams = new Map<number, string | null>();
     for (const item of docItems) {
       if (!streams.has(item.page)) streams.set(item.page, await pdfPageStream(doc.hash, item.page).catch(() => null));
+    }
+    // Reading the page can outlive a delete; keep those items for a restore.
+    const currentDoc = await getAnnotateDoc(docId).catch(() => null);
+    if (!currentDoc || currentDoc.deletedAt !== undefined) {
+      for (const item of docItems) {
+        if (isSuppressed(docId, item.job_id)) suppressed.push(item);
+        else outcome.waiting += 1;
+      }
+      continue;
     }
     const placedItems: AnnotationJobItemDto[] = [];
     const write = await writeFootnotes(docId, (footnotes) => {
@@ -413,7 +422,8 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
       suppressed.push(item);
       return false;
     });
-    if (write === "failed") {
+    const latestDoc = write === "gone" ? await getAnnotateDoc(docId).catch(() => null) : null;
+    if (write === "failed" || write === "gone" && (!latestDoc || latestDoc.deletedAt !== undefined)) {
       outcome.waiting += currentItems.length;
       continue;
     }
@@ -429,7 +439,9 @@ export async function placeAnnotationJobItems(client: LcClient): Promise<PlaceOu
   for (const item of suppressed) {
     // A failed Undo restores delivery; keep its queued items until the save ends.
     await pendingUndos.get(undoKey(item.doc_id, item.job_id));
-    if (isSuppressed(item.doc_id, item.job_id)) done.push(item.item_id);
+    const doc = await getAnnotateDoc(item.doc_id).catch(() => null);
+    if (doc?.deletedAt !== undefined) outcome.waiting += 1;
+    else if (isSuppressed(item.doc_id, item.job_id)) done.push(item.item_id);
     else outcome.waiting += 1;
   }
   if (done.length) await client.ackAnnotationJobItems([...new Set(done)]);

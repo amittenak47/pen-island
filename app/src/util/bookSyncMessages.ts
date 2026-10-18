@@ -36,7 +36,9 @@ export function bookFailureMessage(book: BookResult, libraryPull = false): strin
     case "unconfirmed": return `${title}: the hub didn't confirm this sync. Sync again.`;
     case "hub_changed": return `${title} changed on the hub. Sync again.`;
     case "local_changed": return `${title} changed on this device during sync. Sync again.`;
-    case "needs_choice": return `${title}: needs your choice. Open it and sync again.`;
+    case "needs_choice": return error.messageKey === "deleted_elsewhere"
+      ? `${title} was deleted on another device. Open it to keep your copy or delete it.`
+      : `${title}: needs your choice. Open it and sync again.`;
     case "merge_mount": return `${title}: couldn't open the merge window.`;
     case "local_page": return `${title}: ${label} can't be read on this device.`;
     case "hub_page": return libraryPull && error.missing ? `${title}: ${label} isn't on the hub yet. Sync the other device.` : `${title}: ${label} can't be read from the hub.`;

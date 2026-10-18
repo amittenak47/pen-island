@@ -1,10 +1,13 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it } from "vitest";
+import { IDBFactory, IDBKeyRange } from "fake-indexeddb";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   bytesFromStoredValue,
   docStoreFacts,
   formatDocStoreReport,
+  getDocBytes,
+  putDocBytes,
   readBlobBytes,
   type DocStoreReport,
 } from "./docBytes";
@@ -127,5 +130,55 @@ describe("readBlobBytes", () => {
     Object.defineProperty(blob, "arrayBuffer", { configurable: true, value: undefined });
     const got = await readBlobBytes(blob);
     expect([...new Uint8Array(got)]).toEqual([1, 4, 9]);
+  });
+});
+
+
+describe("shared PDF bytes", () => {
+  beforeEach(async () => {
+    const { closeDbForTests } = await import("./idb");
+    const { resetLocalBookStoreForTests } = await import("./localBookStore");
+    const { resetBookCoordinatorForTests } = await import("./bookCoordinator");
+    await closeDbForTests();
+    resetLocalBookStoreForTests();
+    resetBookCoordinatorForTests();
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    vi.stubGlobal("IDBKeyRange", IDBKeyRange);
+    // fake-indexeddb clones buffers in Node's realm rather than jsdom's.
+    vi.stubGlobal("ArrayBuffer", structuredClone(new ArrayBuffer(0)).constructor);
+    localStorage.clear();
+  });
+
+  afterEach(async () => {
+    const { closeDbForTests } = await import("./idb");
+    const { resetLocalBookStoreForTests } = await import("./localBookStore");
+    const { resetBookCoordinatorForTests } = await import("./bookCoordinator");
+    await closeDbForTests();
+    resetLocalBookStoreForTests();
+    resetBookCoordinatorForTests();
+    localStorage.clear();
+    vi.unstubAllGlobals();
+  });
+
+  it("T17 preserves the other book's PDF bytes when one shared book is trashed and swept", async () => {
+    // Two books share a PDF; trashing and sweeping one leaves the other's source bytes readable.
+    const { ANNOTATE_TRASH_TTL_MS, getAnnotateDoc, listAnnotateDocs, markAnnotateDeleteAcked,
+      saveAnnotateDoc, sweepAnnotateTrash, trashAnnotateDoc } = await import("./annotateStore");
+    const hash = "shared-pdf";
+    const bytes = new Uint8Array([37, 80, 68, 70, 45, 49]).buffer;
+    await putDocBytes(hash, bytes);
+    const board = { v: 1 as const, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } };
+    const first = await saveAnnotateDoc({ name: "shared.pdf", hash, docType: "pdf", source: "", board });
+    const second = await saveAnnotateDoc({ name: "shared.pdf", hash, docType: "pdf", source: "", board });
+    expect(second.id).not.toBe(first.id);
+
+    await trashAnnotateDoc(first.id, 1);
+    expect(new Uint8Array((await getDocBytes(hash))!)).toEqual(new Uint8Array(bytes));
+    await markAnnotateDeleteAcked(first.id, true);
+    expect(await sweepAnnotateTrash(1 + ANNOTATE_TRASH_TTL_MS)).toEqual([first.id]);
+    expect(await getAnnotateDoc(first.id)).toBeNull();
+    expect(listAnnotateDocs().map((book) => book.id)).toEqual([second.id]);
+    expect(await getAnnotateDoc(second.id)).toMatchObject({ hash, docType: "pdf" });
+    expect(new Uint8Array((await getDocBytes(hash))!)).toEqual(new Uint8Array(bytes));
   });
 });

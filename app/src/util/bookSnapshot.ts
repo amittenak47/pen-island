@@ -271,6 +271,8 @@ export interface BookPublication {
   restoreFromHub?: boolean;
   /** This device's deletion agrees with the hub's: mark it acknowledged. */
   settleDelete?: boolean;
+  /** Keep the complete book in local trash after observing or choosing the hub delete. */
+  trashFromHub?: { followed: boolean };
 }
 /** One CAS protects the entire read set. Every hash and decoded page is prepared. */
 export async function publishBook(capture: BookCapture, prepared: BookPublication): Promise<void> {
@@ -312,7 +314,7 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
               }
               if (prepared.record) {
                 const { metadata, payload } = localRecordParts(capture, prepared.record, capture);
-                if (prepared.restoreFromHub) { delete metadata.deletedAt; delete metadata.deleteAcked; delete metadata.purgedAt; }
+                if (prepared.restoreFromHub) { delete metadata.deletedAt; delete metadata.deleteAcked; delete metadata.deleteFollowed; delete metadata.purgedAt; }
                 tx.objectStore(STORE_BOOK_META).put(metadata, syncStateKey(capture.kind, capture.id));
                 tx.objectStore(capture.kind === "problem" ? STORE_PROBLEM_BOARDS : STORE_CONTENT).put(capture.kind === "problem" ? { ...metadata, ...payload } : payload, capture.id);
                 if (capture.kind === "annotate" && object(prepared.record.footnote_boards)) for (const [id, value] of Object.entries(prepared.record.footnote_boards)) {
@@ -322,6 +324,11 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
               }
               if (prepared.settleDelete && capture.metadata) {
                 tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deleteAcked: true }, syncStateKey(capture.kind, capture.id));
+              }
+              if (prepared.trashFromHub && capture.metadata) {
+                const now = Date.now();
+                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deletedAt: now, deleteAcked: true,
+                  deleteFollowed: prepared.trashFromHub.followed, lastTouch: now }, syncStateKey(capture.kind, capture.id));
               }
               for (let index = 0; index < prepared.pages.length; index++) {
                 const page = prepared.pages[index]!, seq = first + index + 1;

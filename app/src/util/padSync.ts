@@ -722,25 +722,59 @@ export async function pushDocBytes(client: LcClient, hash: string, bytes: ArrayB
   await client.putDocBytes(hash, bytes).catch(() => {});
 }
 
+export type DeletePadResult = { status: "deleted" } | { status: "queued" } | { status: "stale" };
+export type DeletePadOptions = import("./bookSync").BookSyncOptions & { force?: boolean };
+
 export async function deletePadEverywhere(
   client: LcClient,
   kind: PadKindSync,
   padId: string,
   _localDelete?: () => Promise<void>,
-  options?: import("./bookSync").BookSyncOptions,
-): Promise<void> {
+  options?: DeletePadOptions,
+): Promise<DeletePadResult> {
   if (kind === "problem") {
     await deleteProblemBoard(padId);
     const state = await getBookSyncState(kind, padId);
     if (state?.lifecycle) await sendDeletePad(client, kind, padId, state.lifecycle.seq, options);
-    return;
+    return { status: (await getBookSyncState(kind, padId))?.lifecycle ? "queued" : "deleted" };
   }
-  const seq =
-    kind === "whiteboard"
-      ? await trashWhiteboardNotebook(padId)
-      : await trashAnnotateDoc(padId);
-  if (seq == null) return;
+  let offline = isPadHubOffline(), baseBookRev: number | undefined;
+  if (!offline && client.getBookState) {
+    const [{ captureBook, wirePageKey, pageIdentity }, { boundedBookRequest, BookSyncError }, { recordHash }] = await Promise.all([
+      import("./bookSnapshot"), import("./bookSync"), import("./syncContent"),
+    ]);
+    const capture = await captureBook({ kind, id: padId });
+    let remote;
+    try {
+      remote = await boundedBookRequest(() => client.getBookState(kind, padId, { timeoutMs: options?.timeoutMs }),
+        options?.signal ?? new AbortController().signal, options?.timeoutMs);
+    } catch (cause) {
+      if (!(cause instanceof ApiError) || cause.status !== 0) throw cause;
+      offline = true;
+    }
+    if (remote) {
+      if (remote.kind !== kind || remote.id !== padId) throw new BookSyncError("invalid", "Wrong book identity returned by hub");
+      if (remote.record && await recordHash(remote.record) !== remote.record_hash) throw new BookSyncError("invalid", "The hub record doesn't match its advertised content hash");
+      if (remote.state === "live" && remote.book_rev > capture.state.appliedBookRev && !options?.force) {
+        const pages = new Map(remote.pages.map(page => [pageIdentity(page.key, page.page_id), page]));
+        let changed = remote.record_hash !== capture.state.baseRecordWireHash;
+        for (const row of capture.pages) {
+          if (!(row.syncedRev && row.syncedRev > 0)) continue;
+          const key = pageIdentity(wirePageKey(capture, row.docKey), row.pageId), page = pages.get(key);
+          if (!page || (row.baseWireHash ? page.hash !== row.baseWireHash : page.rev !== row.syncedRev)) changed = true;
+          pages.delete(key);
+        }
+        if (changed || pages.size) return { status: "stale" };
+      }
+      baseBookRev = remote.book_rev;
+    }
+  }
+  const trash = kind === "whiteboard" ? trashWhiteboardNotebook : trashAnnotateDoc;
+  const seq = baseBookRev === undefined ? await trash(padId) : await trash(padId, Date.now(), baseBookRev);
+  if (seq == null) return { status: "deleted" };
+  if (offline) return { status: "queued" };
   await sendDeletePad(client, kind, padId, seq, options);
+  return { status: (await getBookSyncState(kind, padId))?.lifecycle ? "queued" : "deleted" };
 }
 
 export type RestoreTrashedPadResult =

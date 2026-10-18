@@ -134,6 +134,25 @@ async function tap(label: string, host: HTMLElement) {
 }
 
 describe("AnnotateDialog", () => {
+  it("shows a terse stale-delete error and keeps the document live", async () => {
+    // Another device changes this book; deleting here is refused before the local trash changes.
+    const onDelete = vi.fn(async () => ({ status: "stale" as const }));
+    const view = mount({ onDelete: onDelete as unknown as Extract<AnnotateDialogProps, { mode: "entry" }>["onDelete"] });
+    try {
+      await click("Recent", view.host);
+      const remove = view.host.querySelector<HTMLButtonElement>(".lc-scratch-load-trash")!;
+      await act(async () => {
+        remove.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0 }));
+        await new Promise(resolve => setTimeout(resolve, LIBRARY_HOLD_MS + 50));
+        remove.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0 }));
+      });
+      await hold("Delete", view.host);
+      expect(onDelete).toHaveBeenCalledWith("d1");
+      expect(view.host.textContent).toContain("Changed on another device since your last sync. Sync first.");
+      expect(live.rows.some(row => row.id === "d1")).toBe(true);
+      expect(trash.rows).toHaveLength(0);
+    } finally { view.unmount(); view.host.remove(); }
+  });
   it("keeps New and the existing note naming and creation flow", async () => {
     const view = mount();
     try {

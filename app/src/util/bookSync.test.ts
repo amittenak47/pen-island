@@ -425,11 +425,29 @@ describe("modern current-state book sync", () => {
     expect(result.status).toBe("synced"); expect(remote.state).toBe("gone"); expect((await getBookSyncState("whiteboard", "book"))?.lifecycle).toBeNull();
     expect((await listRecoveryCopies()).some(copy => copy.type === "record" && copy.record?.ink?.some(row => row.pageId === 44))).toBe(true);
   });
-  it("retains a live local copy when another device deleted its hub book", async () => {
+  it("deletes against an advanced hub head without a choice when its content is unchanged", async () => {
+    await initial();
+    await trashWhiteboardNotebook("book");
+    const before = await captureBook({ kind: "whiteboard", id: "book" });
+    remote = { ...remote, book_rev: ++revision, record_rev: revision, record: { ...remote.record!, sync_seq: 8 } };
+    const head = remote.book_rev;
+    vi.mocked(api.commitPad).mockClear();
+    const requestChoice = vi.fn();
+    const result = await syncBook(api, "whiteboard", "book", undefined, { ...options, manual: true, requestChoice });
+    expect(result.status).toBe("synced"); expect(requestChoice).not.toHaveBeenCalled();
+    expect(remote.state).toBe("gone");
+    expect(api.commitPad).toHaveBeenCalledWith(expect.objectContaining({ action: "delete", base_book_rev: head, seq: 8 }), expect.anything());
+    const after = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(after.metadata).toMatchObject({ deletedAt: before.metadata!.deletedAt, deleteAcked: true });
+    expect(after.payload).toEqual(before.payload); expect(after.pages).toEqual(before.pages);
+  });
+  it("trashes an unchanged local copy when another device deleted its hub book", async () => {
     await initial(); const before = await captureBook({ kind: "whiteboard", id: "book" });
     remote = { ...remote, state: "gone", record: null, record_rev: 0, record_hash: null, pages: [], gone_seq: 1, book_rev: ++revision };
-    expect((await syncBook(api, "whiteboard", "book", undefined, options)).error?.kind).toBe("gone");
-    expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
+    expect(await syncBook(api, "whiteboard", "book", undefined, options)).toMatchObject({ status: "synced", notice: "deleted_elsewhere" });
+    const after = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(after.metadata).toMatchObject({ deletedAt: expect.any(Number), deleteAcked: true, deleteFollowed: true });
+    expect(after.state.lifecycle).toBeNull(); expect(after.payload).toEqual(before.payload); expect(after.pages).toEqual(before.pages);
   });
   it.each(["local", "server", "merged"] as const)("restores retained gone ink with actual revisions after an explicit %s choice", async choice => {
     await initial(); await remotePage(113, drawing()); await remotePage(44, empty);

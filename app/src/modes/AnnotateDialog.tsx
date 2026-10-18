@@ -39,7 +39,7 @@ import { LibraryPadlock } from "./LibraryPadlock";
 import { PadNameField } from "./PadNameField";
 import { LibraryMenuRow, LibrarySearch } from "./LibrarySearch";
 import { LibraryTimes } from "./LibraryTimes";
-import { TOMBSTONE_COPY } from "../util/padSync";
+import { TOMBSTONE_COPY, type DeletePadResult } from "../util/padSync";
 import {
   listPadSnapshots,
   PAD_SNAPSHOT_TIERS,
@@ -92,7 +92,7 @@ interface LeaveProps {
   defaultName?: string;
   onChoose: (choice: MdInkLeaveChoice, name?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | Promise<void>;
+  onDelete?: (id: string) => void | DeletePadResult | Promise<void | DeletePadResult>;
   /** Same as the entry dialog — web leave still offers the first-Save name step. */
   kind?: AnnotateDialogKind;
 }
@@ -116,7 +116,7 @@ interface EntryProps {
   defaultName?: string;
   onChoose: (choice: MdInkEntryChoice, docId?: string, snapshotId?: string) => void;
   onCancel: () => void;
-  onDelete?: (id: string) => void | Promise<void>;
+  onDelete?: (id: string) => void | DeletePadResult | Promise<void | DeletePadResult>;
   onRestoreTrash?: (id: string) => void | Promise<void>;
   onRename?: (id: string, title: string) => void | Promise<void>;
 }
@@ -301,7 +301,10 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     setRemoving(true);
     setRemoveError(null);
     try {
-      if (props.onDelete) await props.onDelete(id);
+      if (props.onDelete) {
+        const result = await props.onDelete(id);
+        if (result?.status === "stale") throw new Error("Changed on another device since your last sync. Sync first.");
+      }
       else await trashAnnotateDoc(id);
       if (listAnnotateDocs().some((row) => row.id === id)) {
         throw new Error("This document could not be removed. It may be locked.");

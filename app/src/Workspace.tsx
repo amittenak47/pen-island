@@ -11430,9 +11430,14 @@ export const Workspace = memo(function Workspace({
 
       {whiteboardLibOpen && (
         <WhiteboardLibraryDialog
-          onDelete={(id) =>
-            deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions)
-          }
+          onDelete={async (id) => {
+            const result = await deletePadEverywhere(client, "whiteboard", id, undefined, lifecycleSyncOptions);
+            if (result.status === "stale") {
+              const message = "Changed on another device since your last sync. Sync first.";
+              setError(message);
+              throw new Error(message);
+            }
+          }}
           onFreed={() => {
             setWhiteboardLibOpen(false);
             const resume = whiteboardLibResumeRef.current;

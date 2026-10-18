@@ -126,6 +126,25 @@ async function tap(label: string, host: HTMLElement) {
 }
 
 describe("WhiteboardDialog", () => {
+  it("shows a terse stale-delete error and keeps the notebook live", async () => {
+    // Another device changes this book; deleting here is refused before the local trash changes.
+    const onDelete = vi.fn(async () => ({ status: "stale" as const }));
+    const view = mount({ onDelete: onDelete as unknown as Extract<WhiteboardDialogProps, { mode: "entry" }>["onDelete"] });
+    try {
+      await hold("Load", view.host);
+      const remove = view.host.querySelector<HTMLButtonElement>(".lc-scratch-load-trash")!;
+      await act(async () => {
+        remove.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0 }));
+        await new Promise(resolve => setTimeout(resolve, LIBRARY_HOLD_MS + 50));
+        remove.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0 }));
+      });
+      await hold("Delete", view.host);
+      expect(onDelete).toHaveBeenCalledWith("w1");
+      expect(view.host.textContent).toContain("Changed on another device since your last sync. Sync first.");
+      expect(live.rows.some(row => row.id === "w1")).toBe(true);
+      expect(trash.rows.some(row => row.id === "w1")).toBe(false);
+    } finally { view.unmount(); view.host.remove(); }
+  });
   it("uses the PDF's square shell, row subtext and no footer hint, with existing actions at the top level", async () => {
     live.rows[0].hubAckUpdatedAt = 1;
     const view = mount({ allowSave: true, snapshotKey: "w1", defaultName: "One", onRefreshHub: vi.fn() });

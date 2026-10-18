@@ -29,7 +29,8 @@ export type BookErrorKind = "unreachable" | "storage" | "needs_choice" | "merge_
   | "stage" | "unconfirmed" | "hub_changed" | "local_changed" | "missing_staging" | "missing_parent" | "dependency" | "gone" | "cap" | "invalid";
 export class BookSyncError extends Error {
   missing = false;
-  constructor(readonly kind: BookErrorKind, message: string, readonly pages: Array<{ key: string; pageId: number }> = [], readonly cause?: unknown) {
+  constructor(readonly kind: BookErrorKind, message: string, readonly pages: Array<{ key: string; pageId: number }> = [], readonly cause?: unknown,
+    readonly messageKey?: "deleted_elsewhere") {
     super(message); this.name = "BookSyncError";
   }
 }
@@ -49,6 +50,7 @@ export interface BookResult extends BookIdentity {
   committed: boolean;
   error?: BookSyncError;
   display?: BookDisplay;
+  notice?: "deleted_elsewhere";
 }
 export type BookChoice = "local" | "server" | "merged" | "none";
 export interface BookResolution {
@@ -220,6 +222,28 @@ async function prepareDependencies(client: LcClient, capture: BookCapture, recor
 }
 async function applyChoices(client: LcClient, conflict: BookConflict, resolution: BookResolution, local: Map<string, LocalPage>, options: BookSyncOptions, signal: AbortSignal): Promise<void> {
   const { capture, remote } = conflict;
+  if (conflict.lifecycle && remote.state === "gone" && !capture.state.lifecycle) {
+    if (resolution.lifecycle !== "local" && resolution.lifecycle !== "server") throw new BookSyncError("invalid", "An explicit lifecycle choice is required");
+    const alternatives: PreparedBookPage[] = [], pages: PreparedBookPage[] = [];
+    if (resolution.lifecycle === "local") {
+      for (const page of vector(remote)) {
+        const server = await conflict.loadPage(page); alternatives.push(server);
+        const mine = local.get(pageIdentity(page.key, page.page_id));
+        // Restore this device's complete book. A page only retained by the hub
+        // is explicitly erased, while its original remains in recovery.
+        pages.push({ ...server, row: mine?.row ?? { ...server.row, gz: undefined, inkC: encodeInkOps([]), sum: undefined } });
+      }
+    }
+    const current = await boundedBookRequest(() => client.getBookState(capture.kind, capture.id, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+    if (current.book_rev !== remote.book_rev) throw new LcApiError("The displayed hub version changed", 409);
+    const seq = Math.max(Number(capture.metadata?.syncSeq ?? 0), remote.gone_seq ?? 0) + 1;
+    const keep = resolution.lifecycle === "local";
+    await publishBook(capture, { book: remote, record: keep && capture.record ? { ...capture.record, sync_seq: seq } : null,
+      recordLocalHash: null, pages, alternative: { book: remote, pages: alternatives }, authored: keep,
+      lifecycle: keep ? { action: "restore", seq, token: newBookToken(), baseBookRev: remote.book_rev, goneSeq: remote.gone_seq } : null,
+      ...(keep ? {} : { trashFromHub: { followed: false } }) });
+    return;
+  }
   const displayed = remote.record ? await localizedRecordHash(remote.record, capture, false) : null;
   let record = conflict.lifecycle && capture.state.lifecycle?.action === "delete" ? null : capture.record;
   if (conflict.record) {
@@ -422,7 +446,32 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           await publishBook(capture, { book: remote, record: null, recordLocalHash: null, pages: [] });
           return { ...owner, status: committed ? "synced" : "unchanged", committed };
         }
-        if (remote.state === "gone" && !restoring && capture.metadata?.deletedAt === undefined && capture.state.lifecycle?.action !== "delete") throw new BookSyncError("gone", "Book deleted elsewhere; local content was kept");
+        if (remote.state === "gone" && !capture.state.lifecycle && capture.metadata?.deletedAt === undefined && !nothingHere) {
+          const clean = !!effectiveCapture.record && !capture.state.bootstrap && capture.state.changeSeq === capture.state.syncedChangeSeq
+            && await recordHash(effectiveCapture.record) === capture.state.baseRecordLocalHash
+            && [...local.values()].every(page => page.row.bootstrap === false && page.row.changeSeq === page.row.syncedChangeSeq
+              && page.localHash === page.row.baseLocalHash);
+          if (clean) {
+            await boundedBookRequest(() => client.checkBookHead(owner.kind, owner.id, remote.book_rev, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
+            await options.beforePublish?.(capture, remote); stop(signal);
+            try {
+              await publishBook(capture, { book: remote, record: null, recordLocalHash: null, pages: [], lifecycle: null, trashFromHub: { followed: true } });
+            } catch (cause) {
+              if (cause instanceof LocalBookConflictError) throw new BookSyncError("local_changed", "This book changed during sync. Its newer edits were kept.", [], cause);
+              throw cause;
+            }
+            return { ...owner, status: "synced", committed, notice: "deleted_elsewhere" };
+          }
+          if (!options.manual || !options.requestChoice) throw new BookSyncError("needs_choice", "Book deleted on another device. Choose whether to keep this copy or delete it.", [], undefined, "deleted_elsewhere");
+          const conflict: BookConflict = { capture, remote, record: false, lifecycle: true, pages: [],
+            loadPage: page => acquirePage(client, capture, remote, page, options, signal, bookTransfers(signal)) };
+          let resolution: BookResolution;
+          try { resolution = await waitForConflictUi(lifecycle => options.requestChoice!(conflict, lifecycle), signal, "The merge window could not open"); }
+          catch (cause) { if (cause instanceof HubSyncCancelled || signal.aborted) throw new HubSyncCancelled(); throw new BookSyncError("merge_mount", "The merge window could not open", [], cause); }
+          await applyChoices(client, conflict, resolution, local, options, signal);
+          if (resolution.lifecycle === "server") return { ...owner, status: "synced", committed, notice: "deleted_elsewhere" };
+          continue;
+        }
         // Deleted here after another device deleted it: the deletions agree, so
         // there is nothing to choose. The trashed copy here stays until its sweep.
         if (remote.state === "gone" && deleting && capture.metadata?.deletedAt !== undefined) {
@@ -545,7 +594,10 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
             else if (classification === "equal") downloadTasks.push(async () => ({ remote: page, localHash: mine!.localHash, row: mine!.row }));
           }
           downloads.push(...await Promise.all(downloadTasks.map(work => work())));
-          const lifecycleConflict = !!capture.state.lifecycle && ((capture.state.lifecycle.action === "delete" && capture.state.lifecycle.baseBookRev !== remote.book_rev)
+          const deleteContentChanged = remote.state === "live" && (remote.record_hash !== capture.state.baseRecordWireHash
+            || vector(remote).some(page => local.get(pageIdentity(page.key, page.page_id))?.row.baseWireHash !== page.hash)
+            || capture.pages.some(page => page.syncedRev && !remotePages.has(pageIdentity(wirePageKey(capture, page.docKey), page.pageId))));
+          const lifecycleConflict = !!capture.state.lifecycle && ((capture.state.lifecycle.action === "delete" && capture.state.lifecycle.baseBookRev !== remote.book_rev && deleteContentChanged)
             || restoring && remote.state === "gone" && capture.state.lifecycle.baseBookRev !== remote.book_rev);
           if ((recordClass === "conflict" || conflicts.length) && !lifecycleConflict && choseOverHub) {
             // Already chosen in Retained copies: commit the local version.
@@ -626,7 +678,8 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
               record: uploadRecord && targetRecord && action !== "delete" ? { base_rev: remote.record_rev, value: targetRecord } : null,
               pages: action === "delete" ? [] : uploads.map(page => ({ key: page.key, page_id: page.row.pageId,
                 base_rev: remotePages.get(pageIdentity(page.key, page.row.pageId))?.rev ?? 0, hash: page.hash })),
-              ...(action !== "upsert" ? { base_book_rev: capture.state.lifecycle!.baseBookRev!, seq: capture.state.lifecycle!.seq,
+              ...(action !== "upsert" ? { base_book_rev: action === "delete" ? remote.book_rev : capture.state.lifecycle!.baseBookRev!,
+                seq: action === "delete" ? Math.max(capture.state.lifecycle!.seq, Number(remote.record?.sync_seq ?? 0)) : capture.state.lifecycle!.seq,
                 ...(action === "restore" ? { gone_seq: remote.gone_seq! } : {}) } : {}) };
             const attempt: NonNullable<SyncState["lastAttempt"]> = { uploadId, requestHash: await hashBytes(new TextEncoder().encode(canonicalJson(body))),
               record: body.record ? { capturedSeq: capture.state.changeSeq, wireHash: await recordHash(body.record.value), localHash: await recordHash(body.record.value) } : null,

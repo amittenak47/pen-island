@@ -6,6 +6,11 @@ import { bookFailureMessage, bookConflictMessage, bookNoticeMessage, bookPassSum
 const display = {title:"Algorithms",scratchTitles:{first:"Sketch",second:"Proof"}};
 const failure = (kind:BookErrorKind):BookResult => ({kind:"annotate",id:"internal-id",status:"failed",committed:false,display,
   error:new BookSyncError(kind,"Technical detail",[{key:"internal-id",pageId:113}])});
+it("explains the choice after another device deletes a locally edited book",()=>{
+  const book=failure("needs_choice");
+  Object.assign(book.error!,{messageKey:"deleted_elsewhere"});
+  expect(bookFailureMessage(book)).toBe("Algorithms was deleted on another device. Open it to keep your copy or delete it.");
+});
 it.each([
   ["unreachable","Can't reach the hub. Is the desktop app open?"],
   ["stage","Algorithms: pages 113 didn't upload (no response)."],
