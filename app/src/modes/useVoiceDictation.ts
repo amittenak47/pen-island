@@ -37,6 +37,8 @@ interface DictationSession {
   cleaning: boolean;
   /** Composer text last produced by write(). */
   written: string;
+  /** The engine reported an error, so an empty result needs no second message. */
+  errored: boolean;
 }
 
 export function useVoiceDictation(options: {
@@ -125,6 +127,7 @@ export function useVoiceDictation(options: {
       rebase: false,
       cleaning: false,
       written: "",
+      errored: false,
     };
     const onEvent = (event: VoiceEvent) => {
       if (sessionRef.current !== session || event.sessionId !== session.id || session.cleaning) return;
@@ -165,6 +168,7 @@ export function useVoiceDictation(options: {
           setPhase("transcribing");
           return;
         case "error":
+          session.errored = true;
           setError(event.message);
           return;
         case "state":
@@ -174,6 +178,8 @@ export function useVoiceDictation(options: {
           void cancelVoiceDictation(session.id);
           const words = appendSegment(session.committed, session.partial);
           if (!words) {
+            // A clip came back empty: say so, instead of the box staying blank.
+            if (session.processing && !session.errored) setError("Didn't catch that. Try again.");
             drop(session);
             return;
           }
