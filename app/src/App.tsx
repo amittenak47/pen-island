@@ -384,10 +384,16 @@ export function App() {
       void pollAnnotationJobs(client).catch(() => {});
     };
     const timer = window.setInterval(tick, PAD_SYNC_PING_MS);
+    // Hidden windows skip ticks; catch up the moment the reader looks again.
+    const onVis = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVis);
     tick();
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVis);
     };
   }, [serverLink, client]);
 
