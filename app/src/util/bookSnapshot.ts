@@ -267,6 +267,8 @@ export interface BookPublication {
   alternative?: unknown;
   authored?: boolean;
   lifecycle?: SyncState["lifecycle"];
+  /** An explicit hub choice brings back a book deleted on this device. */
+  restoreFromHub?: boolean;
 }
 /** One CAS protects the entire read set. Every hash and decoded page is prepared. */
 export async function publishBook(capture: BookCapture, prepared: BookPublication): Promise<void> {
@@ -279,7 +281,7 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
             || !equalStored(actual.metadata, capture.metadata) || !equalStored(actual.payload, capture.payload)
             || !equalStored(actual.children, capture.children) || !equalStored(actual.pages, capture.pages)) throw new LocalBookConflictError("This book changed during sync. Its newer edits were kept.");
           // Observations cannot restore a local tombstone or purge.
-          if (prepared.record && (capture.metadata?.deletedAt !== undefined || capture.metadata?.purgedAt !== undefined) && capture.state.lifecycle?.action !== "restore") throw new LocalBookConflictError();
+          if (prepared.record && !prepared.restoreFromHub && (capture.metadata?.deletedAt !== undefined || capture.metadata?.purgedAt !== undefined) && capture.state.lifecycle?.action !== "restore") throw new LocalBookConflictError();
           allocateChangeSeqRange(tx, prepared.pages.length + 1, first => {
             try {
               if (prepared.alternative !== undefined) {
@@ -308,6 +310,7 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
               }
               if (prepared.record) {
                 const { metadata, payload } = localRecordParts(capture, prepared.record, capture);
+                if (prepared.restoreFromHub) { delete metadata.deletedAt; delete metadata.deleteAcked; delete metadata.purgedAt; }
                 tx.objectStore(STORE_BOOK_META).put(metadata, syncStateKey(capture.kind, capture.id));
                 tx.objectStore(capture.kind === "problem" ? STORE_PROBLEM_BOARDS : STORE_CONTENT).put(capture.kind === "problem" ? { ...metadata, ...payload } : payload, capture.id);
                 if (capture.kind === "annotate" && object(prepared.record.footnote_boards)) for (const [id, value] of Object.entries(prepared.record.footnote_boards)) {

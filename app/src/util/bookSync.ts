@@ -310,18 +310,24 @@ async function applyChoices(client: LcClient, conflict: BookConflict, resolution
   }
   const current = await boundedBookRequest(() => client.getBookState(capture.kind, capture.id, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
   if (current.book_rev !== remote.book_rev) throw new LcApiError("The displayed hub version changed", 409);
-  let lifecycle = capture.state.lifecycle;
+  let lifecycle = capture.state.lifecycle, restoreFromHub = false;
   if (conflict.lifecycle) {
     if (resolution.lifecycle === "local" && lifecycle) {
       lifecycle = { ...lifecycle, seq: lifecycle.action === "restore" ? Math.max(lifecycle.seq, (remote.gone_seq ?? 0) + 1) : lifecycle.seq,
         baseBookRev: remote.book_rev, goneSeq: remote.gone_seq };
       if (record) record = { ...record, sync_seq: lifecycle.seq };
     }
-    else if (resolution.lifecycle === "server") lifecycle = null;
+    else if (resolution.lifecycle === "server") {
+      lifecycle = null;
+      // The hub kept this book live: choosing it brings the book back here.
+      if (remote.state === "live" && displayed && (capture.metadata?.deletedAt !== undefined || capture.metadata?.purgedAt !== undefined)) {
+        record = displayed.record; restoreFromHub = true;
+      }
+    }
     else throw new BookSyncError("invalid", "An explicit lifecycle choice is required");
   }
   await publishBook(capture, { book: remote, record, recordLocalHash: displayed?.hash ?? null, pages,
-    alternative: { book: remote, pages: alternatives }, authored: true, lifecycle });
+    alternative: { book: remote, pages: alternatives }, authored: true, lifecycle, restoreFromHub });
 }
 
 /** At most one promise per context; Web Locks cover cross-context attempts. */

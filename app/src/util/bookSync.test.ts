@@ -7,7 +7,7 @@ import { captureBook, acknowledgeBook } from "./bookSnapshot";
 import { mutateLocalBook } from "./localBookStore";
 import { listRecoveryCopies } from "./syncRecovery";
 import { restoreRetainedRecord } from "./recoveryRestore";
-import { saveWhiteboardNotebook, renameWhiteboardNotebook } from "./whiteboardStore";
+import { saveWhiteboardNotebook, renameWhiteboardNotebook, trashWhiteboardNotebook } from "./whiteboardStore";
 import { putInkPages, getInkPageRecord, encodedFromRecord } from "./inkPageStore";
 import { closeDbForTests, withStore, STORE_INK_PAGES } from "./idb";
 import { inkPageKey } from "./inkPageStore";
@@ -352,6 +352,15 @@ describe("modern current-state book sync", () => {
     await withStore(STORE_INK_PAGES, "readwrite", store => store.clear());
     const result = await syncBook(api, "whiteboard", "book", undefined, options);
     expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/);
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
+  });
+  it("keeping the hub copy of a book deleted here brings it back, once", async () => {
+    await initial(); await trashWhiteboardNotebook("book"); await remoteRecord("Hub rename");
+    const ask = vi.fn(async (conflict: BookConflict, lifecycle: ConflictUiLifecycle) => { lifecycle.onMounted(); expect(conflict.lifecycle).toBe(true); return { lifecycle: "server" as const }; });
+    const result = await syncBook(api, "whiteboard", "book", undefined, { ...options, manual: true, requestChoice: ask });
+    expect(result.error?.message).toBeUndefined(); expect(ask).toHaveBeenCalledOnce();
+    const capture = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(capture.metadata?.deletedAt).toBeUndefined(); expect(capture.record?.title).toBe("Hub rename");
     expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
   });
   it("refuses to recreate a previously synchronized page omitted by the hub", async () => {
