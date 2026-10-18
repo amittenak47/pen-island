@@ -1,9 +1,9 @@
 /**
  * Quote-time PDF text fill: one-shot, keyed by film scope.
  *
- * The paint pump fills spans when the camera is idle. A hold-marquee can
- * confirm before that lands, so the selection sheet asks here, then re-reads
- * the DOM. PdfDocument registers the filler for its scope.
+ * Only an interaction that needs selectable spans asks here. The caller waits
+ * for the shared fill before resolving its caret/range or confirming a quote.
+ * PdfDocument registers the filler for its scope; paint only fetches geometry.
  */
 
 const fills = new Map<string, (page: number) => Promise<boolean>>();
