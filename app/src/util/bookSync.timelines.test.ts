@@ -14,7 +14,7 @@ import { conflictPdfFrames } from "../components/conflictDocumentLayout";
 import { savePdfPageSizes } from "../modes/pdfPageSizeCache";
 import { pdfInkContextFromRecord } from "./pdfInkLayout";
 import { sweepAnnotateTrash } from "./annotateStore";
-import { sweepWhiteboardTrash } from "./whiteboardStore";
+import { saveWhiteboardNotebook, sweepWhiteboardTrash } from "./whiteboardStore";
 import { bookFailureMessage } from "./bookSyncMessages";
 import { findAnnotateDocByHash, getAnnotateDoc, saveAnnotateDoc } from "./annotateStore";
 import { getDocBytes, hashBytes, putDocBytes } from "./docBytes";
@@ -531,5 +531,21 @@ describe("book delete timelines", () => {
     expect((await syncBook(h.api, "annotate", fresh.id, undefined, timelineOptions)).status).toBe("synced");
     expect(h.get("annotate", old.id).state).toBe("gone"); expect(h.get("annotate", fresh.id).state).toBe("live"); expect(await getDocBytes(hash)).toEqual(bytes);
     expect((await h.hubInk(1, "annotate", old.id))?.ops).toEqual(drawing().ops); expect((await h.hubInk(1, "annotate", fresh.id))?.ops).toEqual(emptyInk.ops);
+  });
+});
+
+describe("delete and restore touch only their own book", () => {
+  it("deleting one book does not sync another book's pending edits", async () => {
+    // Two synced notebooks → the other one is edited here → this one is deleted online: only the delete reaches the hub.
+    const h = await timelineHarness("whiteboard"); await h.initial();
+    await saveWhiteboardNotebook({ id: "other", title: "Other", board, pageCount: 1, agent: [] });
+    expect((await syncBook(h.api, "whiteboard", "other", undefined, { ...timelineOptions, allowCreate: true })).status).toBe("synced");
+    await saveWhiteboardNotebook({ id: "other", title: "Other edited", metadataIntent: "rename", board, pageCount: 1, agent: [] });
+    h.clearCalls();
+    expect(await deletePadEverywhere(h.api, "whiteboard", h.id, undefined, timelineOptions)).toEqual({ status: "deleted" });
+    expect(h.get().state).toBe("gone");
+    const committed = vi.mocked(h.api.commitPad).mock.calls.map(call => (call[0] as { id: string }).id);
+    expect(committed).toEqual([h.id]);
+    expect(h.get("whiteboard", "other").record?.title).toBe("Other");
   });
 });

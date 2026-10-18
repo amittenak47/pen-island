@@ -854,7 +854,8 @@ async function sendDeletePad(client: LcClient, kind: PadKindSync, padId: string,
       const { syncBookPass, isModernBookHub } = await import("./bookSyncPass");
       const { boundedBookRequest } = await import("./bookSync");
       const ping = await boundedBookRequest(() => client.pingPadSync(0, {}), new AbortController().signal);
-      if (isModernBookHub(ping)) { await syncBookPass(client, { ...options, ping, selected: { kind, id: padId } }); return; }
+      // Only this book: a delete must not wait on (or push) the rest of the library.
+      if (isModernBookHub(ping)) { await syncBookPass(client, { ...options, ping, selected: { kind, id: padId }, only: true }); return; }
     } catch { return; } // The current durable intent remains pending.
   }
   const captured = await getBookSyncState(kind, padId);
@@ -900,7 +901,7 @@ async function pushRestoreAllFour(
       const { boundedBookRequest } = await import("./bookSync");
       const ping = await boundedBookRequest(() => client.pingPadSync(0, {}), new AbortController().signal);
       if (isModernBookHub(ping)) {
-        const result = await syncBookPass(client, { ...options, ping, selected: { kind, id: padId } });
+        const result = await syncBookPass(client, { ...options, ping, selected: { kind, id: padId }, only: true });
         return result.books.some(book => book.kind === kind && book.id === padId && ["synced", "unchanged"].includes(book.status));
       }
     } catch { return false; }
