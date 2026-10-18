@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import { animateFullscreenChange } from "./fullscreenMotion";
+import { animateFullscreenChange, FULLSCREEN_STAGGER_MS } from "./fullscreenMotion";
 import { applyReadingFullscreen } from "./readingFullscreen";
 
 /**
@@ -13,6 +13,7 @@ import { applyReadingFullscreen } from "./readingFullscreen";
  * the state subscribes.
  */
 let on = false;
+let barsTimer = 0;
 let root: HTMLElement | null = null;
 const listeners = new Set<() => void>();
 
@@ -44,7 +45,11 @@ export function setReadingFullscreen(next: boolean): void {
       else delete element.dataset.fullscreen;
     });
   }
-  void applyReadingFullscreen(on).catch(() => {});
+  // Entering hides the bars at once. Leaving brings them back with the
+  // header (the motion's second phase), not before the page has moved.
+  if (typeof window !== "undefined") window.clearTimeout(barsTimer);
+  if (on || typeof window === "undefined") void applyReadingFullscreen(on).catch(() => {});
+  else barsTimer = window.setTimeout(() => void applyReadingFullscreen(false).catch(() => {}), FULLSCREEN_STAGGER_MS);
   if (typeof window !== "undefined") {
     if (on) window.addEventListener("keydown", onKey);
     else window.removeEventListener("keydown", onKey);

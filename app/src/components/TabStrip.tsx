@@ -31,6 +31,11 @@ import {
 /** Press flash on Home-as-Cancel before the load-complete hold starts. */
 export const CANCEL_HIT_MS = 160;
 
+/** Hold a chip this long, without moving, for its close panel. */
+const TAB_HOLD_MS = 450;
+const HOLD_POP_LEAVE_MS = 140;
+const HOLD_POP_WIDTH = 220;
+
 export interface TabStripProps {
   tabs: TabRecord[];
   /** Splits, so the strip can draw the pair inside one frame. */
@@ -268,6 +273,31 @@ export function TabStrip({
     null,
   );
   const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
+  /*
+   * Hold a chip (without moving) for its close panel, drawn under the chip
+   * like the sync panel. Moving instead, before or after it opens, is the
+   * reorder / split drag as always.
+   */
+  const [holdPop, setHoldPop] = useState<{ id: string; left: number; top: number; leaving: boolean } | null>(null);
+  const holdTimerRef = useRef<number | null>(null);
+  const holdOpenedRef = useRef(false);
+  const holdLeaveRef = useRef<number | null>(null);
+  const clearHoldTimer = () => {
+    if (holdTimerRef.current != null) window.clearTimeout(holdTimerRef.current);
+    holdTimerRef.current = null;
+  };
+  const closeHoldPop = () => {
+    setHoldPop((pop) => (pop && !pop.leaving ? { ...pop, leaving: true } : pop));
+    if (holdLeaveRef.current != null) window.clearTimeout(holdLeaveRef.current);
+    holdLeaveRef.current = window.setTimeout(() => {
+      holdLeaveRef.current = null;
+      setHoldPop(null);
+    }, HOLD_POP_LEAVE_MS);
+  };
+  useEffect(() => () => {
+    clearHoldTimer();
+    if (holdLeaveRef.current != null) window.clearTimeout(holdLeaveRef.current);
+  }, []);
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [insertion, setInsertion] = useState<{
     id: string; side: "before" | "after"; x: number; top: number; height: number;
@@ -280,6 +310,23 @@ export function TabStrip({
   const cancelTimerRef = useRef<number | null>(null);
   const onCancelLoadRef = useRef(onCancelLoad);
   onCancelLoadRef.current = onCancelLoad;
+
+  // The hold panel goes the same way as the chip menu below.
+  useEffect(() => {
+    if (!holdPop || holdPop.leaving) return;
+    const close = () => closeHoldPop();
+    window.addEventListener("resize", close);
+    window.addEventListener("scroll", close, true);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") close();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("resize", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [holdPop]);
 
   // Any scroll, resize or outside press dismisses the chip menu — it is pinned
   // to a viewport point, so it goes stale the moment the strip moves.
@@ -384,6 +431,17 @@ export function TabStrip({
   }, [groups, tabs]);
 
   const still = useReducedMotion();
+
+  /** Chips after `id` in the order they are drawn (splits side by side), closable ones only. */
+  const tabsRightOf = (id: string): string[] => {
+    const order = rows.flatMap((row) => row.members).filter((tab) => !isFootnoteBoardTab(tab));
+    const at = order.findIndex((tab) => tab.id === id);
+    return at < 0 ? [] : order.slice(at + 1).map((tab) => tab.id);
+  };
+  const closeTabsRightOf = (id: string) => {
+    // Rightmost first, so each close leaves the rest of the strip where it was.
+    for (const right of tabsRightOf(id).reverse()) onClose(right);
+  };
 
   const commitRename = (id: string, value: string) => {
     setRenamingId(null);
@@ -564,6 +622,21 @@ export function TabStrip({
                 if (event.button !== 0) return;
                 dragRef.current = { id: tab.id, x: event.clientX, y: event.clientY, moved: false };
                 event.currentTarget.setPointerCapture(event.pointerId);
+                clearHoldTimer();
+                holdOpenedRef.current = false;
+                if (!isFootnoteBoardTab(tab)) {
+                  const chip = event.currentTarget.closest<HTMLElement>(".lc-tab") ?? event.currentTarget;
+                  holdTimerRef.current = window.setTimeout(() => {
+                    holdTimerRef.current = null;
+                    const press = dragRef.current;
+                    if (!press || press.id !== tab.id || press.moved) return;
+                    holdOpenedRef.current = true;
+                    setMenu(null);
+                    const box = chip.getBoundingClientRect();
+                    const left = Math.max(8, Math.min(box.left, window.innerWidth - HOLD_POP_WIDTH - 8));
+                    setHoldPop({ id: tab.id, left, top: box.bottom + 6, leaving: false });
+                  }, TAB_HOLD_MS);
+                }
               }}
               onPointerMove={(event) => {
                 const drag = dragRef.current;
@@ -571,6 +644,11 @@ export function TabStrip({
                 const dx = event.clientX - drag.x;
                 const dy = event.clientY - drag.y;
                 if (!drag.moved && dx * dx + dy * dy < 100) return;
+                if (!drag.moved) {
+                  // Moving is the drag: before the hold, it never opens; after, it goes.
+                  clearHoldTimer();
+                  if (holdOpenedRef.current) closeHoldPop();
+                }
                 drag.moved = true;
                 const insert = insertionAt(tab, event.clientX, event.clientY);
                 setInsertion(insert);
@@ -585,6 +663,9 @@ export function TabStrip({
               onPointerUp={(event) => {
                 const drag = dragRef.current;
                 if (!drag || drag.id !== tab.id) return;
+                clearHoldTimer();
+                // A hold that opened the panel is not also a tap on the chip.
+                if (!drag.moved && holdOpenedRef.current) skipClickRef.current = true;
                 if (drag.moved) {
                   skipClickRef.current = true;
                   const insert = insertionAt(tab, event.clientX, event.clientY);
@@ -604,6 +685,7 @@ export function TabStrip({
                 onTabDragEnd?.();
               }}
               onPointerCancel={() => {
+                clearHoldTimer();
                 dragRef.current = null;
                 setCarry(null);
                 setDropTargetId(null);
@@ -683,6 +765,48 @@ export function TabStrip({
           )
         : null}
 
+      {holdPop
+        ? createPortal(
+            <>
+              <button
+                type="button"
+                className="lc-tab-hold-backdrop"
+                aria-label="Dismiss tab actions"
+                onClick={() => closeHoldPop()}
+              />
+              <div
+                className={["lc-doc-sync-pop", "lc-tab-hold-pop", holdPop.leaving ? "is-leaving" : ""].filter(Boolean).join(" ")}
+                role="menu"
+                aria-label="Tab actions"
+                style={{ top: holdPop.top, left: holdPop.left }}
+              >
+                <button
+                  type="button"
+                  role="menuitem"
+                  onClick={() => {
+                    onClose(holdPop.id);
+                    closeHoldPop();
+                  }}
+                >
+                  Close tab
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  disabled={tabsRightOf(holdPop.id).length === 0}
+                  onClick={() => {
+                    closeTabsRightOf(holdPop.id);
+                    closeHoldPop();
+                  }}
+                >
+                  Close tabs to the right
+                </button>
+              </div>
+            </>,
+            document.body,
+          )
+        : null}
+
       {menu
         ? createPortal(
             <>
@@ -741,6 +865,18 @@ export function TabStrip({
                     }}
                   >
                     Close
+                  </button>
+                ) : null}
+                {tabsRightOf(menu.id).length > 0 ? (
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      closeTabsRightOf(menu.id);
+                      setMenu(null);
+                    }}
+                  >
+                    Close tabs to the right
                   </button>
                 ) : null}
               </div>

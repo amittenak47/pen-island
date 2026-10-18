@@ -91,9 +91,10 @@ it.each([true, false])("uses the sheet's CSS clip/transform clock, entering=%s, 
   expect(header.style.clipPath).toBe(entering ? OPEN : CLOSED);
   await vi.advanceTimersByTimeAsync(48); // two quick frames, then the clock starts
   expect(header.style.clipPath).toBe(entering ? CLOSED : OPEN);
-  expect(header.style.transform).toBe(""); expect(header.style.opacity).toBe("");
+  // Entering: the box closes, no fade. Leaving: the header fades in as its box opens.
+  expect(header.style.transform).toBe(""); expect(header.style.opacity).toBe(entering ? "" : "1");
   expect(getComputedStyle(header).visibility).toBe("visible");
-  expect(getComputedStyle(header).transition).toBe(`clip-path ${TRANSITION}`);
+  expect(getComputedStyle(header).transition).toBe(`clip-path ${TRANSITION}, opacity 240ms ease`);
   expect(main.style.transform).toBe("translateY(0px) scaleY(1)");
   expect(getComputedStyle(main).transition).toBe(`transform ${TRANSITION}`);
   expect([headerSlot, agentSlot].every(el => el.style.transform === "")).toBe(true);
@@ -204,4 +205,16 @@ it.each([true, false])("runs in two phases, entering=%s: header then page, or pa
   expect(main.style.transitionDelay).toBe(entering ? "200ms" : "0ms");
   transitionEnd(header, "clip-path"); transitionEnd(main, "transform"); await done;
   expect(header.style.transitionDelay).toBe(""); expect(main.style.transitionDelay).toBe("");
+});
+
+it("leaving starts the header hidden, fades it in, and shrinks the page on a gentler curve", async () => {
+  app.dataset.fullscreen = "true";
+  const done = toggle(false);
+  expect(header.style.opacity).toBe("0"); // the old picture: no header yet
+  await vi.advanceTimersByTimeAsync(48);
+  expect(header.style.opacity).toBe("1");
+  expect(main.style.transitionDuration).toBe("280ms");
+  expect(main.style.transitionTimingFunction).toBe("cubic-bezier(0.4, 0, 0.2, 1)");
+  transitionEnd(header, "clip-path"); transitionEnd(main, "transform"); await done;
+  expect(header.style.opacity).toBe(""); expect(main.style.transitionDuration).toBe(""); expect(main.style.transitionTimingFunction).toBe("");
 });

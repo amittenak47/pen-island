@@ -1734,6 +1734,25 @@ html[data-theme="dark"] .lc-web-doc {
 /* Sync notifications (tab and Home) fade and scale in, and out when they close. */
 .lc-doc-sync-pop { animation: lc-sync-pop-in 160ms cubic-bezier(0.22, 1, 0.36, 1) both; }
 .lc-doc-sync-pop.is-leaving { animation: lc-sync-pop-out 140ms ease-in both; pointer-events: none; }
+/* Hold a tab: its close panel, in the sync panel's clothes, under the chip. */
+.lc-tab-hold-pop { width: 220px; padding: 4px; gap: 2px; z-index: 112; }
+.lc-tab-hold-pop button {
+  appearance: none;
+  min-height: 40px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: max(6px, calc(var(--lc-r-round) - 2px));
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+.lc-tab-hold-pop button:hover:not(:disabled),
+.lc-tab-hold-pop button:active:not(:disabled) { background: color-mix(in srgb, var(--ink) 10%, transparent); }
+.lc-tab-hold-pop button:disabled { opacity: 0.4; cursor: default; }
+.lc-tab-hold-backdrop { position: fixed; inset: 0; z-index: 111; border: 0; padding: 0; background: transparent; }
 @keyframes lc-sync-pop-in { from { opacity: 0; transform: translateY(-4px) scale(0.97); } }
 @keyframes lc-sync-pop-out { to { opacity: 0; transform: translateY(-4px) scale(0.97); } }
 @media (prefers-reduced-motion: reduce) {
@@ -23848,7 +23867,7 @@ html[data-corners="rounded"] {
 }
 
 .lc-app[data-fullscreen-motion="active"] > .lc-header {
-  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1);
+  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
 }
 
 .lc-app[data-fullscreen-motion="active"] > .lc-main {

@@ -8,6 +8,15 @@ const DURATION = 240;
  * The second phase starts as the first is landing.
  */
 const STAGGER = 200;
+/** When the second phase starts; the store brings the status bar back with it. */
+export const FULLSCREEN_STAGGER_MS = STAGGER;
+/**
+ * Leaving, the page shrinks on a gentler, symmetric curve: the sheet's
+ * front-loaded ease-out reads well for a box growing, but shrinking with it
+ * snapped. The header also fades in while its box opens.
+ */
+const EXIT_SHRINK_MS = 280;
+const EXIT_SHRINK_EASING = "cubic-bezier(0.4, 0, 0.2, 1)";
 /** Two frames this quick in a row mean the board's refit work is done. */
 const QUICK_FRAME_MS = 20;
 /** Never hold the old picture longer than this before moving. */
@@ -64,6 +73,7 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
   document.body.dataset.lcPanelMotion = "true";
   app.dataset.fullscreenMotion = "prepare";
   header.style.clipPath = clip && clip !== "none" ? clip : entering ? OPEN : CLOSED;
+  if (!entering) header.style.opacity = "0";
   main.style.transform = "none";
   main.style.transformOrigin = "50% 0px";
   changeLayout();
@@ -77,7 +87,10 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
     app.dataset.fullscreenMotion = "prepare";
     header.style.clipPath = original.clip;
     header.style.removeProperty("transition-delay");
+    header.style.removeProperty("opacity");
     main.style.removeProperty("transition-delay");
+    main.style.removeProperty("transition-duration");
+    main.style.removeProperty("transition-timing-function");
     main.style.transform = original.transform;
     main.style.transformOrigin = original.origin;
     // As with useAgentSheet's drag cleanup, commit the restored styles while
@@ -149,11 +162,17 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
       app.dataset.fullscreenMotion = "active";
       header.style.transitionDelay = entering ? "0ms" : `${STAGGER}ms`;
       main.style.transitionDelay = entering ? `${STAGGER}ms` : "0ms";
+      if (!entering) {
+        main.style.transitionDuration = `${EXIT_SHRINK_MS}ms`;
+        main.style.transitionTimingFunction = EXIT_SHRINK_EASING;
+        header.style.opacity = "1";
+      }
       header.style.clipPath = entering ? CLOSED : OPEN;
       main.style.transform = rest;
       // WebView can omit transitionend (e.g. a backgrounded window). Also covers
       // a reversal before either property has moved and has nothing to animate.
-      timer = window.setTimeout(() => finish(false), STAGGER + DURATION + 20);
+      const total = entering ? STAGGER + DURATION : Math.max(EXIT_SHRINK_MS, STAGGER + DURATION);
+      timer = window.setTimeout(() => finish(false), total + 20);
     };
     const begun = performance.now();
     let last = begun, quick = 0;
