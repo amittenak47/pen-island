@@ -37,26 +37,26 @@ export function remapPdfFootnotes(notes: readonly DocFootnote[], from: readonly 
   };
   const remap = (anchor: DocAnchor, bands?: Band[]) => {
     const match = /^p(\d+)(r?)$/.exec(anchor.scope ?? "");
-    if (!match) return { anchor, bands };
+    if (!match) return { anchor, bands: bands ?? [] };
     const source = from.filter(f => f.pageId === Number(match[1]))[wasSpread && match[2] ? 1 : 0];
-    if (!source) return { anchor, bands };
+    if (!source) return { anchor, bands: bands ?? [] };
     const mapped = (bands ?? []).flatMap(mapBand);
     const region = anchor.kind === "region" ? mapBand({left:anchor.x,top:source.minY+anchor.y,width:anchor.w,height:anchor.h}) : [];
     const candidates = region.length ? region : mapped;
     const target = [...candidates].sort((a,b)=>b.band.width*b.band.height-a.band.width*a.band.height)[0];
-    if (!target && anchor.kind === "region") return {anchor,bands};
+    if (!target && anchor.kind === "region") return {anchor,bands:bands ?? []};
     const scope = target?.scope ?? (spread ? anchor.scope : `p${match[1]}`);
     const nextAnchor: DocAnchor = anchor.kind === "region" && target
       ? {...anchor,scope,x:target.band.left,y:target.band.top-target.frame.minY,w:target.band.width,h:target.band.height}
       : {...anchor,scope};
     // A marquee spanning the gutter has two visible pieces. Retain both
     // even if the older mark had only its region rectangle, no stored bands.
-    return {anchor:nextAnchor,bands:bands ? (mapped.length ? mapped.map(item=>item.band) : bands)
-      : region.length > 1 ? region.map(item=>item.band) : undefined};
+    return {anchor:nextAnchor,bands:bands?.length ? (mapped.length ? mapped.map(item=>item.band) : bands)
+      : region.length > 1 ? region.map(item=>item.band) : []};
   };
   return notes.map(note => ({...note,...remap(note.anchor,note.bands),
     ...(note.subMarks ? {subMarks:note.subMarks.map(mark=>mark.anchor
       ? {...mark,...remap(mark.anchor,mark.bands)} as typeof mark
-      : {...mark,bands:mark.bands?.flatMap(mapBand).map(item=>item.band)})} : {}),
+      : {...mark,bands:(mark.bands ?? []).flatMap(mapBand).map(item=>item.band)})} : {}),
   }));
 }

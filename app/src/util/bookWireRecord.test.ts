@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { bookWireRecord } from "./bookWireRecord";
 import { canonicalJson } from "./syncContent";
+import golden from "./fixtures/sync-content-golden.json";
 
 it("omits only defined optional transcript and footnote DTO fields that are undefined", () => {
   const original = { agent: [{ id: "turn", queued: undefined, deletedAt: 123, future: { source: "kept" } }],
@@ -23,3 +24,19 @@ it("drops a reader note's undefined images so the book stays representable", () 
   expect(wire).toStrictEqual({ footnotes: [{ id: "mark", notes: [{ id: "n", text: "hi" }, { id: "p", text: "", images: ["a.png"] }] }] });
   expect(() => canonicalJson(wire)).not.toThrow();
 });
+
+for (const fixture of golden.records) {
+  const paths = (fixture as { undefinedPaths?: (string | number)[][] }).undefinedPaths;
+  if (!paths) continue;
+  it(`drops legacy undefined only at known paths: ${fixture.name}`, () => {
+    const missing = JSON.parse(fixture.input);
+    const legacy = structuredClone(missing);
+    for (const path of paths) {
+      let row = legacy;
+      for (const key of path.slice(0, -1)) row = row[key];
+      row[path[path.length - 1]!] = undefined;
+    }
+    expect(bookWireRecord(legacy)).toStrictEqual(missing);
+    expect(legacy).not.toStrictEqual(missing);
+  });
+}

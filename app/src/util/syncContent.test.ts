@@ -3,6 +3,7 @@ import { gzipSync } from "fflate";
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
 import golden from "./fixtures/sync-content-golden.json";
 import snapshots from "./fixtures/snapshot-copy-golden.json";
+import { bookWireRecord } from "./bookWireRecord";
 import { canonicalJson, hashBytes, MAX_PACKED_INK_BYTES, normalizeRecord, normalizeSnapshotCopy, recordHash, snapshotCopyHash, validateInk, validatePackedInk } from "./syncContent";
 
 beforeAll(async () => {
@@ -29,8 +30,47 @@ describe("cross-language content contract", () => {
   });
   for (const fixture of golden.records) it(fixture.name, async () => {
     const input = JSON.parse(fixture.input);
-    expect(canonicalJson(normalizeRecord(input))).toBe(fixture.canonical);
-    expect(await recordHash(input)).toBe(fixture.hash);
+    // JSON cannot spell undefined; metadata recreates legacy in-memory rows.
+    for (const path of (fixture as { undefinedPaths?: (string | number)[][] }).undefinedPaths ?? []) {
+      let row = input;
+      for (const key of path.slice(0, -1)) row = row[key];
+      row[path[path.length - 1]!] = undefined;
+    }
+    const wire = bookWireRecord(input);
+    expect(canonicalJson(normalizeRecord(wire))).toBe(fixture.canonical);
+    expect(await recordHash(wire)).toBe(fixture.hash);
+  });
+  it("keeps populated defaults and every nonqualifying or unknown empty value", async () => {
+    for (const fixture of golden.records.filter(item => item.name.endsWith(": explicit"))) {
+      const input = JSON.parse(fixture.input);
+      const visit = async (row: Record<string, unknown>, path: (string | number)[] = []) => {
+        for (const [key, value] of Object.entries(row)) {
+          const here = [...path, key];
+          if (value === false || Array.isArray(value) && !value.length || key === "footnote_boards") {
+            const changed = structuredClone(input);
+            let target = changed;
+            for (const part of here.slice(0, -1)) target = target[part];
+            target[key] = value === false ? true : key === "footnote_boards" ? { child: { board: {} } } : ["content"];
+            expect(await recordHash(changed), here.join(".")).not.toBe(fixture.hash);
+          } else if (value && typeof value === "object") {
+            if (Array.isArray(value)) for (let i = 0; i < value.length; i++) await visit(value[i], [...here, i]);
+            else await visit(value as Record<string, unknown>, here);
+          }
+        }
+      };
+      await visit(input);
+      expect(await recordHash(input)).toBe(fixture.hash);
+    }
+    for (const field of ["artifactFootnoteIds", "future"]) {
+      expect(await recordHash({ agent: [{ [field]: [] }] })).not.toBe(await recordHash({ agent: [{}] }));
+    }
+    expect(await recordHash({ footnotes: [] })).not.toBe(await recordHash({}));
+    for (const value of [{ title: "" }, { palette: [] }, { updatedAt: 0 }, { pending: "" }]) {
+      expect(await recordHash({ footnotes: [value] })).not.toBe(await recordHash({ footnotes: [{}] }));
+    }
+    expect(await recordHash({ agent: [{ attachments: [{ sendToModel: false }] }] }))
+      .not.toBe(await recordHash({ agent: [{ attachments: [{}] }] }));
+    expect(await recordHash({ board: { appState: { future: false } } })).not.toBe(await recordHash({ board: {} }));
   });
   for (const fixture of snapshots.cases) it(`snapshot ${fixture.name}`, async () => {
     expect(await normalizeSnapshotCopy(fixture.input)).toEqual(fixture.normalized);

@@ -5,6 +5,16 @@ import { remapPdfFootnotes } from "./pdfFootnoteLayout";
 const whole = [{pageId:9,minY:1800,maxY:1900},{pageId:10,minY:1918,maxY:2018}];
 const split = [{pageId:9,minY:3600,maxY:3800},{pageId:9,minY:3818,maxY:4018},
   {pageId:10,minY:4036,maxY:4236},{pageId:10,minY:4254,maxY:4454}];
+it("remaps missing and empty bands identically across a gutter and saves absent geometry as []", () => {
+  const note: DocFootnote = {id:"note",kind:"note",createdAt:1,excerpt:"Across",
+    anchor:{kind:"region",scope:"p9",x:80,y:20,w:40,h:10}};
+  const missing = remapPdfFootnotes([note], whole, split, 200)[0];
+  const empty = remapPdfFootnotes([{...note,bands:[]}], whole, split, 200)[0];
+  expect(empty).toEqual(missing);
+  expect(empty.bands).toHaveLength(2);
+  const [text] = remapPdfFootnotes([{...note,anchor:{kind:"text",scope:"p9",start:0,end:4}}], whole, split, 200);
+  expect(text.bands).toEqual([]);
+});
 it("moves right-half footnotes and sub-highlights with their PDF sheet, then restores them", () => {
   const note: DocFootnote = {id:"note",kind:"note",createdAt:1,excerpt:"Here",
     anchor:{kind:"region",scope:"p10",x:140,y:30,w:30,h:10},

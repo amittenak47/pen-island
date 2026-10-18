@@ -5313,6 +5313,8 @@ export const Workspace = memo(function Workspace({
               role: "assistant",
               content: frame.nudge,
               at: Date.now(),
+              attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [],
+              pending: false, queued: false, bridgePending: false,
             },
           ]);
           openCoachPanel();
@@ -5376,6 +5378,8 @@ export const Workspace = memo(function Workspace({
         content: "",
         at: Date.now(),
         pending: true,
+        queued: false, bridgePending: false,
+        attachments: [], artifacts: [], artifactProposals: [], flags: [],
         requestState: "running",
         ...(requestId ? { requestId, ...(sessionId ? { sessionId } : {}) } : {}),
         processEvents: [],
@@ -5452,6 +5456,12 @@ export const Workspace = memo(function Workspace({
               }
             : {}),
           ...part,
+          attachments: part.attachments ?? (offset === 0 ? placeholder.attachments : undefined) ?? [],
+          artifacts: part.artifacts ?? (offset === 0 ? placeholder.artifacts : undefined) ?? [],
+          artifactProposals: part.artifactProposals ?? (offset === 0 ? placeholder.artifactProposals : undefined) ?? [],
+          flags: part.flags ?? (offset === 0 ? placeholder.pendingAck?.flags ?? placeholder.flags : undefined) ?? [],
+          processEvents: part.processEvents ?? (offset === 0 ? placeholder.processEvents : undefined) ?? [],
+          queued: part.queued ?? false, bridgePending: part.bridgePending ?? false,
         }));
         const next = [...current.slice(0, index), ...built, ...current.slice(index + 1)];
         return built.some((message) => message.drawing?.expanded)
@@ -5546,6 +5556,9 @@ export const Workspace = memo(function Workspace({
             content,
             at: Date.now(),
             ...extra,
+            attachments: extra?.attachments ?? [], artifacts: [], artifactProposals: [],
+            flags: extra?.flags ?? [], processEvents: [],
+            pending: false, queued: extra?.queued ?? false, bridgePending: extra?.bridgePending ?? false,
           },
         ];
         if (extra?.drawing?.expanded) {
@@ -6000,6 +6013,7 @@ export const Workspace = memo(function Workspace({
               {
                 id: freshNoteId(next.flatMap((entry) => entry.notes ?? [])),
                 text: note,
+                images: [],
                 by: "ai" as const,
                 createdAt: Date.now(),
                 updatedAt: Date.now(),
@@ -6009,11 +6023,12 @@ export const Workspace = memo(function Workspace({
         next = addFootnote(next, {
           id: freshFootnoteId(next),
           kind: "ai",
+          whiteboards: [], artifacts: [], subMarks: [], threads: [], bands: [],
           anchor,
           excerpt: excerpt || note.slice(0, 80),
           createdAt: Date.now(),
-          ...(notes ? { notes } : {}),
-          ...(links.length > 0 ? { userLinks: links } : {}),
+          notes: notes ?? [],
+          userLinks: links,
           ...footnoteThemeSeed(next),
         });
       }
@@ -6180,7 +6195,9 @@ export const Workspace = memo(function Workspace({
                 : "The model returned an empty reply."),
             ...(result.reasoning?.trim() ? { reasoning: result.reasoning.trim() } : {}),
             ...(firstDrawing ? { drawing: withNewDrawing(firstDrawing, drawingPage) } : {}),
-            artifactProposals: sanitizeArtifactProposals(result.artifacts),
+            artifactProposals: (sanitizeArtifactProposals(result.artifacts) ?? []).map(proposal => ({
+              ...proposal, programs: proposal.programs ?? [], messages: proposal.messages ?? [],
+            })),
             artifactFootnoteIds,
           },
           ...moreDrawings.map((drawable, index) => ({
@@ -6557,13 +6574,14 @@ export const Workspace = memo(function Workspace({
           addFootnote(current, {
             id: freshFootnoteId(current),
             kind: "coach",
+            notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [],
             anchor: quoted.anchor,
             excerpt: quoted.excerpt,
             createdAt: now,
             threadRootId: rootId,
             threads: [thread],
             ...footnoteThemeSeed(current),
-            ...(quoted.hitRects.length > 0 ? { bands: quoted.hitRects } : {}),
+            bands: quoted.hitRects,
             ...(quoted.text.trim() ? { blockText: quoted.text } : {}),
           }),
         );
@@ -6606,7 +6624,7 @@ export const Workspace = memo(function Workspace({
 
         setAgentMessages((current) =>
           current.map((message) =>
-            message.id === userMessageId ? { ...message, queued: undefined } : message,
+            message.id === userMessageId ? { ...message, queued: false } : message,
           ),
         );
 
@@ -6914,7 +6932,7 @@ export const Workspace = memo(function Workspace({
       }
       if (![...drop].some((dropped) => current.some((message) => message.id === dropped && !message.deletedAt))) return current;
       return current.map((message) => drop.has(message.id) && !message.deletedAt
-        ? { ...message, deletedAt: now, pending: false, queued: undefined }
+        ? { ...message, deletedAt: now, pending: false, queued: false }
         : message);
     });
   };
@@ -7812,12 +7830,13 @@ export const Workspace = memo(function Workspace({
         addFootnote(current, {
           id,
           kind: "note",
+          notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
           anchor: selection.anchor,
           excerpt: selection.excerpt,
           createdAt: Date.now(),
           ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
           ...footnoteThemeSeed(current),
-          ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+          bands: selection.hitRects,
           ...(selection.text.trim() ? { blockText: selection.text } : {}),
         }),
       );
@@ -7906,13 +7925,14 @@ export const Workspace = memo(function Workspace({
         addFootnote(current, {
           id,
           kind: "search",
+          notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
           anchor: selection.anchor,
           excerpt: selection.excerpt,
           createdAt: Date.now(),
           query,
           url,
           ...footnoteThemeSeed(current),
-          ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+          bands: selection.hitRects,
           ...(selection.text.trim() ? { blockText: selection.text } : {}),
         }),
       );
@@ -7995,6 +8015,7 @@ export const Workspace = memo(function Workspace({
       const next = addFootnote(existing, {
         id: footnoteId,
         kind: "ai",
+        notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
         anchor,
         excerpt: excerpt.slice(0, 4000),
         createdAt: Date.now(),
@@ -8003,7 +8024,7 @@ export const Workspace = memo(function Workspace({
         ...(options ? { jobId: requestId } : {}),
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(existing),
-        ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+        bands: selection.hitRects,
         ...(selection.text.trim() ? { blockText: selection.text } : {}),
       });
       heldFootnoteAsksRef.current = [
@@ -8127,7 +8148,7 @@ export const Workspace = memo(function Workspace({
         assertArtifactParentActive(context.parent);
         agentMessagesRef.current = agentMessagesRef.current.map(turn => turn.id === message.id ? { ...turn,
           artifacts: [...(turn.artifacts ?? []), reference],
-          artifactProposals: index === undefined ? turn.artifactProposals : turn.artifactProposals?.filter((_, i) => i !== index),
+          artifactProposals: (index === undefined ? turn.artifactProposals : turn.artifactProposals?.filter((_, i) => i !== index)) ?? [],
         } : turn);
         setAgentMessages(agentMessagesRef.current);
         const marks = context.associations.flatMap(association => association.kind === "footnote" ? [association.footnoteId] : []);
@@ -8220,6 +8241,7 @@ export const Workspace = memo(function Workspace({
           minted = freshSubMarkId(existing);
           const next = {
             ...mark,
+            bands: mark.bands ?? [],
             id: minted,
             ...(theme ? { color: theme.color, palette: theme.palette } : {}),
           };
@@ -8243,12 +8265,13 @@ export const Workspace = memo(function Workspace({
       addFootnote(current, {
         id: freshFootnoteId(current),
         kind: "note",
+        notes: [], whiteboards: [], artifacts: [], userLinks: [], subMarks: [], threads: [],
         anchor: selection.anchor,
         excerpt: selection.excerpt,
         createdAt: Date.now(),
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(current),
-        ...(selection.hitRects.length > 0 ? { bands: selection.hitRects } : {}),
+        bands: selection.hitRects,
         ...(selection.text.trim() ? { blockText: selection.text } : {}),
       }),
     );

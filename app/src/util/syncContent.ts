@@ -1,6 +1,12 @@
 /** Atomic-sync content contract, mirrored by src/pads/sync_content.rs.
  * UTF-16 key order, ECMAScript finite-number formatting, no implicit omission.
- * Only root transport fields and named board view/manifests are excluded.
+ * Excludes root transport fields, board view/manifests and page-frame layout.
+ * Empty defaults canonicalize to absence only at these paths: root agent
+ * and footnote_boards; agent[].attachments/artifacts/artifactProposals/
+ * flags/processEvents, agent[].pending/queued/bridgePending=false,
+ * agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
+ * footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
+ * footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
  * Values are actual IEEE-754 JSON Numbers, not original decimal spellings.
  * A previously rounded JSON literal cannot be reconstructed by this helper.
  */
@@ -71,7 +77,9 @@ export function canonicalJson(value: unknown): string {
  * saved before tags, and sync keeps each device's own frame on download. */
 export const PAGE_FRAME_LOCAL_KEYS = ["width", "height", "version", "versionNonce", "updated", "seed"] as const;
 /** Agent message flags whose `false` is the same as leaving them out. */
-export const MESSAGE_FALSE_DEFAULT_KEYS = ["pending", "queued"] as const;
+export const MESSAGE_FALSE_DEFAULT_KEYS = ["pending", "queued", "bridgePending"] as const;
+export const MESSAGE_EMPTY_LIST_KEYS = ["attachments", "artifacts", "artifactProposals", "flags", "processEvents"] as const;
+export const FOOTNOTE_EMPTY_LIST_KEYS = ["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"] as const;
 
 const plainObject = (value: unknown): value is Record<string, unknown> =>
   value != null && typeof value === "object" && !Array.isArray(value);
@@ -87,6 +95,9 @@ export function normalizeRecord(value: unknown): Record<string, unknown> {
   check(value != null && typeof value === "object" && !Array.isArray(value), "book record must be an object");
   const record = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
   for (const key of RECORD_TRANSPORT_KEYS) delete record[key];
+  const emptyLists = (row: Record<string, unknown>, keys: readonly string[]) => {
+    for (const key of keys) if (Array.isArray(row[key]) && row[key].length === 0) delete row[key];
+  };
   const board = (value: unknown) => {
     if (!plainObject(value)) return;
     const row = value;
@@ -109,8 +120,25 @@ export function normalizeRecord(value: unknown): Record<string, unknown> {
     if (Object.keys(record.footnote_boards).length === 0) delete record.footnote_boards;
   }
   if (Array.isArray(record.agent)) for (const message of record.agent) {
-    if (plainObject(message)) for (const key of MESSAGE_FALSE_DEFAULT_KEYS) if (message[key] === false) delete message[key];
+    if (!plainObject(message)) continue;
+    emptyLists(message, MESSAGE_EMPTY_LIST_KEYS);
+    for (const key of MESSAGE_FALSE_DEFAULT_KEYS) if (message[key] === false) delete message[key];
+    if (plainObject(message.drawing) && message.drawing.redacted === false) delete message.drawing.redacted;
+    if (Array.isArray(message.artifactProposals)) for (const proposal of message.artifactProposals) {
+      if (plainObject(proposal)) emptyLists(proposal, ["programs", "messages"]);
+    }
   }
+  if (Array.isArray(record.footnotes)) for (const note of record.footnotes) {
+    if (!plainObject(note)) continue;
+    emptyLists(note, FOOTNOTE_EMPTY_LIST_KEYS);
+    if (Array.isArray(note.notes)) for (const entry of note.notes) {
+      if (plainObject(entry)) emptyLists(entry, ["images"]);
+    }
+    if (Array.isArray(note.subMarks)) for (const mark of note.subMarks) {
+      if (plainObject(mark)) emptyLists(mark, ["bands"]);
+    }
+  }
+  emptyLists(record, ["agent"]);
   return record;
 }
 

@@ -19,6 +19,8 @@ type SelectionProps = ComponentProps<typeof import("./modes/DocSelectionLayer").
 const mocks = vi.hoisted(() => ({
   shell: {} as ShellValue, api: null as WorkspaceApi | null, board: {} as BoardHandle,
   paper: null as PaperProps | null, boardProps: null as ComponentProps<typeof Board> | null,
+  selection: null as SelectionProps | null,
+  agent: null as ComponentProps<typeof import("./modes/AgentSidePanel").AgentSidePanel> | null,
   marks: [] as DocFootnote[], docs: new Map<string, AnnotateDoc>(),
   height: 2400, save: vi.fn(), restore: vi.fn(), remove: vi.fn(), snapshots: vi.fn(),
 }));
@@ -46,11 +48,19 @@ vi.mock("./modes/AnnotateDocument", async () => {
 });
 vi.mock("./modes/DocSelectionLayer", () => ({
   DocSelectionLayer: (props: SelectionProps) => {
+    mocks.selection = props;
     mocks.marks = [...props.footnotes ?? []];
     return <>
       {props.children}
       {props.footnotes?.map(mark => <button key={mark.id} onClick={() => props.onOpenFootnote?.(mark, null)}>Open {mark.id}</button>)}
     </>;
+  },
+}));
+vi.mock("./modes/AgentSidePanel", async original => ({
+  ...await original<typeof import("./modes/AgentSidePanel")>(),
+  AgentSidePanel: (props: ComponentProps<typeof import("./modes/AgentSidePanel").AgentSidePanel>) => {
+    mocks.agent = props;
+    return null;
   },
 }));
 vi.mock("./modes/FootnoteOverview", () => ({
@@ -176,6 +186,39 @@ afterEach(() => {
   if (mounted) act(() => root.unmount());
   mounted = false; document.body.textContent = "";
   vi.useRealTimers(); vi.restoreAllMocks(); vi.unstubAllGlobals();
+});
+
+it.each(["annotate", "mark"])("saves explicit empty lists on a new %s footnote", async action => {
+  await mount();
+  if (action === "mark") await act(async () => { mocks.boardProps!.onHighlightingChange!(true); });
+  const selection = { text: "First", excerpt: "First", anchor: { kind: "text" as const, start: 2, end: 7 }, hitRects: [] };
+  await act(async () => {
+    if (action === "annotate") mocks.selection!.onAnnotate!(selection, null);
+    else mocks.selection!.onMark!(selection, null);
+  });
+  await click(saveLabel);
+  const saved = mocks.save.mock.calls.at(-1)![0].footnotes.find((mark: DocFootnote) => mark.anchor.kind === "text");
+  expect(saved).toMatchObject({ notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [] });
+});
+
+it.each([false, true])("saves message defaults and proposal list defaults (proposal: %s)", async hasProposal => {
+  const ask = vi.fn(async () => ({ reply: "An answer", programs: [], artifacts: hasProposal ? [{ kind: "code", title: "answer.py", source: "print(1)" }] : [] }));
+  Object.assign(mocks.shell.client, { runPreparedCoach: ask });
+  await mount();
+  act(() => { void mocks.agent!.onSend("A question", {
+    ask: true, draw: false, reviewBoard: false, lazy: false, handwriting: false,
+    capture: false, annotations: false, reasoning: "off",
+  }); });
+  for (let i = 0; i < 30 && !mocks.agent!.messages.some(message => message.content === "An answer"); i++) await advance(100);
+  expect(mocks.shell.setError).not.toHaveBeenCalledWith(expect.any(String));
+  expect(ask).toHaveBeenCalledTimes(1);
+  await click(saveLabel);
+  const messages = mocks.save.mock.calls.at(-1)![0].agent;
+  expect(messages).toHaveLength(2);
+  for (const message of messages) expect(message).toMatchObject({ attachments: [], artifacts: [], processEvents: [], pending: false, queued: false, bridgePending: false });
+  expect(messages[0].artifactProposals).toEqual([]);
+  expect(messages[1].artifactProposals).toEqual(hasProposal ? [{ kind: "code", title: "answer.py", source: "print(1)", programs: [], messages: [] }] : []);
+  expect(messages[1].flags).toEqual(["Ask"]);
 });
 
 it("opens markdown with its marks and saved width, reports height to the page, and ignores subpixel state changes", async () => {

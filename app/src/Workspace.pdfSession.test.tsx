@@ -210,7 +210,7 @@ it("toggles spread on and off, holds busy until layout/remap, rejects a double t
   await advance(200);
   expect(loadPdfSpreadPref("pdf-hash")).toBe(false); expect(busy()).toBe(false);
   expect(mocks.board.setInkSpread).toHaveBeenLastCalledWith(true);
-  expect(mocks.marks[0]).toEqual(originalMark); expect(peekPdfFilmCurrent(tab.id)).toBe(2);
+  expect(mocks.marks[0]).toEqual({ ...originalMark, bands: [] }); expect(peekPdfFilmCurrent(tab.id)).toBe(2);
 });
 
 it("ignores spread while ink layout is pending and clears busy without changing the preference when frames are missing", async () => {

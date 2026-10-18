@@ -32,6 +32,17 @@ function footnote(patch: Partial<DocFootnote> = {}): DocFootnote {
   };
 }
 
+it("retains explicitly empty lists and images on read without filling legacy omissions", () => {
+  const [saved] = sanitizeFootnotes([footnote({ notes: [{ id: "n", text: "words", images: [], createdAt: 1, updatedAt: 1 }],
+    threads: [], bands: [], subMarks: [{ id: "s", kind: "underline", excerpt: "hash", start: 0, end: 4, bands: [] }],
+    userLinks: [], whiteboards: [], artifacts: [] })]);
+  expect(saved).toMatchObject({ notes: [{ images: [] }], threads: [], bands: [], subMarks: [{ bands: [] }], userLinks: [], whiteboards: [], artifacts: [] });
+  const [legacy] = sanitizeFootnotes([footnote()]);
+  expect(legacy.notes).toBeUndefined();
+  expect(legacy.bands).toBeUndefined();
+  expect(legacy.artifacts).toBeUndefined();
+});
+
 describe("addFootnote", () => {
   it("keeps footnotes in reading order", () => {
     const list = addFootnote(

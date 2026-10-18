@@ -33,6 +33,19 @@ afterEach(() => {
   clearHubConflict();
 });
 
+it("builds a combined mark with explicit empty collections", () => {
+  expect(combineFootnotePair(note("a"), note("a"))).toMatchObject({ notes: [], whiteboards: [], threads: [], userLinks: [], subMarks: [] });
+});
+
+it("does not offer conflict choices for empty defaults on a mark or its parts", () => {
+  const missing = note("a", "quote", { notes: [{ id: "n", text: "words", createdAt: 1, updatedAt: 1 }],
+    subMarks: [{ id: "s", kind: "underline", excerpt: "q", start: 0, end: 1 }] });
+  const empty = { ...missing, threads: [], bands: [], userLinks: [], whiteboards: [], artifacts: [],
+    notes: missing.notes!.map(note => ({ ...note, images: [] })), subMarks: missing.subMarks!.map(mark => ({ ...mark, bands: [] })) };
+  expect(visibleFootnoteDiffRows([missing], [empty])).toEqual([]);
+  expect(footnotePartDiffs(missing, empty)).toEqual([]);
+});
+
 describe("footnoteDiffRows", () => {
   it("lines both sides up by id and flags the marks that exist on each", () => {
     const rows = footnoteDiffRows([note("a"), note("b")], [note("a", "quote a"), note("c")]);
@@ -320,9 +333,7 @@ describe("combineFootnotePair", () => {
   it("reads back like a single-sided keep when there is nothing to add", () => {
     // No empty arrays where a plain ✓ would have left the field absent.
     const combined = combineFootnotePair(note("a"), note("a"));
-    expect(combined).toEqual(note("a"));
-    expect(Object.hasOwn(combined, "notes")).toBe(false);
-    expect(Object.hasOwn(combined, "whiteboards")).toBe(false);
+    expect(combined).toEqual({ ...note("a"), notes: [], whiteboards: [], threads: [], userLinks: [], subMarks: [] });
   });
 
   it("lets an explicit pick override the pane default for that mark alone", () => {

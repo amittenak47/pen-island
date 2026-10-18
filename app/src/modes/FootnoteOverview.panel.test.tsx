@@ -76,7 +76,84 @@ function reveal(n: number) {
   act(() => document.querySelector<HTMLButtonElement>(`[aria-label^="Note ${n}:"]`)!.click());
 }
 
+function confirmHold(button: HTMLButtonElement) {
+  const time = vi.spyOn(performance, "now").mockReturnValue(0);
+  act(() => button.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })));
+  time.mockReturnValue(2000);
+  act(() => button.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })));
+  time.mockRestore();
+}
+
 describe("FootnoteOverview panel", () => {
+  it("saves a new text-only note with an explicit empty images list", async () => {
+    const onChange = vi.fn();
+    mount({ ...MARK, notes: [] }, { onChange });
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Add Notes"]')!.click());
+    await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Note"]')).not.toBeNull());
+    const input = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Note"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "A thought");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Save")!.click());
+    expect(onChange.mock.calls.at(-1)![0].notes).toMatchObject([{ text: "A thought", images: [] }]);
+  });
+
+  it("saves [] after the last picture is removed from an existing note", async () => {
+    const onChange = vi.fn();
+    mount({ ...MARK, notes: [{ ...MARK.notes![0], images: ["YQ=="] }] }, { onChange });
+    reveal(1);
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Edit note 1"]')!.click());
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Remove picture 1"]')).not.toBeNull());
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Remove picture 1"]')!.click());
+    act(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Save")!.click());
+    expect(onChange.mock.calls.at(-1)![0].notes[0].images).toEqual([]);
+  });
+
+  it("resets the panel's collections to explicit empty lists", () => {
+    const onChange = vi.fn();
+    mount(MARK, { onChange });
+    const reset = document.querySelector<HTMLButtonElement>(".lc-footnote-panel-reset")!;
+    confirmHold(reset);
+    expect(onChange.mock.calls.at(-1)![0]).toMatchObject({ notes: [], userLinks: [], threads: [], subMarks: [] });
+  });
+
+  it.each(["whiteboards", "threads", "subMarks"] as const)("saves [] when the last %s entry is removed", field => {
+    const onChange = vi.fn();
+    const entries = {
+      whiteboards: [{ id: "wb", title: "Scratch", createdAt: 1, updatedAt: 1 }],
+      threads: [{ rootId: "turn", title: "Conversation", createdAt: 1 }],
+      subMarks: [{ id: "sm", kind: "underline" as const, excerpt: "Contents", start: 0, end: 4 }],
+    };
+    mount({ ...MARK, ...entries }, { onChange });
+    if (field === "subMarks") act(() => document.querySelector<HTMLButtonElement>('[aria-label="Remove underline"]')!.click());
+    else confirmHold(document.querySelector<HTMLButtonElement>(field === "whiteboards" ? '[aria-label^="Scratch —"]' : '[aria-label^="Conversation. Tap"]')!);
+    expect(onChange.mock.calls.at(-1)![0][field]).toEqual([]);
+  });
+
+  it("saves [] when the last user link is removed", async () => {
+    const onChange = vi.fn();
+    mount({ ...MARK, userLinks: [{ title: "My link", url: "https://example.com" }] }, { onChange });
+    act(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.includes("My link"))!.click());
+    await vi.waitFor(() => expect(document.querySelector('[aria-label="Remove link"]')).not.toBeNull());
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Remove link"]')!.click());
+    expect(onChange.mock.calls.at(-1)![0].userLinks).toEqual([]);
+  });
+
+  it("saves [] when the last note is edited to contain nothing", async () => {
+    const onChange = vi.fn();
+    mount(MARK, { onChange }); reveal(1);
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Edit note 1"]')!.click());
+    await vi.waitFor(() => expect(document.querySelector('textarea[aria-label="Note"]')).not.toBeNull());
+    const input = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Note"]')!;
+    act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")!.set!.call(input, "");
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    act(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Save")!.click());
+    expect(onChange.mock.calls.at(-1)![0].notes).toEqual([]);
+  });
+
   it("shows assistant app failures on pending footnotes", () => {
     mount({ ...MARK, pending: "fr-app" }, { pendingStatus: "Codex couldn't finish. Open Settings → ChatBot → Test." });
     expect(document.querySelector('[role="status"]')?.textContent).toBe("Codex couldn't finish. Open Settings → ChatBot → Test.");

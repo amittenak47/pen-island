@@ -98,7 +98,7 @@ export function setDrawingExpanded<T extends { id: string; drawing?: MessageDraw
       drawing: {
         ...message.drawing,
         expanded,
-        redacted: expanded ? false : message.drawing.redacted,
+        redacted: expanded ? false : message.drawing.redacted ?? false,
       },
     };
   });
@@ -115,6 +115,7 @@ export function withNewDrawing(
   return {
     program,
     expanded: true,
+    redacted: false,
     frameIndex: 0,
     ...(page != null && page >= 1 ? { page: Math.floor(page) } : {}),
   };

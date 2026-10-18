@@ -321,6 +321,7 @@ export function footnoteFromItem(
   const base: DocFootnote = {
     id: freshFootnoteId(existing, now),
     kind: "ai",
+    notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [],
     anchor: {
       kind: "text",
       start: at.start,

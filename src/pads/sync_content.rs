@@ -1,7 +1,12 @@
 //! Content identity for atomic sync. This contract is mirrored by syncContent.ts.
 //! Keys sort by UTF-16 code units; numbers use ECMAScript's shortest spelling.
 //! Only named root transport fields, board view/manifests, the page frame's per-device
-//! layout fields, an empty footnote board map and false agent flags are excluded.
+//! layout fields and these empty defaults canonicalize to absence: root agent
+//! and footnote_boards; agent[].attachments/artifacts/artifactProposals/
+//! flags/processEvents, agent[].pending/queued/bridgePending=false,
+//! agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
+//! footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
+//! footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
 use anyhow::{ensure, Context, Result};
 use flate2::bufread::GzDecoder;
 use serde_json::Value;
@@ -71,7 +76,15 @@ pub fn canonical_json(value: &Value) -> Result<String> {
 /// saved before tags, and sync keeps each device's own frame on download.
 pub const PAGE_FRAME_LOCAL_KEYS: &[&str] = &["width", "height", "version", "versionNonce", "updated", "seed"];
 /// Agent message flags whose `false` is the same as leaving them out.
-pub const MESSAGE_FALSE_DEFAULT_KEYS: &[&str] = &["pending", "queued"];
+pub const MESSAGE_FALSE_DEFAULT_KEYS: &[&str] = &["pending", "queued", "bridgePending"];
+pub const MESSAGE_EMPTY_LIST_KEYS: &[&str] = &["attachments", "artifacts", "artifactProposals", "flags", "processEvents"];
+pub const FOOTNOTE_EMPTY_LIST_KEYS: &[&str] = &["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"];
+
+fn omit_empty_lists(object: &mut serde_json::Map<String, Value>, keys: &[&str]) {
+    for key in keys {
+        if object.get(*key).and_then(Value::as_array).is_some_and(Vec::is_empty) { object.remove(*key); }
+    }
+}
 
 fn is_page_frame(element: &serde_json::Map<String, Value>) -> bool {
     if element.get("id").and_then(Value::as_str) == Some("lcmdink-0-frame") { return true; }
@@ -114,11 +127,32 @@ pub fn normalize_record(value: &Value) -> Result<Value> {
     }
     if let Some(messages) = object.get_mut("agent").and_then(Value::as_array_mut) {
         for message in messages.iter_mut().filter_map(Value::as_object_mut) {
+            omit_empty_lists(message, MESSAGE_EMPTY_LIST_KEYS);
             for key in MESSAGE_FALSE_DEFAULT_KEYS {
                 if message.get(*key) == Some(&Value::Bool(false)) { message.remove(*key); }
             }
+            if let Some(drawing) = message.get_mut("drawing").and_then(Value::as_object_mut) {
+                if drawing.get("redacted") == Some(&Value::Bool(false)) { drawing.remove("redacted"); }
+            }
+            if let Some(proposals) = message.get_mut("artifactProposals").and_then(Value::as_array_mut) {
+                for proposal in proposals.iter_mut().filter_map(Value::as_object_mut) {
+                    omit_empty_lists(proposal, &["programs", "messages"]);
+                }
+            }
         }
     }
+    if let Some(notes) = object.get_mut("footnotes").and_then(Value::as_array_mut) {
+        for note in notes.iter_mut().filter_map(Value::as_object_mut) {
+            omit_empty_lists(note, FOOTNOTE_EMPTY_LIST_KEYS);
+            if let Some(entries) = note.get_mut("notes").and_then(Value::as_array_mut) {
+                for entry in entries.iter_mut().filter_map(Value::as_object_mut) { omit_empty_lists(entry, &["images"]); }
+            }
+            if let Some(marks) = note.get_mut("subMarks").and_then(Value::as_array_mut) {
+                for mark in marks.iter_mut().filter_map(Value::as_object_mut) { omit_empty_lists(mark, &["bands"]); }
+            }
+        }
+    }
+    omit_empty_lists(object, &["agent"]);
     Ok(value)
 }
 
@@ -273,6 +307,31 @@ mod tests {
             assert_eq!(canonical_json(&normalize_record(&value).unwrap()).unwrap(), item["canonical"].as_str().unwrap());
             assert_eq!(record_hash(&value).unwrap(), item["hash"].as_str().unwrap());
         }
+    }
+
+    #[test]
+    fn empty_defaults_match_missing_only_at_named_paths() {
+        let missing = json!({"agent":[{"drawing":{"program":{"id":"p"}},
+            "artifactProposals":[{"kind":"whiteboard","title":"Sketch"}]}],
+            "footnotes":[{"notes":[{"text":"words"}],"subMarks":[{"id":"sub"}]}]});
+        let empty = json!({"agent":[{"drawing":{"program":{"id":"p"},"redacted":false},
+            "artifactProposals":[{"kind":"whiteboard","title":"Sketch","programs":[],"messages":[]}],
+            "attachments":[],"artifacts":[],"flags":[],"processEvents":[],"pending":false,"queued":false,"bridgePending":false}],
+            "footnotes":[{"notes":[{"text":"words","images":[]}],"subMarks":[{"id":"sub","bands":[]}],
+                "threads":[],"bands":[],"userLinks":[],"whiteboards":[],"artifacts":[]}]});
+        assert_eq!(normalize_record(&empty).unwrap(), missing);
+        assert_eq!(record_hash(&empty).unwrap(), record_hash(&missing).unwrap());
+        assert_eq!(normalize_record(&json!({"agent":[],"footnote_boards":{}})).unwrap(), json!({}));
+        assert_ne!(record_hash(&json!({"footnotes":[]})).unwrap(), record_hash(&json!({})).unwrap());
+        for extra in [json!({"artifactFootnoteIds":[]}), json!({"future":[]}), json!({"bridgePending":true}),
+            json!({"attachments":[{}]}), json!({"processEvents":[{}]})] {
+            assert_ne!(record_hash(&json!({"agent":[extra]})).unwrap(), record_hash(&json!({"agent":[{}]})).unwrap());
+        }
+        for extra in [json!({"title":""}), json!({"palette":[]}), json!({"updatedAt":0}), json!({"pending":""})] {
+            assert_ne!(record_hash(&json!({"footnotes":[extra]})).unwrap(), record_hash(&json!({"footnotes":[{}]})).unwrap());
+        }
+        assert_ne!(record_hash(&json!({"agent":[{"attachments":[{"sendToModel":false}]}]})).unwrap(),
+            record_hash(&json!({"agent":[{"attachments":[{}]}]})).unwrap());
     }
 
     #[test]

@@ -304,7 +304,7 @@ describe("padSync pull", () => {
     for (const restore of [restoreWhiteboardNotebook, restoreAnnotateDoc]) {
       const saved = restore.mock.calls[0]![0] as { agent: unknown[] };
       const reopened = restoreAgentMessages(saved.agent);
-      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...message, sessionId: "session-question" })));
+      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...message, sessionId: "session-question", queued: false })));
       expect(visibleDrawings(reopened)).toHaveLength(expanded ? 1 : 0);
     }
   });
