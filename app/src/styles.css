@@ -23807,8 +23807,9 @@ html[data-corners="rounded"] {
 /* ------------------------------------------------- reading full screen --- */
 /*
  * Hold Recenter: the header leaves the flow and the content takes its height,
- * in one layout change. The visible motion is `fullscreenMotion.ts`, on
- * transforms only, so nothing is laid out per frame.
+ * in one layout change. `fullscreenMotion.ts` commits the starting box before
+ * paint; CSS transitions use the mobile agent sheet's properties and clock.
+ * The board refits once at the end, with no layout work per animation frame.
  *
  * Only the content's copy of the header height drops to 0. The header keeps
  * its natural box (out of the flow, clipped shut), so its box can close and
@@ -23827,6 +23828,38 @@ html[data-corners="rounded"] {
   clip-path: inset(0px 0px 100% 0px);
   visibility: hidden;
   pointer-events: none;
+}
+
+.lc-app[data-fullscreen-motion] > .lc-header {
+  /* Keep the edge paintable while closing/opening; contents stay in place.
+   * At rest the header is unclipped so menus can overflow again. */
+  visibility: visible;
+  z-index: 55;
+  will-change: clip-path;
+}
+
+.lc-app[data-fullscreen-motion] > .lc-main {
+  will-change: transform;
+}
+
+.lc-app[data-fullscreen-motion="prepare"] > .lc-header,
+.lc-app[data-fullscreen-motion="prepare"] > .lc-main {
+  transition: none;
+}
+
+.lc-app[data-fullscreen-motion="active"] > .lc-header {
+  transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lc-app[data-fullscreen-motion="active"] > .lc-main {
+  transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-app[data-fullscreen-motion] > .lc-header,
+  .lc-app[data-fullscreen-motion] > .lc-main {
+    transition: none;
+  }
 }
 
 /* A hold button dressed as its menu neighbours: the same 36 px box and ink. */

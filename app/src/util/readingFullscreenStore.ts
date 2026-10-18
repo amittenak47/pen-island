@@ -38,9 +38,11 @@ export function setReadingFullscreen(next: boolean): void {
   if (next === on) return;
   on = next;
   if (root) {
-    if (on) root.dataset.fullscreen = "true";
-    else delete root.dataset.fullscreen;
-    void animateFullscreenChange(root, on);
+    const element = root;
+    void animateFullscreenChange(element, on, () => {
+      if (on) element.dataset.fullscreen = "true";
+      else delete element.dataset.fullscreen;
+    });
   }
   void applyReadingFullscreen(on).catch(() => {});
   if (typeof window !== "undefined") {

@@ -1,70 +1,170 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+// @ts-expect-error Node runtime module used by Vitest; app intentionally has no Node typings.
+import { readFileSync } from "node:fs";
+// @ts-expect-error Node runtime module used by Vitest; app intentionally has no Node typings.
+import { URL as FileURL } from "node:url";
 import { animateFullscreenChange } from "./fullscreenMotion";
-import { SPLIT_RESIZE_EVENT } from "./splitResize";
+import { boardResizeDeferred, SPLIT_RESIZE_EVENT } from "./splitResize";
 
-let app: HTMLDivElement, header: HTMLElement, main: HTMLElement, side: HTMLElement;
-const animations: Array<{ el: Element; frames: Keyframe[]; options: KeyframeAnimationOptions; finish: () => void; cancel: ReturnType<typeof vi.fn> }> = [];
-let settles = 0;
-const onSettle = (event: Event) => { if ((event as CustomEvent).detail?.phase === "settle") settles++; };
+const OPEN = "inset(0px 0px 0px 0px)";
+const CLOSED = "inset(0px 0px 100% 0px)";
+const TRANSITION = "240ms cubic-bezier(0.22, 1, 0.36, 1)";
+const css = readFileSync(new FileURL("../styles.css", import.meta.url), "utf8");
+let app: HTMLDivElement, header: HTMLElement, main: HTMLElement, headerSlot: HTMLElement, agentSlot: HTMLElement;
+let style: HTMLStyleElement;
+const originalAnimate = Element.prototype.animate;
+let settles: boolean[];
+let committed: Array<{ clip: string; transform: string; transition: string; held: boolean }>;
+const onSettle = (event: Event) => {
+  if ((event as CustomEvent).detail?.phase === "settle") settles.push(boardResizeDeferred());
+};
+const rect = (top: number, height: number) => ({ top, height, left: 0, width: 800, right: 800, bottom: top + height, x: 0, y: top, toJSON() {} });
+const toggle = (entering: boolean, changeLayout = () => {
+  if (entering) app.dataset.fullscreen = "true";
+  else delete app.dataset.fullscreen;
+}) => animateFullscreenChange(app, entering, changeLayout);
+const transitionEnd = (el: HTMLElement, propertyName: string) => {
+  const event = new Event("transitionend", { bubbles: true });
+  Object.defineProperty(event, "propertyName", { value: propertyName });
+  el.dispatchEvent(event);
+};
+
 beforeEach(() => {
-  vi.useFakeTimers(); animations.length = 0; settles = 0;
+  vi.useFakeTimers(); settles = []; committed = [];
   window.matchMedia = vi.fn(() => ({ matches: false })) as unknown as typeof window.matchMedia;
-  Element.prototype.animate = function (this: Element, frames: Keyframe[], options: KeyframeAnimationOptions) {
-    let resolve!: () => void; const finished = new Promise<void>(r => { resolve = r; });
-    const record = { el: this, frames, options, finish: () => resolve(), cancel: vi.fn(() => resolve()), finished };
-    animations.push(record); return record as unknown as Animation;
-  } as typeof Element.prototype.animate;
-  app = document.createElement("div"); header = document.createElement("header"); header.className = "lc-header";
-  main = document.createElement("main"); side = document.createElement("aside");
-  app.append(header, main, side); document.body.append(app);
+  // There is deliberately no working Web Animations API: the tablet's known
+  // working sheet uses CSS transitions, and full screen must use that path too.
+  vi.stubGlobal("Animation", undefined);
+  Element.prototype.animate = vi.fn(() => { throw new Error("Use CSS transitions"); });
+  style = document.createElement("style");
+  style.textContent = css.slice(css.indexOf("/* ------------------------------------------------- reading full screen --- */"));
+  document.head.append(style);
+  app = document.createElement("div"); app.className = "lc-app";
+  header = document.createElement("header"); header.className = "lc-header";
+  main = document.createElement("main"); main.className = "lc-main";
+  headerSlot = document.createElement("span"); headerSlot.className = "lc-header-slot"; headerSlot.style.display = "contents";
+  agentSlot = document.createElement("span"); agentSlot.className = "lc-agent-slot"; agentSlot.style.display = "contents";
+  app.append(header, headerSlot, main, agentSlot); document.body.append(app);
+  Object.defineProperty(app, "clientHeight", { configurable: true, value: 1000 });
   Object.defineProperty(header, "offsetHeight", { configurable: true, value: 44 });
+  vi.spyOn(main, "getBoundingClientRect").mockImplementation(() => app.hasAttribute("data-fullscreen") ? rect(0, 1000) : rect(44, 956));
+  const computed = window.getComputedStyle.bind(window);
+  vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
+    const value = computed(el, pseudo);
+    if (el === main && main.style.transform) committed.push({
+      clip: header.style.clipPath, transform: main.style.transform,
+      transition: value.transition, held: boardResizeDeferred(),
+    });
+    return value;
+  });
   window.addEventListener(SPLIT_RESIZE_EVENT, onSettle);
 });
-afterEach(() => { window.removeEventListener(SPLIT_RESIZE_EVENT, onSettle); app.remove(); delete document.body.dataset.lcPanelMotion; vi.useRealTimers(); });
-
-it("entering: one refit up front, then the header box shrinks in place while the reading box enlarges", async () => {
-  Object.defineProperty(app, "clientHeight", { configurable: true, value: 1000 });
-  const done = animateFullscreenChange(app, true);
-  expect(settles).toBe(1); // boards fit the final size before anything moves
-  expect(document.body.dataset.lcPanelMotion).toBe("true"); // and do not refit mid-motion
-  const head = animations.find(a => a.el === header)!;
-  // A box: its bottom edge closes upward; nothing slides.
-  expect(head.frames[0]).toMatchObject({ clipPath: "inset(0px 0px 0px 0px)" });
-  expect(head.frames.at(-1)).toMatchObject({ clipPath: "inset(0px 0px 100% 0px)" });
-  expect(head.frames.every(f => !("transform" in f))).toBe(true);
-  for (const el of [main, side]) {
-    const a = animations.find(x => x.el === el)!;
-    // From the old box (44 px shorter, centred lower) to the full screen, uniformly.
-    expect(a.frames[0]).toMatchObject({ transform: `translateY(22px) scale(${956 / 1000})` });
-    expect(a.frames.at(-1)).toMatchObject({ transform: "translateY(0px) scale(1)" });
-  }
-  expect(new Set(animations.map(a => `${a.options.duration}|${a.options.easing}`)).size).toBe(1);
-  animations.forEach(a => a.finish()); await vi.runAllTimersAsync(); await done;
-  expect(document.body.dataset.lcPanelMotion).toBeUndefined();
-  expect(settles).toBe(2); // one settle after the motion, measured without transforms
+afterEach(async () => {
+  await vi.runAllTimersAsync();
+  window.removeEventListener(SPLIT_RESIZE_EVENT, onSettle);
+  app.remove(); style.remove(); delete document.body.dataset.lcPanelMotion;
+  vi.restoreAllMocks(); vi.unstubAllGlobals(); Element.prototype.animate = originalAnimate; vi.useRealTimers();
 });
 
-it("leaving: the header box grows back down and the reading box shrinks into place", () => {
-  Object.defineProperty(app, "clientHeight", { configurable: true, value: 1000 });
-  animateFullscreenChange(app, false);
-  const head = animations.find(a => a.el === header)!;
-  expect(head.frames[0]).toMatchObject({ clipPath: "inset(0px 0px 100% 0px)" });
-  expect(head.frames.at(-1)).toMatchObject({ clipPath: "inset(0px 0px 0px 0px)" });
-  expect(animations.find(a => a.el === main)!.frames[0]).toMatchObject({ transform: `translateY(-22px) scale(${1000 / 956})` });
+it.each([true, false])("uses the sheet's CSS clip/transform clock, entering=%s, without a final-state flash", async entering => {
+  if (!entering) app.dataset.fullscreen = "true";
+  let layouts = 0;
+  const done = toggle(entering, () => {
+    // The hold and visible starting clip precede the only layout change.
+    expect(boardResizeDeferred()).toBe(true);
+    expect(header.style.clipPath).toBe(entering ? OPEN : CLOSED);
+    layouts++;
+    if (entering) app.dataset.fullscreen = "true";
+    else delete app.dataset.fullscreen;
+  });
+  expect(layouts).toBe(1);
+  expect(committed).toContainEqual({
+    clip: entering ? OPEN : CLOSED,
+    transform: entering ? `translateY(44px) scaleY(${956 / 1000})` : `translateY(-44px) scaleY(${1000 / 956})`,
+    transition: "none", held: true,
+  });
+  expect(header.style.clipPath).toBe(entering ? CLOSED : OPEN);
+  expect(header.style.transform).toBe(""); expect(header.style.opacity).toBe("");
+  expect(getComputedStyle(header).visibility).toBe("visible");
+  expect(getComputedStyle(header).transition).toBe(`clip-path ${TRANSITION}`);
+  expect(main.style.transform).toBe("translateY(0px) scaleY(1)");
+  expect(getComputedStyle(main).transition).toBe(`transform ${TRANSITION}`);
+  expect([headerSlot, agentSlot].every(el => el.style.transform === "")).toBe(true);
+  expect(settles).toEqual([]);
+  expect(boardResizeDeferred()).toBe(true);
+  const resize = vi.fn(() => {
+    expect(main.style.transform).toBe("");
+    expect(boardResizeDeferred()).toBe(false);
+  });
+  window.addEventListener("resize", resize);
+  // Ignore descendants' transitions and unrelated properties.
+  const child = document.createElement("div"); main.append(child);
+  transitionEnd(child, "transform"); transitionEnd(header, "opacity");
+  expect(boardResizeDeferred()).toBe(true);
+  transitionEnd(header, "clip-path");
+  expect(boardResizeDeferred()).toBe(true);
+  transitionEnd(main, "transform");
+  await done;
+  expect(app.hasAttribute("data-fullscreen-motion")).toBe(false);
+  expect(header.style.clipPath).toBe(""); expect(main.style.transform).toBe("");
+  if (entering) expect(getComputedStyle(header).visibility).toBe("hidden");
+  else expect(getComputedStyle(header).visibility).not.toBe("hidden");
+  expect(settles).toEqual([false]); expect(resize).toHaveBeenCalledOnce();
+  await vi.runAllTimersAsync(); expect(settles).toHaveLength(1);
+  window.removeEventListener("resize", resize);
 });
 
-it("reduced motion: no animation, one refit", async () => {
+it("falls back to one final settle when WebView transitionend is missing", async () => {
+  const done = toggle(true);
+  await vi.advanceTimersByTimeAsync(239);
+  expect(boardResizeDeferred()).toBe(true); expect(settles).toEqual([]);
+  await vi.runAllTimersAsync(); await done;
+  expect(boardResizeDeferred()).toBe(false); expect(settles).toEqual([false]);
+});
+
+it("reverses from the visible box and clip, resolves the interrupted motion and keeps the refit hold", async () => {
+  const first = toggle(true);
+  await vi.advanceTimersByTimeAsync(80);
+  const computed = window.getComputedStyle.bind(window);
+  vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
+    const value = computed(el, pseudo);
+    if (el === header) return { ...value, clipPath: "inset(0px 0px 60% 0px)" } as CSSStyleDeclaration;
+    return value;
+  });
+  // Browser-measured intermediate geometry, not the first motion's target.
+  vi.mocked(main.getBoundingClientRect).mockReturnValueOnce(rect(18, 982));
+  const done = toggle(false);
+  await expect(first).resolves.toBeUndefined();
+  expect(committed).toContainEqual({
+    clip: "inset(0px 0px 60% 0px)", transform: `translateY(-26px) scaleY(${982 / 956})`,
+    transition: "none", held: true,
+  });
+  await vi.advanceTimersByTimeAsync(180); // The cancelled fallback must not settle.
+  expect(boardResizeDeferred()).toBe(true); expect(settles).toEqual([]);
+  transitionEnd(header, "clip-path"); transitionEnd(main, "transform");
+  await done; await vi.runAllTimersAsync();
+  expect(settles).toEqual([false]); expect(boardResizeDeferred()).toBe(false);
+  expect(app.dataset.fullscreen).toBeUndefined();
+});
+
+it("reduced motion switches instantly, with one settle and resize and no retained motion styles", async () => {
   window.matchMedia = vi.fn(() => ({ matches: true })) as unknown as typeof window.matchMedia;
-  await animateFullscreenChange(app, true);
-  expect(animations).toHaveLength(0); expect(settles).toBe(1); expect(document.body.dataset.lcPanelMotion).toBeUndefined();
+  const resize = vi.fn(); window.addEventListener("resize", resize);
+  await toggle(true);
+  expect(app.dataset.fullscreen).toBe("true");
+  expect(app.hasAttribute("data-fullscreen-motion")).toBe(false);
+  expect(header.style.clipPath).toBe(""); expect(main.style.transform).toBe("");
+  expect(boardResizeDeferred()).toBe(false); expect(settles).toEqual([false]);
+  expect(resize).toHaveBeenCalledOnce(); expect(vi.getTimerCount()).toBe(0);
+  window.removeEventListener("resize", resize);
 });
 
-it("a second toggle mid-motion cancels the first and only the last geometry is fitted", async () => {
-  animateFullscreenChange(app, true);
-  const first = [...animations];
-  const done = animateFullscreenChange(app, false);
-  expect(first.every(a => a.cancel.mock.calls.length === 1)).toBe(true);
-  animations.slice(first.length).forEach(a => a.finish()); await vi.runAllTimersAsync(); await done;
-  expect(document.body.dataset.lcPanelMotion).toBeUndefined();
+it("a reduced-motion toggle during a transition clears the old hold and settles only the new geometry", async () => {
+  const first = toggle(true);
+  window.matchMedia = vi.fn(() => ({ matches: true })) as unknown as typeof window.matchMedia;
+  await toggle(false); await first; await vi.runAllTimersAsync();
+  expect(app.dataset.fullscreen).toBeUndefined();
+  expect(app.hasAttribute("data-fullscreen-motion")).toBe(false);
+  expect(boardResizeDeferred()).toBe(false); expect(settles).toEqual([false]);
 });
