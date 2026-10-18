@@ -354,6 +354,16 @@ describe("modern current-state book sync", () => {
     expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/);
     expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
   });
+  it("a book deleted here after another device deleted it settles without a choice", async () => {
+    await initial(); await trashWhiteboardNotebook("book");
+    remote = { ...remote, state: "gone", record: null, record_hash: null, record_rev: 0, pages: [], gone_seq: 9, book_rev: ++revision }; pages.clear();
+    vi.mocked(api.commitPad).mockClear();
+    const result = await syncBook(api, "whiteboard", "book", undefined, options);
+    expect(result.error?.message).toBeUndefined(); expect(result.status).toMatch(/^(synced|unchanged)$/); expect(api.commitPad).not.toHaveBeenCalled();
+    const capture = await captureBook({ kind: "whiteboard", id: "book" });
+    expect(capture.state.lifecycle).toBeNull(); expect(capture.metadata?.deletedAt).toBeDefined(); expect(capture.metadata?.deleteAcked).toBe(true);
+    expect((await syncBook(api, "whiteboard", "book", undefined, options)).status).toBe("unchanged");
+  });
   it("keeping the hub copy of a book deleted here brings it back, once", async () => {
     await initial(); await trashWhiteboardNotebook("book"); await remoteRecord("Hub rename");
     const ask = vi.fn(async (conflict: BookConflict, lifecycle: ConflictUiLifecycle) => { lifecycle.onMounted(); expect(conflict.lifecycle).toBe(true); return { lifecycle: "server" as const }; });

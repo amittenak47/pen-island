@@ -269,6 +269,8 @@ export interface BookPublication {
   lifecycle?: SyncState["lifecycle"];
   /** An explicit hub choice brings back a book deleted on this device. */
   restoreFromHub?: boolean;
+  /** This device's deletion agrees with the hub's: mark it acknowledged. */
+  settleDelete?: boolean;
 }
 /** One CAS protects the entire read set. Every hash and decoded page is prepared. */
 export async function publishBook(capture: BookCapture, prepared: BookPublication): Promise<void> {
@@ -317,6 +319,9 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
                   localPageKey(capture, `${capture.id}/fn/${id}`);
                   tx.objectStore(STORE_CONTENT).put(value, `fnwb:${capture.id}:${id}`);
                 }
+              }
+              if (prepared.settleDelete && capture.metadata) {
+                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deleteAcked: true }, syncStateKey(capture.kind, capture.id));
               }
               for (let index = 0; index < prepared.pages.length; index++) {
                 const page = prepared.pages[index]!, seq = first + index + 1;

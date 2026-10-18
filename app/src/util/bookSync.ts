@@ -423,6 +423,12 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           return { ...owner, status: committed ? "synced" : "unchanged", committed };
         }
         if (remote.state === "gone" && !restoring && capture.metadata?.deletedAt === undefined && capture.state.lifecycle?.action !== "delete") throw new BookSyncError("gone", "Book deleted elsewhere; local content was kept");
+        // Deleted here after another device deleted it: the deletions agree, so
+        // there is nothing to choose. The trashed copy here stays until its sweep.
+        if (remote.state === "gone" && deleting && capture.metadata?.deletedAt !== undefined) {
+          await publishBook(capture, { book: remote, record: null, recordLocalHash: null, pages: [], lifecycle: null, settleDelete: true });
+          return { ...owner, status: "synced", committed };
+        }
         if (!capture.record && remote.record && !options.allowCreate && !capture.metadata && !capture.state.lifecycle) throw new BookSyncError("needs_choice", "This book is retained outside the active library");
         const remoteInline = remote.record ? await convertInlineBook(capture, remote.record, capture.state.changeSeq) : null;
         // The reader chose, in Retained copies, between this exact hub record's
