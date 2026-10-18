@@ -448,6 +448,8 @@ export function HubConflictSplit({
     return () => onUnavailable?.();
   }, [conflict, onMounted, onUnavailable]);
   const [manualPicks, setManualPicks] = useState<Record<string, SidePick>>({});
+  /** With no rows to pick (only the book's details differ), the column choice is the whole copy. */
+  const [wholePick, setWholePick] = useState<Side | null>(null);
   const [differencesOnly, setDifferencesOnly] = useState(true);
   const [revealInk, setRevealInk] = useState(false);
   /** The change lists sit over the page; folding them away shows the whole page. */
@@ -777,6 +779,9 @@ export function HubConflictSplit({
     const visible = idsOnSide(side, true);
     return visible.length > 0 ? visible : idsOnSide(side);
   };
+  // Nothing to list on either side: the choice is between the two copies.
+  // Keep used to resolve this silently to this device's copy.
+  const recordOnly = idsOnSide("local").length === 0 && idsOnSide("server").length === 0;
 
   const paneFilled = (side: Side, value: boolean): boolean => {
     const ids = columnIds(side);
@@ -802,6 +807,7 @@ export function HubConflictSplit({
   const onPaneKeep = (side: Side) => {
     const other: Side = side === "local" ? "server" : "local";
     if (side === "server" && serverMissing) return;
+    if (recordOnly) { setWholePick(current => current === side ? null : side); return; }
     setPicks((current) => {
       const ids = columnIds(side);
       const otherIds = columnIds(other);
@@ -826,10 +832,17 @@ export function HubConflictSplit({
   };
 
   const onPaneDrop = (side: Side) => {
+    if (recordOnly) {
+      const other: Side = side === "local" ? "server" : "local";
+      if (other === "server" && serverMissing) return;
+      setWholePick(current => current === other ? null : other);
+      return;
+    }
     setSideAll(side, paneFilled(side, false) ? undefined : false);
   };
 
   const paneVerdict = (side: Side): "undecided" | "keep" | "reject" => {
+    if (recordOnly) return wholePick === null ? "undecided" : wholePick === side ? "keep" : "reject";
     if (paneFilled(side, true)) return "keep";
     if (paneFilled(side, false)) return "reject";
     return "undecided";
@@ -881,7 +894,7 @@ export function HubConflictSplit({
   // No attachment choice may remove the only authored version. Reconciliation
   // retains the other active version as a conflict copy, including tombstones.
   const catalogHomed = !hasCatalogRow || Boolean(picks[ARTIFACT_CATALOG_ROW_ID]?.local || picks[ARTIFACT_CATALOG_ROW_ID]?.server);
-  const valid = Boolean(conflict) && notesHomed && inkHomed && catalogHomed;
+  const valid = Boolean(conflict) && notesHomed && inkHomed && catalogHomed && (!recordOnly || wholePick !== null);
 
   /*
    * What each pane draws, entry by entry.
@@ -1045,6 +1058,7 @@ export function HubConflictSplit({
     });
 
   const overallPick = (): HubConflictResolution["pick"] => {
+    if (recordOnly && wholePick) return wholePick;
     if (conflict?.kind === "annotate" && Object.keys(manualPicks).some(id => parseFootnotePartRowId(id))) return "merged";
     const choices = [inkChoice(), ...(hasCatalogRow && !catalogs.same ? [inkChoiceFromPick(picks[ARTIFACT_CATALOG_ROW_ID])] : [])].filter(choice => choice !== "none");
     const ink = choices.length === 0 ? "none" : choices.every(choice => choice === choices[0]) ? choices[0] : "merged";
@@ -1420,7 +1434,7 @@ export function HubConflictSplit({
     const shown = paneShows[side];
     const appState = padBoardAppState(body);
     const lined = linedPitchStateFromAppState(appState);
-    const hasChoices = columnIds(side).length > 0;
+    const hasChoices = columnIds(side).length > 0 || recordOnly;
     const at = updatedAtOf(body);
     const verdict = paneVerdict(side);
     const label = sideLabel(side);
@@ -1488,6 +1502,7 @@ export function HubConflictSplit({
         </header>
         <div className="lc-hub-conflict-pane-body">
           {!hasChoices && !inkLoading && <p className="lc-muted">No differing marks, handwriting or attachments on this side.</p>}
+          {recordOnly && !inkLoading && <p className="lc-muted">Only the book's details differ. Tick the copy to keep.</p>}
           <ConflictPagePreview
             hash={docHash}
             documentType={conflict.kind === "annotate" ? (body as AnnotatePadDto | null)?.doc_type : undefined}

@@ -185,6 +185,18 @@ describe("HubConflictSplit", () => {
     expect(paneButton(1, "drop").className).toContain("lc-doc-confirm-no");
   });
 
+  it("with only the book's details differing, a side tick chooses the whole copy and Keep waits for it", () => {
+    const { onResolve } = mount({ ...CONFLICT, local: annotateBody("book", 900, []), server: annotateBody("book renamed", 500, []) });
+    expect(paneButton(1, "keep").disabled).toBe(false);
+    expect(resolveButton().disabled).toBe(true);
+    act(() => paneButton(1, "keep").click());
+    expect(paneButton(1, "keep").getAttribute("aria-pressed")).toBe("true");
+    expect(paneButton(0, "drop").getAttribute("aria-pressed")).toBe("true");
+    act(() => resolveButton().click());
+    expect(onResolve).toHaveBeenCalledTimes(1);
+    expect(onResolve.mock.calls[0]![0].pick).toBe("server");
+  });
+
   it("top ✓ keeps that whole copy and discards the other column", () => {
     const { onResolve } = mount();
     act(() => paneButton(0, "keep").click());
