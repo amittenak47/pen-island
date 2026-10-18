@@ -605,6 +605,7 @@ export function DocSelectionLayer({
     lastX: number;
     lastY: number;
     sideScroll: HTMLElement | null;
+    textReady?: Promise<boolean>;
   } | null>(null);
 
   const clearGesture = useCallback(() => {
@@ -677,7 +678,12 @@ export function DocSelectionLayer({
       if (event.pointerType === "touch" || event.button !== 0 || isDocChromeTarget(event.target)) return;
       const { root } = scopeRootAtPoint(body, event.clientX, event.clientY);
       const page = pdfPageNumberOf(root);
-      if (page != null && !root.querySelector(".lc-pdf-text")?.hasChildNodes()) {
+      if (subMarkArmed && subMarkParent) {
+        const bands = subMarkParent.bands?.length ? subMarkParent.bands : anchorLocalRects(body, root, subMarkParent.anchor);
+        if (pointInLocalBands(body, bands, event.clientX, event.clientY, 48)) return;
+      }
+      const textLayer = root.querySelector<HTMLElement>(".lc-pdf-text");
+      if (page != null && (!textLayer?.hasChildNodes() || textLayer.dataset.pdfTextBuilding)) {
         pending = { id: event.pointerId, root, x: event.clientX, y: event.clientY, ready: fillPdfQuoteText(paletteScope, page) };
       }
     };
@@ -701,9 +707,6 @@ export function DocSelectionLayer({
     host.addEventListener("pointerdown", fillAt, true);
     window.addEventListener("pointerup", finish, true);
     window.addEventListener("pointercancel", finish, true);
-    const root = subMarkParent ? scopeRootIn(body, subMarkParent.anchor.scope) : null;
-    const page = root ? pdfPageNumberOf(root as HTMLElement) : null;
-    if (subMarkArmed && page != null) void fillPdfQuoteText(paletteScope, page);
     return () => {
       pending = null;
       host.removeEventListener("pointerdown", fillAt, true);
@@ -987,6 +990,7 @@ export function DocSelectionLayer({
   useEffect(() => {
     const host = hostRef.current;
     if (!host || !enabled || subMarkArmed || subMarkParent) return;
+    let selectionRequest = 0;
 
     const paintFromFinger = (hold: NonNullable<typeof holdRef.current>) => {
       const body = bodyRef.current;
@@ -1076,6 +1080,7 @@ export function DocSelectionLayer({
     const onPointerDown = (event: PointerEvent) => {
       if (event.button !== 0) return;
       if (isDocChromeTarget(event.target)) return;
+      selectionRequest += 1;
       // Unsaved confirm (✓/✕, not yet Annotate) dies on tap-off. A new hold
       // on this same pointer can replace it. Actions stay on the backdrop.
       if (phaseRef.current === "confirm") dismiss();
@@ -1104,7 +1109,7 @@ export function DocSelectionLayer({
           const body = bodyRef.current;
           const page = body && paletteScope && documentUsesPdfPlacement(body)
             ? pdfPageNumberOf(scopeRootAtPoint(body, hold.startX, hold.startY).root) : null;
-          if (page != null && paletteScope) void fillPdfQuoteText(paletteScope, page);
+          if (page != null && paletteScope) hold.textReady = fillPdfQuoteText(paletteScope, page);
         }, SELECT_HOLD_ARM_MS),
         armed: false,
         held: false,
@@ -1173,26 +1178,22 @@ export function DocSelectionLayer({
         setHitRects([]);
         return;
       }
-      const done = finalizeMarquee(body, rect, root, scope);
-      if (!done) {
-        setBand(null);
-        setHitRects([]);
-        return;
-      }
-      if (done.text.trim()) {
-        confirmMarquee(done, rect);
-        return;
-      }
       const page = pdfPageNumberOf(root);
-      if (page == null || !paletteScope) {
+      const request = selectionRequest;
+      const finish = () => {
+        if (!body.isConnected || selectionRequest !== request) return;
+        const done = finalizeMarquee(body, rect, root, scope);
+        if (!done) {
+          setBand(null);
+          setHitRects([]);
+          return;
+        }
         confirmMarquee(done, rect);
-        return;
-      }
-      void fillPdfQuoteText(paletteScope, page).then((ok) => {
-        if (!body.isConnected) return;
-        const retry = ok ? finalizeMarquee(body, rect, root, scope) : null;
-        confirmMarquee(retry ?? done, rect);
-      });
+      };
+      // A partly rendered layer can already contain text. Always wait for the
+      // requested build before extracting either the quote or its tight bands.
+      if (page != null && paletteScope) void (hold.textReady ?? fillPdfQuoteText(paletteScope, page)).then(finish);
+      else finish();
     };
 
     /*
@@ -1232,6 +1233,7 @@ export function DocSelectionLayer({
     window.addEventListener("pointerup", onPointerUp, true);
     window.addEventListener("pointercancel", onPointerCancel, true);
     return () => {
+      selectionRequest += 1;
       host.removeEventListener("selectstart", onSelectStart);
       host.removeEventListener("contextmenu", onContextMenu);
       host.removeEventListener("pointerdown", onPointerDown);
@@ -1382,7 +1384,16 @@ export function DocSelectionLayer({
       startY: number;
       armTimer: number | null;
       armed: boolean;
+      textReady: Promise<boolean> | null;
     } | null = null;
+    let waitingSelect: { pointerId: number; x: number; y: number; up: PointerEvent | null } | null = null;
+
+    const requestText = (root: HTMLElement): Promise<boolean> | null => {
+      const page = pdfPageNumberOf(root);
+      const textLayer = root.querySelector<HTMLElement>(".lc-pdf-text");
+      return page != null && paletteScope && (!textLayer?.hasChildNodes() || textLayer.dataset.pdfTextBuilding)
+        ? fillPdfQuoteText(paletteScope, page) : null;
+    };
 
     const clearPendingHold = () => {
       if (pendingHold?.armTimer != null) window.clearTimeout(pendingHold.armTimer);
@@ -1635,6 +1646,7 @@ export function DocSelectionLayer({
         ?.closest?.(".lc-doc-submark-grip") as Element | null;
       const grip = fromTarget ?? fromPoint;
       if (!grip && isDocChromeTarget(event.target)) return;
+      if (waitingSelect) { waitingSelect = null; releaseSubMarkGesture(); }
       const region = parentRegion();
       if (!region) return;
       if (
@@ -1698,9 +1710,11 @@ export function DocSelectionLayer({
         startX: event.clientX,
         startY: event.clientY,
         armed: false,
+        textReady: event.pointerType === "touch" ? null : requestText(region.root),
         armTimer: window.setTimeout(() => {
           if (pendingHold && pendingHold.pointerId === event.pointerId) {
             pendingHold.armed = true;
+            pendingHold.textReady ??= requestText(region.root);
             try {
               navigator.vibrate?.(10);
             } catch {
@@ -1712,6 +1726,13 @@ export function DocSelectionLayer({
     };
 
     const onPointerMove = (event: PointerEvent) => {
+      if (waitingSelect?.pointerId === event.pointerId) {
+        waitingSelect.x = event.clientX;
+        waitingSelect.y = event.clientY;
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       const hold = pendingHold;
       if (hold && hold.pointerId === event.pointerId && !subMarkDragRef.current) {
         const moved = Math.hypot(event.clientX - hold.startX, event.clientY - hold.startY);
@@ -1725,6 +1746,20 @@ export function DocSelectionLayer({
         const startX = hold.startX;
         const startY = hold.startY;
         clearPendingHold();
+        if (hold.textReady) {
+          ownSubMarkGesture();
+          const waiting = { pointerId: event.pointerId, x: event.clientX, y: event.clientY, up: null as PointerEvent | null };
+          waitingSelect = waiting;
+          void hold.textReady.then(ok => {
+            if (waitingSelect !== waiting) return;
+            waitingSelect = null;
+            if (!ok) { releaseSubMarkGesture(); return; }
+            beginSelectAt(waiting.pointerId, startX, startY, waiting.x, waiting.y);
+            tickSubMarkFinger(waiting.x, waiting.y);
+            if (waiting.up) onPointerUp(waiting.up);
+          });
+          return;
+        }
         beginSelectAt(event.pointerId, startX, startY, event.clientX, event.clientY);
         return;
       }
@@ -1800,6 +1835,16 @@ export function DocSelectionLayer({
     };
 
     const onPointerUp = (event: PointerEvent) => {
+      if (waitingSelect?.pointerId === event.pointerId) {
+        if (event.type === "pointercancel") waitingSelect = null;
+        else {
+          waitingSelect.x = event.clientX;
+          waitingSelect.y = event.clientY;
+          waitingSelect.up = event;
+        }
+        releaseSubMarkGesture();
+        return;
+      }
       if (pendingHold?.pointerId === event.pointerId) clearPendingHold();
       const drag = subMarkDragRef.current;
       if (!drag || drag.pointerId !== event.pointerId) return;
@@ -1873,6 +1918,7 @@ export function DocSelectionLayer({
     window.addEventListener("pointerup", onPointerUp, true);
     window.addEventListener("pointercancel", onPointerUp, true);
     return () => {
+      waitingSelect = null;
       clearPendingHold();
       unsubHit();
       host.removeEventListener("selectstart", onSelectStart);
@@ -1883,7 +1929,7 @@ export function DocSelectionLayer({
       releaseSubMarkGesture();
       killNativeSelection();
     };
-  }, [subMarkArmed, subMarkMode, subMarkParent, onAddSubMark, dismiss]);
+  }, [subMarkArmed, subMarkMode, subMarkParent, onAddSubMark, dismiss, paletteScope]);
 
   /*
    * Ribbons are placed from the live DOM, so they follow a re-render of the

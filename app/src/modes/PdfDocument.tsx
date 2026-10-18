@@ -28,17 +28,17 @@
  * overlap — it does not re-render. The flick-end HUD guess never feeds this
  * window.
  *
- * Only the viewport hole keeps selectable spans (at most three pages).
+ * Interactions build selectable spans on demand; the viewport text window
+ * retains at most three pages. Scrolling alone never builds a text layer.
  * Marks use cached worker text geometry, independent of those spans.
  */
 
-import { waitForInkSettled } from "../canvas/inkSettled";
 import { traceOpen } from "../util/messageOf";
 import { type CSSProperties, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { isDocCameraLive, isDocCameraPulsing, subscribeDocCameraLive, subscribeDocCameraPulse } from "../canvas/docSelectionGesture";
 import { pdfExtrasHeld } from "./pdfOpenHold";
-import { isPageTurnBusy, pageTurnHoldLeft, subscribePageTurnBusy } from "../util/pageTurnBusy";
+import { isPageTurnBusy, subscribePageTurnBusy } from "../util/pageTurnBusy";
 import type { PageFrame } from "../canvas/inkPageIndex";
 import {
   isCameraBusy,
@@ -100,7 +100,6 @@ import {
   sessionPathPages,
 } from "./pdfPageSession";
 import {
-  nextPdfPageMissingText,
   pageNeedsDecode,
   pdfDecodeQueue,
   pdfOuterPages,
@@ -582,8 +581,6 @@ function releasePagePixels(
 /** How long a parked book keeps its sharp pages before giving them back. */
 export const PARKED_TRIM_MS = 5_000;
 
-/** Longest the text layer waits for ink to finish painting. */
-const TEXT_AFTER_INK_CAP_MS = 3000;
 /**
  * Most a sharp paint waits for its page's text geometry before it lands.
  *
@@ -1423,18 +1420,7 @@ export function PdfDocument({
     type PdfPageProxy = Awaited<ReturnType<typeof doc.getPage>>;
     type PdfTextContent = Awaited<ReturnType<PdfPageProxy["getTextContent"]>>;
     const renderBusy = () => isDocCameraLive(filmScope) || isPageTurnBusy(filmScope);
-    /*
-     * The text layer is one freeze that cannot be cut short (0.15–0.4 s a
-     * page on the tablet), so it waits for the hand to rest, not just for the
-     * landed page's sharp paint: started 0.4 s after a turn, it landed under
-     * the next swipe of a reader turning in cadence.
-     */
-    /*
-     * And not the moment a drag pauses either: a hold-and-drag through Scroll
-     * reading rests for a beat between moves, the fill started in that beat,
-     * and the next move ran into it. `isCameraBusy` holds on after the camera
-     * last moved (0.9 s on Android), so the text waits for the hand to rest.
-     */
+    // Worker geometry may wait for rest; selectable spans are requested by a gesture.
     const textBusy = () => renderBusy() || isPageTurnBusy() || isCameraBusy();
 
     /**
@@ -1449,10 +1435,9 @@ export function PdfDocument({
       pdfPage: PdfPageProxy,
       content: PdfTextContent,
       signal: AbortSignal,
-      ignoreLive = false,
     ): Promise<boolean> => {
       const blocked = () =>
-        disposedRef.current || signal.aborted || (!ignoreLive && textBusy());
+        disposedRef.current || signal.aborted;
       for (const slot of queryPageSlots(host, n)) {
         if (blocked()) return false;
         await yieldToInput();
@@ -1466,7 +1451,7 @@ export function PdfDocument({
          * pdf.js sizes each span by setting a canvas font and measuring its
          * string: thousands of font switches and measurements on the UI thread,
          * ~4 s on a dense page on the tablet. alignTextLayerToGlyphs below
-         * already measures every span's real width in one batch and scales it
+         * already fits real DOM widths in one batch and scales each span
          * to the PDF's own glyph width, from any starting scale. So pdf.js gets
          * horizontal items without a width, which skips its measuring; vertical
          * text, which that fit leaves alone, is measured as before.
@@ -1487,67 +1472,52 @@ export function PdfDocument({
         if (blocked()) return false;
         const cancel = () => layer.cancel();
         signal.addEventListener("abort", cancel, { once: true });
-        try { await layer.render(); }
-        finally { signal.removeEventListener("abort", cancel); }
-        if (blocked()) return false;
-        alignTextLayerToGlyphs(
-          spreadHost,
-          layer.textDivs,
-          content.items,
-          entry.fit,
-        );
+        textHost.dataset.pdfTextBuilding = "true";
+        try {
+          await layer.render();
+          if (blocked()) return false;
+          alignTextLayerToGlyphs(
+            spreadHost,
+            layer.textDivs,
+            content.items,
+            entry.fit,
+          );
+        } finally {
+          signal.removeEventListener("abort", cancel);
+          delete textHost.dataset.pdfTextBuilding;
+        }
       }
       publishDocPlacementRev(filmScope, [n]);
       return true;
     };
 
-    /** See {@link nextPdfPageMissingText} for what this is for. */
-    const nextPageMissingText = (): number | null => {
-      const onScreen = textWindowRef.current!.pages();
-      return nextPdfPageMissingText(onScreen, (n) => {
-        const first = queryPageSlots(host, n)[0];
-        const textHost = first?.querySelector(".lc-pdf-text");
-        return {
-          laidOut: pagesRef.current.some((page) => page.pageNumber === n),
-          painted: Boolean(first?.hasAttribute("data-painted")),
-          hasSpans: (textHost?.childNodes.length ?? 0) > 0,
-          filled: textWindowRef.current!.has(n),
-        };
-      });
-    };
-
-    const fillMissingText = async (
-      n: number,
-      ignoreLive = false,
-    ): Promise<boolean> => {
+    const fillMissingText = async (n: number): Promise<boolean> => {
       const entry = pagesRef.current.find((page) => page.pageNumber === n);
-      if (!entry || disposedRef.current) return false;
-      if (!ignoreLive && textBusy()) return false;
+      if (!entry || disposedRef.current || pausedRef.current || offscreenRef.current) return false;
       return textWindowRef.current!.ensure(n, async (signal) => {
         const closeJob = openBackgroundJob(`pdf-text:${n}`);
         try {
-          // Ink first; an explicit selection does not wait for background work.
-          if (!ignoreLive) await waitForInkSettled(TEXT_AFTER_INK_CAP_MS);
+          // Explicit selection owns this work, even while the camera/ink is busy.
           await yieldToInput();
-          if (disposedRef.current || signal.aborted || (!ignoreLive && textBusy())) return false;
+          if (disposedRef.current || signal.aborted) return false;
           const pdfPage = await doc.getPage(n);
-          if (disposedRef.current || signal.aborted || (!ignoreLive && textBusy())) return false;
+          if (disposedRef.current || signal.aborted) return false;
           const content = await pageText(n, pdfPage);
-          if (disposedRef.current || signal.aborted || (!ignoreLive && textBusy())) return false;
-          return await fillPageText(n, entry, pdfPage, content, signal, ignoreLive);
+          if (disposedRef.current || signal.aborted) return false;
+          return await fillPageText(n, entry, pdfPage, content, signal);
         } catch {
           return false;
         } finally {
           closeJob();
         }
-      }, ignoreLive);
+      }, true);
     };
 
     quoteFillRef.current = async (page) => {
-      // An idle fill already in flight may yield to this gesture. Retry it as
-      // an explicit quote after that shared promise releases its reservation.
-      if (await fillMissingText(page, true)) return true;
-      return fillMissingText(page, true);
+      // A viewport publication can cancel an in-flight build. The gesture
+      // still gets one retry under its explicit reservation before giving up.
+      if (await fillMissingText(page)) return true;
+      return fillMissingText(page);
     };
 
     const pageOut = async (
@@ -1735,21 +1705,6 @@ export function PdfDocument({
         archiveDropped(dropped);
         return sheet;
       };
-      const fillTextFromPage = async (pdfPage: PdfPageProxy) => {
-        try {
-          // Opening: the reader's ink first; the text layer follows (`pdfOpenHold`).
-          if (disposedRef.current || textBusy() || pdfExtrasHeld(filmScope)) {
-            return;
-          }
-          const content = await pageText(n, pdfPage);
-          if (disposedRef.current || textBusy()) {
-            return;
-          }
-          await textWindowRef.current!.ensure(n, signal => fillPageText(n, entry, pdfPage, content, signal));
-        } catch {
-          // The next idle turn retries text content or an interrupted layer.
-        }
-      };
 
       try {
         const cached = sheetLruRef.current.get(n);
@@ -1762,12 +1717,6 @@ export function PdfDocument({
             if (disposedRef.current || aborted) return;
           }
           commitSheet(cached);
-          if (renderBusy()) return;
-          const firstText = slots[0]?.querySelector(".lc-pdf-text");
-          if (firstText && firstText.childNodes.length > 0) return;
-          const pdfPage = await doc.getPage(n);
-          if (disposedRef.current || renderBusy()) return;
-          await fillTextFromPage(pdfPage);
           return;
         }
 
@@ -1789,11 +1738,6 @@ export function PdfDocument({
             archiveDropped(dropped);
             if (!pageNeedsDecode(entry.fit, paintScale, restored.pixelScale)) {
               commitSheet(restored);
-              const firstText = slots[0]?.querySelector(".lc-pdf-text");
-              if (firstText && firstText.childNodes.length > 0) return;
-              const pdfPage = await doc.getPage(n);
-              if (disposedRef.current || renderBusy()) return;
-              await fillTextFromPage(pdfPage);
               return;
             }
           }
@@ -1835,9 +1779,6 @@ export function PdfDocument({
         await settleMarkGeometry(markGeometry);
         if (disposedRef.current) return;
         commitSheet(sheet);
-        if (!renderBusy()) {
-          await fillTextFromPage(pdfPage);
-        }
       } catch (cause: unknown) {
         if (disposedRef.current) return;
         const message = cause instanceof Error ? cause.message : String(cause);
@@ -2000,24 +1941,6 @@ export function PdfDocument({
           if (missingGeometry != null) {
             try { await pageText(missingGeometry, await doc.getPage(missingGeometry)); }
             catch { return; } // A later paint wake can retry a worker failure.
-            continue;
-          }
-
-          /*
-           * Words on screen before pages the reader has not reached.
-           *
-           * A page can be quotable or merely legible, and the difference is
-           * this layer. It goes ahead of the path fill because the reader is
-           * looking at these pages now.
-           */
-          const textless = nextPageMissingText();
-          if (textless != null) {
-            const rest = pageTurnHoldLeft();
-            if (rest > 0) {
-              await waitForPaintSignal(filmScope, rest);
-              continue;
-            }
-            await fillMissingText(textless);
             continue;
           }
 

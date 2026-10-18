@@ -15,7 +15,7 @@
  * quote comes back ending a fifth of the way early, and the confirm block and
  * the underline stop mid-line with the rest of the words outside them.
  *
- * The remeasure closes the loop in the DOM instead: ask each span how wide it
+ * The remeasure closes the loop in the DOM instead: sample how wide spans
  * *actually* came out and re-derive `--scale-x` from that, against the width
  * the text content says the item is. It is the same correction pdf.js intended,
  * taken from the surface that has to match rather than from a canvas that does
@@ -78,6 +78,7 @@ export function refitScaleX({ want, measured, scaleX }: TextSpanFit): number | n
 export interface PdfTextItem {
   str?: string;
   width?: number;
+  fontName?: string;
   type?: string;
 }
 
@@ -113,8 +114,10 @@ export function spannedItems(items: readonly PdfTextItem[]): PdfTextItem[] {
  *
  * `spans` is `TextLayer.textDivs`, which carries one entry per text item in
  * content order — including the empty ones it never appends — so the two lists
- * index together once the marked-content markers are out of the way. Reads are
- * taken in one pass and writes in another: the read of the first box is the
+ * index together once the marked-content markers are out of the way. Up to eight
+ * non-trivial spans per font establish its correction. Disagreement beyond the
+ * fit tolerance falls back to measuring every span of that font. Reads are
+ * taken before writes: the read of the first box is the
  * only forced layout, and interleaving them would make it one per span.
  *
  * Returns how many spans were changed, which is zero on a platform that is not
@@ -130,7 +133,9 @@ export function alignTextLayerToGlyphs(
   if (!(scale > 0) || !(fit > 0)) return 0;
 
   const strings = spannedItems(items);
-  const pending: Array<{ span: HTMLElement; want: number; scaleX: number; measured: number }> = [];
+  type Entry = { span: HTMLElement; want: number; scaleX: number; measured: number };
+  const pending: Entry[] = [];
+  const fonts = new Map<string, Entry[]>();
   const upto = Math.min(spans.length, strings.length);
   for (let i = 0; i < upto; i += 1) {
     const span = spans[i];
@@ -145,11 +150,35 @@ export function alignTextLayerToGlyphs(
      */
     if (span.style.getPropertyValue("--rotate")) continue;
     const scaleX = Number(span.style.getPropertyValue("--scale-x")) || 1;
-    pending.push({ span, want: item.width * fit * scale, scaleX, measured: 0 });
+    const entry = { span, want: item.width * fit * scale, scaleX, measured: 0 };
+    pending.push(entry);
+    const font = item.fontName ?? span.style.fontFamily;
+    const group = fonts.get(font) ?? [];
+    if (!fonts.has(font)) fonts.set(font, group);
+    group.push(entry);
   }
 
-  for (const entry of pending) {
-    entry.measured = entry.span.getBoundingClientRect().width;
+  for (const group of fonts.values()) {
+    // Spread samples across the page, omitting tiny boxes whose rounding can
+    // dominate the ratio. Android text zoom is normally uniform per PDF font.
+    const candidates = group.filter(entry => entry.want >= 8);
+    const count = Math.min(8, candidates.length);
+    const sampled = new Set<Entry>();
+    const ratios: number[] = [];
+    for (let i = 0; i < count; i += 1) {
+      const entry = candidates[Math.floor(i * candidates.length / count)];
+      entry.measured = entry.span.getBoundingClientRect().width;
+      sampled.add(entry);
+      ratios.push(entry.want / entry.measured);
+    }
+    ratios.sort((a, b) => a - b);
+    const ratio = ratios[Math.floor(ratios.length / 2)];
+    const uniform = count > 0 && ratios.every(value => Number.isFinite(value) && value > 0)
+      && ratios[ratios.length - 1] - ratios[0] <= REFIT_EPSILON;
+    for (const entry of group) {
+      if (uniform) entry.measured = entry.want / ratio;
+      else if (!sampled.has(entry)) entry.measured = entry.span.getBoundingClientRect().width;
+    }
   }
 
   let changed = 0;

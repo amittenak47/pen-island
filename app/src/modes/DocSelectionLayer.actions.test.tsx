@@ -174,7 +174,7 @@ it("offers ChatBot for an Android quote marquee with a durable text anchor", asy
   }
 });
 
-it("finishes a mouse quote after filling a PDF page that had no selectable text", async () => {
+it.each(["mouse", "pen"])("finishes a %s quote after filling a PDF page that had no selectable text", async (pointerType) => {
   const changed = vi.fn();
   let finish!: () => void;
   const fill = vi.fn(async () => new Promise<boolean>(resolve => {
@@ -187,7 +187,7 @@ it("finishes a mouse quote after filling a PDF page that had no selectable text"
   const descriptors = ["elementFromPoint", "caretRangeFromPoint"].map(key => [key, Object.getOwnPropertyDescriptor(document, key)] as const);
   const pointer = (type: string, x: number) => {
     const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 60 });
-    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "mouse" } });
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: pointerType } });
     return event;
   };
   try {
@@ -216,5 +216,117 @@ it("finishes a mouse quote after filling a PDF page that had no selectable text"
       if (descriptor) Object.defineProperty(document, key, descriptor);
       else Reflect.deleteProperty(document, key);
     }
+  }
+});
+
+it.each([false, true])("snaps an underline to the same words after a PDF drag (deferred fill: %s)", async (deferred) => {
+  vi.useFakeTimers();
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+  const add = vi.fn();
+  let finishFill!: () => void;
+  const fill = vi.fn(() => new Promise<boolean>(resolve => {
+    finishFill = () => {
+      host.querySelector(".lc-pdf-text")!.innerHTML = "<span>Selected words for a question</span>";
+      resolve(true);
+    };
+  }));
+  const stop = registerPdfQuoteTextFill("underline-pdf", fill);
+  const descriptors = ["elementFromPoint", "caretRangeFromPoint"].map(key => [key, Object.getOwnPropertyDescriptor(document, key)] as const);
+  const pointer = (type: string, x: number) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: 60 });
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "pen" } });
+    return event;
+  };
+  try {
+    act(() => root.render(<DocSelectionLayer paletteScope="underline-pdf" footnotes={footnotes} subMarkMode="underline" onAddSubMark={add}
+      subMarkParent={{ id: "parent", kind: "note", createdAt: 1, excerpt: "Selected words for a question",
+        anchor: { kind: "text", scope: "p4", start: 0, end: 29 }, bands: [{ left: 30, top: 50, width: 150, height: 20 }] }}>
+      <div data-doc-scope="p4" data-pdf-page="4"><div className="lc-pdf-text textLayer">{!deferred && <span>Selected words for a question</span>}</div></div>
+    </DocSelectionLayer>));
+    const page = host.querySelector<HTMLElement>("[data-pdf-page]")!;
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => page });
+    Object.defineProperty(document, "caretRangeFromPoint", { configurable: true, value: (x: number) => {
+      const node = page.querySelector("span")!.firstChild!;
+      const range = document.createRange();
+      range.setStart(node, x < 100 ? 1 : 12); range.collapse(true); return range;
+    } });
+    act(() => page.dispatchEvent(pointer("pointerdown", 40)));
+    act(() => vi.advanceTimersByTime(400));
+    act(() => page.dispatchEvent(pointer("pointermove", 160)));
+    act(() => page.dispatchEvent(pointer("pointerup", 160)));
+    if (deferred) {
+      expect(fill).toHaveBeenCalledTimes(1);
+      expect(document.querySelector('[aria-label="Use this selection"]')).toBeNull();
+      await act(async () => finishFill());
+    } else expect(fill).not.toHaveBeenCalled();
+    const confirm = document.querySelector<HTMLButtonElement>('[aria-label="Use this selection"]');
+    expect(confirm).toBeTruthy();
+    await act(async () => confirm!.click());
+    expect(add).toHaveBeenCalledWith(expect.objectContaining({ kind: "underline", start: 0, end: 14,
+      excerpt: "Selected words", anchor: expect.objectContaining({ kind: "text", scope: "p4", exact: "Selected words" }) }));
+  } finally {
+    stop();
+    for (const [key, descriptor] of descriptors) {
+      if (descriptor) Object.defineProperty(document, key, descriptor);
+      else Reflect.deleteProperty(document, key);
+    }
+    vi.useRealTimers();
+  }
+});
+
+it.each([{ highlighting: false, cancel: false }, { highlighting: true, cancel: false }, { highlighting: false, cancel: true }])(
+  "waits for the complete PDF layer before confirming a touch marquee (%j)", async ({ highlighting, cancel }) => {
+  vi.useFakeTimers();
+  vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 Android");
+  vi.spyOn(window, "requestAnimationFrame").mockImplementation(() => 1);
+  vi.spyOn(Element.prototype, "getBoundingClientRect").mockImplementation(function (this: Element) {
+    return this.tagName === "SPAN" ? new DOMRect(30, 50, 150, 20) : new DOMRect(0, 0, 800, 1000);
+  });
+  const changed = vi.fn();
+  let finishFill!: () => void;
+  const fill = vi.fn(() => new Promise<boolean>(resolve => {
+    // TextLayer can expose some nodes before render() has finished.
+    host.querySelector(".lc-pdf-text")!.innerHTML = "<span>Selected </span>";
+    finishFill = () => {
+      host.querySelector("span")!.textContent += "words for a question";
+      resolve(true);
+    };
+  }));
+  const stop = registerPdfQuoteTextFill("hold-pdf", fill);
+  const descriptor = Object.getOwnPropertyDescriptor(document, "elementFromPoint");
+  const pointer = (type: string, x: number, y: number) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX: x, clientY: y });
+    Object.defineProperties(event, { pointerId: { value: 1 }, pointerType: { value: "touch" } });
+    return event;
+  };
+  try {
+    act(() => root.render(<DocSelectionLayer paletteScope="hold-pdf" highlighting={highlighting} footnotes={footnotes} onSelectionChange={changed}>
+      <div data-doc-scope="p4" data-pdf-page="4"><div className="lc-pdf-text textLayer" /></div>
+    </DocSelectionLayer>));
+    const page = host.querySelector<HTMLElement>("[data-pdf-page]")!;
+    Object.defineProperty(document, "elementFromPoint", { configurable: true, value: () => page });
+    act(() => page.dispatchEvent(pointer("pointerdown", 40, 60)));
+    expect(fill).not.toHaveBeenCalled();
+    act(() => vi.advanceTimersByTime(400));
+    expect(fill).toHaveBeenCalledWith(4);
+    act(() => page.dispatchEvent(pointer("pointermove", 160, 80)));
+    act(() => page.dispatchEvent(pointer(cancel ? "pointercancel" : "pointerup", 160, 80)));
+    expect(document.querySelector('[aria-label="Use this selection"]')).toBeNull();
+    await act(async () => finishFill());
+    if (cancel) {
+      expect(document.querySelector('[aria-label="Use this selection"]')).toBeNull();
+      expect(changed).not.toHaveBeenCalledWith(expect.objectContaining({ text: "Selected words for a question" }));
+      return;
+    }
+    expect(changed).toHaveBeenLastCalledWith(expect.objectContaining({ text: "Selected words for a question",
+      anchor: { kind: "region", scope: "p4", x: 40, y: 60, w: 120, h: 20 },
+      hitRects: [{ left: 30, top: 50, width: 150, height: 20 }],
+    }));
+    expect(document.querySelector('[aria-label="Use this selection"]')).toBeTruthy();
+  } finally {
+    stop();
+    if (descriptor) Object.defineProperty(document, "elementFromPoint", descriptor);
+    else Reflect.deleteProperty(document, "elementFromPoint");
+    vi.useRealTimers();
   }
 });
