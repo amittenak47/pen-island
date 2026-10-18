@@ -618,6 +618,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           detail={TOMBSTONE_COPY}
           confirmLabel="Delete"
           pending={removing}
+          pendingLabel="Deleting…"
           error={removeError}
           onConfirm={() => void confirmRemove(pendingId)}
           onCancel={() => setPendingId(null)}
@@ -629,6 +630,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           message="It changed since your last sync. Delete anyway?"
           confirmLabel="Delete anyway"
           pending={removing}
+          pendingLabel="Deleting…"
           error={removeError}
           onConfirm={() => void confirmRemove(staleId, true)}
           onCancel={() => { setStaleId(null); setRemoveError(null); }}

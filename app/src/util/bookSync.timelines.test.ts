@@ -179,7 +179,8 @@ describe("book delete timelines", () => {
       expect((await h.capture()).metadata).toMatchObject({ deleteAcked: true, deleteFollowed: false });
       await h.switchDevice("other"); await h.sync(); expect(await restoreTrashedPad(h.api, kind, h.id, timelineOptions)).toMatchObject({ ok: true });
       expect(h.get().state).toBe("live"); await h.switchDevice("this");
-      expect(await h.sync()).toMatchObject({ status: "synced", notice: "restored_elsewhere" });
+      // The result is named after the restored version, not this device's trashed copy.
+      expect(await h.sync()).toMatchObject({ status: "synced", notice: "restored_elsewhere", display: { title: "Book" } });
       const after = await h.capture(); expect(after.metadata?.deletedAt).toBeUndefined(); expect(after.metadata?.deleteFollowed).toBeUndefined();
       expect(titleOf(h, after.record)).toBe("Book"); expect(await recordHash(after.record!)).toBe(await recordHash(h.get().record!));
       expect((await encodedFromRecord(after.pages.find(page => page.pageId === 1)!))?.ops).toEqual(emptyInk.ops);

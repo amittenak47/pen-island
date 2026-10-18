@@ -155,6 +155,34 @@ describe("WhiteboardDialog", () => {
       expect(view.host.querySelector('[aria-label="Changed on another device"]:not([inert])')).toBeNull();
     } finally { view.unmount(); view.host.remove(); resetLibraryDeleteArmForTests(); }
   });
+  it("shows Deleting… and locks the prompt while a forced delete is still syncing", async () => {
+    // Delete anyway → the hub delete takes a while → the prompt says so and cannot be confirmed twice.
+    let finish!: () => void;
+    const slow = new Promise<void>(resolve => { finish = resolve; });
+    const onDelete = vi.fn(async (id: string, options?: { force?: boolean }) => {
+      if (!options?.force) return { status: "stale" as const };
+      await slow;
+      const at = live.rows.findIndex(row => row.id === id); trash.rows.push({ ...live.rows[at]!, deletedAt: 1 }); live.rows.splice(at, 1);
+      return { status: "deleted" as const };
+    });
+    const view = mount({ onDelete: onDelete as unknown as Extract<WhiteboardDialogProps, { mode: "entry" }>["onDelete"] });
+    try {
+      await hold("Load", view.host);
+      const remove = view.host.querySelector<HTMLButtonElement>(".lc-scratch-load-trash")!;
+      await act(async () => {
+        remove.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, pointerId: 1, button: 0 }));
+        await new Promise(resolve => setTimeout(resolve, LIBRARY_HOLD_MS + 50));
+        remove.dispatchEvent(new PointerEvent("pointerup", { bubbles: true, pointerId: 1, button: 0 }));
+      });
+      await hold("Delete", view.host);
+      await hold("Delete anyway", view.host);
+      expect(view.host.textContent).toContain("Deleting…");
+      const prompt = view.host.querySelector('[aria-label="Changed on another device"]')!;
+      expect([...prompt.querySelectorAll("button")].every(button => button.disabled)).toBe(true);
+      await act(async () => { finish(); await new Promise(resolve => setTimeout(resolve, 0)); });
+      expect(view.host.querySelector('[aria-label="Changed on another device"]:not([inert])')).toBeNull();
+    } finally { view.unmount(); view.host.remove(); resetLibraryDeleteArmForTests(); }
+  });
   it("Cancel on the changed-elsewhere prompt keeps the notebook and sends nothing more", async () => {
     const onDelete = vi.fn(async () => ({ status: "stale" as const }));
     const view = mount({ onDelete: onDelete as unknown as Extract<WhiteboardDialogProps, { mode: "entry" }>["onDelete"] });

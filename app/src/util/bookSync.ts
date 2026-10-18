@@ -526,7 +526,8 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
           await publishBook(capture, { book: remote, record: record?.record ?? null, recordLocalHash: record?.hash ?? null,
             pages: downloads, restoreFromHub: true, replacePages: true, lifecycle: null,
             ...(capture.metadata.deleteFollowed === true ? {} : { alternative: { book: remote, pages: downloads } }) });
-          return { ...owner, status: "synced", committed,
+          // Named after the restored version, not this device's trashed copy.
+          return { ...owner, status: "synced", committed, display: bookDisplay(owner, null, remote.record),
             ...(capture.metadata.deleteFollowed === true ? {} : { notice: "restored_elsewhere" as const }) };
         }
         if (remote.state === "gone" && (capture.metadata?.deletedAt !== undefined || nothingHere) && !capture.state.lifecycle) {
@@ -882,7 +883,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
         }
       }
     }, signal);
-    return { ...result, display };
+    return { ...result, display: result.display ?? display };
   } catch (cause) {
     if (cause instanceof HubSyncCancelled || signal.aborted) return { ...owner, status: "cancelled", committed };
     const error = cause instanceof BookSyncError ? cause : cause instanceof LcApiError

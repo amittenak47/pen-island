@@ -91,6 +91,7 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
         message="It changed since your last sync. Restore anyway? Their version is kept as a snapshot."
         confirmLabel="Restore anyway"
         pending={pending}
+        pendingLabel="Restoring…"
         error={error}
         onConfirm={() => void staleRetry()}
         onCancel={() => { setStaleRetry(null); setSelected(null); }}

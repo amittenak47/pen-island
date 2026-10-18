@@ -29,6 +29,8 @@ export interface ConfirmDialogProps {
   /** Blocks input while the action is in flight. */
   pending?: boolean;
   error?: string | null;
+  /** Shown in place of the hold hint while `pending`, e.g. "Deleting…". */
+  pendingLabel?: string;
 }
 
 export function ConfirmDialog({
@@ -41,6 +43,7 @@ export function ConfirmDialog({
   onCancel,
   pending = false,
   error = null,
+  pendingLabel,
 }: ConfirmDialogProps) {
   const titleId = useId();
   const present = useIsPresent();
@@ -65,8 +68,8 @@ export function ConfirmDialog({
         <div className="lc-dialog-body">
         <p>{message}</p>
         {detail && <p className="lc-muted">{detail}</p>}
-        <p className="lc-muted lc-reveal-hold-hint">
-          Hold {confirmLabel} briefly to confirm.
+        <p className="lc-muted lc-reveal-hold-hint" role={pending && pendingLabel ? "status" : undefined}>
+          {pending && pendingLabel ? pendingLabel : `Hold ${confirmLabel} briefly to confirm.`}
         </p>
         {error && <p className="lc-warning">{error}</p>}
         </div>
