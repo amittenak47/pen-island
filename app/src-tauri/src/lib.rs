@@ -198,6 +198,8 @@ pub fn run() {
         capture_save::pick_capture_folder,
         capture_save::share_png_bytes,
         doc_source::pick_document_source,
+        doc_source::pick_source_folder,
+        doc_source::list_source_folder,
         doc_source::stat_document_source,
         doc_source::read_document_source,
         document_export::begin_document_export,

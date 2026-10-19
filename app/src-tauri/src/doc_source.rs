@@ -21,6 +21,23 @@ pub struct SourceStat {
     modified: Option<u64>,
 }
 
+#[derive(Debug, Serialize)]
+pub struct FolderPick {
+    kind: &'static str,
+    location: String,
+    name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct FolderEntry {
+    kind: &'static str,
+    location: String,
+    name: String,
+    size: Option<u64>,
+    modified: Option<u64>,
+    relative: String,
+}
+
 #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn path_stat(path: &std::path::Path) -> Result<Option<SourceStat>, String> {
     match std::fs::metadata(path) {
@@ -84,6 +101,87 @@ pub async fn pick_document_source(app: AppHandle) -> Result<Option<SourcePick>, 
     {
         let _ = app;
         Ok(None)
+    }
+}
+
+#[tauri::command]
+pub async fn pick_source_folder(app: AppHandle) -> Result<Option<FolderPick>, String> {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        use tauri_plugin_dialog::DialogExt;
+        let picked = app.dialog().file().blocking_pick_folder();
+        let Some(picked) = picked else { return Ok(None) };
+        let path = picked.into_path().map_err(|err| format!("folder path: {err}"))?;
+        let name = path.file_name().map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| path.to_string_lossy().into_owned());
+        return Ok(Some(FolderPick {
+            kind: "path", location: path.to_string_lossy().into_owned(), name,
+        }));
+    }
+    #[cfg(target_os = "android")]
+    {
+        let picked = app.gallery_save().ok_or("gallery save plugin unavailable")?
+            .pick_folder_info().map_err(|err| err.to_string())?;
+        if picked.uri.is_empty() { return Ok(None) }
+        let name = picked.name.unwrap_or_else(|| picked.uri.rsplit('/').next().unwrap_or("folder").into());
+        return Ok(Some(FolderPick { kind: "uri", location: picked.uri, name }));
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "android")))]
+    {
+        let _ = app;
+        Ok(None)
+    }
+}
+
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+fn list_path_folder(root: &std::path::Path, directory: &std::path::Path, depth: usize, entries: &mut Vec<FolderEntry>) -> Result<(), String> {
+    for entry in std::fs::read_dir(directory).map_err(|err| format!("list source folder: {err}"))? {
+        let entry = entry.map_err(|err| format!("list source folder: {err}"))?;
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if name.starts_with('.') { continue }
+        let file_type = entry.file_type().map_err(|err| format!("source folder entry: {err}"))?;
+        let path = entry.path();
+        if file_type.is_dir() {
+            if depth < 3 { list_path_folder(root, &path, depth + 1, entries)?; }
+        } else if file_type.is_file() {
+            let Some(stat) = path_stat(&path)? else { continue };
+            let relative = path.strip_prefix(root).map_err(|err| format!("source relative path: {err}"))?
+                .components().map(|part| part.as_os_str().to_string_lossy().into_owned())
+                .collect::<Vec<_>>().join("/");
+            entries.push(FolderEntry {
+                kind: "path", location: path.to_string_lossy().into_owned(), name,
+                size: stat.size, modified: stat.modified, relative,
+            });
+        }
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn list_source_folder(app: AppHandle, kind: String, location: String) -> Result<Vec<FolderEntry>, String> {
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
+    {
+        let _ = app;
+        if kind != "path" { return Err("Source folder must be a path on desktop".into()) }
+        let root = std::path::Path::new(&location);
+        let mut entries = Vec::new();
+        list_path_folder(root, root, 0, &mut entries)?;
+        return Ok(entries);
+    }
+    #[cfg(target_os = "android")]
+    {
+        if kind != "uri" { return Err("Source folder must be a URI on Android".into()) }
+        let entries = app.gallery_save().ok_or("gallery save plugin unavailable")?
+            .list_folder(&location).map_err(|err| err.to_string())?;
+        return Ok(entries.into_iter().map(|entry| FolderEntry {
+            kind: "uri", location: entry.uri, name: entry.name,
+            size: entry.size, modified: entry.modified, relative: entry.relative,
+        }).collect());
+    }
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "android")))]
+    {
+        let _ = (app, kind, location);
+        Err("Source folders are unavailable on this platform".into())
     }
 }
 

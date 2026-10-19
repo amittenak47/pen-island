@@ -5,7 +5,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vite
 import type { AnnotateDocMeta } from "../util/annotateStore";
 
 const library = vi.hoisted(() => ({ rows: [] as AnnotateDocMeta[] }));
-const source = vi.hoisted(() => ({ refs: {} as Record<string, { name: string }>, check: vi.fn(), update: vi.fn() }));
+const source = vi.hoisted(() => ({ refs: {} as Record<string, { name: string }>, check: vi.fn(), update: vi.fn(), link: vi.fn(), justLink: vi.fn() }));
+const native = vi.hoisted(() => ({ available: vi.fn(), pickFolder: vi.fn(), listFolder: vi.fn(), stat: vi.fn() }));
 
 vi.mock("../components/HoldButton", () => ({
   HoldButton: ({ label, children, onConfirm, disabled, className }: {
@@ -19,8 +20,9 @@ vi.mock("../util/annotateStore", () => ({
   trashAnnotateDoc: vi.fn(), deleteAnnotateDoc: vi.fn(), setAnnotateDocLocked: vi.fn(),
   annotateDocLabel: (doc: AnnotateDocMeta) => doc.label?.trim() || doc.name,
 }));
-vi.mock("../util/docSourceStore", () => ({ listDocSources: () => source.refs }));
-vi.mock("../util/docSourceUpdate", () => ({ checkDocSource: source.check, updateDocFromSource: source.update, DOC_SOURCE_CHECKED_EVENT: "lc-doc-source-checked" }));
+vi.mock("../util/docSourceStore", () => ({ listDocSources: () => source.refs, getDocSource: (id: string) => source.refs[id] ?? null }));
+vi.mock("../util/docSourceUpdate", () => ({ checkDocSource: source.check, updateDocFromSource: source.update, linkDocSource: source.link, justLinkDocSource: source.justLink, DOC_SOURCE_CHECKED_EVENT: "lc-doc-source-checked" }));
+vi.mock("../util/docSourceNative", () => ({ nativeSourcePickerAvailable: native.available, pickSourceFolder: native.pickFolder, listSourceFolder: native.listFolder, statDocumentSource: native.stat }));
 vi.mock("../util/padSnapshotStore", () => ({ listPadSnapshots: async () => [], PAD_SNAPSHOT_TIERS: [] }));
 vi.mock("../util/padSync", () => ({ TOMBSTONE_COPY: "Trash on this device." }));
 vi.mock("./RetainedCopies", () => ({ RetainedCopies: () => null }));
@@ -32,6 +34,8 @@ let root: Root;
 beforeAll(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; });
 beforeEach(() => {
   source.check.mockReset(); source.update.mockReset();
+  source.link.mockReset(); source.justLink.mockReset();
+  native.available.mockReset().mockReturnValue(false); native.pickFolder.mockReset(); native.listFolder.mockReset(); native.stat.mockReset();
   library.rows = [
     { id: "first", name: "Lecture.pdf", hash: "old-1", docType: "pdf", updatedAt: 1 },
     { id: "second", name: "Notes.md", hash: "old-2", docType: "markdown", updatedAt: 2 },
@@ -52,6 +56,62 @@ async function click(label: string) {
 async function recents() { await click("Open"); await click("Recents"); }
 
 describe("AnnotateDialog source updates", () => {
+  it("lists folder matches, links only selected files, and offers differing files in the newer list", async () => {
+    library.rows.push(
+      { id: "third", name: "Chapter.md", hash: "old-3", docType: "markdown", updatedAt: 3 },
+      { id: "fourth", name: "Appendix.md", hash: "old-4", docType: "markdown", updatedAt: 4 },
+    );
+    source.refs = {};
+    const folder = { kind: "path", location: "C:/course", name: "course" };
+    const entries = library.rows.map(doc => ({ kind: "path", location: `C:/course/${doc.name}`, name: doc.name, relative: `notes/${doc.name}`, size: 10, modified: 1 }));
+    const content = (id: string) => ({ status: "newer", text: `changed ${id}`, ref: { hash: `new-${id}` } });
+    native.available.mockReturnValue(true); native.pickFolder.mockResolvedValue(folder); native.listFolder.mockResolvedValue(entries);
+    source.link.mockImplementation(async (id: string) => id === "first" ? { status: "linked" } : { status: "differs", content: content(id) });
+    source.update.mockResolvedValue({ unplaced: [{ kind: "highlight", label: "A passage" }] });
+    const notice = vi.fn(); mount(notice); await recents(); await click("Link files from a folder…");
+    expect(native.listFolder).toHaveBeenCalledWith("path", "C:/course");
+    const dialog = host.querySelector<HTMLElement>('[aria-label="Link files"]')!;
+    expect(dialog.textContent).toContain("notes/Chapter.md");
+    const boxes = dialog.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect([...boxes].every(box => box.checked)).toBe(true);
+    await act(async () => boxes[1]!.click());
+    await click("Link selected");
+    expect(source.link.mock.calls.map(call => call[0])).toEqual(["first", "third", "fourth"]);
+    expect(source.link).toHaveBeenCalledWith("third", entries[2]);
+    const newer = host.querySelector<HTMLElement>('[aria-label="Newer versions available"]')!;
+    const updates = newer.querySelectorAll<HTMLInputElement>('input[type="checkbox"]');
+    expect(updates).toHaveLength(2); expect([...updates].every(box => box.checked)).toBe(true);
+    await act(async () => updates[1]!.click());
+    await click("Update selected");
+    expect(source.update).toHaveBeenCalledTimes(1);
+    expect(source.update).toHaveBeenCalledWith("third", content("third"));
+    expect(source.justLink).toHaveBeenCalledTimes(1);
+    expect(source.justLink).toHaveBeenCalledWith("fourth", content("fourth").ref);
+    expect(notice).toHaveBeenCalledWith("Linked 3 documents. 1 was updated. 1 annotation couldn't be placed and stays in the previous version (Recents → retained copies).");
+  });
+
+  it("reports duplicate names in the folder dialog and announces no matches", async () => {
+    source.refs = {};
+    native.available.mockReturnValue(true); native.pickFolder.mockResolvedValue({ kind: "uri", location: "content://tree", name: "course" });
+    const file = (name: string, relative: string) => ({ kind: "uri", location: `content://tree/${relative}`, name, relative, size: null, modified: null });
+    native.listFolder.mockResolvedValue([file("Notes.md", "one/Notes.md"), file("NOTES.MD", "two/NOTES.MD"), file("Lecture.pdf", "Lecture.pdf")]);
+    mount(); await recents(); await click("Link files from a folder…");
+    const dialog = host.querySelector<HTMLElement>('[aria-label="Link files"]')!;
+    expect(dialog.textContent).toContain("1 name appears more than once and was skipped");
+    expect(dialog.querySelectorAll('input[type="checkbox"]')).toHaveLength(1);
+    await act(async () => dialog.querySelector<HTMLButtonElement>('[aria-label="Close Link files"]')!.click());
+    native.listFolder.mockResolvedValue([]);
+    await click("Link files from a folder…");
+    expect(host.textContent).toContain("No documents in this folder match your library.");
+  });
+
+  it("leaves the library alone when the folder picker is cancelled", async () => {
+    native.available.mockReturnValue(true); native.pickFolder.mockResolvedValue(null);
+    mount(); await recents(); await click("Link files from a folder…");
+    expect(native.listFolder).not.toHaveBeenCalled(); expect(source.link).not.toHaveBeenCalled();
+    expect(host.querySelector('[aria-label="Link files"]')).toBeNull();
+  });
+
   it("lists newer files checked by default and updates only the selected file", async () => {
     const newer = (id: string) => ({ status: "newer", text: `new ${id}`, ref: { hash: `new-${id}` } });
     source.check.mockImplementation(async (id: string) => newer(id));

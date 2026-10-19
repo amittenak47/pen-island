@@ -63,9 +63,10 @@ import { useHeaderModes } from "./util/headerModesPref";
 import { collectExploreGraph } from "./util/exploreGraphExport";
 import { HubSyncControl, padTabSync, tabOffersHubSync } from "./components/HubSyncControl";
 import { LibrarySyncControl } from "./components/LibrarySyncControl";
-import { DocSourceRefresh } from "./components/DocSourceRefresh";
+import { DocSourceLinkDialog, DocSourceRefresh } from "./components/DocSourceRefresh";
 import { getDocSource, setDocSource, type DocSourceRef } from "./util/docSourceStore";
-import { checkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
+import { checkDocSource, justLinkDocSource, linkDocSource, unlinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
+import { nativeSourcePickerAvailable, pickDocumentSource } from "./util/docSourceNative";
 import { getCachedBookMeta } from "./util/localBookStore";
 import { LoadingDoodle } from "./components/LoadingDoodle";
 import { waitForTopBannersIdle } from "./components/StatusBanner";
@@ -136,7 +137,7 @@ import { ensureTypingImports } from "./util/pythonImports";
 /** Room under the last line of code so a note fits below it. */
 const CODE_PAGE_TAIL = 160;
 const newerDocSources = new Set<string>();
-const pendingSourcePrompts = new Map<string, { name: string; content: Awaited<ReturnType<typeof checkDocSource>> }>();
+const pendingSourcePrompts = new Map<string, { name: string; content: Awaited<ReturnType<typeof checkDocSource>>; linking?: boolean; documentName?: string }>();
 import { WhiteboardLibraryDialog } from "./modes/WhiteboardLibraryDialog";
 import { formatTestReport, TestResultsModal } from "./modes/TestResultsModal";
 import { AmbientPanel, type AmbientEntry } from "./modes/AmbientPanel";
@@ -9042,7 +9043,9 @@ export const Workspace = memo(function Workspace({
   const [sourceNewer, setSourceNewer] = useState<Record<string, boolean>>(() => Object.fromEntries([...newerDocSources].map(id => [id, true])));
   const [sourceUpdatePrompt, setSourceUpdatePrompt] = useState<{
     id: string; name: string; content: Awaited<ReturnType<typeof checkDocSource>>;
+    linking?: boolean; documentName?: string;
   } | null>(null);
+  const [sourceMissingPrompt, setSourceMissingPrompt] = useState<{ id: string; name: string } | null>(null);
   const [sourceUpdating, setSourceUpdating] = useState(false);
   const [sourceUpdateError, setSourceUpdateError] = useState<string | null>(null);
   useEffect(() => {
@@ -9137,7 +9140,8 @@ export const Workspace = memo(function Workspace({
     if (!pending) return;
     pendingSourcePrompts.delete(annotateDocId);
     setSourceUpdateError(null);
-    setSourceUpdatePrompt({ id: annotateDocId, ...pending });
+    if (pending.content.status === "missing") setSourceMissingPrompt({ id: annotateDocId, name: pending.name });
+    else setSourceUpdatePrompt({ id: annotateDocId, ...pending });
   }, [active, annotateDocId, annotateSource, boardPreparing, sourceNewer, sourceUpdating]);
 
   const checkSourceFor = useCallback(async (id: string, manual = false) => {
@@ -9149,11 +9153,10 @@ export const Workspace = memo(function Workspace({
         if (!await saveAnnotateSession({ throwOnError: true })) throw new Error("The app's copy could not be saved before checking its source.");
       }
       const content = await checkDocSource(id);
-      if (content.status === "newer") pendingSourcePrompts.set(id, { name: content.ref?.name ?? getAnnotateDocMeta(id)?.name ?? "This file", content });
+      if (content.status === "newer" || content.status === "missing") pendingSourcePrompts.set(id, { name: content.ref?.name ?? getDocSource(id)?.name ?? getAnnotateDocMeta(id)?.name ?? "This file", content });
       else pendingSourcePrompts.delete(id);
       window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id, newer: content.status === "newer" } }));
       if (manual && content.status === "same") setNotice("Up to date");
-      else if (manual && content.status === "missing") setNotice("The original file isn't on this device anymore; using the app's copy.");
     } catch (cause) {
       if (manual) setError(messageOf(cause));
     } finally {
@@ -9161,6 +9164,39 @@ export const Workspace = memo(function Workspace({
       if (manual) setSourceChecking(false);
     }
   }, [saveAnnotateSession, setError, setNotice]);
+  const linkSourceFor = useCallback(async (id: string) => {
+    if (sourceChecks.current.has(id)) return;
+    sourceChecks.current.add(id);
+    setSourceChecking(true);
+    try {
+      const pick = await pickDocumentSource();
+      if (!pick) return;
+      if (annotateDocIdRef.current === id && !getAnnotateDocMeta(id)) {
+        if (!await saveAnnotateSession({ throwOnError: true })) throw new Error("The app's copy could not be saved before linking its source.");
+      }
+      const result = await linkDocSource(id, pick);
+      pendingSourcePrompts.delete(id);
+      if (result.status === "linked") setNotice(`Linked to “${pick.name}”.`);
+      else pendingSourcePrompts.set(id, { name: pick.name, documentName: getAnnotateDocMeta(id)?.name ?? "this document", content: result.content, linking: true });
+      window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id, newer: false } }));
+    } catch (cause) {
+      setError(messageOf(cause));
+    } finally {
+      sourceChecks.current.delete(id);
+      setSourceChecking(false);
+    }
+  }, [saveAnnotateSession, setError, setNotice]);
+  const justLinkSource = useCallback(() => {
+    if (!sourceUpdatePrompt?.content.ref || sourceUpdating) return;
+    try {
+      justLinkDocSource(sourceUpdatePrompt.id, sourceUpdatePrompt.content.ref);
+      window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: sourceUpdatePrompt.id, newer: true } }));
+      setNotice(`Linked to “${sourceUpdatePrompt.name}”.`);
+      setSourceUpdatePrompt(null);
+    } catch (cause) {
+      setSourceUpdateError(messageOf(cause));
+    }
+  }, [setNotice, sourceUpdatePrompt, sourceUpdating]);
   const applySourceUpdate = useCallback(async () => {
     if (!sourceUpdatePrompt || sourceUpdating) return;
     setSourceUpdating(true);
@@ -10589,9 +10625,15 @@ export const Workspace = memo(function Workspace({
               ) : null
             }
             pageTitle={null}
-            sourceRefresh={active && annotateDocId && !footnoteBoardSession && getDocSource(annotateDocId)
+            sourceRefresh={active && annotateDocId && !footnoteBoardSession && nativeSourcePickerAvailable()
               ? <DocSourceRefresh docId={annotateDocId} checking={sourceChecking} newer={sourceNewer[annotateDocId]} chromeHost={headerSlots.boardChrome}
-                  onCheck={() => void checkSourceFor(annotateDocId, true)} /> : null}
+                  onCheck={() => void checkSourceFor(annotateDocId, true)} onLink={() => void linkSourceFor(annotateDocId)}
+                  onUnlink={() => {
+                    unlinkDocSource(annotateDocId);
+                    pendingSourcePrompts.delete(annotateDocId);
+                    window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: annotateDocId, newer: false } }));
+                    setNotice("Unlinked. The app's copy stays.");
+                  }} /> : null}
             pageContentHeight={
               problem && isAnnotate(problem) && !footnoteBoardSession
                 ? annotatePageHeight(annotateHeight)
@@ -11532,11 +11574,21 @@ export const Workspace = memo(function Workspace({
         />
       )}</DialogPresence>
 
-      <DialogPresence>{sourceUpdatePrompt && (
+      <DialogPresence>{sourceUpdatePrompt && !sourceUpdatePrompt.linking && (
         <ConfirmDialog title="Newer version available"
           message={`“${sourceUpdatePrompt.name}” has changed on this device since you opened it.`}
           confirmLabel="Update" cancelLabel="Not now" pending={sourceUpdating} pendingLabel="Updating…" error={sourceUpdateError}
           onConfirm={() => void applySourceUpdate()} onCancel={() => { if (!sourceUpdating) setSourceUpdatePrompt(null); }} />
+      )}</DialogPresence>
+
+      <DialogPresence>{sourceUpdatePrompt?.linking && (
+        <DocSourceLinkDialog mode="differs" fileName={sourceUpdatePrompt.name} documentName={sourceUpdatePrompt.documentName}
+          pending={sourceUpdating} error={sourceUpdateError} onJustLink={justLinkSource} onUpdate={() => void applySourceUpdate()}
+          onCancel={() => { if (!sourceUpdating) setSourceUpdatePrompt(null); }} />
+      )}</DialogPresence>
+      <DialogPresence>{sourceMissingPrompt && (
+        <DocSourceLinkDialog mode="missing" fileName={sourceMissingPrompt.name} onCancel={() => setSourceMissingPrompt(null)}
+          onFind={() => { const id = sourceMissingPrompt.id; setSourceMissingPrompt(null); void linkSourceFor(id); }} />
       )}</DialogPresence>
 
 

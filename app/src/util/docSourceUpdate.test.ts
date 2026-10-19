@@ -5,8 +5,8 @@ import { closeDbForTests, run, STORE_CONTENT } from "./idb";
 import { resetBookCoordinatorForTests } from "./bookCoordinator";
 import { resetLocalBookStoreForTests } from "./localBookStore";
 import { docIdentityHash, getAnnotateDoc, hashMarkdown, saveAnnotateDoc } from "./annotateStore";
-import { getDocSource, setDocSource, type DocSourceRef } from "./docSourceStore";
-import { checkDocSource, updateDocFromSource, DOC_SOURCE_UPDATING_EVENT } from "./docSourceUpdate";
+import { clearDocSource, getDocSource, setDocSource, type DocSourceRef } from "./docSourceStore";
+import { checkDocSource, justLinkDocSource, linkDocSource, unlinkDocSource, updateDocFromSource, DOC_SOURCE_UPDATING_EVENT } from "./docSourceUpdate";
 import { captureBook } from "./bookSnapshot";
 import { clearDocBytes, deleteDocBytes, getDocBytes, hashBytes, putDocBytes } from "./docBytes";
 import { encodeInkOps } from "../canvas/inkCodec";
@@ -82,6 +82,100 @@ describe("checking a document source", () => {
     });
     await expect(checkDocSource("book")).rejects.toThrow("source changed");
     expect(getDocSource("book")?.location).toBe("C:/new-source");
+  });
+});
+
+describe("linking a document source", () => {
+  const pick = { kind: "path" as const, location: "C:/moved/notes.txt", name: "notes.txt", size: 9, modified: 2 };
+  it("links the same content without changing the app copy", async () => {
+    const hash = await textBook(); clearDocSource("book");
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("old words"));
+    expect(await linkDocSource("book", pick)).toEqual({ status: "linked" });
+    expect(getDocSource("book")).toMatchObject({ ...pick, hash });
+    expect((await getAnnotateDoc("book"))?.source).toBe("old words");
+  });
+  it("leaves the current source untouched until a different file is accepted", async () => {
+    await textBook(); const before = getDocSource("book");
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("new words"));
+    expect(await linkDocSource("book", pick)).toMatchObject({ status: "differs", content: {
+      status: "newer", text: "new words", ref: { ...pick, hash: hashMarkdown("new words") },
+    } });
+    expect(getDocSource("book")).toEqual(before);
+  });
+  it("just links using the current app hash and checks the different content next time", async () => {
+    await textBook();
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("new words"));
+    const result = await linkDocSource("book", pick);
+    if (result.status !== "differs") throw new Error("expected different content");
+    const hash = hashMarkdown("edited in the app");
+    await saveAnnotateDoc({ id: "book", name: "notes.txt", docType: "code", hash, source: "edited in the app", board });
+    justLinkDocSource("book", result.content.ref);
+    expect(getDocSource("book")).toMatchObject({ ...pick, hash, checkedAt: 0 });
+    vi.mocked(native.statDocumentSource).mockResolvedValue({ size: pick.size, modified: pick.modified });
+    expect(await checkDocSource("book")).toMatchObject({ status: "newer", text: "new words" });
+    expect(native.readDocumentSource).toHaveBeenCalledTimes(2);
+  });
+  it("refuses a different document kind detected from bytes", async () => {
+    await textBook(); const before = getDocSource("book");
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("%PDF-1.7"));
+    await expect(linkDocSource("book", pick)).rejects.toThrow("That file is a different kind of document.");
+    expect(getDocSource("book")).toEqual(before);
+  });
+  it("refuses a different document kind detected from the name", async () => {
+    await textBook();
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("old words"));
+    await expect(linkDocSource("book", { ...pick, name: "notes.md" })).rejects.toThrow("That file is a different kind of document.");
+  });
+  it("unlinks without changing the app copy", async () => {
+    await textBook();
+    unlinkDocSource("book");
+    expect(getDocSource("book")).toBeNull();
+    expect((await getAnnotateDoc("book"))?.source).toBe("old words");
+  });
+  it("updates an unlinked document from a different picked file and saves its source", async () => {
+    await textBook(); clearDocSource("book");
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("new words"));
+    const result = await linkDocSource("book", pick);
+    if (result.status !== "differs") throw new Error("expected different content");
+    await updateDocFromSource("book", result.content);
+    expect((await getAnnotateDoc("book"))?.source).toBe("new words");
+    expect(getDocSource("book")).toMatchObject({ ...pick, hash: hashMarkdown("new words") });
+  });
+  it("updates a linked document and replaces its old source only after a successful backup", async () => {
+    await textBook(); const before = getDocSource("book");
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("new words"));
+    const result = await linkDocSource("book", pick);
+    if (result.status !== "differs") throw new Error("expected different content");
+    const retain = vi.spyOn(recovery, "retainRecoveryCopy").mockRejectedValueOnce(new Error("backup full"));
+    await expect(updateDocFromSource("book", result.content)).rejects.toThrow("backup full");
+    expect(getDocSource("book")).toEqual(before);
+    expect((await getAnnotateDoc("book"))?.source).toBe("old words");
+    retain.mockRestore();
+    await updateDocFromSource("book", result.content);
+    expect(getDocSource("book")).toMatchObject({ ...pick, hash: hashMarkdown("new words") });
+  });
+  it("rejects a source changed after a different file was picked", async () => {
+    const hash = await textBook();
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("new words"));
+    const result = await linkDocSource("book", pick);
+    if (result.status !== "differs") throw new Error("expected different content");
+    setDocSource("book", { ...source(hash), location: "C:/another-source" });
+    await expect(updateDocFromSource("book", result.content)).rejects.toThrow("source changed");
+    expect((await getAnnotateDoc("book"))?.source).toBe("old words");
+  });
+  it("keeps a new source linked during backup instead of overwriting it", async () => {
+    const hash = await textBook();
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("new words"));
+    const result = await linkDocSource("book", pick);
+    if (result.status !== "differs") throw new Error("expected different content");
+    const retain = recovery.retainRecoveryCopy;
+    vi.spyOn(recovery, "retainRecoveryCopy").mockImplementation(async copy => {
+      await retain(copy);
+      setDocSource("book", { ...source(hash), location: "C:/another-source" });
+    });
+    await expect(updateDocFromSource("book", result.content)).rejects.toThrow("changed while");
+    expect(getDocSource("book")?.location).toBe("C:/another-source");
+    expect((await getAnnotateDoc("book"))?.source).toBe("old words");
   });
 });
 
