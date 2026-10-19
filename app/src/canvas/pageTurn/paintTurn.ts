@@ -77,9 +77,9 @@ export interface TurnFrame {
 }
 
 /** How strongly the front shows through the back of a single sheet. */
-export const PRINT_THROUGH = 0.15;
+export const PRINT_THROUGH = 0.3;
 /** …and its marks, which are light washes and thin rules to begin with. */
-export const MARKS_THROUGH = 0.35;
+export const MARKS_THROUGH = 0.4;
 
 /** An edge picture's part outside the page, drawn in page coordinates. */
 function drawEdge(ctx: CanvasRenderingContext2D, edge: TurnEdge, W: number, H: number): void {
