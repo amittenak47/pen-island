@@ -68,7 +68,7 @@ it("missing merge mount ends both controls at 3000ms; a single header tap starts
   await act(async()=>{await new Promise(resolve=>setTimeout(resolve,3100));});
   const reason="Algorithms: couldn't open the merge window.";
   expect(dock().getAttribute("aria-label")).toBe("Sync failed");expect(dock().getAttribute("aria-busy")).toBe("false");expect(dock().title).toBe(reason);
-  expect(header().textContent).toBe("!Sync failed");expect(header().title).toBe(reason);
+  expect(header().getAttribute("aria-label")).toBe("Sync failed");expect(header().querySelector(".lc-sync-link-dot")?.getAttribute("data-state")).toBe("unsynced");expect(header().title).toBe(reason);
   expect(await captureBook({kind:"whiteboard",id:"book"})).toEqual(before);
   vi.mocked(host.onConflict).mockImplementation(async(_conflict,lifecycle)=>{lifecycle!.onMounted();return {pick:"server"};});
   await act(async()=>header().click());await vi.waitFor(()=>expect(dock().dataset.stage).toBe("synced"));

@@ -123,6 +123,8 @@ export interface WorkspaceChrome {
     walkNotice?: string | null;
     /** Hub or embedding model not answering at the last Sync (DocIndexNote). */
     indexNote?: { kind: "hub-offline" | "embed-offline"; detail: string | null } | null;
+    /** The open document's linked file, for the tab's Link half. */
+    link?: import("./components/DocSyncLinkPair").DocLinkState | null;
     /** The walk is asking which copy to keep, not spinning. */
     walkWaiting?: "conflict" | null;
     padSync?: "synced" | "not-synced" | null;
@@ -176,6 +178,7 @@ export function chromeLooksSame(current: WorkspaceChrome, next: WorkspaceChrome)
     current.docIndex.walkMessage === next.docIndex.walkMessage &&
     current.docIndex.walkNotice === next.docIndex.walkNotice &&
     current.docIndex.indexNote === next.docIndex.indexNote &&
+    current.docIndex.link === next.docIndex.link &&
     current.docIndex.walkWaiting === next.docIndex.walkWaiting &&
     current.docIndex.padSync === next.docIndex.padSync &&
     current.docIndex.onSync === next.docIndex.onSync &&

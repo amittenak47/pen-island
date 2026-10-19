@@ -56,10 +56,10 @@ describe("the chip while a Sync walk runs", () => {
     act(() => button.click());
     expect(onSync).toHaveBeenCalledOnce();
     rerender({ walkError: "The hub has a newer copy of Algorithms." });
-    expect(button.textContent).toContain("Sync failed");
+    expect(button.getAttribute("aria-label")).toBe("Sync failed");
     expect(button.getAttribute("aria-busy")).toBe("false");
-    expect(button.querySelector(".lc-doc-index-ring")).toBeNull();
-    expect(button.querySelector('[aria-label="Sync error"]')).not.toBeNull();
+    // Red: the dot says it failed; the reason is in the notification.
+    expect(button.querySelector(".lc-sync-link-dot")?.getAttribute("data-state")).toBe("unsynced");
     expect(document.querySelector(".lc-doc-sync-line")?.textContent).toContain("newer copy of Algorithms");
     act(() => button.click());
     expect(onSync).toHaveBeenCalledTimes(2);
@@ -71,7 +71,8 @@ describe("the chip while a Sync walk runs", () => {
     expect(document.querySelector(".lc-doc-sync-pop")).not.toBeNull();
     rerender({ walkWaiting: "conflict" });
     expect(document.querySelector(".lc-doc-sync-pop")).toBeNull();
-    expect(host.querySelector(".lc-doc-index-ring")).toBeNull();
+    // Yellow, held still: waiting on the reader, not working.
+    expect(host.querySelector(".lc-sync-link-dot")?.getAttribute("data-state")).toBe("waiting");
   });
   it("says which stage, for the stages that name themselves", () => {
     // A tap used to walk the pill through Index → Pad → Ink → Links → Pull
@@ -212,21 +213,24 @@ function syncPopover(): HTMLElement | null {
 
 describe("the in-tab Sync overlay", () => {
   it.each([
-    { walkStage: "pad" },
-    { walkStage: "synced" },
-    { padSync: "not-synced" as const },
-    { status: "indexed" as const },
-    { status: "error" as const, error: "index failed" },
-    { walkStage: "pad", walkError: "hub unreachable" },
-    { status: "indexing" as const },
-    { embedding: true },
-    { status: "idle" as const },
-    { viewportWait: true },
-  ])("renders only the Sync box in the tab: %j", (state) => {
+    [{ walkStage: "pad" }, "syncing"],
+    [{ walkStage: "synced" }, "synced"],
+    [{ padSync: "not-synced" as const }, "unsynced"],
+    [{ status: "indexed" as const }, "unsynced"],
+    [{ status: "error" as const, error: "index failed" }, "unsynced"],
+    [{ walkStage: "pad", walkError: "hub unreachable" }, "unsynced"],
+    [{ status: "indexing" as const }, "syncing"],
+    [{ embedding: true }, "syncing"],
+    [{ status: "idle" as const }, "unsynced"],
+    [{ viewportWait: true }, "unsynced"],
+  ] as const)("renders only the Sync square in the tab, its dot coloured by state: %j", (state: Partial<DocIndexChipProps>, dot) => {
     const { host } = mount({ ...state, onSync: vi.fn() });
     expect(chip(host)).toBeNull();
     expect(host.querySelectorAll("button")).toHaveLength(1);
-    expect(syncButton(host).textContent).toBe(state.walkError ? "!Sync failed" : "Sync");
+    expect(host.querySelector(".lc-sync-link-pair.is-tab.is-sync-only")).not.toBeNull();
+    // A square with a dot, no words: green synced, yellow working, red otherwise.
+    expect(syncButton(host).textContent).toBe("");
+    expect(syncButton(host).querySelector(".lc-sync-link-dot")?.getAttribute("data-state")).toBe(dot);
     expect(syncButton(host).disabled).toBe(false);
     expect(syncButton(host).getAttribute("aria-label")).toBe(state.walkError ? "Sync failed" : "Hub sync");
     expect(syncButton(host).getAttribute("aria-haspopup")).toBe("dialog");
@@ -398,19 +402,42 @@ describe("the in-tab Sync overlay", () => {
     { walkStage: "pad", walkProgress: { done: 1, total: 4 } },
     { status: "indexing" as const, indexProgress: { done: 1, total: 4 } },
     { embedding: true, embedProgress: { done: 1, total: 4 } },
-  ])("replaces the hub dot with the working ring: %j", (state) => {
+  ])("turns the dot yellow while working, and green once synced: %j", (state) => {
     const { host, rerender } = mount({ ...state, onSync: vi.fn() });
-    expect(syncButton(host).querySelector(".lc-doc-index-ring")).not.toBeNull();
-    expect(syncButton(host).querySelector(".lc-doc-index-ring-pct")?.textContent).toBe("25");
-    expect(syncButton(host).querySelector(".lc-hub-status-dot")).toBeNull();
+    const dot = () => syncButton(host).querySelector(".lc-sync-link-dot")?.getAttribute("data-state");
+    expect(dot()).toBe("syncing");
+    expect(syncButton(host).getAttribute("aria-busy")).toBe("true");
     rerender({ walkStage: "synced", status: "indexed", embedding: false });
-    expect(syncButton(host).querySelector(".lc-doc-index-ring")).toBeNull();
-    expect(syncButton(host).querySelector(".lc-hub-status-dot")).not.toBeNull();
+    expect(dot()).toBe("synced");
+    // The hub offline: nothing can sync, so red even on a synced book.
+    hub.status = "offline";
+    rerender({ walkStage: "synced", status: "indexed", embedding: false, walkProgress: null });
+    expect(dot()).toBe("unsynced");
   });
 
-  it("sweeps with unmeasured progress and marks error and conflict states", () => {
+  it("puts the Link half beside Sync in the tab when the document has a file", () => {
+    const onCheck = vi.fn();
+    const link = { name: "course.pdf", checking: false, newer: false, onCheck, onLink: vi.fn(), onUnlink: vi.fn() };
+    const { host } = mount({ walkStage: "synced", onSync: vi.fn(), link });
+    const pair = host.querySelector(".lc-sync-link-pair.is-tab")!;
+    expect(pair.classList.contains("is-sync-only")).toBe(false);
+    const halves = pair.querySelectorAll(".lc-sync-link-half");
+    expect(halves).toHaveLength(2);
+    const linkButton = pair.querySelector<HTMLButtonElement>(".lc-sync-link-link")!;
+    expect(linkButton.classList.contains("is-linked")).toBe(true);
+    act(() => linkButton.click());
+    expect(onCheck).toHaveBeenCalledOnce();
+    // Entering Link takes Sync's notification down: one at a time.
+    act(() => syncButton(host).dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+    expect(syncPopover()?.classList.contains("lc-sync-link-tip")).toBe(false);
+    act(() => halves[1].dispatchEvent(new MouseEvent("pointerover", { bubbles: true })));
+    const shown = [...document.querySelectorAll(".lc-doc-sync-pop:not(.is-leaving)")];
+    expect(shown.map(pop => pop.classList.contains("lc-sync-link-tip"))).toEqual([true]);
+  });
+
+  it("works with unmeasured progress and marks error and conflict states", () => {
     const { host, rerender } = mount({ walkStage: "pad", onSync: vi.fn() });
-    expect(syncButton(host).querySelector(".is-sweeping")).not.toBeNull();
+    expect(syncButton(host).querySelector(".lc-sync-link-dot")?.getAttribute("data-state")).toBe("syncing");
     rerender({ walkError: "upload failed" });
     expect(syncButton(host).classList.contains("is-bad")).toBe(true);
     expect(syncButton(host).title).toBe("upload failed");

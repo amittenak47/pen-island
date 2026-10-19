@@ -34,6 +34,8 @@
 }
 .lc-sync-link-dot[data-state="synced"] { background: var(--lc-sync-good); }
 .lc-sync-link-dot[data-state="syncing"] { background: var(--lc-sync-wait); animation: lc-sync-link-pulse 1.1s ease-in-out infinite; }
+/* Waiting on the reader (a conflict to choose): yellow, held still. */
+.lc-sync-link-dot[data-state="waiting"] { background: var(--lc-sync-wait); }
 @keyframes lc-sync-link-pulse { 50% { opacity: .45; } }
 .lc-sync-link-link .lc-icon-svg { transition: color 200ms ease; color: var(--lc-sync-bad); }
 .lc-sync-link-link.is-linked .lc-icon-svg { color: var(--lc-sync-good); }

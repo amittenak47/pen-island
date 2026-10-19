@@ -1516,6 +1516,7 @@ export function App() {
                   walkMessage={chrome.docIndex.walkMessage}
                   walkNotice={chrome.docIndex.walkNotice}
                   indexNote={chrome.docIndex.indexNote}
+                  link={chrome.docIndex.link}
                   walkWaiting={chrome.docIndex.walkWaiting}
                   padSync={chrome.docIndex.padSync}
                   onSync={chrome.docIndex.onSync}
