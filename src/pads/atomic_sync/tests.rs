@@ -843,10 +843,11 @@ fn modern_restore_requires_acquired_retained_revision_before_explicit_replacemen
     let restored = f.book("whiteboard", "book");
     assert_eq!(restored.state, "live");
     assert!(restored.retained_restore_pages.is_empty());
-    assert!(serde_json::to_value(&restored)
-        .unwrap()
-        .get("retained_restore_pages")
-        .is_none());
+    // Written as an empty list, never left out (the empty-fields rule).
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap().get("retained_restore_pages"),
+        Some(&serde_json::json!([]))
+    );
     assert_eq!(
         get_ink_page(&f.conn, "whiteboard", "book", 1)
             .unwrap()
@@ -1119,10 +1120,11 @@ fn corrupt_gone_retained_ink_is_reported_per_book_and_cannot_be_restored() {
     ))
     .unwrap();
     let gone = f.book("whiteboard", "book");
-    assert!(serde_json::to_value(&gone)
-        .unwrap()
-        .get("retained_restore_pages")
-        .is_none());
+    // Written as an empty list, never left out (the empty-fields rule).
+    assert_eq!(
+        serde_json::to_value(&gone).unwrap().get("retained_restore_pages"),
+        Some(&serde_json::json!([]))
+    );
     legacy_restore_page(&f, "whiteboard", "book", 1, 100, "retained", true);
     f.conn
         .execute(
