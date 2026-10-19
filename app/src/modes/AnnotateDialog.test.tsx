@@ -30,6 +30,9 @@ vi.mock("../util/padSync", () => ({
   TOMBSTONE_COPY: "Trash on this device — three days, then gone.",
 }));
 
+vi.mock("../util/docSourceStore", () => ({ listDocSources: () => ({}) }));
+vi.mock("../util/docSourceUpdate", () => ({ checkDocSource: vi.fn(), updateDocFromSource: vi.fn(), DOC_SOURCE_CHECKED_EVENT: "lc-doc-source-checked" }));
+
 import { AnnotateDialog, type AnnotateDialogProps } from "./AnnotateDialog";
 
 beforeAll(() => {

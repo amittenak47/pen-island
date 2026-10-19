@@ -1238,6 +1238,8 @@ export interface BoardProps {
    * and the hand both reach the canvas through it.
    */
   pageContent?: ReactNode;
+  /** Device-local source refresh, pinned above the reading page mask. */
+  sourceRefresh?: ReactNode;
   /**
    * The page is prose the reader may pick quotes out of.
    *
@@ -1428,6 +1430,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     bottomCenter = null,
     pageTitle = null,
     pageContent = null,
+    sourceRefresh = null,
     selectableContent = false,
     onMarksSlot,
     onHighlightingChange,
@@ -2190,6 +2193,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const pageShownRef = useRef<{ minY: number; maxY: number } | null>(null);
   /** Covers the board outside `pageShownRef` while a page is fitted. */
   const pageMaskRef = useRef<HTMLDivElement | null>(null);
+  const [pageMaskShown, setPageMaskShown] = useState(false);
   /** The zoom the page fit last put the camera at. */
   const pageFitZoomRef = useRef(1);
   /**
@@ -2732,10 +2736,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const hole = mask.firstElementChild as HTMLElement | null;
     const blank = hole?.firstElementChild as HTMLElement | null;
     if (!shown || !box || !bounds || !hole) {
-      if (!mask.hidden) mask.hidden = true;
+      if (!mask.hidden) { mask.hidden = true; setPageMaskShown(false); }
       return;
     }
-    if (mask.hidden) mask.hidden = false;
+    if (mask.hidden) { mask.hidden = false; setPageMaskShown(true); }
     // The whole page box is the sheet; a text page cut short is blank paper
     // from its cut down, not the desk. In a spread the sheet is both pages.
     const column = spreadColumn(bounds);
@@ -11358,6 +11362,13 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           </div>
         </div>
       )}
+      <AnimatePresence>{pageContent && pageMaskShown && sourceRefresh && chromeEnabled && (
+        <motion.div key="source-refresh" className="lc-doc-source-refresh-layer"
+          initial={{ opacity: reducedChromeMotion ? 1 : 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+          transition={{ duration: reducedChromeMotion ? 0 : .18 }}>
+          {sourceRefresh}
+        </motion.div>
+      )}</AnimatePresence>
       <SceneOverlay
         ref={sceneOverlayRef}
         getElements={() => {
