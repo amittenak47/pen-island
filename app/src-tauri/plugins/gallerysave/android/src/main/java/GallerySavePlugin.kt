@@ -22,6 +22,7 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -141,13 +142,64 @@ class GallerySavePlugin(private val activity: Activity) : Plugin(activity) {
             val uri = data.data ?: throw IOException("No folder returned")
             val flags = data.flags and (Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             activity.contentResolver.takePersistableUriPermission(uri, flags)
-            invoke.resolve(JSObject().apply { put("uri", uri.toString()) })
+            val document = DocumentsContract.buildDocumentUriUsingTree(uri, DocumentsContract.getTreeDocumentId(uri))
+            val name = runCatching {
+                activity.contentResolver.query(document, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null).use { cursor ->
+                    if (cursor != null && cursor.moveToFirst() && !cursor.isNull(0)) cursor.getString(0) else null
+                }
+            }.getOrNull() ?: uri.lastPathSegment ?: "folder"
+            invoke.resolve(JSObject().apply { put("uri", uri.toString()); put("name", name) })
         } catch (error: Exception) { invoke.reject(error.message ?: "Folder permission failed") }
     }
 
     @InvokeArg
     class DocumentSourceArgs {
         var uri: String = ""
+    }
+
+    @Command
+    fun list_folder(invoke: Invoke) {
+        val args = invoke.parseArgs(DocumentSourceArgs::class.java)
+        Thread {
+            try {
+                val tree = Uri.parse(args.uri)
+                if (tree.scheme != "content" || !DocumentsContract.isTreeUri(tree)) throw IOException("Choose the folder again")
+                val entries = JSONArray()
+                listFolder(tree, DocumentsContract.getTreeDocumentId(tree), "", 0, entries)
+                invoke.resolve(JSObject().apply { put("entries", entries) })
+            } catch (error: Exception) { invoke.reject(error.message ?: "Cannot list folder") }
+        }.start()
+    }
+
+    private fun listFolder(tree: Uri, parentId: String, relative: String, depth: Int, entries: JSONArray) {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parentId)
+        activity.contentResolver.query(children, null, null, null, null).use { cursor ->
+            if (cursor == null) throw IOException("Folder is unavailable")
+            val idIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_DOCUMENT_ID)
+            val typeIndex = cursor.getColumnIndexOrThrow(DocumentsContract.Document.COLUMN_MIME_TYPE)
+            val nameIndex = cursor.getColumnIndexOrThrow(OpenableColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            val modifiedIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+            while (cursor.moveToNext()) {
+                val name = cursor.getString(nameIndex) ?: continue
+                if (name.startsWith(".")) continue
+                val id = cursor.getString(idIndex) ?: continue
+                val path = if (relative.isEmpty()) name else "$relative/$name"
+                if (cursor.getString(typeIndex) == DocumentsContract.Document.MIME_TYPE_DIR) {
+                    if (depth < 3) listFolder(tree, id, path, depth + 1, entries)
+                } else {
+                    val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex).takeIf { it >= 0 } else null
+                    val modified = if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) cursor.getLong(modifiedIndex).takeIf { it >= 0 } else null
+                    entries.put(JSObject().apply {
+                        put("uri", DocumentsContract.buildDocumentUriUsingTree(tree, id).toString())
+                        put("name", name)
+                        put("size", size ?: JSONObject.NULL)
+                        put("modified", modified ?: JSONObject.NULL)
+                        put("relative", path)
+                    })
+                }
+            }
+        }
     }
 
     @Command

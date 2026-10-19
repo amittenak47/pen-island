@@ -3,6 +3,8 @@ import type { DocSourceRef } from "./docSourceStore";
 
 export type SourcePick = Pick<DocSourceRef, "kind" | "location" | "name" | "size" | "modified">;
 export type SourceStat = Pick<DocSourceRef, "size" | "modified">;
+export type FolderPick = Pick<DocSourceRef, "kind" | "location" | "name">;
+export type FolderEntry = SourcePick & { relative: string };
 
 export function nativeSourcePickerAvailable(): boolean {
   if (import.meta.env.MODE === "test" || typeof window === "undefined") return false;
@@ -13,6 +15,14 @@ export function nativeSourcePickerAvailable(): boolean {
 
 export function pickDocumentSource(): Promise<SourcePick | null> {
   return invoke("pick_document_source");
+}
+
+export function pickSourceFolder(): Promise<FolderPick | null> {
+  return invoke("pick_source_folder");
+}
+
+export function listSourceFolder(kind: DocSourceRef["kind"], location: string): Promise<FolderEntry[]> {
+  return invoke("list_source_folder", { kind, location });
 }
 
 export function statDocumentSource(kind: DocSourceRef["kind"], location: string): Promise<SourceStat | null> {

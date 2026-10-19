@@ -7,7 +7,7 @@ use tauri::plugin::{Builder, PluginHandle, TauriPlugin};
 use tauri::{Manager, Runtime};
 
 mod mobile;
-pub use mobile::{DocumentPick, DocumentStat};
+pub use mobile::{DocumentPick, DocumentStat, FolderEntry, FolderPick};
 
 #[cfg(target_os = "android")]
 const PLUGIN_IDENTIFIER: &str = "dev.lc.whiteboard.gallerysave";
