@@ -22139,7 +22139,8 @@ button.lc-row-selected:hover:not(:disabled) {
   overflow: visible;
 }
 
-.lc-doc-footnote-pack > .lc-doc-footnote {
+.lc-doc-footnote-pack > .lc-doc-footnote,
+.lc-page-booktabs-slot .lc-doc-footnote-bookmark {
   pointer-events: auto;
 }
 

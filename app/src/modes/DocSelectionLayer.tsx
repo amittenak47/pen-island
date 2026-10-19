@@ -2835,58 +2835,68 @@ export function DocSelectionLayer({
                     {caption}
                   </span>
                 ) : null}
-                <HoldButton
-                  label={String(number)}
-                  className={`lc-doc-footnote lc-doc-footnote-bookmark lc-doc-footnote-${footnote.kind}${footnote.pending ? " lc-doc-footnote-pending" : ""}`}
-                  style={chipStyle}
-                  dataId={footnote.id}
-                  ariaLabel={`${footnoteTitle(footnote, number)} — tap to open, hold to delete`}
-                  onTap={() => {
+                {/*
+                  The square goes up with the booktabs, over the page mask: on
+                  the marks layer the page-turn lip (drawn on the mask) covered
+                  it. Its quote and caption stay on the page.
+                */}
+                {overlay(booktabsHost,
+                  <PdfMarkPage filmScope={cameraScope} scope={group.scope}
+                    page={booktabsHost && group.page ? { left: chipLeft, top: chipTop, width: chipW, height: chipW } : undefined}>
+                  <HoldButton
+                    label={String(number)}
+                    className={`lc-doc-footnote lc-doc-footnote-bookmark lc-doc-footnote-${footnote.kind}${footnote.pending ? " lc-doc-footnote-pending" : ""}`}
+                    style={chipStyle}
+                    dataId={footnote.id}
+                    ariaLabel={`${footnoteTitle(footnote, number)} — tap to open, hold to delete`}
+                    onTap={() => {
+                      /*
+                       * The quote, not the chip.
+                       *
+                       * The hub places itself clear of what it is given, so a
+                       * sixteen-pixel chip let it open straight over the marked
+                       * sentence — the one thing the reader has just said they
+                       * are interested in. Hand it the whole block of bands and
+                       * it settles under, over, or beside the passage instead.
+                       */
+                      const rect =
+                        screenBoxOfLocalRects(bodyRef.current, paintBands) ??
+                        ribbonNodes.current.get(footnote.id)?.getBoundingClientRect() ??
+                        null;
+                      onOpenFootnote?.(footnote, rect);
+                    }}
                     /*
-                     * The quote, not the chip.
+                     * The longer hold, not the default 333ms.
                      *
-                     * The hub places itself clear of what it is given, so a
-                     * sixteen-pixel chip let it open straight over the marked
-                     * sentence — the one thing the reader has just said they
-                     * are interested in. Hand it the whole block of bands and
-                     * it settles under, over, or beside the passage instead.
+                     * A ribbon is sixteen pixels across and deleting it throws away a
+                     * thread or a search the reader cannot get back. `HOLD_MS` is
+                     * shorter than the app's own `LONG_PRESS_MS`, so a tap that
+                     * merely lingered would have popped the mark. `HOLD_SENSITIVE_MS`
+                     * is what the offline gate and the solution reveal already use
+                     * for "mean it".
                      */
-                    const rect =
-                      screenBoxOfLocalRects(bodyRef.current, paintBands) ??
-                      ribbonNodes.current.get(footnote.id)?.getBoundingClientRect() ??
-                      null;
-                    onOpenFootnote?.(footnote, rect);
-                  }}
-                  /*
-                   * The longer hold, not the default 333ms.
-                   *
-                   * A ribbon is sixteen pixels across and deleting it throws away a
-                   * thread or a search the reader cannot get back. `HOLD_MS` is
-                   * shorter than the app's own `LONG_PRESS_MS`, so a tap that
-                   * merely lingered would have popped the mark. `HOLD_SENSITIVE_MS`
-                   * is what the offline gate and the solution reveal already use
-                   * for "mean it".
-                   */
-                  holdMs={HOLD_SENSITIVE_MS}
-                  holdThrough
-                  onConfirm={() => onRemoveFootnote?.(footnote)}
-                  /*
-                   * Keep the element, not its rect. This ref callback is new on
-                   * every render, so React re-runs it for every chip each time:
-                   * measuring here forced a layout per chip per render, about
-                   * 3 s in every 20 of scrolling on the tablet.
-                   */
-                  onMeasure={(node: HTMLButtonElement | null) => {
-                    if (node) ribbonNodes.current.set(footnote.id, node);
-                    else ribbonNodes.current.delete(footnote.id);
-                  }}
-                >
-                  {footnote.pending ? (
-                    <span className="lc-doc-footnote-spinner" aria-hidden="true" />
-                  ) : (
-                    <span className="lc-doc-footnote-tag">{number}</span>
-                  )}
-                </HoldButton>
+                    holdMs={HOLD_SENSITIVE_MS}
+                    holdThrough
+                    onConfirm={() => onRemoveFootnote?.(footnote)}
+                    /*
+                     * Keep the element, not its rect. This ref callback is new on
+                     * every render, so React re-runs it for every chip each time:
+                     * measuring here forced a layout per chip per render, about
+                     * 3 s in every 20 of scrolling on the tablet.
+                     */
+                    onMeasure={(node: HTMLButtonElement | null) => {
+                      if (node) ribbonNodes.current.set(footnote.id, node);
+                      else ribbonNodes.current.delete(footnote.id);
+                    }}
+                  >
+                    {footnote.pending ? (
+                      <span className="lc-doc-footnote-spinner" aria-hidden="true" />
+                    ) : (
+                      <span className="lc-doc-footnote-tag">{number}</span>
+                    )}
+                  </HoldButton>
+                  </PdfMarkPage>,
+                )}
               </span>
             );
           })}
