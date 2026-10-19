@@ -23214,32 +23214,31 @@ html[data-corners="rounded"] {
   max-width: none;
 }
 
-/* Reset with a mini Undo (left) and Redo (right) tucked under it. */
+/*
+ * Undo | Reset | Redo on one row, the three the same height. Reset is
+ * narrower than on its own, so the row takes about the room Reset alone did
+ * and never wraps onto a second line at the panel's minimum width.
+ */
 .lc-footnote-panel-history {
   margin-left: auto;
   display: flex;
-  flex-direction: column;
   align-items: stretch;
   gap: 3px;
-  min-width: 52px;
+  flex: none;
 }
 
 .lc-footnote-panel-history .lc-footnote-panel-reset {
   margin-left: 0;
+  min-height: 24px;
+  padding: 0 6px;
 }
 
-.lc-footnote-panel-undo-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 4px;
-}
-
-.lc-footnote-panel-undo-row .lc-footnote-panel-mini {
+.lc-footnote-panel-history .lc-footnote-panel-mini {
   display: inline-grid;
   place-items: center;
-  width: 22px;
+  width: 20px;
   min-width: 0;
-  height: 17px;
+  height: 24px;
   min-height: 0;
   padding: 0;
   border: 1px solid var(--chrome-edge, var(--border, rgb(127 127 127 / 30%)));

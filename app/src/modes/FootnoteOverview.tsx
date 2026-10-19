@@ -1103,7 +1103,12 @@ export function FootnoteOverview({
                   />
                 </div>
                 {!readOnly && (
+                  /* One row: Undo | Reset | Redo. */
                   <div className="lc-footnote-panel-history">
+                    <button type="button" className="lc-footnote-panel-mini" aria-label="Undo" data-tip="Undo"
+                      disabled={!history.canUndo} onClick={history.undo}>
+                      <HistoryArrow />
+                    </button>
                     {hasPanelContent && (
                       <HoldButton
                         label="Reset"
@@ -1115,16 +1120,10 @@ export function FootnoteOverview({
                         <strong>Reset</strong>
                       </HoldButton>
                     )}
-                    <div className="lc-footnote-panel-undo-row">
-                      <button type="button" className="lc-footnote-panel-mini" aria-label="Undo" data-tip="Undo"
-                        disabled={!history.canUndo} onClick={history.undo}>
-                        <HistoryArrow />
-                      </button>
-                      <button type="button" className="lc-footnote-panel-mini is-redo" aria-label="Redo" data-tip="Redo"
-                        disabled={!history.canRedo} onClick={history.redo}>
-                        <HistoryArrow />
-                      </button>
-                    </div>
+                    <button type="button" className="lc-footnote-panel-mini is-redo" aria-label="Redo" data-tip="Redo"
+                      disabled={!history.canRedo} onClick={history.redo}>
+                      <HistoryArrow />
+                    </button>
                   </div>
                 )}
               </header>
