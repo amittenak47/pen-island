@@ -32,7 +32,7 @@ import { SettingsChoices } from "./SettingsChoices";
 import { loadLlmAskAtStartup, saveLlmAskAtStartup } from "../util/llmStartupPref";
 import { loadShowBooktabs, saveShowBooktabs, loadShowFootnoteTitles, saveShowFootnoteTitles, loadBooktabPosition, saveBooktabPosition, loadBooktabFootnotes, saveBooktabFootnotes, type BooktabPosition, type BooktabFootnotes } from "../util/booktabsPref";
 import { HoldButton } from "./HoldButton";
-import { HEADER_MODES, loadHeaderModes, saveHeaderModes, type HeaderModes } from "../util/headerModesPref";
+import { HEADER_MODES, HEADER_MODES_SHOWN, loadHeaderModes, saveHeaderModes, type HeaderModes } from "../util/headerModesPref";
 import { loadTestForwardMode, saveTestForwardMode, type TestForwardMode } from "../util/agentPrefs";
 import { loadInkHandedness, saveInkHandedness, type InkHandedness } from "../util/inkHandedness";
 import { loadInkToolPresets, saveInkToolPresets } from "../util/inkToolPresets";
@@ -2673,7 +2673,7 @@ export function SettingsModal({
                   <div className="lc-settings-subhead">Top bar buttons</div>
                   <p className="lc-settings-hint">Choose which shortcuts appear at the top. Everything stays available from Home.</p>
                   <SettingsChoices className="lc-settings-choice" aria-label="Top bar buttons">
-                    {HEADER_MODES.map(([mode, label]) => <button key={mode} type="button" role="switch"
+                    {HEADER_MODES_SHOWN.map(([mode, label]) => <button key={mode} type="button" role="switch"
                       aria-label={`Show ${label} in header`} aria-checked={headerModes[mode]}
                       className={headerModes[mode] ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                       onClick={() => setHeaderModes(current => ({ ...current, [mode]: !current[mode] }))}>

@@ -5,6 +5,12 @@ export const HEADER_MODES = [
   ["web", "Web"], ["explore", "Explore"],
 ] as const;
 export type HeaderMode = typeof HEADER_MODES[number][0];
+/**
+ * The header's left-to-right order, for Settings to list the switches in.
+ * HEADER_MODES keeps its own order: it is the order the choice is saved in.
+ */
+export const HEADER_MODES_SHOWN: readonly (typeof HEADER_MODES[number])[] =
+  (["annotate", "web", "whiteboard", "explore", "practice"] as const).map(mode => HEADER_MODES.find(([m]) => m === mode)!);
 export type HeaderModes = Record<HeaderMode, boolean>;
 export const HEADER_MODES_EVENT = "lc-header-modes";
 const KEY = "whiteboard.headerModes.v1";

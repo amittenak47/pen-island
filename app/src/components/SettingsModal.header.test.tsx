@@ -45,6 +45,9 @@ it("keeps header visibility as a draft on Cancel and persists each mode on Save"
   const api=client(),close=vi.fn(); await show(api,close);
   const toggle=(mode:string)=>host.querySelector<HTMLButtonElement>(`[aria-label="Show ${mode} in header"]`)!;
   for (const mode of ["Annotate","Whiteboard","Practice","Web","Explore"]) expect(toggle(mode).getAttribute("aria-checked")).toBe("true");
+  // Listed in the header's order.
+  expect([...host.querySelectorAll('[aria-label="Top bar buttons"] [role="switch"]')].map(el => el.querySelector("strong")?.textContent))
+    .toEqual(["Annotate","Web","Whiteboard","Explore","Practice"]);
   await act(async()=>{toggle("Web").click();toggle("Explore").click();});
   expect(count()).toBe("2 changes"); expect(loadHeaderModes().web).toBe(true);
   await act(async()=>button("Cancel").click());
