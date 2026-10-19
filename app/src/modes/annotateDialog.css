@@ -41,6 +41,11 @@
 }
 .lc-dialog-frame.lc-annotate-dialog .lc-dialog-foot:has(.lc-doc-source-bulk) { flex-wrap: wrap; }
 .lc-dialog-frame.lc-annotate-dialog .lc-dialog-foot .lc-doc-source-bulk { flex: 0 1 auto; min-width: 0; padding: 8px 10px; font-size: 12px; }
+/* Link from a folder is the chain alone: a square, the chain in the menu's colour. */
+.lc-dialog-frame.lc-annotate-dialog .lc-dialog-foot .lc-doc-source-folder {
+  display: inline-flex; align-items: center; justify-content: center; width: 38px; padding: 0; color: var(--lc-dialog-mode, var(--accent));
+}
+.lc-dialog-frame.lc-annotate-dialog .lc-dialog-foot .lc-doc-source-folder .lc-icon-svg { width: 16px; height: 16px; }
 .lc-settings-modal.lc-dialog-frame.lc-doc-source-updates { width: min(500px, 100%); max-height: 85dvh; padding: 0; }
 .lc-doc-source-update-list { display: flex; flex-direction: column; }
 .lc-doc-source-update-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: var(--lc-dialog-edge) solid var(--lc-dialog-line); cursor: pointer; }

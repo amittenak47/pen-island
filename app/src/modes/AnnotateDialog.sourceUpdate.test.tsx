@@ -68,7 +68,12 @@ describe("AnnotateDialog source updates", () => {
     native.available.mockReturnValue(true); native.pickFolder.mockResolvedValue(folder); native.listFolder.mockResolvedValue(entries);
     source.link.mockImplementation(async (id: string) => id === "first" ? { status: "linked" } : { status: "differs", content: content(id) });
     source.update.mockResolvedValue({ unplaced: [{ kind: "highlight", label: "A passage" }] });
-    const notice = vi.fn(); mount(notice); await recents(); await click("Link files from a folder…");
+    const notice = vi.fn(); mount(notice); await recents();
+    // The chain alone, named by its label.
+    const folder = host.querySelector<HTMLButtonElement>(".lc-doc-source-folder")!;
+    expect(folder.textContent).toBe(""); expect(folder.querySelector("svg")).not.toBeNull();
+    expect(folder.getAttribute("aria-label")).toBe("Link files from a folder…");
+    await click("Link files from a folder…");
     expect(native.listFolder).toHaveBeenCalledWith("path", "C:/course");
     const dialog = host.querySelector<HTMLElement>('[aria-label="Link files"]')!;
     expect(dialog.textContent).toContain("notes/Chapter.md");

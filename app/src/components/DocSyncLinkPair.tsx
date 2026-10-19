@@ -175,7 +175,7 @@ function useHalfTip(anchor: RefObject<HTMLElement | null>, shown: boolean, text:
   </div>, document.body);
 }
 
-function LinkIcon() {
+export function LinkIcon() {
   return <svg className="lc-icon-svg" viewBox="0 0 16 16" width="13" height="13" fill="none" stroke="currentColor"
     strokeWidth="1.6" strokeLinecap="round" aria-hidden="true">
     <path d="m6 10 4-4M6.5 4.5l1.7-1.7a3 3 0 0 1 4.2 4.2l-1.7 1.7M9.5 11.5l-1.7 1.7A3 3 0 0 1 3.6 9l1.7-1.7" />
