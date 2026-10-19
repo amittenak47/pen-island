@@ -26,8 +26,9 @@ import {
   trashAnnotateDoc,
   type AnnotateDoc,
 } from "./annotateStore";
-/** Stored agent messages always carry their on/off flags (see agentMessageFormat). */
-const FLAGS_OFF = { pending: false, queued: false, bridgePending: false };
+/** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false,
+  attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
 
 const deleteDocBytes = vi.fn(async (_hash?: string) => {});
 vi.mock("./docBytes", () => ({
@@ -505,7 +506,9 @@ describe("footnotes on an entry", () => {
       board: board(),
       footnotes: [mark(0, 9)],
     });
-    expect((await getAnnotateDoc(saved.id))?.footnotes).toEqual([mark(0, 9)]);
+    // Stored with every list written, empty or not (see agentMessageFormat).
+    expect((await getAnnotateDoc(saved.id))?.footnotes).toEqual([{ ...mark(0, 9),
+      notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [] }]);
   });
 
   it("keeps the existing set when a caller does not track footnotes", async () => {

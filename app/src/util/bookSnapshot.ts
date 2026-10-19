@@ -9,7 +9,7 @@ import { notifyBookMetadataChanged, LocalBookConflictError } from "./localBookSt
 import { LOCAL_VIEW_KEYS, recordHash, hashBytes } from "./syncContent";
 import { recordAuthoredExtras } from "./recordAuthoredExtras";
 import { mergeAgentMessages } from "../modes/coachSessions";
-import { canonicalAgentMessages } from "./agentMessageFormat";
+import { canonicalAgentMessages, canonicalFootnotes } from "./agentMessageFormat";
 import { equalStored } from "./queueMigration";
 import { requireArtifactCatalogTransition } from "./artifactCatalogEdits";
 import { bookWireRecord } from "./bookWireRecord";
@@ -71,7 +71,7 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
   return { ...common, name: meta.name, hash: meta.hash, doc_type: meta.docType ?? "markdown",
     ...(meta.localFileHash ? { local_file_hash: meta.localFileHash } : {}),
     ...(typeof meta.label === "string" && meta.label.trim() ? { label: meta.label } : {}),
-    source: payload.source ?? "", footnotes, footnote_boards: children,
+    source: payload.source ?? "", footnotes: canonicalFootnotes(footnotes), footnote_boards: children,
     updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
 }
 

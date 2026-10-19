@@ -38,8 +38,9 @@ import { visibleDrawings } from "../viz/drawingState";
 import { memoryBookTransaction } from "./testBookTransaction";
 import { mutateLocalBook, resetLocalBookStoreForTests } from "./localBookStore";
 import { getBookSyncState } from "./syncState";
-/** Stored agent messages always carry their on/off flags (see agentMessageFormat). */
-const FLAGS_OFF = { pending: false, queued: false, bridgePending: false };
+/** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false,
+  attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
 const durable = vi.hoisted(() => new Map<string, Map<IDBValidKey, unknown>>());
 vi.mock("./idb", async original => ({
   ...await original<typeof import("./idb")>(),
@@ -306,7 +307,7 @@ describe("padSync pull", () => {
     for (const restore of [restoreWhiteboardNotebook, restoreAnnotateDoc]) {
       const saved = restore.mock.calls[0]![0] as { agent: unknown[] };
       const reopened = restoreAgentMessages(saved.agent);
-      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...message, sessionId: "session-question", ...FLAGS_OFF })));
+      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...FLAGS_OFF, ...message, sessionId: "session-question" })));
       expect(visibleDrawings(reopened)).toHaveLength(expanded ? 1 : 0);
     }
   });

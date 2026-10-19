@@ -6,8 +6,9 @@ import { editWhiteboardArtifacts, getWhiteboardNotebook, listWhiteboardNotebooks
 import { editArtifactCatalog, type ArtifactCatalogEdit } from "./artifactCatalogEdits";
 import type { ArtifactCatalog, ArtifactParent } from "./padArtifacts";
 import type { BoardBlob } from "../canvas/BoardHandle";
-/** Stored agent messages always carry their on/off flags (see agentMessageFormat). */
-const FLAGS_OFF = { pending: false, queued: false, bridgePending: false };
+/** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false,
+  attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
 
 const state = vi.hoisted(() => ({
   db: new Map<string, any>(), meta: new Map<string, any>(), sync: new Map<string, any>(), ls: new Map<string, string>(),
