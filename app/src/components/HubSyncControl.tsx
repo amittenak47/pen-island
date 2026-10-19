@@ -12,6 +12,7 @@ import { useEffect, useRef, useState, type MutableRefObject } from "react";
 import { createPortal } from "react-dom";
 
 import type { AnnotatePadDto, LcClient, WhiteboardPadDto } from "../api/client";
+import { hubDidNotAnswer } from "../api/client";
 import type { DocHubHint } from "../util/hubHint";
 import {
   type HubConflictResolution,
@@ -79,6 +80,11 @@ export interface HubWalkReport {
   /** The walk is asking the reader to pick a copy, not doing work. */
   waiting?: "conflict";
   message?: string | null;
+  /**
+   * Something beside the books that didn't sync (links, snapshots, a ChatBot
+   * answer). The books did: this sits under "Synced", not in place of it.
+   */
+  notice?: string | null;
 }
 
 export type HubSyncStage =
@@ -233,15 +239,25 @@ export interface HubSyncWalkHost {
   onIndexProgress(progress: DocWorkProgress | null): void;
   /** How far the Sync walk has got, for the tab chip. Null when idle (not Synced). */
   onWalkProgress(report: HubWalkReport | null): void;
+  /** The hub answered and indexing failed. Null clears it, as a walk starts. */
   onIndexError(message: string | null): void;
+  /**
+   * The hub did not answer during the index step (the desktop app closed or
+   * restarting). Not an index error: nothing is known about the index, and
+   * the reader is told to try again later rather than the walk retrying.
+   */
+  onIndexOffline(): void;
   /**
    * The hub holds an index for this document.
    *
    * The walk indexed it, or found it already there. Nothing said so, so a
    * successful walk left the document-index chip reading whatever it read
    * before — usually "not indexed", about a document that now is.
+   *
+   * `embedOffline` says why embedding did not finish, when a model is set
+   * but did not answer. Indexing needs no model, so this is still "indexed".
    */
-  onIndexDone(): void;
+  onIndexDone(embedOffline?: string | null): void;
 }
 
 export interface HubSyncControlProps {
@@ -496,8 +512,10 @@ export function HubSyncControl({
           await host?.emitReload(); throwIfAborted(); goStage("idle"); walkingRef.current = false; return;
         }
         // Indexing is supplemental to the live-book transaction. Its failure
-        // is retained as a notice and cannot undo a confirmed book commit.
-        let notice = result.notices.map(bookNoticeMessage).join(" ");
+        // is kept for the index line and cannot undo a confirmed book commit.
+        const notice = result.notices.map(bookNoticeMessage).join(" ");
+        let indexFailure: string | null = null;
+        let indexOffline = false;
         if (doc && doc.docType !== "web") {
           goStage("index");
           try {
@@ -507,22 +525,42 @@ export function HubSyncControl({
             }
             const fresh = await boundedBookRequest(() => client!.getDocIndex(doc.hash), abort.signal);
             if (!fresh?.indexed) throw new Error("The hub didn't keep the index.");
-            if (fresh.embed_state !== "full") for (let guard = 0; guard < 500; guard++) {
-              const budget = await boundedBookRequest(() => client!.embedDoc(doc.hash), abort.signal);
-              goWork("embed", { done: budget.done, total: budget.total });
-              if (budget.reason || !budget.total || budget.done >= budget.total) break;
+            /*
+             * Embedding is its own step, and needs the model; indexing does not.
+             *
+             * They shared one catch, so a model that was off or slow to answer
+             * read "index error" about a document the hub had fully indexed.
+             * No model set at all is not "offline": the card says to set one.
+             */
+            let embedOffline: string | null = null;
+            const modelSet = (fresh.configured_model ?? "").length > 0;
+            if (fresh.embed_state !== "full") {
+              try {
+                for (let guard = 0; guard < 500; guard++) {
+                  const budget = await boundedBookRequest(() => client!.embedDoc(doc.hash), abort.signal);
+                  goWork("embed", { done: budget.done, total: budget.total });
+                  if (budget.reason) { if (modelSet) embedOffline = budget.reason; break; }
+                  if (!budget.total || budget.done >= budget.total) break;
+                }
+              } catch (cause) {
+                if (abort.signal.aborted) throw new HubSyncCancelled();
+                embedOffline = cause instanceof Error ? cause.message : String(cause);
+              }
             }
-            host?.onIndexDone();
+            host?.onIndexDone(embedOffline);
           } catch (cause) {
             if (abort.signal.aborted) throw new HubSyncCancelled();
-            notice += ` ${cause instanceof Error ? cause.message : String(cause)}`;
+            if (hubDidNotAnswer(cause)) indexOffline = true;
+            else indexFailure = cause instanceof Error ? cause.message : String(cause);
           }
         }
         goStage("pull");
         await host?.emitReload(); throwIfAborted();
         syncedAtSeqRef.current = editSeqRef.current;
         goStage(selected ? "synced" : "idle");
-        if (notice.trim()) host?.onIndexError(notice.trim());
+        if (indexOffline) host?.onIndexOffline();
+        if (indexFailure) host?.onIndexError(indexFailure);
+        if (notice && selected) hostRef.current?.onWalkProgress({ stage: "synced", progress: null, notice });
         walkingRef.current = false;
         return;
       }
@@ -893,7 +931,7 @@ export function HubSyncControl({
        */
       if (!padInfo) {
         goStage("idle");
-        if (legacyNotice) host?.onIndexError(legacyNotice);
+        if (legacyNotice) hostRef.current?.onWalkProgress({ stage: "idle", progress: null, notice: legacyNotice });
         walkingRef.current = false;
         return;
       }
@@ -912,7 +950,7 @@ export function HubSyncControl({
       }
       syncedAtSeqRef.current = editSeqRef.current;
       goStage("synced");
-      if (legacyNotice) host?.onIndexError(legacyNotice);
+      if (legacyNotice) hostRef.current?.onWalkProgress({ stage: "synced", progress: null, notice: legacyNotice });
       queueMicrotask(() => {
         syncedAtSeqRef.current = editSeqRef.current;
         absorbReloadEditsRef.current = false;
@@ -932,8 +970,11 @@ export function HubSyncControl({
       const message = cause instanceof Error ? cause.message : String(cause);
       setWalkError(message);
       // Stay parked on the failing stage; the next tap retries from it. The
-      // tab says the real reason, beside the document it happened to.
-      hostRef.current?.onIndexError(message);
+      // pill says the real reason. Only a failure in Index is about the index.
+      if (walkStageRef.current === "index") {
+        if (hubDidNotAnswer(cause)) hostRef.current?.onIndexOffline();
+        else hostRef.current?.onIndexError(message);
+      }
       hostRef.current?.onWalkProgress({
         stage: walkStageRef.current,
         progress: null,

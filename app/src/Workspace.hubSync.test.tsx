@@ -17,6 +17,7 @@ import { PAD_HUB_WINDOW_EVENT, type PadHubWindowDetail } from "./util/padSync";
 import { saveHubSyncWindowPill } from "./util/hubSyncWindowPillPref";
 import { savePadHub } from "./util/padHub";
 import { BOOK_PASS_STATUS_EVENT } from "./util/bookSyncPass";
+import { LcApiError } from "./api/client";
 
 type PaperProps = ComponentProps<typeof import("./modes/AnnotateDocument").AnnotateDocument>;
 type SplitProps = ComponentProps<typeof import("./components/HubConflictSplit").HubConflictSplit>;
@@ -199,32 +200,79 @@ it("a tab Sync tap prepares the live pad, reports progress, ignores window reloa
   await reload(); expect(mocks.board.restoreBoard).toHaveBeenCalledTimes(2);
 });
 
-it("asks the hub again after the walk's index step fails, and clears the error once it has the index", async () => {
-  // The hub lives in the desktop app; while it restarts, the walk's index step fails.
-  const client = mocks.shell.client as unknown as { getDocIndex: ReturnType<typeof vi.fn> };
-  const status = () => vi.mocked(mocks.shell.setChrome).mock.lastCall?.[0]?.docIndex?.status;
+type IndexClient = { getDocIndex: ReturnType<typeof vi.fn>; embedDoc?: ReturnType<typeof vi.fn> };
+const docIndexChrome = () => vi.mocked(mocks.shell.setChrome).mock.lastCall?.[0]?.docIndex;
+
+it("says the hub is offline when it does not answer during Index, and does not ask again by itself", async () => {
+  // The hub lives in the desktop app; while it restarts, nothing answers.
+  const client = mocks.shell.client as unknown as IndexClient;
   await mount();
-  client.getDocIndex.mockRejectedValue(new Error("hub unreachable"));
+  client.getDocIndex.mockRejectedValue(new LcApiError("Could not reach the hub at http://isolated.test.", 0));
   await tapSync();
   for (let i = 0; i < 8; i++) await advance(250);
-  expect(status()).toBe("error");
-  client.getDocIndex.mockResolvedValue({ indexed: true, page_count: 1, embed_state: "full" });
-  await advance(5_000);
-  await advance(250);
-  expect(status()).toBe("indexed");
+  expect(docIndexChrome()?.indexNote).toEqual({ kind: "hub-offline", detail: null });
+  expect(docIndexChrome()?.status).not.toBe("error");
+  expect(mocks.sync!.report?.stage).toBe("synced");
+  const calls = client.getDocIndex.mock.calls.length;
+  await advance(600_000);
+  expect(client.getDocIndex.mock.calls.length).toBe(calls);
 });
 
-it("stops asking the hub again after a few tries", async () => {
-  const client = mocks.shell.client as unknown as { getDocIndex: ReturnType<typeof vi.fn> };
+it("calls a failure the hub answered with an index error, not the hub being offline", async () => {
+  const client = mocks.shell.client as unknown as IndexClient;
   await mount();
-  client.getDocIndex.mockRejectedValue(new Error("hub unreachable"));
+  client.getDocIndex.mockRejectedValue(new LcApiError("extract failed", 500));
   await tapSync();
   for (let i = 0; i < 8; i++) await advance(250);
-  const calls = client.getDocIndex.mock.calls.length;
-  await advance(5_000 + 15_000 + 30_000 + 60_000 + 120_000 + 1_000);
-  expect(client.getDocIndex.mock.calls.length).toBe(calls + 5);
-  await advance(600_000);
-  expect(client.getDocIndex.mock.calls.length).toBe(calls + 5);
+  expect(docIndexChrome()?.status).toBe("error");
+  expect(docIndexChrome()?.error).toBe("extract failed");
+  expect(docIndexChrome()?.indexNote).toBeNull();
+});
+
+it("keeps a document indexed and the sync successful when the embedding model does not answer", async () => {
+  const client = mocks.shell.client as unknown as IndexClient;
+  client.embedDoc = vi.fn(async () => ({ done: 0, total: 4, reason: "error sending request: connection refused" }));
+  await mount();
+  client.getDocIndex.mockResolvedValue({ indexed: true, page_count: 1, embed_state: "none", configured_model: "qwen-embed" });
+  await tapSync();
+  for (let i = 0; i < 8; i++) await advance(250);
+  expect(client.embedDoc).toHaveBeenCalledTimes(1);
+  expect(docIndexChrome()?.status).toBe("indexed");
+  expect(docIndexChrome()?.indexNote).toEqual({ kind: "embed-offline", detail: "error sending request: connection refused" });
+  expect(mocks.sync!.report).toMatchObject({ stage: "synced" });
+  expect(mocks.sync!.report?.error ?? null).toBeNull();
+});
+
+it("treats an embed request that fails outright as embedding offline too", async () => {
+  const client = mocks.shell.client as unknown as IndexClient;
+  client.embedDoc = vi.fn(async () => { throw new LcApiError("No response from the hub", 0); });
+  await mount();
+  client.getDocIndex.mockResolvedValue({ indexed: true, page_count: 1, embed_state: "none", configured_model: "qwen-embed" });
+  await tapSync();
+  for (let i = 0; i < 8; i++) await advance(250);
+  expect(docIndexChrome()?.status).toBe("indexed");
+  expect(docIndexChrome()?.indexNote).toMatchObject({ kind: "embed-offline" });
+});
+
+it("does not call embedding offline when no model is set at all", async () => {
+  const client = mocks.shell.client as unknown as IndexClient;
+  client.embedDoc = vi.fn(async () => ({ done: 0, total: 4, reason: "no embedding model is configured" }));
+  await mount();
+  client.getDocIndex.mockResolvedValue({ indexed: true, page_count: 1, embed_state: "none", configured_model: "" });
+  await tapSync();
+  for (let i = 0; i < 8; i++) await advance(250);
+  expect(docIndexChrome()?.status).toBe("indexed");
+  expect(docIndexChrome()?.indexNote).toBeNull();
+});
+
+it("shows a book notice under Synced instead of as an index error", async () => {
+  mocks.pass.mockResolvedValue({ ...result(), notices: [{ kind: "links" }] });
+  await mount();
+  await tapSync();
+  for (let i = 0; i < 8; i++) await advance(250);
+  expect(mocks.sync!.report).toMatchObject({ stage: "synced", notice: "Links didn't sync." });
+  expect(docIndexChrome()?.walkNotice).toBe("Links didn't sync.");
+  expect(docIndexChrome()?.status).toBe("indexed");
 });
 
 it("holds autosave throughout an asynchronous hub apply and releases it afterwards", async () => {

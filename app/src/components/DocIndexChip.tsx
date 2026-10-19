@@ -14,6 +14,15 @@ import { HubStatusDot } from "./HubStatusDot";
 
 export type DocIndexChipStatus = "idle" | "indexing" | "indexed" | "error";
 
+/**
+ * What the last Sync learned about the index that is not its status.
+ *
+ * `hub-offline`: the hub did not answer during Index, so nothing is known;
+ * try again later. `embed-offline`: indexed, but the embedding model did not
+ * answer (`detail` says how), so matching stays by words for now.
+ */
+export type DocIndexNote = { kind: "hub-offline" | "embed-offline"; detail: string | null };
+
 /** Done over total, in whatever unit the job counts. */
 export interface DocWorkProgress {
   done: number;
@@ -162,6 +171,10 @@ export interface DocIndexChipProps {
   /** Asking which copy to keep — not a spinning stage. */
   walkWaiting?: "conflict" | null;
   walkMessage?: string | null;
+  /** Beside the books, something that didn't sync. Shown under the sync line. */
+  walkNotice?: string | null;
+  /** See DocIndexNote. */
+  indexNote?: DocIndexNote | null;
   /** Resting pad sync, for tabs the walk is not currently walking. */
   padSync?: "synced" | "not-synced" | null;
   /**
@@ -191,6 +204,8 @@ export function DocIndexChip({
   walkError,
   walkWaiting,
   walkMessage,
+  walkNotice,
+  indexNote,
   padSync,
   onSync,
   viewportWait,
@@ -277,16 +292,29 @@ export function DocIndexChip({
     ? "indexing…"
     : embedding
       ? "embedding…"
-      : status === "error"
-        ? "index error"
-        : status === "indexed"
-          ? meta?.embedded === false ? "indexed · words" : "indexed"
-          : onIndex ? "not indexed" : null;
+      : indexNote?.kind === "hub-offline"
+        ? "hub offline · try again later"
+        : status === "error"
+          ? "index error"
+          : status === "indexed"
+            ? indexNote?.kind === "embed-offline"
+              ? "indexed · embedding offline"
+              : meta?.embedded === false ? "indexed · words" : "indexed"
+            : onIndex ? "not indexed" : null;
+  const indexTitle = indexNote?.kind === "hub-offline"
+    ? "The hub didn't answer. Open the desktop app, then tap Sync again."
+    : status === "error"
+      ? error ?? "index error"
+      : embedding
+        ? embedEta ?? undefined
+        : indexNote?.kind === "embed-offline"
+          ? `The embedding model didn't answer, so matching is by words for now: ${indexNote.detail}`
+          : undefined;
   const indexRing = status === "indexing" || embedding;
   const syncShown = syncOpen || syncHover;
   // Opens and closes with motion: mounted until the fade-out has played.
   const syncPresence = usePresence(Boolean(onSync) && syncShown);
-  const syncPlaced = usePopPlacement(buttonRef, syncPopRef, syncPresence.mounted, `${syncText}|${indexText}`);
+  const syncPlaced = usePopPlacement(buttonRef, syncPopRef, syncPresence.mounted, `${syncText}|${walkNotice}|${indexText}`);
   const working = !walkError && walkWaiting !== "conflict" && (walking || indexRing);
   const workProgress = walking ? walkProgress : status === "indexing" ? indexProgress : embedProgress;
   const syncBtn = onSync ? (
@@ -518,11 +546,12 @@ export function DocIndexChip({
           }}
         >
           <div className="lc-doc-sync-line">{sentence(syncText)}</div>
+          {walkNotice && <div className="lc-doc-sync-note">{walkNotice}</div>}
           {indexText && (
             <IndexRow
-              className="lc-doc-sync-index"
+              className={indexNote ? "lc-doc-sync-index is-note" : "lc-doc-sync-index"}
               type={canOpen ? "button" : undefined}
-              title={status === "error" ? error ?? "index error" : embedding ? embedEta ?? undefined : undefined}
+              title={indexTitle}
               onClick={canOpen ? () => {
                 setSyncOpen(false);
                 setOpen(true);

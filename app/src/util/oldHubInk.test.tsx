@@ -46,14 +46,16 @@ it.each(["sync", "pull", "push", "record", "discover", "library", "automatic"])(
   expect(await captureBook({ kind: "whiteboard", id: "book" })).toEqual(before);
 });
 it("shows the update-hub error on every manual attempt without entering the legacy walk", async () => {
-  const error = vi.fn();
+  const error = vi.fn(), walk = vi.fn();
   const host = { doc: () => null, pad: async () => ({ kind: "whiteboard", id: "book", buildBody: () => ({}), hubAckUpdatedAt: () => 0 }),
-    emitReload: vi.fn(), inkSince: () => 0, onWalkProgress: vi.fn(), onIndexError: error, onIndexDone: vi.fn(), onIndexProgress: vi.fn() } as unknown as HubSyncWalkHost;
+    emitReload: vi.fn(), inkSince: () => 0, onWalkProgress: walk, onIndexError: error, onIndexOffline: vi.fn(), onIndexDone: vi.fn(), onIndexProgress: vi.fn() } as unknown as HubSyncWalkHost;
   const element = document.createElement("div"); document.body.append(element); const root = createRoot(element);
   try {
     await act(async () => root.render(<HubSyncControl client={api} host={host} />));
     for (let i = 0; i < 2; i++) await act(async () => { (element.querySelector("button") as HTMLButtonElement).click(); });
-    expect(error.mock.calls.filter(([message]) => message)).toEqual([["Update the desktop app to sync safely."], ["Update the desktop app to sync safely."]]);
+    // A walk failure, said on the pill each tap; it is not an index error.
+    expect(walk.mock.calls.map(([report]) => report?.error).filter(Boolean)).toEqual(["Update the desktop app to sync safely.", "Update the desktop app to sync safely."]);
+    expect(error.mock.calls.filter(([message]) => message)).toEqual([]);
     expect(api.putWhiteboardPad).not.toHaveBeenCalled(); expect(api.getInkPage).not.toHaveBeenCalled(); expect(api.putInkPage).not.toHaveBeenCalled();
   } finally { await act(async () => root.unmount()); element.remove(); }
 });

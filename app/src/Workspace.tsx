@@ -24,14 +24,14 @@ import { usePdfSession } from "./workspace/usePdfSession";
 import { useAnnotateSession } from "./workspace/useAnnotateSession";
 import { useHubSync } from "./workspace/useHubSync";
 
-import { LcApiError, type AnnotatePadDto, type DocIndexStatus, type ProposedAnnotation, type SearchOptions } from "./api/client";
+import { hubDidNotAnswer, LcApiError, type AnnotatePadDto, type DocIndexStatus, type ProposedAnnotation, type SearchOptions } from "./api/client";
 import { AmbientCoach, defaultCoachSocketFactory, type AmbientProbe } from "./api/coachSocket";
 import { mergeProcessEvent } from "./modes/processEvents";
 import { isTauriRuntime } from "./api/nativeHttp";
 import { liveWebviewSupported } from "./util/liveWebviewSupport";
 import { afterBootSettled } from "./util/bootSettled";
 import { etaLabel, etaMs, newEta, recordBatch } from "./util/embedEta";
-import type { DocWorkProgress } from "./components/DocIndexChip";
+import type { DocIndexNote, DocWorkProgress } from "./components/DocIndexChip";
 import { fetchDocHubHint, type DocHubHint } from "./util/hubHint";
 import { HubConflictSplit } from "./components/HubConflictSplit";
 import { PageTurn } from "./canvas/pageTurn/PageTurn";
@@ -975,6 +975,8 @@ export const Workspace = memo(function Workspace({
     "idle" | "indexing" | "indexed" | "error"
   >("idle");
   const [docIndexError, setDocIndexError] = useState<string | null>(null);
+  /** The hub or the embedding model did not answer at the last Sync. */
+  const [docIndexNote, setDocIndexNote] = useState<DocIndexNote | null>(null);
   const [docIndexMeta, setDocIndexMeta] = useState<DocIndexStatus | null>(null);
   /**
    * What the hub already had when this document was opened — read-only, so
@@ -1259,7 +1261,7 @@ export const Workspace = memo(function Workspace({
     client, tab, boardRef, whiteboardNotebookIdRef, annotateDocIdRef,
     annotateSourceRef, annotateFootnotesRef, footnoteBoardRef, footnoteBoardSessionRef,
     hubConflictAskRef, setHubConflictAsk, setHubConflictError,
-    setDocIndexStatus, setDocIndexError, setDocIndexMeta, isLocalPad, flushDirtyInk,
+    setDocIndexStatus, setDocIndexError, setDocIndexMeta, setDocIndexNote, isLocalPad, flushDirtyInk,
   });
   useEffect(() => trackBookPass(active), [active]);
   useEffect(trackHubSyncWindowPill, []);
@@ -1305,6 +1307,7 @@ export const Workspace = memo(function Workspace({
     if (force) {
       setDocIndexStatus("indexing");
       setDocIndexError(null);
+      setDocIndexNote(null);
       setDocIndexProgress(null);
     }
     window.setTimeout(() => {
@@ -1385,6 +1388,12 @@ export const Workspace = memo(function Workspace({
           setDocIndexStatus("indexed");
         } catch (cause) {
           if (workspaceLoadGenRef.current !== loadGen) return;
+          // No answer is not a failed index: say the hub is offline, once.
+          if (hubDidNotAnswer(cause)) {
+            setDocIndexStatus("idle");
+            setDocIndexNote({ kind: "hub-offline", detail: null });
+            return;
+          }
           setDocIndexStatus("error");
           setDocIndexError(messageOf(cause));
         } finally {
@@ -3661,6 +3670,7 @@ export const Workspace = memo(function Workspace({
       setError(null);
       setDocIndexStatus("idle");
       setDocIndexError(null);
+      setDocIndexNote(null);
       setDocIndexMeta(null);
       setHubHint(null);
       setTests(null);
@@ -9627,6 +9637,8 @@ export const Workspace = memo(function Workspace({
         walkProgress: walkReport?.progress ?? null,
         walkError: walkReport?.error ?? null,
         walkMessage: walkReport?.message ?? null,
+        walkNotice: walkReport?.notice ?? null,
+        indexNote: docIndexNote,
         walkWaiting: walkReport?.waiting ?? null,
         padSync: padTabSync({
           walkStage: walkReport?.stage ?? null,
@@ -9658,6 +9670,7 @@ export const Workspace = memo(function Workspace({
     chunkSyncIssue,
     docIndexError,
     docIndexMeta,
+    docIndexNote,
     docIndexStatus,
     docIndexProgress,
     docEmbedProgress,

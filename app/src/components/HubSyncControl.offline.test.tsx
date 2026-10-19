@@ -58,7 +58,7 @@ function setup(kind: "annotate" | "whiteboard", hasPad = true) {
     emitReload: vi.fn(), inkSince: () => 0,
     onConflict: vi.fn(async () => ({ pick: "local" as const })),
     onIndexProgress: vi.fn(), onWalkProgress: report => reports.push(report),
-    onIndexError: vi.fn(), onIndexDone: vi.fn(),
+    onIndexError: vi.fn(), onIndexOffline: vi.fn(), onIndexDone: vi.fn(),
   };
   const network = vi.fn().mockRejectedValue(new Error("Can't reach the hub. Is the desktop app open?"));
   const client = new Proxy({}, { get: () => network }) as LcClient;
