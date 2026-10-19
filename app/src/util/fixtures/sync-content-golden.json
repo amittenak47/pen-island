@@ -622,6 +622,18 @@
       "input": "{\"agent\":[],\"artifacts\":null,\"footnotes\":[],\"id\":\"book\"}",
       "canonical": "{\"id\":\"book\"}",
       "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "diagram view state: open on frame 2",
+      "input": "{\"id\":\"book\",\"board\":{\"v\":1,\"elements\":[]},\"agent\":[{\"id\":\"answer\",\"role\":\"assistant\",\"content\":\"The tree\",\"at\":1,\"drawing\":{\"program\":{\"id\":\"recursion-tree\",\"frames\":[{\"label\":\"split\"},{\"label\":\"merge\"}]},\"expanded\":true,\"frameIndex\":2}}]}",
+      "canonical": "{\"agent\":[{\"at\":1,\"content\":\"The tree\",\"drawing\":{\"program\":{\"frames\":[{\"label\":\"split\"},{\"label\":\"merge\"}],\"id\":\"recursion-tree\"}},\"id\":\"answer\",\"role\":\"assistant\"}],\"board\":{\"elements\":[],\"v\":1},\"id\":\"book\"}",
+      "hash": "7a01325a5ec00e62d1ffc6b8ff085fc126193a6a53afee852def5f9396e7c0b3"
+    },
+    {
+      "name": "diagram view state: closed on frame 0",
+      "input": "{\"id\":\"book\",\"board\":{\"v\":1,\"elements\":[]},\"agent\":[{\"id\":\"answer\",\"role\":\"assistant\",\"content\":\"The tree\",\"at\":1,\"drawing\":{\"program\":{\"id\":\"recursion-tree\",\"frames\":[{\"label\":\"split\"},{\"label\":\"merge\"}]},\"expanded\":false,\"frameIndex\":0}}]}",
+      "canonical": "{\"agent\":[{\"at\":1,\"content\":\"The tree\",\"drawing\":{\"program\":{\"frames\":[{\"label\":\"split\"},{\"label\":\"merge\"}],\"id\":\"recursion-tree\"}},\"id\":\"answer\",\"role\":\"assistant\"}],\"board\":{\"elements\":[],\"v\":1},\"id\":\"book\"}",
+      "hash": "7a01325a5ec00e62d1ffc6b8ff085fc126193a6a53afee852def5f9396e7c0b3"
     }
   ],
   "ink": [

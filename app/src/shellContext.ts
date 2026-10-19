@@ -119,6 +119,10 @@ export interface WorkspaceChrome {
     /** The walk parked on `walkStage`. */
     walkError?: string | null;
     walkMessage?: string | null;
+    /** Beside the books, something that didn't sync. */
+    walkNotice?: string | null;
+    /** Hub or embedding model not answering at the last Sync (DocIndexNote). */
+    indexNote?: { kind: "hub-offline" | "embed-offline"; detail: string | null } | null;
     /** The walk is asking which copy to keep, not spinning. */
     walkWaiting?: "conflict" | null;
     padSync?: "synced" | "not-synced" | null;
@@ -170,6 +174,8 @@ export function chromeLooksSame(current: WorkspaceChrome, next: WorkspaceChrome)
     current.docIndex.walkJob === next.docIndex.walkJob &&
     current.docIndex.walkError === next.docIndex.walkError &&
     current.docIndex.walkMessage === next.docIndex.walkMessage &&
+    current.docIndex.walkNotice === next.docIndex.walkNotice &&
+    current.docIndex.indexNote === next.docIndex.indexNote &&
     current.docIndex.walkWaiting === next.docIndex.walkWaiting &&
     current.docIndex.padSync === next.docIndex.padSync &&
     current.docIndex.onSync === next.docIndex.onSync &&

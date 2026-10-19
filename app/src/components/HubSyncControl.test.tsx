@@ -346,7 +346,7 @@ describe("HubSyncControl (step-2 stub)", () => {
       const progress = vi.fn();
       const errors = vi.fn();
       const indexDone = vi.fn();
-      const walkReports: Array<{ stage: string; job?: string | null } | null> = [];
+      const walkReports: Array<{ stage: string; job?: string | null; error?: string | null } | null> = [];
       const reload = vi.fn();
       const conflicts: unknown[] = [];
       const picks: Array<{ pick: "local" | "server" }> = [];
@@ -362,6 +362,7 @@ describe("HubSyncControl (step-2 stub)", () => {
         onIndexProgress: (p) => progress(p),
         onWalkProgress: (report) => walkReports.push(report),
         onIndexError: (m) => errors(m),
+        onIndexOffline: () => {},
         onIndexDone: () => indexDone(),
       };
       return { host, progress, errors, indexDone, walkReports, reload, conflicts, picks };
@@ -1566,7 +1567,7 @@ describe("HubSyncControl (step-2 stub)", () => {
     it("fails a 409 with no mounted merge UI and one tap starts a fresh walk", async () => {
       vi.useFakeTimers();
       const client = fakeClient({ putAnnotatePad: vi.fn().mockRejectedValue(new LcApiError("stale", 409)) });
-      const { host, errors } = makeHost(null);
+      const { host, errors, walkReports } = makeHost(null);
       withPad(host);
       let pendingSignal: AbortSignal | undefined;
       host.onConflict = (_conflict, lifecycle) => {
@@ -1579,7 +1580,9 @@ describe("HubSyncControl (step-2 stub)", () => {
       expect(activeLabel(button)).toBe("Sync failed");
       expect(button.getAttribute("aria-busy")).toBe("false");
       expect(button.querySelector('[aria-label="Sync error"]')).not.toBeNull();
-      expect(errors).toHaveBeenLastCalledWith(expect.stringContaining("newer copy of book.pdf"));
+      // The reason rides the walk report (the pill); a pad failure is not an index error.
+      expect(walkReports.at(-1)?.error).toContain("newer copy of book.pdf");
+      expect(errors).not.toHaveBeenCalledWith(expect.stringContaining("newer copy of book.pdf"));
       expect(pendingSignal?.aborted).toBe(true);
       vi.mocked(client.putAnnotatePad).mockImplementation(async (_id, body) => ({ ...body, updated_at: 900 }));
       await act(async () => { button.click(); await vi.runAllTimersAsync(); });

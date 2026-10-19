@@ -158,6 +158,20 @@ export class PadHubOfflineError extends LcApiError {
   }
 }
 
+/**
+ * The hub never answered: it is down, restarting with the desktop app, or out
+ * of reach. An HTTP error is an answer, so the hub is up and said no.
+ *
+ * Only with a hub set: local harness failures carry status 0 as well.
+ */
+export function hubDidNotAnswer(cause: unknown): boolean {
+  if (!loadPadHub()) return false;
+  for (let at: unknown = cause; at instanceof Error; at = at.cause) {
+    if (at instanceof LcApiError) return at.status === 0;
+  }
+  return false;
+}
+
 let lastUnreachableEventAt = 0;
 const UNREACHABLE_EVENT_COOLDOWN_MS = 4_000;
 

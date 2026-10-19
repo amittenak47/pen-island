@@ -310,6 +310,33 @@ describe("the in-tab Sync overlay", () => {
     if (state.status === "error") expect(row?.getAttribute("title")).toBe("extract failed");
   });
 
+  it("says the hub is offline and to try again later, which is not an index error", () => {
+    const { host } = mount({ status: "idle", onSync: vi.fn(), indexNote: { kind: "hub-offline", detail: null } });
+    act(() => syncButton(host).click());
+    const row = syncPopover()?.querySelector(".lc-doc-sync-index");
+    expect(row?.textContent).toBe("Hub offline · try again later");
+    expect(row?.classList.contains("is-note")).toBe(true);
+    expect(row?.getAttribute("title")).toContain("tap Sync again");
+  });
+
+  it("keeps an indexed document indexed when embedding is offline, with the reason on hover", () => {
+    const { host } = mount({
+      status: "indexed", meta: { embedded: false } as never, onSync: vi.fn(),
+      indexNote: { kind: "embed-offline", detail: "connection refused" },
+    });
+    act(() => syncButton(host).click());
+    const row = syncPopover()?.querySelector(".lc-doc-sync-index");
+    expect(row?.textContent).toBe("Indexed · embedding offline");
+    expect(row?.getAttribute("title")).toContain("connection refused");
+  });
+
+  it("puts a sync notice under the sync line instead of replacing it", () => {
+    const { host } = mount({ status: "indexed", onSync: vi.fn(), walkStage: "synced", walkNotice: "Links didn't sync." });
+    act(() => syncButton(host).click());
+    expect(syncPopover()?.querySelector(".lc-doc-sync-line")?.textContent).toBe("Synced");
+    expect(syncPopover()?.querySelector(".lc-doc-sync-note")?.textContent).toBe("Links didn't sync.");
+  });
+
   it("omits the index row when there is no index state to offer", () => {
     const { host } = mount({ status: "idle", onSync: vi.fn() });
     act(() => syncButton(host).click());

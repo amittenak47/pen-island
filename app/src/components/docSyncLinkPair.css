@@ -1,0 +1,39 @@
+/* [⊙ Sync | Link]: one outlined pair, split by a hairline, in a menu's context row. */
+.lc-sync-link-pair {
+  flex-shrink: 0; display: inline-flex; align-items: stretch;
+  border: var(--lc-dialog-edge, 1px) solid var(--lc-dialog-line, var(--line));
+  border-radius: var(--lc-dialog-control-radius, max(8px, var(--lc-r-round)));
+  overflow: hidden;
+}
+.lc-sync-link-half { display: inline-flex; }
+.lc-sync-link-half + .lc-sync-link-half { border-inline-start: var(--lc-dialog-edge, 1px) solid var(--lc-dialog-line, var(--line)); }
+.lc-sync-link-pair :is(.lc-sync-link-sync, .lc-sync-link-link) {
+  position: relative; display: inline-flex; align-items: center; gap: 6px;
+  min-height: 30px; padding: 0 10px; margin: 0; border: 0; border-radius: 0;
+  background: transparent; color: var(--ink); font: inherit; font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: background-color 140ms ease, color 140ms ease;
+}
+.lc-sync-link-pair :is(.lc-sync-link-sync, .lc-sync-link-link):hover:not(:disabled),
+.lc-sync-link-pair :is(.lc-sync-link-sync, .lc-sync-link-link):focus-visible {
+  background: color-mix(in srgb, var(--lc-dialog-mode, var(--accent)) 14%, transparent);
+}
+.lc-sync-link-pair :is(.lc-sync-link-sync, .lc-sync-link-link):disabled { opacity: .5; cursor: default; }
+.lc-sync-link-sync.is-bad { color: var(--bad); }
+.lc-sync-link-face { display: inline-flex; align-items: center; gap: 6px; }
+.lc-sync-link-link .lc-hold-reveal-label { position: static; display: inline-flex; align-items: center; }
+.lc-sync-link-link .lc-icon-svg { color: var(--lc-dialog-mode, var(--accent)); }
+.lc-sync-link-link.is-unlinked .lc-icon-svg { opacity: .55; }
+.lc-sync-link-link.is-working .lc-hold-reveal-fill { display: none; }
+.lc-sync-link-link .lc-library-sync-dot { position: absolute; top: 4px; right: 4px; }
+.lc-sync-link-pair .lc-doc-index-ring { width: 14px; height: 14px; }
+
+/* Above the dialog these sit on (its backdrop is z 120). */
+.lc-doc-sync-pop:is(.lc-sync-link-tip, .lc-sync-link-menu) { z-index: 130; }
+.lc-sync-link-menu { pointer-events: auto; }
+
+@media (max-width: 380px) {
+  .lc-sync-link-pair :is(.lc-sync-link-sync, .lc-sync-link-link) { padding: 0 7px; font-size: 11px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-sync-link-pair :is(.lc-sync-link-sync, .lc-sync-link-link) { transition: none; }
+}

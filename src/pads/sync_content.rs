@@ -5,6 +5,8 @@
 //! footnotes and footnote_boards; agent[].attachments/artifacts/artifactProposals/
 //! flags/processEvents, agent[].pending/queued/bridgePending=false,
 //! agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
+//! agent[].drawing.expanded/frameIndex are this device's view of a diagram
+//! (open or not, which frame), excluded like the camera;
 //! footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
 //! footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
 //! Also empty strings at agent[].requestNote/reasoning/bridgeError,
@@ -91,6 +93,8 @@ pub const PAGE_FRAME_LOCAL_KEYS: &[&str] = &["width", "height", "version", "vers
 /// Agent message flags whose `false` is the same as leaving them out.
 pub const MESSAGE_FALSE_DEFAULT_KEYS: &[&str] = &["pending", "queued", "bridgePending"];
 pub const MESSAGE_EMPTY_LIST_KEYS: &[&str] = &["attachments", "artifacts", "artifactProposals", "flags", "processEvents"];
+/// How a diagram in a message is being viewed: per device, like the camera, never authored.
+pub const MESSAGE_DRAWING_VIEW_KEYS: &[&str] = &["expanded", "frameIndex"];
 pub const MESSAGE_EMPTY_STRING_KEYS: &[&str] = &["requestNote", "reasoning", "bridgeError"];
 pub const FOOTNOTE_EMPTY_LIST_KEYS: &[&str] = &["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"];
 
@@ -237,6 +241,8 @@ pub fn normalize_record(value: &Value) -> Result<Value> {
             }
             if let Some(drawing) = message.get_mut("drawing").and_then(Value::as_object_mut) {
                 if drawing.get("redacted") == Some(&Value::Bool(false)) { drawing.remove("redacted"); }
+                // How a diagram is being viewed on one device is not an edit.
+                for key in MESSAGE_DRAWING_VIEW_KEYS { drawing.remove(*key); }
             }
             if let Some(proposals) = message.get_mut("artifactProposals").and_then(Value::as_array_mut) {
                 for proposal in proposals.iter_mut().filter_map(Value::as_object_mut) {

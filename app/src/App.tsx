@@ -1514,6 +1514,8 @@ export function App() {
                   walkProgress={chrome.docIndex.walkProgress}
                   walkError={chrome.docIndex.walkError}
                   walkMessage={chrome.docIndex.walkMessage}
+                  walkNotice={chrome.docIndex.walkNotice}
+                  indexNote={chrome.docIndex.indexNote}
                   walkWaiting={chrome.docIndex.walkWaiting}
                   padSync={chrome.docIndex.padSync}
                   onSync={chrome.docIndex.onSync}

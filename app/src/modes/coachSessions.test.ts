@@ -16,6 +16,16 @@ it("merges explicit message defaults with a legacy missing-field copy without a 
   expect(mergeAgentMessages([missing], [{ ...missing, future: [] }])).toHaveLength(2);
 });
 
+it("does not duplicate an answer whose diagram is only being viewed differently on each device", () => {
+  // Opening a diagram or scrubbing its frames is this device's view, not an edit.
+  const program = { id: "tree", frames: [{ label: "split" }, { label: "merge" }] };
+  const here = msg("answer", { role: "assistant", drawing: { program, expanded: true, frameIndex: 1 } } as Partial<AgentChatMessage>);
+  const there = msg("answer", { role: "assistant", drawing: { program, expanded: false, frameIndex: 0 } } as Partial<AgentChatMessage>);
+  const merged = mergeAgentMessages([here], [there]) as AgentChatMessage[];
+  expect(merged).toHaveLength(1);
+  expect(merged[0]!.drawing).toMatchObject({ expanded: true, frameIndex: 1 });
+});
+
 it("restores off request flags as false while leaving untouched legacy list omissions alone", () => {
   const [saved] = persistableAgentMessages(restoreAgentMessages([msg("turn")]));
   expect(saved.queued).toBe(false);

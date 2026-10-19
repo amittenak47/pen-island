@@ -21,6 +21,7 @@ export function usePopPlacement(
   visible: boolean,
   content: unknown,
   prefer: "below" | "above" = "below",
+  align: "left" | "right" = "left",
 ): CSSProperties {
   const [style, setStyle] = useState<CSSProperties>(HIDDEN);
   // The side is chosen when the notification opens and kept until it closes:
@@ -37,12 +38,14 @@ export function usePopPlacement(
       // Its natural height, not the capped one, decides where it fits.
       const height = Math.max(box.height, el.scrollHeight);
       const view = { width: window.innerWidth, height: window.innerHeight };
-      const at = popPlacement(button, { width: box.width, height }, view, GAP, 8, prefer, side.current ?? undefined);
+      const at = popPlacement(button, { width: box.width, height }, view, GAP, 8, prefer, side.current ?? undefined, align);
       side.current = at.above ? "above" : "below";
       const vertical = at.above ? { bottom: view.height - (button.top - GAP) } : { top: at.top };
       // Lined up with the button's right edge: hold the right edge, so a
       // width sliding inside grows to the left, away from the window's edge.
-      const rightAligned = at.left + box.width >= button.right - 1;
+      // Lined up with its left edge, hold that one (it used to read any
+      // notification wider than its button as right-aligned).
+      const rightAligned = Math.abs(at.left + box.width - button.right) < 1 && Math.abs(at.left - button.left) >= 1;
       const next: CSSProperties = {
         ...vertical,
         ...(rightAligned ? { right: view.width - (at.left + box.width) } : { left: at.left }),
@@ -64,7 +67,7 @@ export function usePopPlacement(
       window.removeEventListener("resize", place);
       window.removeEventListener("scroll", place, true);
     };
-  }, [trigger, pop, visible, content, prefer]);
+  }, [trigger, pop, visible, content, prefer, align]);
   return style;
 }
 

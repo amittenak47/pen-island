@@ -228,8 +228,10 @@ export function mergeAgentMessages(local: unknown[], remote: unknown[], preserve
       continue;
     }
     if (canonical(withoutSessionId(current)) === canonical(withoutSessionId(value))) {
+      // The same message: keep this device's copy (its view of a diagram, say),
+      // taking a session id from the other copy if only that one has it.
       const sessionId = sessionIdOf(current) || sessionIdOf(value);
-      const base = structuredClone(sessionIdOf(current) ? current : value);
+      const base = structuredClone(current);
       if (sessionId && base && typeof base === "object") (base as { sessionId?: string }).sessionId = sessionId;
       rows[at] = base;
       continue;

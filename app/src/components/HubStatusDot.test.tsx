@@ -4,7 +4,6 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PadHub } from "../util/padHub";
 import { DocIndexChip } from "./DocIndexChip";
-import { HubLibraryRefresh } from "./HubLibraryRefresh";
 import { HubStatusDot } from "./HubStatusDot";
 
 const shared = vi.hoisted(() => ({
@@ -52,24 +51,16 @@ describe("desktop hub status dot", () => {
 
   it("keeps hub availability distinct from the pad's acknowledged sync state", () => {
     shared.status = "offline";
-    act(() => root.render(<>
-      <DocIndexChip status="idle" meta={null} error={null} padSync="synced" onSync={() => {}} />
-      <HubLibraryRefresh onRefresh={async () => 0} />
-    </>));
+    act(() => root.render(<DocIndexChip status="idle" meta={null} error={null} padSync="synced" onSync={() => {}} />));
     expect(host.querySelector(".lc-doc-index-chip")).toBeNull();
     expect(host.querySelector(".lc-doc-index-sync")?.textContent).toBe("Sync");
-    for (const selector of [".lc-doc-index-sync", ".lc-hub-pull-command"]) {
-      expect(host.querySelector(`${selector} [aria-label="Desktop hub offline"]`)).not.toBeNull();
-    }
+    expect(host.querySelector('.lc-doc-index-sync [aria-label="Desktop hub offline"]')).not.toBeNull();
     // One dot per tab: with a Sync button it lives inside the lone box.
     expect(host.querySelector('.lc-doc-index-chip [aria-label="Desktop hub offline"]')).toBeNull();
     act(() => root.render(<DocIndexChip status="idle" meta={null} error={null} padSync="synced" />));
     expect(host.querySelector('.lc-doc-index-chip [aria-label="Desktop hub offline"]')).not.toBeNull();
     shared.hub = null;
-    act(() => root.render(<>
-      <DocIndexChip status="idle" meta={null} error={null} padSync="synced" onSync={() => {}} />
-      <HubLibraryRefresh onRefresh={async () => 0} />
-    </>));
+    act(() => root.render(<DocIndexChip status="idle" meta={null} error={null} padSync="synced" onSync={() => {}} />));
     expect(host.querySelector(".lc-hub-status-dot")).toBeNull();
   });
 });

@@ -24,14 +24,14 @@ import { usePdfSession } from "./workspace/usePdfSession";
 import { useAnnotateSession } from "./workspace/useAnnotateSession";
 import { useHubSync } from "./workspace/useHubSync";
 
-import { LcApiError, type AnnotatePadDto, type DocIndexStatus, type ProposedAnnotation, type SearchOptions } from "./api/client";
+import { hubDidNotAnswer, LcApiError, type AnnotatePadDto, type DocIndexStatus, type ProposedAnnotation, type SearchOptions } from "./api/client";
 import { AmbientCoach, defaultCoachSocketFactory, type AmbientProbe } from "./api/coachSocket";
 import { mergeProcessEvent } from "./modes/processEvents";
 import { isTauriRuntime } from "./api/nativeHttp";
 import { liveWebviewSupported } from "./util/liveWebviewSupport";
 import { afterBootSettled } from "./util/bootSettled";
 import { etaLabel, etaMs, newEta, recordBatch } from "./util/embedEta";
-import type { DocWorkProgress } from "./components/DocIndexChip";
+import { docSyncLine, type DocIndexNote, type DocWorkProgress } from "./components/DocIndexChip";
 import { fetchDocHubHint, type DocHubHint } from "./util/hubHint";
 import { HubConflictSplit } from "./components/HubConflictSplit";
 import { PageTurn } from "./canvas/pageTurn/PageTurn";
@@ -63,7 +63,8 @@ import { useHeaderModes } from "./util/headerModesPref";
 import { collectExploreGraph } from "./util/exploreGraphExport";
 import { HubSyncControl, padTabSync, tabOffersHubSync } from "./components/HubSyncControl";
 import { LibrarySyncControl } from "./components/LibrarySyncControl";
-import { DocSourceLinkDialog, DocSourceRefresh } from "./components/DocSourceRefresh";
+import { DocSourceLinkDialog } from "./components/DocSourceLinkDialog";
+import type { DocSyncLinkPairProps } from "./components/DocSyncLinkPair";
 import { getDocSource, setDocSource, type DocSourceRef } from "./util/docSourceStore";
 import { checkDocSource, justLinkDocSource, linkDocSource, unlinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
 import { nativeSourcePickerAvailable, pickDocumentSource } from "./util/docSourceNative";
@@ -358,7 +359,6 @@ import {
 import { renameLibraryPad } from "./util/libraryPadRename";
 import { loadPadHub } from "./util/padHub";
 import { resolveProblemLeave } from "./util/problemLeave";
-import { pullMissingHubFiles } from "./util/padSync";
 import { loadChatBotAnswerMode } from "./util/chatBotClient";
 import { assistantPendingMessage, useAssistantRunnerStatus } from "./util/useAssistantRunnerStatus";
 import {
@@ -975,6 +975,8 @@ export const Workspace = memo(function Workspace({
     "idle" | "indexing" | "indexed" | "error"
   >("idle");
   const [docIndexError, setDocIndexError] = useState<string | null>(null);
+  /** The hub or the embedding model did not answer at the last Sync. */
+  const [docIndexNote, setDocIndexNote] = useState<DocIndexNote | null>(null);
   const [docIndexMeta, setDocIndexMeta] = useState<DocIndexStatus | null>(null);
   /**
    * What the hub already had when this document was opened — read-only, so
@@ -1008,6 +1010,13 @@ export const Workspace = memo(function Workspace({
     onUnavailable?(): void;
   } | null>(null);
   const hubConflictAskRef = useRef<typeof hubConflictAsk>(null);
+  // A Sync started from a menu's [Sync | Link] can stop on a conflict: the
+  // merge split takes over, so the menu steps aside rather than covering it.
+  useEffect(() => {
+    if (!hubConflictAsk) return;
+    setAnnotateEntryOpen(false);
+    setWhiteboardEntryOpen(false);
+  }, [hubConflictAsk]);
 
   /** A resolve is writing. Locks the split, and the handler behind it. */
   const hubConflictBusyRef = useRef(false);
@@ -1259,7 +1268,7 @@ export const Workspace = memo(function Workspace({
     client, tab, boardRef, whiteboardNotebookIdRef, annotateDocIdRef,
     annotateSourceRef, annotateFootnotesRef, footnoteBoardRef, footnoteBoardSessionRef,
     hubConflictAskRef, setHubConflictAsk, setHubConflictError,
-    setDocIndexStatus, setDocIndexError, setDocIndexMeta, isLocalPad, flushDirtyInk,
+    setDocIndexStatus, setDocIndexError, setDocIndexMeta, setDocIndexNote, isLocalPad, flushDirtyInk,
   });
   useEffect(() => trackBookPass(active), [active]);
   useEffect(trackHubSyncWindowPill, []);
@@ -1305,6 +1314,7 @@ export const Workspace = memo(function Workspace({
     if (force) {
       setDocIndexStatus("indexing");
       setDocIndexError(null);
+      setDocIndexNote(null);
       setDocIndexProgress(null);
     }
     window.setTimeout(() => {
@@ -1385,6 +1395,12 @@ export const Workspace = memo(function Workspace({
           setDocIndexStatus("indexed");
         } catch (cause) {
           if (workspaceLoadGenRef.current !== loadGen) return;
+          // No answer is not a failed index: say the hub is offline, once.
+          if (hubDidNotAnswer(cause)) {
+            setDocIndexStatus("idle");
+            setDocIndexNote({ kind: "hub-offline", detail: null });
+            return;
+          }
           setDocIndexStatus("error");
           setDocIndexError(messageOf(cause));
         } finally {
@@ -3661,6 +3677,7 @@ export const Workspace = memo(function Workspace({
       setError(null);
       setDocIndexStatus("idle");
       setDocIndexError(null);
+      setDocIndexNote(null);
       setDocIndexMeta(null);
       setHubHint(null);
       setTests(null);
@@ -9216,6 +9233,48 @@ export const Workspace = memo(function Workspace({
       setSourceUpdating(false);
     }
   }, [setNotice, sourceUpdatePrompt, sourceUpdating]);
+  const unlinkSourceFor = useCallback((id: string) => {
+    unlinkDocSource(id);
+    pendingSourcePrompts.delete(id);
+    window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id, newer: false } }));
+    setNotice("Unlinked. The app's copy stays.");
+  }, [setNotice]);
+
+  /*
+   * The menus' [Sync | Link], where "not synced" used to sit.
+   *
+   * Sync is the tab's Sync (the same walk and the same words); Link is the
+   * linked file the page's refresh button used to check. A whiteboard or a
+   * web page has no file, so it gets Sync alone.
+   */
+  const menuSyncPair = (link: DocSyncLinkPairProps["link"]): DocSyncLinkPairProps | null => {
+    const offered = tabOffersHubSync(tab.kind) && (tab.kind !== "practice" || !!problem && !isLocalPad(problem)) && !isFootnoteBoardTab(tab);
+    if (!offered) return null;
+    const stage = walkReport?.stage ?? null;
+    return {
+      syncLine: docSyncLine({
+        walkStage: stage, walkJob: walkReport?.job ?? null, walkError: walkReport?.error ?? null,
+        walkWaiting: walkReport?.waiting ?? null, walkMessage: walkReport?.message ?? null,
+        padSync: padTabSync({
+          walkStage: stage, padEditSeq, hubHint,
+          hasDocument: Boolean(indexInputsRef.current),
+          hasPad: Boolean(annotateDocId || whiteboardNotebookId),
+        }) ?? "not-synced",
+      }),
+      syncing: stage != null && stage !== "idle" && stage !== "synced" && !walkReport?.error,
+      syncFailed: Boolean(walkReport?.error),
+      onSync: onHubSync,
+      link,
+    };
+  };
+  const annotateSyncPair = menuSyncPair(annotateDocId && entryKind !== "web" && nativeSourcePickerAvailable() ? {
+    name: getDocSource(annotateDocId)?.name ?? null,
+    checking: sourceChecking,
+    newer: Boolean(sourceNewer[annotateDocId]),
+    onCheck: () => void checkSourceFor(annotateDocId, true),
+    onLink: () => void linkSourceFor(annotateDocId),
+    onUnlink: () => unlinkSourceFor(annotateDocId),
+  } : null);
 
   /*
    * The prompt belongs to one chip. Switching away answers it by walking off,
@@ -9627,6 +9686,8 @@ export const Workspace = memo(function Workspace({
         walkProgress: walkReport?.progress ?? null,
         walkError: walkReport?.error ?? null,
         walkMessage: walkReport?.message ?? null,
+        walkNotice: walkReport?.notice ?? null,
+        indexNote: docIndexNote,
         walkWaiting: walkReport?.waiting ?? null,
         padSync: padTabSync({
           walkStage: walkReport?.stage ?? null,
@@ -9658,6 +9719,7 @@ export const Workspace = memo(function Workspace({
     chunkSyncIssue,
     docIndexError,
     docIndexMeta,
+    docIndexNote,
     docIndexStatus,
     docIndexProgress,
     docEmbedProgress,
@@ -10005,10 +10067,7 @@ export const Workspace = memo(function Workspace({
             </HoldButton>
           )}
           {!hidePadMenu && headerModes.explore && <ExploreHeaderMenu active={tab.kind === "explore"} disabled={busy !== null || canvasLoading}
-            onOpen={openExplore} onPull={async () => {
-              try { return await pullMissingHubFiles(client); }
-              finally { window.dispatchEvent(new Event("lc-explore-graph")); }
-            }} getGraph={() => collectExploreGraph(tabsRef.current.tabs)} />}
+            onOpen={openExplore} getGraph={() => collectExploreGraph(tabsRef.current.tabs)} />}
           {!hidePadMenu && headerModes.practice && FEATURE_LEETCODE && <button type="button" className="lc-icon lc-head-mode-practice"
             aria-label="Practice: open the problem library" disabled={busy !== null || canvasLoading} onClick={() => openPracticePicker?.()}>
             <svg className="lc-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
@@ -10628,15 +10687,6 @@ export const Workspace = memo(function Workspace({
               ) : null
             }
             pageTitle={null}
-            sourceRefresh={active && annotateDocId && !footnoteBoardSession && nativeSourcePickerAvailable()
-              ? <DocSourceRefresh docId={annotateDocId} checking={sourceChecking} newer={sourceNewer[annotateDocId]} chromeHost={headerSlots.boardChrome}
-                  onCheck={() => void checkSourceFor(annotateDocId, true)} onLink={() => void linkSourceFor(annotateDocId)}
-                  onUnlink={() => {
-                    unlinkDocSource(annotateDocId);
-                    pendingSourcePrompts.delete(annotateDocId);
-                    window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: annotateDocId, newer: false } }));
-                    setNotice("Unlinked. The app's copy stays.");
-                  }} /> : null}
             pageContentHeight={
               problem && isAnnotate(problem) && !footnoteBoardSession
                 ? annotatePageHeight(annotateHeight)
@@ -11441,7 +11491,7 @@ export const Workspace = memo(function Workspace({
       <DialogPresence>{annotateEntryOpen && (
         <AnnotateDialog
           mode="entry"
-          onRefreshHub={() => pullMissingHubFiles(client)}
+          syncPair={annotateSyncPair}
           onNotice={setNotice}
           kind={entryKind}
           pending={busy !== null || boardPreparing}
@@ -11598,7 +11648,7 @@ export const Workspace = memo(function Workspace({
       <DialogPresence>{whiteboardEntryOpen && (
         <WhiteboardDialog
           mode="entry"
-          onRefreshHub={() => pullMissingHubFiles(client)}
+          syncPair={menuSyncPair(null)}
           pending={busy !== null || boardPreparing}
           allowSave={Boolean(problem && isWhiteboard(problem))}
           snapshotKey={whiteboardNotebookId}

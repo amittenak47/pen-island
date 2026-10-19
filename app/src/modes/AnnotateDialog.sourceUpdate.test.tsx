@@ -46,7 +46,7 @@ beforeEach(() => {
 afterEach(() => { act(() => root.unmount()); host.remove(); });
 
 function mount(onNotice?: (message: string) => void) {
-  act(() => root.render(<AnnotateDialog mode="entry" onChoose={vi.fn()} onCancel={vi.fn()} onNotice={onNotice} onRefreshHub={async () => 0} />));
+  act(() => root.render(<AnnotateDialog mode="entry" onChoose={vi.fn()} onCancel={vi.fn()} onNotice={onNotice} />));
 }
 async function click(label: string) {
   const button = Array.from(host.querySelectorAll<HTMLButtonElement>("button")).find(node => node.getAttribute("aria-label") === label || node.textContent?.trim() === label);
@@ -118,7 +118,8 @@ describe("AnnotateDialog source updates", () => {
     source.update.mockResolvedValue({ unplaced: [{ kind: "ink", label: "Page 3" }] });
     const notice = vi.fn();
     mount(notice); await recents();
-    expect(host.querySelector(".lc-library-footer-pull")?.nextElementSibling?.textContent).toContain("Check for newer versions");
+    // First in the footer, now that Pull is gone from the menus.
+    expect(host.querySelector(".lc-dialog-foot")?.firstElementChild?.textContent).toContain("Check for newer versions");
     await click("Check for newer versions");
     expect(source.check.mock.calls.map(call => call[0])).toEqual(["first", "second"]);
     const dialog = host.querySelector<HTMLElement>('[aria-label="Newer versions available"]')!;

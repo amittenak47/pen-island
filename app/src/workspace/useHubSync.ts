@@ -3,7 +3,7 @@ import type { DocIndexStatus, SearchOptions } from "../api/client";
 import type { ProblemDetail } from "../api/types";
 import type { BoardHandle } from "../canvas/BoardHandle";
 import { boardInkMix, padContentFingerprint, sceneFingerprint } from "../canvas/snapshot";
-import type { DocWorkProgress } from "../components/DocIndexChip";
+import type { DocIndexNote, DocWorkProgress } from "../components/DocIndexChip";
 import type { HubSyncWalkHost, HubWalkReport } from "../components/HubSyncControl";
 import type { AgentChatMessage } from "../modes/AgentSidePanel";
 import { persistableAgentMessages, restoreAgentMessages } from "../modes/agentTranscript";
@@ -57,6 +57,7 @@ type HubSyncArgs = Pick<ShellValue, "client"> & {
   setDocIndexStatus: Setter<"idle" | "indexing" | "indexed" | "error">;
   setDocIndexError: Setter<string | null>;
   setDocIndexMeta: Setter<DocIndexStatus | null>;
+  setDocIndexNote: Setter<DocIndexNote | null>;
   isLocalPad: (problem: ProblemDetail | null | undefined) => boolean;
   flushDirtyInk: (board: BoardHandle, docKey: string | null, attempt?: number, strict?: boolean) => Promise<void>;
 };
@@ -118,7 +119,7 @@ export function useHubSync({
   client, tab, boardRef, whiteboardNotebookIdRef, annotateDocIdRef,
   annotateSourceRef, annotateFootnotesRef, footnoteBoardRef, footnoteBoardSessionRef,
   hubConflictAskRef, setHubConflictAsk, setHubConflictError,
-  setDocIndexStatus, setDocIndexError, setDocIndexMeta, isLocalPad, flushDirtyInk,
+  setDocIndexStatus, setDocIndexError, setDocIndexMeta, setDocIndexNote, isLocalPad, flushDirtyInk,
 }: HubSyncArgs) {
   /** How far the Sync walk has got, for the chip beside the document name. */
   const [walkReport, setWalkReport] = useState<HubWalkReport | null>(null);
@@ -365,16 +366,17 @@ export function useHubSync({
           }),
         onIndexProgress: (progress) => getContext().setDocIndexProgress(progress),
         onWalkProgress: (report) => {
-          syncWalkActiveRef.current = report != null && report.stage !== "synced" && !report.error;
+          syncWalkActiveRef.current = report != null && report.stage !== "synced" && report.stage !== "idle" && !report.error;
           setWalkReport(report);
         },
         // The hub has an index for this document now, whether the walk built it
         // or found it already there. Nothing used to say so, so the chip kept
         // reading "not indexed" about a document that was.
-        onIndexDone: () => {
+        onIndexDone: (embedOffline) => {
           const { indexInputsRef } = getContext();
           setDocIndexStatus("indexed");
           setDocIndexError(null);
+          setDocIndexNote(embedOffline ? { kind: "embed-offline", detail: embedOffline } : null);
           /*
            * And the numbers, not only the word.
            *
@@ -390,7 +392,11 @@ export function useHubSync({
             .then((meta) => setDocIndexMeta(meta))
             .catch(() => {});
         },
+        // Said once, not retried: the reader taps Sync again when the
+        // desktop app is back. The index status is left as it was known.
+        onIndexOffline: () => setDocIndexNote({ kind: "hub-offline", detail: null }),
         onIndexError: (message) => {
+          setDocIndexNote(null);
           if (message) {
             setDocIndexStatus("error");
             setDocIndexError(message);

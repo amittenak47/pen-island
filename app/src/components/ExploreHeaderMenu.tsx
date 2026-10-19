@@ -3,7 +3,6 @@ import { createPortal } from "react-dom";
 import { DialogBackdrop, DialogPresence } from "./DialogMotion";
 import { DialogFrame } from "./DialogFrame";
 import { HoldButton } from "./HoldButton";
-import { HubLibraryRefresh, type HubLibraryRefreshAction } from "./HubLibraryRefresh";
 import { LIBRARY_HOLD_MS } from "../util/gesture";
 import { exploreGraphFile, type ExploreGraphExport } from "../util/exploreGraphExport";
 import { saveDocumentExport } from "../util/saveDocumentExport";
@@ -13,9 +12,9 @@ export function ExploreIcon() {
     <path d="m6 7 12 2M6 7l4 11m8-9-8 9" /><circle cx="6" cy="7" r="3" /><circle cx="18" cy="9" r="3" /><circle cx="10" cy="18" r="3" />
   </svg>;
 }
-export function ExploreHeaderMenu({ active, disabled, onOpen, onPull, getGraph }: {
+export function ExploreHeaderMenu({ active, disabled, onOpen, getGraph }: {
   active: boolean; disabled: boolean; onOpen: () => void;
-  onPull: HubLibraryRefreshAction; getGraph: () => Promise<ExploreGraphExport>;
+  getGraph: () => Promise<ExploreGraphExport>;
 }) {
   const [open, setOpen] = useState(false), [pending, setPending] = useState(false);
   const [message, setMessage] = useState(""), [error, setError] = useState("");
@@ -27,11 +26,6 @@ export function ExploreHeaderMenu({ active, disabled, onOpen, onPull, getGraph }
     window.addEventListener("keydown", escape);
     return () => window.removeEventListener("keydown", escape);
   }, [open]);
-  const pull = async () => {
-    busy.current = true; setPending(true); setError(""); setMessage("");
-    try { return await onPull(); }
-    finally { busy.current = false; setPending(false); }
-  };
   const exportGraph = async () => {
     if (busy.current) return;
     busy.current = true; setPending(true); setError(""); setMessage("Preparing graph…");
@@ -56,7 +50,7 @@ export function ExploreHeaderMenu({ active, disabled, onOpen, onPull, getGraph }
           </HoldButton>
           {message && <p role="status">{message}</p>}{error && <p role="alert">{error}</p>}
         </div>
-        <footer className="lc-settings-foot lc-dialog-foot"><HubLibraryRefresh onRefresh={pull} disabled={pending} className="lc-library-footer-pull" resultsContainer={bodyRef} />
+        <footer className="lc-settings-foot lc-dialog-foot">
           <span className="lc-dialog-foot-spacer" aria-hidden="true" />
           <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={close}>Cancel</button></footer>
       </DialogFrame>

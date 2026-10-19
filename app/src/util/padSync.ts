@@ -1092,13 +1092,6 @@ export async function discoverHubPads(client: LcClient, report:HubLibraryPullRep
   return imported;
 }
 
-export async function pullMissingHubFiles(client:LcClient):Promise<HubLibraryPullReport> {
-  const report:HubLibraryPullReport={added:[],repaired:[],failures:[]};
-  try { await discoverHubPads(client,report); }
-  catch (error) { if (!(error instanceof HubLibraryPullError)) throw error; }
-  return report;
-}
-
 export async function pullPads(client: LcClient): Promise<void> {
   let ping: PadSyncPingDto | undefined;
   if (client.pingPadSync) {

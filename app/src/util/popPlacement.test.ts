@@ -49,3 +49,11 @@ it("opens above when asked to, and falls back below when the top of the window i
 it("keeps a side it was given even when the other would now fit", () => {
   expect(popPlacement(button(100, 200), pop, { width: 1200, height: 800 }, 8, 8, "above", "below")).toMatchObject({ top: 230, left: 100, above: false });
 });
+
+it("puts the right half of a pair's notification right-aligned under it, left-aligned when that would leave the window", () => {
+  // button(left, top) is 22 wide: right edge at left + 22.
+  const placed = popPlacement(button(600, 100), pop, { width: 1200, height: 800 }, 8, 8, "below", undefined, "right");
+  expect(placed.left + pop.width).toBe(622);
+  const nearLeft = popPlacement(button(20, 100), pop, { width: 1200, height: 800 }, 8, 8, "below", undefined, "right");
+  expect(nearLeft.left).toBe(20);
+});

@@ -35,7 +35,7 @@ beforeEach(async()=>{
     commitPad:vi.fn(async()=>{throw new Error("Server choice needs no upload");}),putInkPage:vi.fn(async()=>{throw new Error("Live PUT is forbidden");})} as unknown as LcClient;
   reports=[];
   host={book:async()=>({kind:"whiteboard",id:"book"}),doc:()=>null,pad:async()=>{throw new Error("Modern sync cannot enter legacy pad apply");},prepare:vi.fn(async()=>{}),
-    emitReload:vi.fn(async()=>{}),inkSince:()=>0,onConflict:vi.fn(()=>new Promise<never>(()=>{})),onIndexProgress:vi.fn(),onWalkProgress:()=>{},onIndexError:vi.fn(),onIndexDone:vi.fn()};
+    emitReload:vi.fn(async()=>{}),inkSince:()=>0,onConflict:vi.fn(()=>new Promise<never>(()=>{})),onIndexProgress:vi.fn(),onWalkProgress:()=>{},onIndexError:vi.fn(),onIndexOffline:vi.fn(),onIndexDone:vi.fn()};
   element=document.createElement("div");document.body.append(element);root=createRoot(element);
 });
 afterEach(async()=>{if(root)act(()=>root!.unmount());root=null;element?.remove();await closeDbForTests();resetLocalBookStoreForTests();resetBookCoordinatorForTests();
