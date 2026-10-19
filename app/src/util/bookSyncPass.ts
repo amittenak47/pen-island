@@ -6,6 +6,7 @@ import { listBookFallbacks, listFallbackContentKeys, fallbackBookIdentity } from
 import { syncBook, boundedBookRequest, awaitBookOperation, BookSyncError, unreadableHubError, type BookResult, type BookSyncOptions } from "./bookSync";
 import { listAllPadSnapshots, getPadSnapshot, type PadSnapshot } from "./padSnapshotStore";
 import { snapshotCopyHash } from "./syncContent";
+import { snapshotFootnoteInk } from "./padSnapshotPayload";
 import { loadHubAutosync, HUB_AUTOSYNC_EVENT } from "./hubAutoSyncPref";
 import { parseArtifactSnapshotBundle, stageArtifactSnapshot } from "./artifactSnapshot";
 import { syncEdges } from "./inkSync";
@@ -56,8 +57,12 @@ export function isModernBookHub(ping: PadSyncPingDto): boolean { return ping.fea
 const identity = (book: BookIdentity) => `${book.kind}:${book.id}`;
 function snapshotBody(snapshot: PadSnapshot): PadSnapshotDto {
   const { kind, key, tier, writtenAt, snapshotId: _snapshotId, ...payload } = snapshot;
-  // These optional local DTO fields have explicit omission semantics. Unknown
+  // Null preserves the not-captured semantics of older snapshots. Unknown
   // fields remain untouched and are validated by the shared JSON contract.
+  payload.source ??= null; payload.agent ??= null; payload.footnotes ??= null;
+  payload.ink ??= null; payload.artifactBundle ??= null;
+  const footnoteInk = snapshotFootnoteInk(payload.footnoteBoards, payload.footnoteInk);
+  if (footnoteInk !== undefined) payload.footnoteInk = footnoteInk;
   for (const field of ["footnotes", "agent", "pageCount", "source", "ink", "footnoteBoards", "footnoteInk", "edges", "artifactBundle"]) {
     if (payload[field as keyof typeof payload] === undefined) delete payload[field as keyof typeof payload];
   }

@@ -67,7 +67,7 @@ describe("cross-language content contract", () => {
     for (const field of ["artifactFootnoteIds", "future"]) {
       expect(await recordHash({ agent: [{ [field]: [] }] })).not.toBe(await recordHash({ agent: [{}] }));
     }
-    expect(await recordHash({ footnotes: [] })).not.toBe(await recordHash({}));
+    expect(await recordHash({ footnotes: [] })).toBe(await recordHash({}));
     for (const value of [{ title: "Named" }, { palette: ["#111111", "#222222"] }, { updatedAt: 0 }, { pending: "" }]) {
       expect(await recordHash({ footnotes: [value] })).not.toBe(await recordHash({ footnotes: [{}] }));
     }

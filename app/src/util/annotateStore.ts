@@ -154,7 +154,7 @@ function labelDate(): Intl.DateTimeFormat {
 }
 
 export interface AnnotateDoc extends AnnotateDocMeta {
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   /**
    * The markdown or source text, so an entry can be reopened without hunting
    * for the file again.
@@ -208,7 +208,7 @@ const PRE_RENAME_INDEX = "lc.md-ink.index.v1";
 
 /** The heavy half of an entry, stored per-id in IndexedDB. See `contentStore`. */
 interface AnnotateContent {
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   source: string;
   board: BoardBlob;
   footnotes: DocFootnote[];
@@ -652,7 +652,7 @@ export async function migrateAnnotateKeysToId(): Promise<number> {
  */
 export async function saveAnnotateDoc(input: {
   /** Omitted by ink-only autosave; preserve the existing catalog. */
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   id?: string;
   name: string;
   hash: string;
@@ -698,11 +698,11 @@ export async function saveAnnotateDoc(input: {
   // reading session built up.
   const prior =
     input.footnotes && Array.isArray(input.agent) &&
-      !(existing?.artifactRevision && input.artifacts === undefined)
+      !(existing?.artifactRevision && input.artifacts == null)
       ? null
       : await getContent<AnnotateContent>(id);
   const artifactFields = artifactCatalogFields(
-    input.artifacts === undefined ? prior?.artifacts : input.artifacts,
+    input.artifacts == null ? prior?.artifacts : input.artifacts,
     { kind: "annotate", id },
   );
   /*

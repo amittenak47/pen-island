@@ -55,7 +55,7 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
   if (!object(payload.board) || payload.board.v !== 1 || !Array.isArray(payload.board.elements)) throw new Error("The saved book is unreadable. Its content was kept.");
   const common = { ...(object(meta.authoredExtras) ? meta.authoredExtras : {}), id,
     board: payload.board, agent: canonicalAgentMessages(Array.isArray(payload.agent) ? payload.agent : []),
-    ...(payload.artifacts !== undefined ? { artifacts: payload.artifacts } : {}) };
+    artifacts: payload.artifacts ?? null };
   if (kind === "whiteboard") return { ...common, title: meta.title, page_count: meta.pageCount, updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
   if (kind === "problem") return { ...common, dataset: meta.dataset, task_id: meta.taskId, updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
   const footnotes = payload.footnotes ?? [];
@@ -202,7 +202,7 @@ function localRecordParts(owner: BookIdentity, record: Record<string, unknown>, 
     agent: mergeAgentMessages(Array.isArray(capture.payload?.agent) ? capture.payload.agent : [], Array.isArray(record.agent) ? record.agent : []),
     ...(record.source !== undefined ? { source: record.source } : {}),
     ...(record.footnotes !== undefined ? { footnotes: record.footnotes } : {}),
-    ...(record.artifacts !== undefined ? { artifacts: record.artifacts } : {}) };
+    artifacts: record.artifacts ?? null };
   if (Array.isArray(payload.footnotes)) payload.footnotes = canonicalFootnotes(payload.footnotes);
   if (owner.kind === "annotate" && metadata.docType === "web") payload.captures ??= [];
   return { metadata, payload };
@@ -249,7 +249,7 @@ export async function acknowledgeBook(capture: BookCapture, attempt: NonNullable
           const page = tx.objectStore(STORE_INK_PAGES).get(key);
           page.onsuccess = () => {
             const row = page.result as InkPageRecord | undefined;
-            if (row && accepted.rev >= (row.syncedRev ?? 0) && submitted.capturedSeq >= (row.syncedChangeSeq ?? 0)) tx.objectStore(STORE_INK_PAGES).put({ ...row,
+            if (row && accepted.rev >= (row.syncedRev ?? 0) && submitted.capturedSeq >= (row.syncedChangeSeq ?? 0)) tx.objectStore(STORE_INK_PAGES).put({ ...row, layoutPending: row.layoutPending ?? false,
               syncedRev: accepted.rev, baseWireHash: accepted.hash, baseLocalHash: submitted.localHash,
               syncedChangeSeq: Math.max(row.syncedChangeSeq ?? 0, submitted.capturedSeq), bootstrap: false,
               dirty: (row.changeSeq ?? 1) > Math.max(row.syncedChangeSeq ?? 0, submitted.capturedSeq) }, key);
@@ -342,7 +342,7 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
               }
               for (let index = 0; index < prepared.pages.length; index++) {
                 const page = prepared.pages[index]!, seq = first + index + 1;
-                tx.objectStore(STORE_INK_PAGES).put({ ...page.row, changeSeq: seq,
+                tx.objectStore(STORE_INK_PAGES).put({ ...page.row, layoutPending: page.row.layoutPending ?? false, changeSeq: seq,
                   syncedChangeSeq: prepared.authored ? 0 : seq, syncedRev: page.remote.rev,
                   baseWireHash: page.remote.hash, baseLocalHash: page.localHash,
                   bootstrap: false, dirty: prepared.authored === true }, inkPageKey(page.row.docKey, page.row.pageId));

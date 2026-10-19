@@ -47,8 +47,8 @@
     {
       "name": "page frame layout, empty footnote boards and false agent flags are per-device",
       "input": "{\"id\":\"doc\",\"hash\":\"src\",\"footnote_boards\":{},\"footnotes\":[],\"agent\":[{\"id\":\"m1\",\"role\":\"user\",\"content\":\"hi\",\"pending\":false,\"queued\":false},{\"id\":\"m2\",\"role\":\"assistant\",\"content\":\"yo\",\"pending\":true}],\"board\":{\"v\":1,\"elements\":[{\"id\":\"lcmdink-0-frame\",\"type\":\"rectangle\",\"x\":0,\"y\":0,\"width\":642,\"height\":93955,\"version\":4,\"versionNonce\":451615249.4499662,\"updated\":1,\"seed\":1,\"customData\":{\"lcDocumentPage\":true,\"lcMdInkFrame\":true,\"lcRegion\":\"mdink-0\",\"lcRegionFrame\":true}},{\"id\":\"pen\",\"type\":\"rectangle\",\"x\":1,\"y\":2,\"width\":3,\"height\":4,\"version\":2,\"versionNonce\":7,\"seed\":9}],\"appState\":{\"scrollX\":1,\"linedPaperMode\":\"off\"}}}",
-      "canonical": "{\"agent\":[{\"content\":\"hi\",\"id\":\"m1\",\"role\":\"user\"},{\"content\":\"yo\",\"id\":\"m2\",\"pending\":true,\"role\":\"assistant\"}],\"board\":{\"appState\":{\"linedPaperMode\":\"off\"},\"elements\":[{\"customData\":{\"lcDocumentPage\":true,\"lcMdInkFrame\":true,\"lcRegion\":\"mdink-0\",\"lcRegionFrame\":true},\"id\":\"lcmdink-0-frame\",\"type\":\"rectangle\",\"x\":0,\"y\":0},{\"height\":4,\"id\":\"pen\",\"seed\":9,\"type\":\"rectangle\",\"version\":2,\"versionNonce\":7,\"width\":3,\"x\":1,\"y\":2}],\"v\":1},\"footnotes\":[],\"hash\":\"src\",\"id\":\"doc\"}",
-      "hash": "20b141ae266866fe74efc009c511a608389723eb550d12bb8590deaa1a2029bf"
+      "canonical": "{\"agent\":[{\"content\":\"hi\",\"id\":\"m1\",\"role\":\"user\"},{\"content\":\"yo\",\"id\":\"m2\",\"pending\":true,\"role\":\"assistant\"}],\"board\":{\"appState\":{\"linedPaperMode\":\"off\"},\"elements\":[{\"customData\":{\"lcDocumentPage\":true,\"lcMdInkFrame\":true,\"lcRegion\":\"mdink-0\",\"lcRegionFrame\":true},\"id\":\"lcmdink-0-frame\",\"type\":\"rectangle\",\"x\":0,\"y\":0},{\"height\":4,\"id\":\"pen\",\"seed\":9,\"type\":\"rectangle\",\"version\":2,\"versionNonce\":7,\"width\":3,\"x\":1,\"y\":2}],\"v\":1},\"hash\":\"src\",\"id\":\"doc\"}",
+      "hash": "a9abd9c34aeb4fd8743ed96b01321edf8d8c409881435bb1ebc32f3cb4bde509"
     },
     {
       "name": "root empty defaults: missing",
@@ -586,6 +586,42 @@
       "input": "{\"agent\":[{\"artifactFootnoteIds\":null,\"id\":\"message\"}]}",
       "canonical": "{\"agent\":[{\"id\":\"message\"}]}",
       "hash": "506cfc8d4fbb349dcaf90a8697f72c7df7482929b9adbc2704ff921396948e94"
+    },
+    {
+      "name": "legacy artifact catalog null: absent",
+      "input": "{\"id\":\"book\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "legacy artifact catalog null: explicit",
+      "input": "{\"artifacts\":null,\"id\":\"book\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "whole record empty footnotes: absent",
+      "input": "{\"id\":\"book\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "whole record empty footnotes: explicit",
+      "input": "{\"footnotes\":[],\"id\":\"book\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "whole record empty agent and footnotes: absent",
+      "input": "{\"id\":\"book\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "whole record empty agent and footnotes: explicit",
+      "input": "{\"agent\":[],\"artifacts\":null,\"footnotes\":[],\"id\":\"book\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
     }
   ],
   "ink": [
@@ -1676,6 +1712,144 @@
       "input": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"agent\\\":[{\\\"artifactFootnoteIds\\\":null,\\\"id\\\":\\\"message\\\"}],\\\"board\\\":{\\\"appState\\\":{\\\"linedPaperMode\\\":null,\\\"linedPitch\\\":null,\\\"linedPitchCollege\\\":null,\\\"linedPitchWide\\\":null,\\\"linedRule\\\":null,\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1},\\\"inkPalettes\\\":null},\\\"footnote_boards\\\":{\\\"child\\\":{\\\"board\\\":{\\\"appState\\\":{\\\"linedPaperMode\\\":null,\\\"linedPitch\\\":null,\\\"linedPitchCollege\\\":null,\\\"linedPitchWide\\\":null,\\\"linedRule\\\":null,\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1},\\\"inkPalettes\\\":null}}},\\\"footnotes\\\":[{\\\"notes\\\":[{\\\"by\\\":\\\"\\\",\\\"text\\\":\\\"legacy\\\"}]}],\\\"id\\\":\\\"book\\\",\\\"label\\\":\\\"\\\"}\"}]}},\"tier\":\"24h\"}",
       "canonical": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"agent\\\":[{\\\"id\\\":\\\"message\\\"}],\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}},\\\"footnote_boards\\\":{\\\"child\\\":{\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}}}},\\\"footnotes\\\":[{\\\"notes\\\":[{\\\"text\\\":\\\"legacy\\\"}]}],\\\"id\\\":\\\"book\\\"}\"}]}},\"tier\":\"24h\"}",
       "hash": "1351958cda130715226e55204fc2095bc8f275a9e09a1beb5117ba9d0a05cd85"
+    },
+    {
+      "name": "uncaptured snapshot source: absent",
+      "input": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot source: explicit",
+      "input": "{\"payload\":{\"name\":\"Book\",\"source\":null},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot agent: absent",
+      "input": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot agent: explicit",
+      "input": "{\"payload\":{\"agent\":null,\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot footnotes: absent",
+      "input": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot footnotes: explicit",
+      "input": "{\"payload\":{\"footnotes\":null,\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot ink: absent",
+      "input": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot ink: explicit",
+      "input": "{\"payload\":{\"ink\":null,\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot artifactBundle: absent",
+      "input": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured snapshot artifactBundle: explicit",
+      "input": "{\"payload\":{\"artifactBundle\":null,\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "uncaptured child ink: absent",
+      "input": "{\"payload\":{\"footnoteBoards\":{\"child\":{\"board\":{\"v\":1}}}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnoteBoards\":{\"child\":{\"board\":{\"v\":1}}}},\"tier\":\"24h\"}",
+      "hash": "cd5801b31f631b5090231ccaac5aa40b47187d54c9ce4ec689cb279d061ca748"
+    },
+    {
+      "name": "uncaptured child ink: explicit",
+      "input": "{\"payload\":{\"footnoteBoards\":{\"child\":{\"board\":{\"v\":1}}},\"footnoteInk\":{\"child\":null}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnoteBoards\":{\"child\":{\"board\":{\"v\":1}}}},\"tier\":\"24h\"}",
+      "hash": "cd5801b31f631b5090231ccaac5aa40b47187d54c9ce4ec689cb279d061ca748"
+    },
+    {
+      "name": "legacy snapshot catalog null: absent",
+      "input": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "legacy snapshot catalog null: explicit",
+      "input": "{\"payload\":{\"artifacts\":null,\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"name\":\"Book\"},\"tier\":\"24h\"}",
+      "hash": "84cfdba25a00034cee43843720433eaa04609aa6b00fbc5ecd66c3706d5445e4"
+    },
+    {
+      "name": "retained record root defaults: absent",
+      "input": "{\"payload\":{\"bookRecord\":{\"id\":\"book\"}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"bookRecord\":{\"id\":\"book\"}},\"tier\":\"24h\"}",
+      "hash": "30511bea93f73a1c26f192d6f2d63f6a58cdc5a086caf4483cce1b9bdfa32ba4"
+    },
+    {
+      "name": "retained record root defaults: explicit",
+      "input": "{\"payload\":{\"bookRecord\":{\"agent\":[],\"artifacts\":null,\"footnotes\":[],\"id\":\"book\"}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"bookRecord\":{\"id\":\"book\"}},\"tier\":\"24h\"}",
+      "hash": "30511bea93f73a1c26f192d6f2d63f6a58cdc5a086caf4483cce1b9bdfa32ba4"
+    },
+    {
+      "name": "artifact payload root defaults: absent",
+      "input": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"id\\\":\\\"owned\\\"}\"}]}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"id\\\":\\\"owned\\\"}\"}]}},\"tier\":\"24h\"}",
+      "hash": "1fdfa4c5054ac3bb48c06adee09245ad137f362774951f58767136475c97f100"
+    },
+    {
+      "name": "artifact payload root defaults: explicit",
+      "input": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"id\\\":\\\"owned\\\",\\\"footnotes\\\":[],\\\"agent\\\":[],\\\"artifacts\\\":null}\"}]}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"id\\\":\\\"owned\\\"}\"}]}},\"tier\":\"24h\"}",
+      "hash": "1fdfa4c5054ac3bb48c06adee09245ad137f362774951f58767136475c97f100"
+    },
+    {
+      "name": "captured empty snapshot source remains significant",
+      "input": "{\"payload\":{\"source\":\"\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"source\":\"\"},\"tier\":\"24h\"}",
+      "hash": "57f7793ebc03326b28116ed48b9cc470e33124d6b13f9091ce679f58608650e9"
+    },
+    {
+      "name": "captured empty snapshot agent remains significant",
+      "input": "{\"payload\":{\"agent\":[]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"agent\":[]},\"tier\":\"24h\"}",
+      "hash": "6a93355c6d8aca631ab5f25527a7d1c211a37aab91b2d25f87af089ba824d15f"
+    },
+    {
+      "name": "captured empty snapshot footnotes remains significant",
+      "input": "{\"payload\":{\"footnotes\":[]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnotes\":[]},\"tier\":\"24h\"}",
+      "hash": "05b4e9e8a14af2603d454c2735cf1019eda07ad80b37cace210e1a73956acc2d"
+    },
+    {
+      "name": "captured empty snapshot ink remains significant",
+      "input": "{\"payload\":{\"ink\":[]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"ink\":[]},\"tier\":\"24h\"}",
+      "hash": "880fd55b2662116c21118bc1b434af97574fdc92302bda50d8e9d9e0429ddefa"
+    },
+    {
+      "name": "captured empty snapshot footnoteInk remains significant",
+      "input": "{\"payload\":{\"footnoteInk\":{\"child\":[]}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnoteInk\":{\"child\":[]}},\"tier\":\"24h\"}",
+      "hash": "c5d63b76c9b227b139bed3bdf26439aa301a2159842c3d84bbab782aefc38e85"
     }
   ]
 }

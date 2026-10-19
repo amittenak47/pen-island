@@ -19,7 +19,7 @@ export function problemPadId(dataset: string, taskId: string): string {
 export interface ProblemBoardRecord {
   /** Unknown authored wire fields survive download, editing and re-upload. */
   authoredExtras?: Record<string, unknown>;
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   id: string;
   dataset: string;
   taskId: string;
@@ -52,7 +52,7 @@ export async function putProblemBoard(row: ProblemBoardRecord): Promise<void> {
     const current = ctx.content as ProblemBoardRecord | null;
     const artifacts = requireArtifactCatalogTransition(current?.artifacts, supplied.artifacts, { kind: "problem", id: row.id });
     if (current?.artifacts && supplied.artifacts && current.artifacts.revision !== supplied.artifacts.revision) throw new ArtifactEditConflict();
-    const saved = { ...current, ...row, authoredExtras: row.authoredExtras ?? current?.authoredExtras ?? {}, ...(artifacts ? { artifacts } : {}),
+    const saved = { ...current, ...row, authoredExtras: row.authoredExtras ?? current?.authoredExtras ?? {}, artifacts: artifacts ?? null,
       agent: mergeAgentMessages(current?.agent ?? [], row.agent ?? [], false) };
     if (!current && ctx.state.lifecycle?.action === "delete") {
       saved.syncSeq = Math.max(saved.syncSeq ?? 0, ctx.state.lifecycle.seq) + 1;
@@ -84,7 +84,7 @@ export async function replaceProblemBoard(expected: ProblemBoardRecord | null, r
     const current = ctx.content as ProblemBoardRecord | null;
     if (JSON.stringify(current) !== JSON.stringify(expected)) throw new ArtifactEditConflict();
     const artifacts = requireArtifactCatalogTransition(current?.artifacts, row.artifacts, { kind: "problem", id: row.id });
-    const saved = { ...current, ...row, authoredExtras: row.authoredExtras ?? current?.authoredExtras ?? {}, ...(artifacts ? { artifacts } : {}), agent: mergeAgentMessages(current?.agent ?? [], row.agent ?? []) };
+    const saved = { ...current, ...row, authoredExtras: row.authoredExtras ?? current?.authoredExtras ?? {}, artifacts: artifacts ?? null, agent: mergeAgentMessages(current?.agent ?? [], row.agent ?? []) };
     ctx.setContent(saved); ctx.setMetadata({ ...ctx.metadata, ...recordMetadata(saved) });
   });
 }

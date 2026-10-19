@@ -472,7 +472,7 @@ const COACH_HTTP_TIMEOUT_MS = 180_000;
 export interface WhiteboardPadDto {
   /** Hub-assigned content revision; absent on older hubs. */
   rev?: number;
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   id: string;
   title: string;
   updated_at: number;
@@ -486,7 +486,7 @@ export interface WhiteboardPadDto {
 
 export interface AnnotatePadDto {
   rev?: number;
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   id: string;
   name: string;
   /** Display name for this set. Absent means show {@link name}. */
@@ -529,7 +529,7 @@ export interface ApplyAckDto {
 export interface ProblemPadDto {
   rev?: number;
   base_rev?: number | null;
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   id: string;
   dataset: string;
   task_id: string;
@@ -577,7 +577,7 @@ export interface BookStateDto {
   record_hash: string | null;
   record: Record<string, unknown> | null;
   pages: BookPageStateDto[];
-  retained_unpublished?: true;
+  retained_unpublished?: boolean;
   /** Retained bytes of a gone book, available only for explicit restoration. */
   retained_restore_pages?: BookPageRevisionDto[];
 }
@@ -661,17 +661,17 @@ function requireBookState(body: unknown, kind?: PadKind, id?: string): BookState
     && Array.isArray(body.pages) && body.pages.every(validPageState)
     && (body.retained_restore_pages === undefined || Array.isArray(body.retained_restore_pages)
       && body.retained_restore_pages.every(validPageState))
-    && (body.retained_unpublished === undefined || body.retained_unpublished === true), "book state", body);
+    && (body.retained_unpublished === undefined || typeof body.retained_unpublished === "boolean"), "book state", body);
   const book = body as unknown as BookStateDto;
   requireDto(book.state === "live"
     ? book.record !== null && book.record_hash !== null && book.record_hash.length > 0
-      && book.record_rev > 0 && book.gone_seq === null && book.retained_unpublished === undefined
-      && book.retained_restore_pages === undefined
+      && book.record_rev > 0 && book.gone_seq === null && book.retained_unpublished !== true
+      && (book.retained_restore_pages?.length ?? 0) === 0
     : book.record === null && book.record_hash === null && book.record_rev === 0
       && (book.state === "gone" ? book.gone_seq !== null && book.pages.length === 0
-        && book.retained_unpublished === undefined
-        && (book.retained_restore_pages === undefined || book.gone_seq > 0) : book.gone_seq === null
-          && book.retained_restore_pages === undefined
+        && book.retained_unpublished !== true
+        && ((book.retained_restore_pages?.length ?? 0) === 0 || book.gone_seq > 0) : book.gone_seq === null
+          && (book.retained_restore_pages?.length ?? 0) === 0
           && (book.pages.length === 0 || book.retained_unpublished === true)), "book lifecycle", body);
   const identities = new Set<string>();
   requireDto([...book.pages, ...(book.retained_restore_pages ?? [])].every(page => {
@@ -2091,7 +2091,7 @@ export class LcClient {
 
   async putPadSnapshot(body: PadSnapshotDto): Promise<void> {
     const payload = body.payload as { artifactBundle?: unknown } | undefined;
-    if (payload?.artifactBundle !== undefined) {
+    if (payload?.artifactBundle != null) {
       if (body.kind !== "annotate" && body.kind !== "whiteboard") throw new Error("Invalid snapshot owner.");
       const { parseArtifactSnapshotBundle } = await import("../util/artifactSnapshot");
       parseArtifactSnapshotBundle(payload.artifactBundle, { kind: body.kind, id: body.key });
@@ -2103,7 +2103,7 @@ export class LcClient {
       body,
     );
     if (ack?.applied === false) throw new Error("The hub refused the snapshot. Its book must be uploaded first.");
-    if (payload?.artifactBundle !== undefined) {
+    if (payload?.artifactBundle != null) {
       // Old hubs accepted unknown fields without preserving them. A generic
       // applied:true response is insufficient proof that the backup survived.
       const rows = await this.getPadSnapshots(body.kind, body.key);

@@ -57,7 +57,7 @@ export interface WhiteboardNotebookMeta {
 }
 
 export interface WhiteboardNotebook extends WhiteboardNotebookMeta {
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   board: WhiteboardBoardBlob;
   agent: unknown[];
 }
@@ -75,7 +75,7 @@ const PRE_RENAME_INDEX = "lc.scratchpad.index.v1";
 
 /** The heavy half: the board, and the coach thread that goes with it. */
 interface WhiteboardContent {
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   board: WhiteboardBoardBlob;
   agent: unknown[];
 }
@@ -242,7 +242,7 @@ function freshId(library: readonly WhiteboardNotebookMeta[], now: number): strin
 }
 
 export async function saveWhiteboardNotebook(input: {
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   id?: string;
   title?: string;
   metadataIntent?: "rename";
@@ -263,10 +263,10 @@ export async function saveWhiteboardNotebook(input: {
   const named = Boolean(existing?.named) || Boolean(input.title?.trim());
   // An absent `agent` means "this caller has no opinion", not "the thread is
   // empty" — the board autosave saves without one and must not wipe the chat.
-  const prior = !Array.isArray(input.agent) || (existing?.artifactRevision && input.artifacts === undefined)
+  const prior = !Array.isArray(input.agent) || (existing?.artifactRevision && input.artifacts == null)
     ? await getContent<WhiteboardContent>(id) : null;
   const artifactFields = artifactCatalogFields(
-    input.artifacts === undefined ? prior?.artifacts : input.artifacts,
+    input.artifacts == null ? prior?.artifacts : input.artifacts,
     { kind: "whiteboard", id },
   );
   const meta: WhiteboardNotebookMeta = {

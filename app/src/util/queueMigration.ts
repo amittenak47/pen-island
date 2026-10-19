@@ -294,7 +294,7 @@ function seedInk(tx:IDBTransaction,row:MigrationRow,failure:(cause:unknown)=>voi
   if(!object(row.value)||!owner||!safeNumber(row.value.pageId)) fail(`Malformed local ink ${String(row.key)}`);
   const value=row.value;
   if(forceBootstrap||value.changeSeq===undefined) tx.objectStore(STORE_INK_PAGES).put({...value,changeSeq:1,syncedChangeSeq:0,
-    syncedRev:0,baseWireHash:null,baseLocalHash:null,bootstrap:true},row.key);
+    syncedRev:0,baseWireHash:null,baseLocalHash:null,bootstrap:true,layoutPending:value.layoutPending??false},row.key);
   seedParent(tx,owner.kind,owner.id,failure);
 }
 

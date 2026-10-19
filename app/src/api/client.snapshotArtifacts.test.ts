@@ -24,6 +24,13 @@ it("keeps legacy snapshot PUTs compatible without the extra readback", async () 
   await new LcClient().putPadSnapshot({ ...body, payload: {} });
   expect(invoke).toHaveBeenCalledTimes(1);
 });
+it("treats an uncaptured null attachment backup like an omitted legacy bundle", async () => {
+  invoke.mockResolvedValue({ status: 200, body: { applied: true } });
+  const legacy = { ...body, payload: { artifactBundle: null } };
+  await new LcClient().putPadSnapshot(legacy);
+  expect(invoke).toHaveBeenCalledOnce();
+  expect(invoke).toHaveBeenCalledWith("lc_put_snapshot", { body: legacy });
+});
 it("reports a refused snapshot so its queued copy is retained", async () => {
   invoke.mockResolvedValue({ status: 200, body: { applied: false, seq: 3 } });
   await expect(new LcClient().putPadSnapshot({ ...body, payload: {} })).rejects.toThrow("hub refused the snapshot");

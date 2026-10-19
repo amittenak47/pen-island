@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  artifactCreationAssociations, artifactDependencies, artifactDependencyKey,
+  artifactCatalogFields, artifactCreationAssociations, artifactDependencies, artifactDependencyKey,
   artifactRefKey, missingArtifactDependencies, parseArtifactCatalog,
   requireArtifactCatalogAck, sanitizeArtifactRefs, type ArtifactCatalog, type ArtifactRef,
 } from "./padArtifacts";
@@ -69,6 +69,9 @@ describe("artifact catalog validation", () => {
   it("round-trips current records and accepts absence on older pads", () => {
     expect(parseArtifactCatalog(JSON.parse(JSON.stringify(catalog())))).toEqual(catalog());
     expect(parseArtifactCatalog(undefined)).toBeUndefined();
+    expect(parseArtifactCatalog(null)).toBeUndefined();
+    expect(artifactCatalogFields(null, parent)).toEqual({ artifacts: null });
+    expect(parseArtifactCatalog({ ...catalog(), artifacts: [] })).toEqual({ ...catalog(), artifacts: [] });
   });
 
   it("preserves unfiled and deleted records rather than silently losing them", () => {
@@ -88,7 +91,7 @@ describe("artifact catalog validation", () => {
   });
 
   it("rejects malformed/versioned catalogs instead of turning them into empty lists", () => {
-    for (const input of [null, {}, { ...catalog(), v: 2 }, { ...catalog(), artifacts: [null] }]) {
+    for (const input of [{}, [], { ...catalog(), v: 2 }, { ...catalog(), artifacts: [null] }]) {
       expect(() => parseArtifactCatalog(input)).toThrow("Invalid artifact catalog");
     }
     const input = catalog();

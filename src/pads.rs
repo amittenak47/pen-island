@@ -307,7 +307,7 @@ pub struct WhiteboardPad {
     pub board: serde_json::Value,
     #[serde(default)]
     pub agent: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub artifacts: Option<serde_json::Value>,
 }
 
@@ -336,14 +336,14 @@ pub struct AnnotatePad {
     pub base_updated_at: Option<i64>,
     #[serde(default)]
     pub source: String,
-    #[serde(default)]
+    #[serde(default = "empty_json_array")]
     pub footnotes: serde_json::Value,
     pub board: serde_json::Value,
     #[serde(default)]
     pub agent: serde_json::Value,
     #[serde(default = "empty_json_object")]
     pub footnote_boards: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub artifacts: Option<serde_json::Value>,
 }
 
@@ -367,7 +367,7 @@ pub struct ProblemPad {
     pub board: serde_json::Value,
     #[serde(default)]
     pub agent: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub artifacts: Option<serde_json::Value>,
 }
 
@@ -389,6 +389,10 @@ pub struct ApplyAck {
 
 fn is_zero_seq(seq: &i64) -> bool {
     *seq == 0
+}
+
+fn empty_json_array() -> serde_json::Value {
+    serde_json::json!([])
 }
 
 fn empty_json_object() -> serde_json::Value {
@@ -1318,7 +1322,7 @@ pub fn validate_snapshot_payload(payload: &serde_json::Value) -> Result<()> {
     let obj = payload
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("snapshot payload must be an object"))?;
-    if let Some(ink) = obj.get("ink") {
+    if let Some(ink) = obj.get("ink").filter(|value| !value.is_null()) {
         let pages = ink
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("snapshot ink must be an array"))?;
@@ -1358,7 +1362,7 @@ pub fn validate_snapshot_payload(payload: &serde_json::Value) -> Result<()> {
             validate_snapshot_node(edge.get("to"), "to")?;
         }
     }
-    if let Some(source) = obj.get("source") {
+    if let Some(source) = obj.get("source").filter(|value| !value.is_null()) {
         if !source.is_string() {
             anyhow::bail!("snapshot source must be a string");
         }
@@ -2023,6 +2027,19 @@ mod tests {
             agent: json!([]),
             artifacts: None,
         }
+    }
+
+    #[test]
+    fn catalogs_serialize_none_as_null_and_missing_footnotes_default_to_array() {
+        for value in [serde_json::to_value(wb("w", 1)).unwrap(),
+            serde_json::to_value(an("a", 1)).unwrap(), serde_json::to_value(pb("leetcode/one", 1)).unwrap()] {
+            assert_eq!(value.get("artifacts"), Some(&serde_json::Value::Null));
+        }
+        let mut value = serde_json::to_value(an("a", 1)).unwrap();
+        value.as_object_mut().unwrap().remove("footnotes");
+        let parsed: AnnotatePad = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.footnotes, json!([]));
+        assert_eq!(serde_json::to_value(parsed).unwrap()["footnotes"], json!([]));
     }
 
     #[test]

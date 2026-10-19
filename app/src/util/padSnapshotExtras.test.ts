@@ -17,6 +17,7 @@ vi.mock("./artifactSnapshotRestore", () => ({ restoreArtifactSnapshot: () => res
 vi.mock("./inkPageStore", () => ({
   annotateDocKey: (id: string) => `md:${id}`,
   whiteboardDocKey: (id: string) => `wb:${id}`,
+  footnoteWhiteboardDocKey: (docId: string, id: string) => `fnwb:${docId}:${id}`,
   inkPageKey: (docKey: string, pageId: number) => `${docKey}#${pageId}`,
   deleteInkPages: (docKey: string) => deleteInkPages(docKey),
   getInkPageRecords: (docKey: string) => getInkPageRecords(docKey),
@@ -49,7 +50,7 @@ vi.mock("./gzip", () => ({ gzipBytes: async (bytes: Uint8Array) => bytes }));
 vi.mock("../canvas/inkCodec", () => ({ packEncodedInk: (ink: unknown) => ink }));
 vi.mock("./footnoteWhiteboardStore", () => ({
   collectFootnoteBoards: async () => ({}),
-  whiteboardIdsOn: () => [],
+  whiteboardIdsOn: (notes: Array<{ whiteboards?: Array<{ id: string }> }>) => notes.flatMap(note => note.whiteboards?.map(board => board.id) ?? []),
   applyFootnoteBoards: (docId: string, boards: unknown) => applyFootnoteBoards(docId, boards),
 }));
 
@@ -69,12 +70,17 @@ it("gathers explicit empty edges, child boards and top-level child ink", async (
   for (const kind of ["annotate", "whiteboard"] as const) {
     const extra = await gatherPadSnapshotExtras(kind, "empty");
     expect(extra).toMatchObject({ edges: [], footnoteBoards: {}, footnoteInk: {} });
-    expect(extra).not.toHaveProperty("ink");
-    expect(extra).not.toHaveProperty("source");
+    expect(extra).toHaveProperty("ink", []);
+    expect(extra).toHaveProperty("source", null);
+    expect(extra).toHaveProperty("artifactBundle", null);
   }
 });
 
 describe("applyPadSnapshotExtras", () => {
+  it("captures empty source and child ink rather than marking them not captured", async () => {
+    getAnnotateDoc.mockResolvedValueOnce({ source: "", footnotes: [{ whiteboards: [{ id: "child" }] }] });
+    expect(await gatherPadSnapshotExtras("annotate", "a1")).toMatchObject({ source: "", ink: [], footnoteInk: { child: [] } });
+  });
   it("reports a stale restore before applying supplemental links", async () => {
     // Snapshot restore finds unseen hub content -> no local restore or supplemental edge mutation.
     restorePadSnapshotLocally.mockResolvedValueOnce({ status: "stale" });

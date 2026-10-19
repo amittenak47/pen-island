@@ -19,6 +19,16 @@ export interface SnapshotInkPage {
   gz: string;
 }
 
+/** Known child identities still need an explicit not-captured ink value. */
+export function snapshotFootnoteInk(
+  boards: Record<string, unknown> | undefined,
+  ink: Record<string, SnapshotInkPage[] | null> | undefined,
+): Record<string, SnapshotInkPage[] | null> | undefined {
+  if (boards === undefined && ink === undefined) return undefined;
+  return Object.fromEntries([...new Set([...Object.keys(boards ?? {}), ...Object.keys(ink ?? {})])]
+    .map(id => [id, ink?.[id] ?? null]));
+}
+
 export function padNodeRef(
   kind: SnapshotPadKind,
   key: string,

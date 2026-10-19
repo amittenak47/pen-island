@@ -55,6 +55,21 @@ beforeEach(() => {
 afterEach(() => vi.unstubAllGlobals());
 
 describe("transactional parent attachment preservation", () => {
+  it("materializes root defaults after merging ordinary, chat-only and catalog-only saves", async () => {
+    for (const owner of [parent, { kind: "whiteboard" as const, id: "w1" }]) {
+      await putParentContent<{ board: typeof board; artifacts?: null }>(owner, { board });
+      expect(state.db.get(owner.id)).toEqual({ board, agent: [], artifacts: null,
+        ...(owner.kind === "annotate" ? { footnotes: [] } : {}) });
+      const artifacts = catalog(owner);
+      state.db.set(owner.id, { board, agent: [{ id: "old" }], footnotes: [{ id: "mark" }], artifacts });
+      await putParentContent(owner, { board, artifacts: null });
+      expect(state.db.get(owner.id)).toMatchObject({ agent: [{ id: "old" }], footnotes: [{ id: "mark" }], artifacts });
+      await putParentContent(owner, { artifacts: null, agent: [] }, { agentOnly: true });
+      expect(state.db.get(owner.id)).toMatchObject({ agent: [{ id: "old" }], footnotes: [{ id: "mark" }] });
+      await putParentContent(owner, { artifacts: null }, { catalogOnly: true });
+      expect(state.db.get(owner.id)).toMatchObject({ board, agent: [{ id: "old" }], footnotes: [{ id: "mark" }], artifacts });
+    }
+  });
   it("removes tombstoned thread links on inactive documents and rejects their resurrection by a stale save", async () => {
     const note = {id:"mark",threads:[{rootId:"q"},{rootId:"unloaded"}],threadRootId:"q",bands:[{left:91}],future:{kept:true}};
     state.db.set("a1",{board,footnotes:[note],agent:[{id:"q"}]});
@@ -75,7 +90,7 @@ describe("transactional parent attachment preservation", () => {
     const artifacts = catalog();
     state.beforeWrite = () => state.db.set("a1", { board, source: "old", artifacts });
     const saved = await putParentContent(parent, { board, source: "new", artifacts: undefined });
-    expect(saved).toEqual({ board, source: "new", artifacts });
+    expect(saved).toEqual({ board, source: "new", artifacts, agent: [], footnotes: [] });
   });
 
   it("never spills a rejected catalog edit over the valid stored copy", async () => {
@@ -112,7 +127,7 @@ describe("transactional parent attachment preservation", () => {
     const artifacts = catalog();
     await putParentContent(parent, { board, artifacts });
     await putParentContent(parent, { board, artifacts: undefined });
-    expect(await getContent("a1")).toEqual({ board, artifacts });
+    expect(await getContent("a1")).toEqual({ board, artifacts, agent: [], footnotes: [] });
     await expect(editParentContentArtifacts(parent, artifacts.revision, { type: "detach", association: { kind: "file" } }, () => {}))
       .rejects.toThrow("Repair local storage");
   });
@@ -157,6 +172,6 @@ describe("document/notebook artifact integration", () => {
     await saveAnnotateDoc({ id: "a1", name: "Main.md", hash: "h1", source: "text", board });
     state.preflight = () => { state.meta.delete("annotate:a1"); };
     await expect(editAnnotateArtifacts("a1", null, create)).rejects.toThrow("removed");
-    expect(state.db.get("a1").artifacts).toBeUndefined();
+    expect(state.db.get("a1").artifacts).toBeNull();
   });
 });

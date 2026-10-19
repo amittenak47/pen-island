@@ -682,6 +682,7 @@ async function splitLumpedLocalInk(
     const previous = localBy.get(pageId);
     replacements.set(pageId, { ...lump, ...previous, docKey, pageId, gz,
       inkC: undefined, sum: undefined, dirty: false, updatedAt: lump.updatedAt,
+      layoutPending: previous?.layoutPending ?? lump.layoutPending ?? false,
       changeSeq: lump.changeSeq ?? 1, syncedChangeSeq: previous?.syncedChangeSeq ?? 0,
       syncedRev: previous?.syncedRev ?? 0, baseWireHash: previous?.baseWireHash ?? null,
       baseLocalHash: previous?.baseLocalHash ?? null, bootstrap: previous?.bootstrap ?? true });
@@ -690,7 +691,7 @@ async function splitLumpedLocalInk(
   // changed, but no stroke was authored and no sequence is invented.
   for (const [pageId, previous] of localBy) if (!replacements.has(pageId)) {
     replacements.set(pageId, { ...previous, inkC: encodeInkOps([]), gz: undefined,
-      sum: undefined, dirty: true });
+      sum: undefined, dirty: true, layoutPending: previous.layoutPending ?? false, bootstrap: previous.bootstrap ?? true });
   }
   const owner = inkBookOwner(docKey);
   if (!owner) throw new Error("The saved ink owner could not be read.");
@@ -1229,7 +1230,8 @@ export async function localizePendingPdfInk(docId: string, client?: LcClient | n
     const previousHash = await wireInkHash((await gzOf(row))!);
     const convertedHash = await wireInkHash(gz!);
     if (row.baseLocalHash === previousHash) next.baseLocalHash = convertedHash;
-    delete next.layoutPending;
+    next.layoutPending = false;
+    next.bootstrap = row.bootstrap ?? true;
     const owner = inkBookOwner(docKey);
     if (!owner) throw new Error("The saved ink owner could not be read.");
     await withBookWrite(owner.kind, owner.id, () => withStore(STORE_INK_PAGES, "readwrite", (store) => {
@@ -1277,7 +1279,7 @@ async function writeInkPage(
     updatedAt: page.updated_at,
     syncedUpdatedAt: acknowledged ? page.updated_at : 0,
     // A document page from the hub that is not yet in this device's layout.
-    ...(acknowledged && !page.localized && docKey.startsWith("md:") ? { layoutPending: true } : {}),
+    layoutPending: acknowledged && !page.localized && docKey.startsWith("md:"),
   };
   const owner = inkBookOwner(docKey);
   if (!owner) throw new Error("The saved ink owner could not be read.");

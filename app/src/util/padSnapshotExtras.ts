@@ -33,9 +33,9 @@ import { validateInk } from "./syncContent";
 
 export interface PadSnapshotExtras {
   artifactBundle?: PadSnapshot["artifactBundle"];
-  ink?: SnapshotInkPage[];
+  ink?: SnapshotInkPage[] | null;
   edges?: PadSnapshot["edges"];
-  source?: string;
+  source?: string | null;
   footnoteBoards?: PadSnapshot["footnoteBoards"];
   footnoteInk?: PadSnapshot["footnoteInk"];
 }
@@ -97,14 +97,14 @@ export async function gatherPadSnapshotExtras(
   if (kind === "annotate") {
     for (const wbId of whiteboardIdsOn(annotate?.footnotes ?? [])) {
       const pages = await inkPagesForSnapshot(footnoteWhiteboardDocKey(key, wbId));
-      if (pages.length > 0) footnoteInk[wbId] = pages;
+      footnoteInk[wbId] = pages;
     }
   }
   return {
-    ...(artifactBundle ? { artifactBundle } : {}),
-    ...(ink.length > 0 ? { ink } : {}),
+    artifactBundle: artifactBundle ?? null,
+    ink,
     edges,
-    ...(typeof source === "string" && source.length > 0 ? { source } : {}),
+    source: source ?? null,
     footnoteBoards,
     footnoteInk,
   };

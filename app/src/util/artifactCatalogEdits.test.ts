@@ -75,6 +75,8 @@ describe("revision-checked attachment edits", () => {
   it("preserves omitted catalogs and does not mint revisions for irrelevant detaches", () => {
     const before = initial();
     expect(requireArtifactCatalogTransition(before, undefined, parent)).toEqual(before);
+    expect(requireArtifactCatalogTransition(before, null, parent)).toEqual(before);
+    expect(requireArtifactCatalogTransition(null, null, parent)).toBeNull();
     expect(editArtifactCatalog(before, parent, before.revision, { type: "detach", association: { kind: "file" } })).toEqual(before);
   });
 });

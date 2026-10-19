@@ -24,7 +24,17 @@ it("retains known-empty snapshot collections in every complete saved tier", asyn
   for (const row of snapshots) {
     expect(row).toMatchObject({ edges: [], footnoteBoards: {}, footnoteInk: {} });
     expect(await getPadSnapshot(row.kind, row.key, row.tier)).toMatchObject({ edges: [], footnoteBoards: {}, footnoteInk: {} });
-    for (const key of ["ink", "agent", "footnotes", "source"]) expect(row).not.toHaveProperty(key);
+    for (const key of ["ink", "agent", "footnotes", "source", "artifactBundle"]) expect(row).toHaveProperty(key, null);
+  }
+});
+it("distinguishes captured empty values from values not captured", async () => {
+  const snapshots = await recordRollingSnapshots({ ...input, footnotes: [], agent: [],
+    extras: async () => ({ source: "", ink: [], footnoteBoards: { child: { board: input.board, pageCount: 1 } },
+      footnoteInk: { child: null } }),
+  });
+  for (const row of snapshots) {
+    expect(row).toMatchObject({ source: "", agent: [], footnotes: [], ink: [], artifactBundle: null, footnoteInk: { child: null } });
+    expect(await getPadSnapshot(row.kind, row.key, row.tier)).toEqual(row);
   }
 });
 it("keeps unknown snapshot collections absent and explicit direct edges empty", async () => {

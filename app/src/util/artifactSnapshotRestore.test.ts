@@ -56,18 +56,47 @@ describe("transactional local snapshot restore", () => {
     expect(await getInkPageRecord("wb:book", 2)).toMatchObject({ inkC: empty, changeSeq: state.changeSeq, syncedChangeSeq: 0 });
   });
 
-  it("a backup with no strokes replaces current ink with a tracked readable erasure", async () => {
+  it.each([undefined, null])("a backup with uncaptured ink (%s) replaces current ink with a tracked readable erasure", async ink => {
     await seed(); await putInkPages("wb:book", [[1, { ...empty, layout: { w: 500, spread: false } }]], { now: 100 });
-    await restorePadSnapshotLocally({ kind: "whiteboard", id: "book" }, { ...snapshot(), ink: undefined });
+    await restorePadSnapshotLocally({ kind: "whiteboard", id: "book" }, { ...snapshot(), ink });
     expect(await getInkPageRecord("wb:book", 1)).toMatchObject({ inkC: empty, dirty: true, bootstrap: true });
   });
 
-  it("older inline backup ink is verified and retained rather than replaced by today's rows", async () => {
+  it.each([undefined, null])("older inline backup ink is recovered when shard ink is %s", async ink => {
     await seed(); await putInkPages("wb:book", [[1, empty]], { now: 100 });
     const inline = { ...empty, layout: { w: 500, spread: false } };
-    await restorePadSnapshotLocally({ kind: "whiteboard", id: "book" }, { ...snapshot(), ink: undefined, board: { ...board, inkC: inline } });
+    await restorePadSnapshotLocally({ kind: "whiteboard", id: "book" }, { ...snapshot(), ink, board: { ...board, inkC: inline } });
     expect((await getInkPageRecord("wb:book", 1))?.inkC).toEqual(inline);
     expect(await run(STORE_CONTENT, "readonly", store => store.get("book"))).toMatchObject({ board: { inkC: inline } });
+  });
+
+  it.each([undefined, null])("preserves uncaptured source, root lists and attachments (%s)", async uncaptured => {
+    await seed("annotate");
+    const artifacts = { v: 1, parent: { kind: "annotate", id: "book" }, revision: "catalog", artifacts: [] };
+    await mutateLocalBook({ kind: "annotate", id: "book" }, { requireIdb: true }, ctx => {
+      ctx.setContent({ ...(ctx.content as Record<string, unknown>), artifacts, footnotes: [{ id: "kept" }] });
+    });
+    await restorePadSnapshotLocally({ kind: "annotate", id: "book" }, { ...snapshot(), kind: "annotate",
+      source: uncaptured, agent: uncaptured, footnotes: uncaptured, artifactBundle: uncaptured });
+    expect(await run(STORE_CONTENT, "readonly", store => store.get("book"))).toMatchObject({
+      source: "# current", agent: ["current thread"], footnotes: [{ id: "kept" }], artifacts,
+    });
+  });
+
+  it.each([undefined, null, []])("distinguishes uncaptured child ink from captured empty ink (%s)", async ink => {
+    await seed("annotate"); await putInkPages("fnwb:book:child", [[1, empty]], { now: 100 });
+    const inline = { ...empty, layout: { w: 500, spread: false } };
+    await restorePadSnapshotLocally({ kind: "annotate", id: "book" }, { ...snapshot(), kind: "annotate", agent: [], footnotes: [], source: "",
+      footnoteBoards: { child: { board: { ...board, inkC: inline }, pageCount: 1 } }, footnoteInk: ink === undefined ? {} : { child: ink } });
+    expect((await getInkPageRecord("fnwb:book:child", 1))?.inkC).toEqual(ink == null ? inline : empty);
+    expect(await run(STORE_CONTENT, "readonly", store => store.get("book"))).toMatchObject({ source: "", agent: [], footnotes: [] });
+  });
+
+  it("captured empty primary ink disables legacy inline recovery", async () => {
+    await seed(); await putInkPages("wb:book", [[1, empty]], { now: 100 });
+    await restorePadSnapshotLocally({ kind: "whiteboard", id: "book" }, { ...snapshot(), ink: [],
+      board: { ...board, inkC: { ...empty, layout: { w: 500, spread: false } } } });
+    expect((await getInkPageRecord("wb:book", 1))?.inkC).toEqual(empty);
   });
 
   it("restores all scratch content and ink atomically, including a backup without source", async () => {

@@ -1,8 +1,8 @@
 /** Atomic-sync content contract, mirrored by src/pads/sync_content.rs.
  * UTF-16 key order, ECMAScript finite-number formatting, no implicit omission.
  * Excludes root transport fields, board view/manifests and page-frame layout.
- * Empty defaults canonicalize to absence only at these paths: root agent
- * and footnote_boards; agent[].attachments/artifacts/artifactProposals/
+ * Empty defaults canonicalize to absence only at these paths: root agent,
+ * footnotes and footnote_boards; agent[].attachments/artifacts/artifactProposals/
  * flags/processEvents, agent[].pending/queued/bridgePending=false,
  * agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
  * footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
@@ -18,6 +18,8 @@
  * Snapshots use these same defaults without view exclusions, plus empty
  * edges/footnoteBoards/footnoteInk and known-empty board.inkPages manifests.
  * Snapshot artifact payload JSON and retained bookRecord use the same record defaults.
+ * Root artifacts=null is legacy. Snapshot source/agent/footnotes/ink/artifactBundle=null
+ * and footnoteInk[id]=null mean not captured; captured empty values remain significant.
  * Values are actual IEEE-754 JSON Numbers, not original decimal spellings.
  * A previously rounded JSON literal cannot be reconstructed by this helper.
  */
@@ -114,6 +116,16 @@ function emptyMap(row: Record<string, unknown>, key: string): void {
 /** Only named empty defaults; snapshots retain view state and populated manifests. */
 function normalizeEmptyDefaults(record: Record<string, unknown>, snapshot = false, snapshotPayload = snapshot): void {
   emptyStrings(record, ["label"]);
+  if (record.artifacts === null) delete record.artifacts;
+  if (!snapshotPayload) {
+    for (const key of ["footnotes", "agent"]) if (Array.isArray(record[key]) && record[key].length === 0) delete record[key];
+  }
+  if (snapshotPayload) {
+    for (const key of ["source", "agent", "footnotes", "ink", "artifactBundle"]) if (record[key] === null) delete record[key];
+    if (plainObject(record.footnoteInk)) for (const [id, pages] of Object.entries(record.footnoteInk)) {
+      if (pages === null) delete record.footnoteInk[id];
+    }
+  }
   const board = (value: unknown) => {
     if (!plainObject(value)) return;
     emptyMap(value, "files");
