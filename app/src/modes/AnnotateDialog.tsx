@@ -1,7 +1,7 @@
 import { motion, useIsPresent, useReducedMotion } from "motion/react";
 import { DialogBackdrop, DialogPresence } from "../components/DialogMotion";
 import {LibraryTrashRow} from "./LibraryTrashRow";
-import { copyLine, useRetainedRows, VersionPicker, VersionShare } from "./RetainedRow";
+import { copyLine, useRetainedRows, VersionFace, VersionPicker, VersionShare } from "./RetainedRow";
 import { exportVersionBackup, restoreVersion } from "./retainedActions";
 import { deleteBookRetainedCopies, deleteRetainedCopies, formatBytes, trashRetainedCopy, versionBytes, type RetainedVersion } from "../util/retainedVersions";
 import {useLibraryMorph} from "./useLibraryMorph";
@@ -746,6 +746,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                     resetKey={error}
                   >
                     {/* Showing a copy: its own name, label, date and why it was kept. */}
+                    <VersionFace swapKey={copy?.id ?? "now"}>
                     <strong title={copy?.name || doc.name}>{copy?.name || doc.name}</strong>
                     {(() => { const label = (copy ? copy.label : doc.label)?.trim(); const name = (copy?.name || doc.name).trim();
                       return label && label !== name ? <span className="lc-muted lc-library-subtitle" title={label}>{label}</span> : null; })()}
@@ -753,6 +754,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                       ? <span className="lc-muted lc-version-line">{copyLine(copy)}{copy.trashedAt ? " · in the trash (!)" : ""}</span>
                       : <LibraryTimes {...doc}/>}
                     {size !== undefined && <span className="lc-muted lc-library-size">{formatBytes(size)}</span>}
+                    </VersionFace>
                   </HoldButton>
                   )}
                   {renamingId !== doc.id && (
@@ -773,44 +775,22 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                   <VersionShare name={copy ? `copy ${copy.number} of ${title}` : title} disabled={locked}
                     onAnnotated={() => entry.onExportVersion?.(doc.id, copy?.id ?? null)}
                     onBackup={() => void backupVersion(doc.id, doc.name, copy)} />
-                  {!doc.locked && copy && (
+                  {/* One trash for the book or the copy shown: it stays put and changes colour. */}
+                  {!doc.locked && (
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
-                    label={copy.trashedAt ? `Delete copy ${copy.number} of ${title} for good` : `Move copy ${copy.number} of ${title} to the trash`}
-                    className={`lc-scratch-load-trash${copy.trashedAt ? " lc-hold-danger" : ""}`}
+                    label={copy
+                      ? copy.trashedAt ? `Delete copy ${copy.number} of ${title} for good` : `Move copy ${copy.number} of ${title} to the trash`
+                      : `Delete annotations for ${title}`}
+                    className={`lc-scratch-load-trash${copy?.trashedAt ? " lc-hold-danger" : ""}`}
                     disabled={locked}
-                    onConfirm={() => void trashVersion(doc.id, copy)}
-                    resetKey={error}
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="15"
-                      height="15"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.75"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M4 6h16" />
-                      <path d="M9 6V4h6v2" />
-                      <path d="M6 6l1 14h10l1-14" />
-                      <path d="M10 10v7M14 10v7" />
-                    </svg>
-                  </HoldButton>
-                  )}
-                  {!doc.locked && !copy && (
-                  <HoldButton holdMs={LIBRARY_HOLD_MS}
-                    label={`Delete annotations for ${title}`}
-                    className="lc-scratch-load-trash"
-                    disabled={locked}
-                    ariaLabel={
-                      tapArmed
+                    ariaLabel={copy ? undefined
+                      : tapArmed
                         ? `Delete annotations for ${title} — tap to delete`
                         : `Delete annotations for ${title} — hold to delete`
                     }
-                    onTap={tapArmed ? () => void confirmRemove(doc.id) : undefined}
+                    onTap={!copy && tapArmed ? () => void confirmRemove(doc.id) : undefined}
                     onConfirm={() => {
+                      if (copy) { void trashVersion(doc.id, copy); return; }
                       if (tapArmed) void confirmRemove(doc.id);
                       else removeDoc(doc.id);
                     }}

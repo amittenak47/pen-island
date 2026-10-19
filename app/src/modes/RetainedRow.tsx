@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import { createPortal } from "react-dom";
 import { HoldButton } from "../components/HoldButton";
 import { usePopPlacement } from "../components/usePopPlacement";
@@ -92,6 +93,7 @@ export function VersionPicker({ name, versions, picked, currentBytes, currentHas
   const buttonRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  const reduced = useReducedMotion();
   const presence = usePresence(open);
   const placed = usePopPlacement(buttonRef, menuRef, presence.mounted, versions.length, "below", "right");
   useEffect(() => {
@@ -119,8 +121,21 @@ export function VersionPicker({ name, versions, picked, currentBytes, currentHas
       onClick={event => { event.stopPropagation(); setOpen(value => !value); }}>
       <svg className="lc-icon-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75"
         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5M12 7v5l3 2" /></svg>
-      <b>{picked ? picked.number : versions.length}</b>
-      {picked?.trashedAt ? <span className="lc-version-bang" aria-hidden="true">(!)</span> : null}
+      {/* The count rolls when it changes; the trash mark pops in and out. */}
+      <span className="lc-version-count">
+        <AnimatePresence mode="popLayout" initial={false}>
+          <motion.b key={picked ? `copy-${picked.number}` : `count-${versions.length}`}
+            initial={reduced ? false : { opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }}
+            exit={reduced ? { opacity: 0 } : { opacity: 0, y: 6 }} transition={{ duration: reduced ? 0 : 0.16, ease: "easeOut" }}>
+            {picked ? picked.number : versions.length}
+          </motion.b>
+        </AnimatePresence>
+      </span>
+      <AnimatePresence initial={false}>
+        {picked?.trashedAt ? <motion.span key="bang" className="lc-version-bang" aria-hidden="true"
+          initial={reduced ? false : { opacity: 0, scale: 0.4 }} animate={{ opacity: 1, scale: 1 }}
+          exit={reduced ? { opacity: 0 } : { opacity: 0, scale: 0.4 }} transition={{ duration: reduced ? 0 : 0.16 }}>(!)</motion.span> : null}
+      </AnimatePresence>
     </button>
     {presence.mounted && createPortal(<div ref={menuRef} role="menu" aria-label={`Versions of ${name}`}
       className={`lc-doc-sync-pop lc-tab-hold-pop lc-version-menu${presence.leaving ? " is-leaving" : ""}`} style={placed} inert={presence.leaving}>
@@ -153,4 +168,20 @@ export function VersionShare({ name, disabled = false, onAnnotated, onBackup }: 
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round"
       strokeLinejoin="round" aria-hidden="true"><path d="M12 3v12m0 0-4-4m4 4 4-4M5 17v3h14v-3" /></svg>
   </HoldButton>;
+}
+
+/**
+ * A row's text, swapped with motion when it changes between the current
+ * version and a copy (or one copy and another): the old slides up and out,
+ * the new slides up and in.
+ */
+export function VersionFace({ swapKey, children }: { swapKey: string; children: ReactNode }) {
+  const reduced = useReducedMotion();
+  return <AnimatePresence mode="wait" initial={false}>
+    <motion.span key={swapKey} className="lc-version-face"
+      initial={reduced ? false : { opacity: 0, y: 5 }} animate={{ opacity: 1, y: 0 }}
+      exit={reduced ? { opacity: 0 } : { opacity: 0, y: -5 }} transition={{ duration: reduced ? 0 : 0.13, ease: "easeOut" }}>
+      {children}
+    </motion.span>
+  </AnimatePresence>;
 }

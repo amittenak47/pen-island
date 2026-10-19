@@ -1,7 +1,7 @@
 import { useIsPresent } from "motion/react";
 import { DialogBackdrop, DialogPresence } from "../components/DialogMotion";
 import {LibraryTrashRow} from "./LibraryTrashRow";
-import { copyLine, useRetainedRows, VersionPicker, VersionShare } from "./RetainedRow";
+import { copyLine, useRetainedRows, VersionFace, VersionPicker, VersionShare } from "./RetainedRow";
 import { exportVersionBackup, restoreVersion } from "./retainedActions";
 import { deleteBookRetainedCopies, deleteRetainedCopies, formatBytes, trashRetainedCopy, versionBytes, type RetainedVersion } from "../util/retainedVersions";
 import {useLibraryMorph} from "./useLibraryMorph";
@@ -443,6 +443,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                     resetKey={error}
                   >
                     {/* Showing a copy: its own title, date and why it was kept. */}
+                    <VersionFace swapKey={copy?.id ?? "now"}>
                     <strong>{copy?.name || entry.title}</strong>
                     {copy
                       ? <span className="lc-muted lc-version-line">{copyLine(copy)}{copy.trashedAt ? " · in the trash (!)" : ""}</span>
@@ -453,6 +454,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                         <LibraryTimes {...entry}/>
                       </>}
                     {size !== undefined && <span className="lc-muted lc-library-size">{formatBytes(size)}</span>}
+                    </VersionFace>
                   </HoldButton>
                   )}
                   {renamingId !== entry.id && (
@@ -473,44 +475,22 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                   <VersionShare name={copy ? `copy ${copy.number} of ${entry.title}` : entry.title} disabled={locked}
                     onAnnotated={() => { if (props.mode === "entry") props.onExportVersion?.(entry.id, copy?.id ?? null); }}
                     onBackup={() => void backupVersion(entry.id, entry.title, copy)} />
-                  {!entry.locked && copy && (
+                  {/* One trash for the notebook or the copy shown: it stays put and changes colour. */}
+                  {!entry.locked && (
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
-                    label={copy.trashedAt ? `Delete copy ${copy.number} of ${entry.title} for good` : `Move copy ${copy.number} of ${entry.title} to the trash`}
-                    className={`lc-scratch-load-trash${copy.trashedAt ? " lc-hold-danger" : ""}`}
+                    label={copy
+                      ? copy.trashedAt ? `Delete copy ${copy.number} of ${entry.title} for good` : `Move copy ${copy.number} of ${entry.title} to the trash`
+                      : `Delete ${entry.title}`}
+                    className={`lc-scratch-load-trash${copy?.trashedAt ? " lc-hold-danger" : ""}`}
                     disabled={locked}
-                    onConfirm={() => void trashVersion(entry.id, copy)}
-                    resetKey={error}
-                  >
-                    <svg
-                      viewBox="0 0 24 24"
-                      width="15"
-                      height="15"
-                      fill="none"
-                      stroke="currentColor"
-                      strokeWidth="1.75"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      aria-hidden="true"
-                    >
-                      <path d="M4 6h16" />
-                      <path d="M9 6V4h6v2" />
-                      <path d="M6 6l1 14h10l1-14" />
-                      <path d="M10 10v7M14 10v7" />
-                    </svg>
-                  </HoldButton>
-                  )}
-                  {!entry.locked && !copy && (
-                  <HoldButton holdMs={LIBRARY_HOLD_MS}
-                    label={`Delete ${entry.title}`}
-                    className="lc-scratch-load-trash"
-                    disabled={locked}
-                    ariaLabel={
-                      tapArmed
+                    ariaLabel={copy ? undefined
+                      : tapArmed
                         ? `Delete ${entry.title} — tap to delete`
                         : `Delete ${entry.title} — hold to delete`
                     }
-                    onTap={tapArmed ? () => void confirmRemove(entry.id) : undefined}
+                    onTap={!copy && tapArmed ? () => void confirmRemove(entry.id) : undefined}
                     onConfirm={() => {
+                      if (copy) { void trashVersion(entry.id, copy); return; }
                       if (tapArmed) void confirmRemove(entry.id);
                       else removeNotebook(entry.id);
                     }}
