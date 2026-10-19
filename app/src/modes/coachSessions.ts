@@ -1,5 +1,6 @@
 import type { AgentChatMessage } from "./AgentSidePanel";
 import { normalizeRecord } from "../util/syncContent";
+import { canonicalAgentMessages } from "../util/agentMessageFormat";
 
 export type SessionStatus = "failed" | "aborted" | "succeeded";
 
@@ -258,5 +259,6 @@ export function mergeAgentMessages(local: unknown[], remote: unknown[], preserve
       }
     }
   }
-  return rows;
+  // Every device stores the union the same way (see agentMessageFormat).
+  return canonicalAgentMessages(rows);
 }

@@ -26,6 +26,8 @@ import {
   trashAnnotateDoc,
   type AnnotateDoc,
 } from "./annotateStore";
+/** Stored agent messages always carry their on/off flags (see agentMessageFormat). */
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false };
 
 const deleteDocBytes = vi.fn(async (_hash?: string) => {});
 vi.mock("./docBytes", () => ({
@@ -527,7 +529,7 @@ describe("footnotes on an entry", () => {
 });
 
 describe("coach thread on an entry", () => {
-  const turn = { id: "u1", role: "user", content: "what is this theorem?", at: 1 };
+  const turn = { id: "u1", role: "user", content: "what is this theorem?", at: 1, ...FLAGS_OFF };
 
   it("saves and reloads the transcript", async () => {
     const saved = await saveAnnotateDoc({

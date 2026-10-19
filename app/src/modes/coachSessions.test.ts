@@ -101,11 +101,12 @@ describe("orderSessions", () => {
 describe("mergeAgentMessages", () => {
   it("preserves multiple independent threads and loose messages in one saved session", () => {
     const stored = [
-      {...msg("first",{sessionId:"study"}), future:{custom:"kept"}},
-      msg("reply",{role:"assistant",sessionId:"study",replyTo:{id:"first",role:"user",excerpt:"first"}}),
-      msg("second",{sessionId:"study"}),
-      msg("loose",{role:"assistant",sessionId:"study"}),
-      msg("other",{sessionId:"tomorrow"}),
+      // Stored transcripts are in time order (see agentMessageFormat).
+      {...msg("first",{sessionId:"study",at:1}), future:{custom:"kept"}},
+      msg("reply",{role:"assistant",sessionId:"study",at:2,replyTo:{id:"first",role:"user",excerpt:"first"}}),
+      msg("second",{sessionId:"study",at:3}),
+      msg("loose",{role:"assistant",sessionId:"study",at:4}),
+      msg("other",{sessionId:"tomorrow",at:5}),
     ];
     const remote = JSON.parse(JSON.stringify(persistableAgentMessages(stored)));
     const deleted = stored.map(row => row.id === "first" ? {...row,deletedAt:99} : row);
@@ -152,8 +153,9 @@ describe("mergeAgentMessages", () => {
     const saved = [{ ...msg("q"), requestState: "queued", future: true }, msg("deleted", { deletedAt: 2 })];
     const next = mergeAgentMessages(saved, [msg("q", { content: "edited", requestState: "queued" })], false);
     expect(next).toHaveLength(2);
-    expect(next[0]).toMatchObject({ content: "edited", future: true });
-    expect(next[1]).toMatchObject({ deletedAt: 2 });
+    // Same time and role: stored by id, so "deleted" comes first.
+    expect(next.find(row => (row as AgentChatMessage).id === "q")).toMatchObject({ content: "edited", future: true });
+    expect(next.find(row => (row as AgentChatMessage).id === "deleted")).toMatchObject({ deletedAt: 2 });
   });
   it("lets a tombstone win over a live copy and keeps a session id that only one side has", () => {
     const local = [{ id: "q1", content: "Why?", sessionId: "session-q1" }, { id: "q2", content: "Draw" }];
