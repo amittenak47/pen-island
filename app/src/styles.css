@@ -23525,10 +23525,10 @@ html[data-corners="rounded"] {
  * exactly what you see: no 28 px chip inside a taller invisible target.
  *
  * The bottom edge is drawn inside the header (an inset line) instead of as a
- * border under it, so the cells reach the last pixel row. The active tab's and
- * the active mode's 2 px underline then sits on the edge row itself, not 1 px
- * above it. At rest every tab and mode carries a faint 1 px tick of its own
- * colour on that same row, so the header reads as one coloured baseline.
+ * border under it, so the cells reach the last pixel row. Every tab and mode
+ * marks that same row and no other: a faint 1 px tick of its own colour at
+ * rest, the full colour when active. A 2 px underline stood 1 px proud of the
+ * baseline, so the header no longer read as one coloured line.
  *
  * Height is unchanged (38 px plus the safe area).
  */
@@ -23614,7 +23614,7 @@ html[data-corners="rounded"] {
 
 /* Active cells are marked by the underline alone; no fill. */
 .lc-header .lc-header-left > .lc-brand-home.is-active {
-  box-shadow: inset 0 -2px 0 var(--lc-mode-whiteboard);
+  box-shadow: inset 0 -1px 0 var(--lc-mode-whiteboard);
 }
 
 .lc-header .lc-tab-strip {
@@ -23647,7 +23647,7 @@ html[data-corners="rounded"] {
 .lc-header .lc-tab-row .lc-tab.is-active {
   flex-grow: 1.6;
   background: transparent;
-  box-shadow: inset 0 -2px 0 var(--lc-tab-mode, var(--accent));
+  box-shadow: inset 0 -1px 0 var(--lc-tab-mode, var(--accent));
 }
 
 .lc-header .lc-tab .lc-tab-hit {
@@ -23719,6 +23719,20 @@ html[data-corners="rounded"] {
   font-size: 13px;
 }
 
+/*
+ * The file menu starts with a hairline on the side facing the tabs, as Home
+ * ends with one: the group reads as its own block. The first button in
+ * document order is the one beside the tabs in either hand.
+ */
+.lc-header .lc-header-right > .lc-icon:first-child {
+  border-left: 1px solid var(--lc-rail-hair);
+}
+
+[data-ui-handedness="left"] .lc-header .lc-header-right > .lc-icon:first-child {
+  border-left: 0;
+  border-right: 1px solid var(--lc-rail-hair);
+}
+
 /* Mode buttons and Settings: butted cells, no boxes. */
 .lc-header .lc-header-right .lc-icon {
   --lc-head-mode: transparent;
@@ -23750,7 +23764,7 @@ html[data-corners="rounded"] {
 .lc-header .lc-header-right .lc-icon.is-active {
   color: var(--lc-head-mode);
   background: transparent;
-  box-shadow: inset 0 -2px 0 var(--lc-head-mode);
+  box-shadow: inset 0 -1px 0 var(--lc-head-mode);
 }
 
 /* Agent: a dot and a word in the last cell, edged like Home. */
@@ -23785,7 +23799,7 @@ html[data-corners="rounded"] {
 .lc-header .lc-header-right .lc-agent-toggle.lc-agent-toggle-open {
   color: var(--ink);
   background: transparent;
-  box-shadow: inset 0 -2px 0 var(--accent);
+  box-shadow: inset 0 -1px 0 var(--accent);
 }
 
 .lc-header .lc-header-right .lc-agent-toggle.is-vacant {
