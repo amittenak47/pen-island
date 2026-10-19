@@ -61,7 +61,7 @@ describe("page visibility", () => {
     const back = restored.find((element) => element.id === "pinned");
     expect(back?.locked).toBe(true);
     expect(back?.opacity).toBe(60);
-    expect(back?.customData).toBeNull();
+    expect(back?.customData).toEqual({});
   });
 
   it("reports no change when the scene already matches the page", () => {

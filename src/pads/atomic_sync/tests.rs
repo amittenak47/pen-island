@@ -56,6 +56,43 @@ fn request(index: u32, kind: &str, key: &str) -> CommitRequest {
         gone_seq: None,
     }
 }
+
+#[test]
+fn retained_state_always_serializes_empty_fields_and_legacy_omission_reads() {
+    let f = Fixture::new();
+    let absent = f.book("annotate", "book");
+    let live = create(&f, 1, "annotate", "book");
+    for book in [absent, live] {
+        let mut value = serde_json::to_value(book).unwrap();
+        assert_eq!(value.get("retained_restore_pages"), Some(&json!([])));
+        assert_eq!(value.get("retained_unpublished"), Some(&json!(false)));
+        value.as_object_mut().unwrap().remove("retained_restore_pages");
+        value.as_object_mut().unwrap().remove("retained_unpublished");
+        let legacy: BookState = serde_json::from_value(value).unwrap();
+        assert!(legacy.retained_restore_pages.is_empty());
+        assert!(!legacy.retained_unpublished);
+    }
+}
+
+#[test]
+fn missing_footnotes_commit_as_array_and_null_catalog_keeps_existing() {
+    let f = Fixture::new();
+    let catalog = json!({"v":1,"parent":{"kind":"annotate","id":"book"},"revision":"empty","artifacts":[]});
+    let mut first = request(1, "annotate", "book");
+    let input = &mut first.record.as_mut().unwrap().value;
+    input.as_object_mut().unwrap().remove("footnotes");
+    input["artifacts"] = catalog.clone();
+    f.commit(&first).unwrap();
+    let current = f.book("annotate", "book");
+    assert_eq!(current.record.as_ref().unwrap()["footnotes"], json!([]));
+    let mut next = request(2, "annotate", "book");
+    next.record.as_mut().unwrap().base_rev = current.record_rev;
+    next.record.as_mut().unwrap().value["artifacts"] = Value::Null;
+    let effective = effective_record(&next, &current).unwrap().unwrap();
+    assert_eq!(effective["artifacts"], catalog);
+    f.commit(&next).unwrap();
+    assert_eq!(f.book("annotate", "book").record.unwrap()["artifacts"], catalog);
+}
 fn packed(label: &str, draw: bool) -> Vec<u8> {
     let ops = if draw {
         json!([{"k":"d","x0":1.0,"y0":2.0,"n":1,"xyN":0,"prN":0,"slN":0,"c":label}])
@@ -806,10 +843,11 @@ fn modern_restore_requires_acquired_retained_revision_before_explicit_replacemen
     let restored = f.book("whiteboard", "book");
     assert_eq!(restored.state, "live");
     assert!(restored.retained_restore_pages.is_empty());
-    assert!(serde_json::to_value(&restored)
-        .unwrap()
-        .get("retained_restore_pages")
-        .is_none());
+    // Written as an empty list, never left out (the empty-fields rule).
+    assert_eq!(
+        serde_json::to_value(&restored).unwrap().get("retained_restore_pages"),
+        Some(&serde_json::json!([]))
+    );
     assert_eq!(
         get_ink_page(&f.conn, "whiteboard", "book", 1)
             .unwrap()
@@ -1082,10 +1120,11 @@ fn corrupt_gone_retained_ink_is_reported_per_book_and_cannot_be_restored() {
     ))
     .unwrap();
     let gone = f.book("whiteboard", "book");
-    assert!(serde_json::to_value(&gone)
-        .unwrap()
-        .get("retained_restore_pages")
-        .is_none());
+    // Written as an empty list, never left out (the empty-fields rule).
+    assert_eq!(
+        serde_json::to_value(&gone).unwrap().get("retained_restore_pages"),
+        Some(&serde_json::json!([]))
+    );
     legacy_restore_page(&f, "whiteboard", "book", 1, 100, "retained", true);
     f.conn
         .execute(

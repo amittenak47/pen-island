@@ -22,8 +22,8 @@ describe("quoteFromStream", () => {
   it("has no context to offer at the very edges", () => {
     const q = quoteFromStream("edge", 0, 4)!;
     expect(q.exact).toBe("edge");
-    expect(q.prefix).toBeUndefined();
-    expect(q.suffix).toBeUndefined();
+    expect(q.prefix).toBe("");
+    expect(q.suffix).toBe("");
   });
 
   it("refuses a selection that is only whitespace", () => {

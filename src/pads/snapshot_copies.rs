@@ -2,7 +2,8 @@
 //!
 //! Identity is SHA-256 of canonical JSON `{tier,payload}`. Only recognized
 //! primary/footnote gzip fields are normalized to their validated packed bytes,
-//! and attachment payload JSON strings are canonicalized. Every authored field,
+//! and attachment payload JSON strings are canonicalized, along with the safe
+//! empty defaults in sync_content. Every other authored field,
 //! source string, view setting, timestamp and unknown field remains included.
 //! Storage retains the original DTO content and first copy's display timestamp.
 use super::atomic_sync::ProtocolError;
@@ -74,6 +75,12 @@ fn normalize_ink_pages(pages: &mut Value) -> Result<()> {
 
 pub fn normalized_payload(payload: &Value) -> Result<Value> {
     let mut normalized = payload.clone();
+    if let Some(object) = normalized.as_object_mut() {
+        sync_content::normalize_empty_defaults(object, true, true);
+        if let Some(record) = object.get_mut("bookRecord").and_then(Value::as_object_mut) {
+            sync_content::normalize_empty_defaults(record, true, false);
+        }
+    }
     if let Some(pages) = normalized.get_mut("ink") {
         normalize_ink_pages(pages)?;
     }
@@ -95,7 +102,10 @@ pub fn normalized_payload(payload: &Value) -> Result<Value> {
             let text = asset["payload"]
                 .as_str()
                 .context("invalid backup asset payload")?;
-            let parsed: Value = serde_json::from_str(text).context("invalid backup asset JSON")?;
+            let mut parsed: Value = serde_json::from_str(text).context("invalid backup asset JSON")?;
+            if let Some(object) = parsed.as_object_mut() {
+                sync_content::normalize_empty_defaults(object, true, false);
+            }
             asset["payload"] = Value::String(sync_content::canonical_json(&parsed)?);
         }
     }
@@ -345,6 +355,20 @@ mod tests {
                 "{}",
                 case["name"]
             );
+        }
+    }
+
+    #[test]
+    fn safe_snapshot_defaults_match_shared_fixtures() {
+        let fixture: Value = serde_json::from_str(include_str!(
+            "../../app/src/util/fixtures/sync-content-golden.json"
+        )).unwrap();
+        for case in fixture["snapshotDefaults"].as_array().unwrap() {
+            let input: Value = serde_json::from_str(case["input"].as_str().unwrap()).unwrap();
+            let normalized = json!({"tier": input["tier"], "payload": normalized_payload(&input["payload"]).unwrap()});
+            let text = sync_content::canonical_json(&normalized).unwrap();
+            assert_eq!(text, case["canonical"].as_str().unwrap(), "{}", case["name"]);
+            assert_eq!(sync_content::hash_bytes(text.as_bytes()), case["hash"].as_str().unwrap());
         }
     }
 

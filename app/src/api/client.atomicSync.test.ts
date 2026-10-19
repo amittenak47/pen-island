@@ -157,6 +157,24 @@ for (const mode of ["native", "HTTP"] as const) describe(`${mode} atomic-sync co
     else expect(transport.fetch.mock.calls.at(-1)?.[0]).toBe("http://hub.test/pads/ink/annotate/book%2Ffn%2Fscratch/113?book_rev=41&page_rev=16");
   });
 
+  it("accepts older omitted retained fields and new explicit empties in every lifecycle", async () => {
+    for (const body of [state,
+      { ...state, state: "gone", gone_seq: 0, record: null, record_rev: 0, record_hash: null, pages: [] },
+      { ...state, state: "absent", record: null, record_rev: 0, record_hash: null, pages: [] },
+    ]) {
+      respond(body);
+      expect(await client.getBookState("annotate", "book")).toEqual(body);
+      const explicit = { ...body, retained_restore_pages: [], retained_unpublished: false };
+      respond(explicit);
+      expect(await client.getBookState("annotate", "book")).toEqual(explicit);
+    }
+    for (const retained of [{ retained_unpublished: true }, { retained_restore_pages: state.pages },
+      { retained_unpublished: null }, { retained_unpublished: 0 }, { retained_restore_pages: null }]) {
+      respond({ ...state, ...retained });
+      await expect(client.getBookState("annotate", "book")).rejects.toMatchObject({ status: 502 });
+    }
+  });
+
   it("rejects undisclosed, foreign, duplicated or invalid restore page vectors", async () => {
     const gone = { ...state, state: "gone", gone_seq: 7, record: null, record_rev: 0, record_hash: null, pages: [] };
     for (const body of [

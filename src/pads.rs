@@ -307,7 +307,7 @@ pub struct WhiteboardPad {
     pub board: serde_json::Value,
     #[serde(default)]
     pub agent: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub artifacts: Option<serde_json::Value>,
 }
 
@@ -322,7 +322,7 @@ pub struct AnnotatePad {
     pub name: String,
     /// Display name for this annotation set. Empty means show `name` instead.
     /// Does not change the file on disk or a web pad's identity URL.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub label: String,
     pub hash: String,
     #[serde(default = "default_doc_type")]
@@ -336,14 +336,14 @@ pub struct AnnotatePad {
     pub base_updated_at: Option<i64>,
     #[serde(default)]
     pub source: String,
-    #[serde(default)]
+    #[serde(default = "empty_json_array")]
     pub footnotes: serde_json::Value,
     pub board: serde_json::Value,
     #[serde(default)]
     pub agent: serde_json::Value,
-    #[serde(default = "empty_json_object", skip_serializing_if = "is_empty_json_object")]
+    #[serde(default = "empty_json_object")]
     pub footnote_boards: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub artifacts: Option<serde_json::Value>,
 }
 
@@ -367,7 +367,7 @@ pub struct ProblemPad {
     pub board: serde_json::Value,
     #[serde(default)]
     pub agent: serde_json::Value,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default)]
     pub artifacts: Option<serde_json::Value>,
 }
 
@@ -391,12 +391,12 @@ fn is_zero_seq(seq: &i64) -> bool {
     *seq == 0
 }
 
-fn empty_json_object() -> serde_json::Value {
-    serde_json::json!({})
+fn empty_json_array() -> serde_json::Value {
+    serde_json::json!([])
 }
 
-fn is_empty_json_object(value: &serde_json::Value) -> bool {
-    value.as_object().map(|o| o.is_empty()).unwrap_or(true)
+fn empty_json_object() -> serde_json::Value {
+    serde_json::json!({})
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1322,7 +1322,7 @@ pub fn validate_snapshot_payload(payload: &serde_json::Value) -> Result<()> {
     let obj = payload
         .as_object()
         .ok_or_else(|| anyhow::anyhow!("snapshot payload must be an object"))?;
-    if let Some(ink) = obj.get("ink") {
+    if let Some(ink) = obj.get("ink").filter(|value| !value.is_null()) {
         let pages = ink
             .as_array()
             .ok_or_else(|| anyhow::anyhow!("snapshot ink must be an array"))?;
@@ -1362,7 +1362,7 @@ pub fn validate_snapshot_payload(payload: &serde_json::Value) -> Result<()> {
             validate_snapshot_node(edge.get("to"), "to")?;
         }
     }
-    if let Some(source) = obj.get("source") {
+    if let Some(source) = obj.get("source").filter(|value| !value.is_null()) {
         if !source.is_string() {
             anyhow::bail!("snapshot source must be a string");
         }
@@ -1914,6 +1914,13 @@ pub fn clone_device(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn annotate_serializes_empty_footnote_boards() {
+        let pad: super::AnnotatePad = serde_json::from_value(serde_json::json!({
+            "id":"a", "name":"a.md", "hash":"h", "updated_at":1, "board":{}, "agent":[]
+        })).unwrap();
+        assert_eq!(serde_json::to_value(pad).unwrap()["footnote_boards"], serde_json::json!({}));
+    }
     use super::*;
     use serde_json::json;
 
@@ -2020,6 +2027,19 @@ mod tests {
             agent: json!([]),
             artifacts: None,
         }
+    }
+
+    #[test]
+    fn catalogs_serialize_none_as_null_and_missing_footnotes_default_to_array() {
+        for value in [serde_json::to_value(wb("w", 1)).unwrap(),
+            serde_json::to_value(an("a", 1)).unwrap(), serde_json::to_value(pb("leetcode/one", 1)).unwrap()] {
+            assert_eq!(value.get("artifacts"), Some(&serde_json::Value::Null));
+        }
+        let mut value = serde_json::to_value(an("a", 1)).unwrap();
+        value.as_object_mut().unwrap().remove("footnotes");
+        let parsed: AnnotatePad = serde_json::from_value(value).unwrap();
+        assert_eq!(parsed.footnotes, json!([]));
+        assert_eq!(serde_json::to_value(parsed).unwrap()["footnotes"], json!([]));
     }
 
     #[test]
@@ -2142,7 +2162,12 @@ mod tests {
         let got = get_annotate(&conn, "a1").unwrap().unwrap();
         assert!(got.label.is_empty(), "whitespace label stores as empty");
         let json = serde_json::to_value(&got).unwrap();
-        assert!(json.get("label").is_none(), "empty label is omitted on the wire");
+        assert_eq!(json["label"], "", "empty label is explicit on the wire");
+        let explicit: AnnotatePad = serde_json::from_value(json.clone()).unwrap();
+        let mut legacy = json;
+        legacy.as_object_mut().unwrap().remove("label");
+        let absent: AnnotatePad = serde_json::from_value(legacy).unwrap();
+        assert_eq!(explicit.label, absent.label, "empty and absent labels use the same fallback");
         let _ = std::fs::remove_file(path);
     }
 

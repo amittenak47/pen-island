@@ -247,7 +247,7 @@ export function footnoteThemeSeed(existing: number | readonly { color?: string; 
   const palette = paletteForMarkIndex(existingCount);
   if (typeof existing === "number") return { color: palette[0]!, palette };
   const used = existing.map((mark, index) => (
-    mark.color ?? mark.palette?.[0] ?? paletteForMarkIndex(index)[0]!
+    mark.color || mark.palette?.[0] || paletteForMarkIndex(index)[0]!
   ));
   for (let offset = 0; offset < COLORHUNT_FALLBACK_CODES.length; offset++) {
     const next = paletteForMarkIndex(existingCount + offset);
@@ -294,5 +294,5 @@ export function remapColorToPalette(
   const slot = color
     ? prev.findIndex((swatch) => swatch.trim().toLowerCase() === color.trim().toLowerCase())
     : 0;
-  return next[slot >= 0 ? slot : 0] ?? next[0] ?? color ?? "#0d9488";
+  return next[slot >= 0 ? slot : 0] || next[0] || color || "#0d9488";
 }

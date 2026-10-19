@@ -256,7 +256,7 @@ export interface ParentWriteOptions<T, M> {
 }
 
 /** Metadata, payload and tracking are accepted together from authoritative reads. */
-export async function putParentRecord<T extends { artifacts?: ArtifactCatalog }, M extends { id: string } = { id: string }>(
+export async function putParentRecord<T extends { artifacts?: ArtifactCatalog | null }, M extends { id: string } = { id: string }>(
   parent: ArtifactParent, content: T, opts: ParentWriteOptions<T, M> = {},
 ): Promise<{ content: T; metadata: M | null }> {
   artifactCatalogFields(content.artifacts, parent);
@@ -289,7 +289,7 @@ export async function putParentRecord<T extends { artifacts?: ArtifactCatalog },
         }
       }
     }
-    const result = { ...previous, ...(opts.catalogOnly ? {} : content), ...(artifacts ? { artifacts } : {}) } as T;
+    const result = { ...previous, ...(opts.catalogOnly ? {} : content), artifacts: artifacts ?? null } as T;
     const oldRows = (previous as Record<string, unknown> | undefined)?.agent;
     const nextRows = (result as Record<string, unknown>).agent;
     if (!opts.catalogOnly && Array.isArray(oldRows)) {
@@ -308,18 +308,29 @@ export async function putParentRecord<T extends { artifacts?: ArtifactCatalog },
       throw new Error("The parent was removed; content was not published.");
     }
     const saved = merge(ctx.content as T | undefined ?? undefined);
-    ctx.setContent(saved);
     let metadata = ctx.metadata as M | null;
     if (opts.metadata) metadata = opts.metadata(metadata, saved);
     else if (metadata && saved.artifacts) metadata = { ...metadata, artifactRevision: saved.artifacts.revision,
       ...(opts.catalogOnly ? { updatedAt: Math.max(Date.now(), Number(ctx.metadata?.updatedAt ?? 0) + 1) } : {}) };
+    // Root defaults apply only after partial inputs have preserved existing values.
+    const complete = saved as Record<string, unknown>;
+    complete.agent ??= [];
+    complete.artifacts ??= null;
+    if (parent.kind === "annotate") complete.footnotes ??= [];
+    // Captures are a complete-record default, after an omitted partial input
+    // has preserved the history already stored by another save.
+    if (parent.kind === "annotate" && (metadata as Record<string, unknown> | null)?.docType === "web") {
+      const record = saved as Record<string, unknown>;
+      record.captures ??= [];
+    }
+    ctx.setContent(saved);
     if (opts.metadata || metadata !== ctx.metadata) ctx.setMetadata(metadata ? { ...metadata, kind: parent.kind } : null);
     opts.editState?.(ctx);
     return { content: saved, metadata };
   });
 }
 
-export async function putParentContent<T extends { artifacts?: ArtifactCatalog }>(
+export async function putParentContent<T extends { artifacts?: ArtifactCatalog | null }>(
   parent: ArtifactParent, content: T, opts: ParentWriteOptions<T, { id: string }> = {},
 ): Promise<T> {
   return (await putParentRecord(parent, content, opts)).content;
@@ -332,7 +343,7 @@ export async function editParentContentArtifacts(
 ): Promise<ArtifactCatalog> {
   assertLive();
   const requireLiveMetadata = Boolean(getCachedBookMeta(parent.kind, parent.id));
-  const previous = await getContent<{ artifacts?: ArtifactCatalog }>(parent.id);
+  const previous = await getContent<{ artifacts?: ArtifactCatalog | null }>(parent.id);
   if (!previous) throw new Error("Save the parent before attaching content.");
   const next = editArtifactCatalog(previous.artifacts, parent, expectedCatalogRevision, edit);
   const { downloadArtifactAssets } = await import("./artifactAssetSync");

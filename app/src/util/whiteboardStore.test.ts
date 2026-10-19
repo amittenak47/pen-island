@@ -47,6 +47,20 @@ afterEach(() => {
 });
 
 describe("saveWhiteboardNotebook", () => {
+  it("writes false flags and empty extras, including an explicit unlock", async () => {
+    const saved = await saveWhiteboardNotebook({ board: board(), pageCount: 1 });
+    expect(saved).toMatchObject({ locked: false, named: false, authoredExtras: {} });
+    await setWhiteboardNotebookLocked(saved.id, true);
+    await setWhiteboardNotebookLocked(saved.id, false);
+    expect(await getWhiteboardNotebook(saved.id)).toHaveProperty("locked", false);
+  });
+  it("writes empty optional message text on the first save", async () => {
+    const saved = await saveWhiteboardNotebook({ board: board(), pageCount: 1, agent: [{ id: "message" }] });
+    expect((await getWhiteboardNotebook(saved.id))?.agent).toEqual([{
+      id: "message", requestNote: "", reasoning: "", bridgeError: "", pending: false, queued: false, bridgePending: false,
+      attachments: [], artifacts: [], artifactProposals: [], artifactFootnoteIds: null, flags: [], processEvents: [],
+    }]);
+  });
   it("keeps one entry per id and moves it to the front", async () => {
     const first = await saveWhiteboardNotebook({ board: board("a"), pageCount: 1, title: "One" });
     await saveWhiteboardNotebook({ board: board("b"), pageCount: 1, title: "Two" });

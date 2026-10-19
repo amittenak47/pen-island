@@ -62,6 +62,8 @@ export async function auditInkDuplicates(opts: { remove: boolean }): Promise<Ink
       if (encoded.layout) kept.layout = encoded.layout;
       const next: InkPageRecord = {
         ...row,
+        layoutPending: row.layoutPending ?? false,
+        bootstrap: row.bootstrap ?? true,
         gz: await gzipBytes(packEncodedInk(kept)),
         inkC: undefined,
         sum: undefined,

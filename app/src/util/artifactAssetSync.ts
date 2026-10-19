@@ -44,7 +44,7 @@ async function requireConsistentAssets(catalog: ArtifactCatalog): Promise<void> 
 
 /** Do not PUT/acknowledge the parent until every revision was acknowledged. */
 export async function uploadArtifactAssets(
-  client: ArtifactAssetTransport, catalog: ArtifactCatalog | undefined,
+  client: ArtifactAssetTransport, catalog: ArtifactCatalog | null | undefined,
 ): Promise<void> {
   if (!catalog) return;
   for (const locator of dependencies(catalog)) {
@@ -63,7 +63,7 @@ export async function uploadArtifactAssets(
 
 /** Stage only: never write the live scratch scene or an unsaved Monaco buffer. */
 export async function downloadArtifactAssets(
-  client: ArtifactAssetTransport | undefined, catalog: ArtifactCatalog | undefined,
+  client: ArtifactAssetTransport | undefined, catalog: ArtifactCatalog | null | undefined,
 ): Promise<void> {
   if (!catalog) return;
   for (const locator of dependencies(catalog)) {

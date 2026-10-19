@@ -49,14 +49,14 @@ async function currentInk(parent: SnapshotParent): Promise<InkPageRecord[]> {
 }
 
 /** Metadata, content, children, ink and tracking share one local commit. */
-export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Partial<PadSnapshot>, bundle?: ArtifactSnapshotBundle, options: RestorePadOptions = {}): Promise<RestorePadResult> {
+export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Partial<PadSnapshot>, bundle?: ArtifactSnapshotBundle | null, options: RestorePadOptions = {}): Promise<RestorePadResult> {
   if (contentSpillOnly()) throw new Error("Repair local storage before restoring a snapshot.");
   if (!validBoard(snap.board)) throw new Error("Snapshot board is invalid; current work was kept.");
   const prepared = await preparePadRestore(parent, options);
   if (prepared.status === "stale") return { status: "stale" };
   const capturedState = prepared.capture.state;
   const bookRecord = (snap as Partial<PadSnapshot> & { bookRecord?: Record<string, unknown> }).bookRecord;
-  const before = await getContent<{ artifacts?: ArtifactCatalog; [key: string]: unknown }>(parent.id);
+  const before = await getContent<{ artifacts?: ArtifactCatalog | null; [key: string]: unknown }>(parent.id);
   const fingerprint = JSON.stringify(before);
   const previousInk = await currentInk(parent);
   const previousChildren: Record<string, unknown> = {};
@@ -79,7 +79,7 @@ export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Pa
   const primary = parent.kind === "annotate" ? annotateDocKey(parent.id) : whiteboardDocKey(parent.id);
   const addInk = async (docKey: string, value: unknown, board?: BoardBlob) => {
     const pages = parseSnapshotInk(value);
-    if (value !== undefined && (!Array.isArray(value) || pages.length !== value.length)) throw new Error("Snapshot ink is invalid; current work was kept.");
+    if (value != null && (!Array.isArray(value) || pages.length !== value.length)) throw new Error("Snapshot ink is invalid; current work was kept.");
     const ids = new Set<number>();
     const prepared: InkPageRecord[] = [];
     for (const page of pages) {
@@ -91,7 +91,7 @@ export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Pa
     }
     // Verify and convert older inline backups before replacing live shards.
     // Retain the original inline blob as well.
-    if (value === undefined && board && (board.inkC !== undefined || board.ink !== undefined)) {
+    if (value == null && board && (board.inkC !== undefined || board.ink !== undefined)) {
       const revived = board.inkC !== undefined ? reviveEncodedInk(board.inkC) : encodeInkOps(board.ink ?? []);
       if (!revived) throw new Error("Snapshot inline handwriting is unreadable; current work was kept.");
       // The historical reviver restores typed arrays but omits the layout tag.
@@ -145,8 +145,8 @@ export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Pa
     ctx.markLifecycle("restore", seq, prepared.baseBookRev, prepared.goneSeq);
     ctx.setMetadata(meta);
     ctx.setContent({ ...before, board: snap.board,
-      ...(artifacts ? { artifacts } : {}),
-      ...(snap.agent !== undefined ? { agent: snap.agent } : { agent: before?.agent ?? [] }),
+      artifacts: artifacts ?? before?.artifacts ?? null,
+      agent: snap.agent ?? before?.agent ?? [],
       ...(parent.kind === "annotate" ? { source: snap.source ?? before?.source ?? "",
         footnotes: snap.footnotes ?? before?.footnotes ?? [] } : {}) });
     const content = ctx.tx.objectStore(STORE_CONTENT);

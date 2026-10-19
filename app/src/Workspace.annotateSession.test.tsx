@@ -555,3 +555,12 @@ it("keeps autosave suspended when the committed newer copy cannot reload and rej
   });
   await click("Not now");
 });
+
+it("writes blank block text on a selection with no text", async () => {
+  await mount();
+  const selection = { text: "", excerpt: "", anchor: { kind: "text" as const, start: 2, end: 7 }, hitRects: [] };
+  await act(async () => { mocks.selection!.onAnnotate!(selection, null); });
+  await click(saveLabel);
+  const saved = mocks.save.mock.calls.at(-1)![0].footnotes.find((mark: DocFootnote) => mark.anchor.kind === "text");
+  expect(saved).toHaveProperty("blockText", "");
+});

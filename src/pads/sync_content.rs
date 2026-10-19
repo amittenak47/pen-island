@@ -1,12 +1,25 @@
 //! Content identity for atomic sync. This contract is mirrored by syncContent.ts.
 //! Keys sort by UTF-16 code units; numbers use ECMAScript's shortest spelling.
 //! Only named root transport fields, board view/manifests, the page frame's per-device
-//! layout fields and these empty defaults canonicalize to absence: root agent
-//! and footnote_boards; agent[].attachments/artifacts/artifactProposals/
+//! layout fields and these empty defaults canonicalize to absence: root agent,
+//! footnotes and footnote_boards; agent[].attachments/artifacts/artifactProposals/
 //! flags/processEvents, agent[].pending/queued/bridgePending=false,
 //! agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
 //! footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
 //! footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
+//! Also empty strings at agent[].requestNote/reasoning/bridgeError,
+//! footnotes[].title, .notes[].field, .userLinks[]/.whiteboards[].title and
+//! .anchor/.subMarks[].anchor.prefix/suffix; board.files={} and
+//! board.elements[].customData=null/{} (including footnote boards).
+//! Also label=""; footnotes[].blockText/query/url/excerpt/color="", palette=[],
+//! .notes[].by="" and .subMarks[].excerpt/color="", palette=[];
+//! agent[].artifactFootnoteIds=null; board.inkPalettes=null and
+//! board.appState.linedPaperMode/linedPitch/linedPitchWide/linedPitchCollege/linedRule=null.
+//! Snapshots use these same defaults without view exclusions, plus empty
+//! edges/footnoteBoards/footnoteInk and known-empty board.inkPages manifests.
+//! Snapshot artifact payload JSON and retained bookRecord use the same record defaults.
+//! Root artifacts=null is legacy. Snapshot source/agent/footnotes/ink/artifactBundle=null
+//! and footnoteInk[id]=null mean not captured; captured empty values remain significant.
 use anyhow::{ensure, Context, Result};
 use flate2::bufread::GzDecoder;
 use serde_json::Value;
@@ -78,11 +91,101 @@ pub const PAGE_FRAME_LOCAL_KEYS: &[&str] = &["width", "height", "version", "vers
 /// Agent message flags whose `false` is the same as leaving them out.
 pub const MESSAGE_FALSE_DEFAULT_KEYS: &[&str] = &["pending", "queued", "bridgePending"];
 pub const MESSAGE_EMPTY_LIST_KEYS: &[&str] = &["attachments", "artifacts", "artifactProposals", "flags", "processEvents"];
+pub const MESSAGE_EMPTY_STRING_KEYS: &[&str] = &["requestNote", "reasoning", "bridgeError"];
 pub const FOOTNOTE_EMPTY_LIST_KEYS: &[&str] = &["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"];
 
 fn omit_empty_lists(object: &mut serde_json::Map<String, Value>, keys: &[&str]) {
     for key in keys {
         if object.get(*key).and_then(Value::as_array).is_some_and(Vec::is_empty) { object.remove(*key); }
+    }
+}
+
+fn omit_empty_strings(object: &mut serde_json::Map<String, Value>, keys: &[&str]) {
+    for key in keys {
+        if object.get(*key).and_then(Value::as_str) == Some("") { object.remove(*key); }
+    }
+}
+
+fn omit_empty_map(object: &mut serde_json::Map<String, Value>, key: &str) {
+    if object.get(key).and_then(Value::as_object).is_some_and(serde_json::Map::is_empty) { object.remove(key); }
+}
+
+/// Only named empty defaults; snapshots retain view state and populated manifests.
+pub fn normalize_empty_defaults(record: &mut serde_json::Map<String, Value>, snapshot: bool, snapshot_payload: bool) {
+    omit_empty_strings(record, &["label"]);
+    if record.get("artifacts") == Some(&Value::Null) { record.remove("artifacts"); }
+    if !snapshot_payload { omit_empty_lists(record, &["footnotes", "agent"]); }
+    if snapshot_payload {
+        for key in ["source", "agent", "footnotes", "ink", "artifactBundle"] {
+            if record.get(key) == Some(&Value::Null) { record.remove(key); }
+        }
+        if let Some(children) = record.get_mut("footnoteInk").and_then(Value::as_object_mut) {
+            children.retain(|_, pages| !pages.is_null());
+        }
+    }
+    fn board(value: &mut Value, snapshot: bool) {
+        let Some(object) = value.as_object_mut() else { return };
+        omit_empty_map(object, "files");
+        if object.get("inkPalettes") == Some(&Value::Null) { object.remove("inkPalettes"); }
+        if let Some(state) = object.get_mut("appState").and_then(Value::as_object_mut) {
+            for key in ["linedPaperMode", "linedPitch", "linedPitchWide", "linedPitchCollege", "linedRule"] {
+                if state.get(key) == Some(&Value::Null) { state.remove(key); }
+            }
+        }
+        if let Some(elements) = object.get_mut("elements").and_then(Value::as_array_mut) {
+            for element in elements.iter_mut().filter_map(Value::as_object_mut) {
+                if element.get("customData") == Some(&Value::Null) { element.remove("customData"); }
+                omit_empty_map(element, "customData");
+            }
+        }
+        if snapshot && object.get("inkPages").and_then(Value::as_object).is_some_and(|manifest| {
+            manifest.get("v").and_then(Value::as_f64) == Some(1.0)
+                && manifest.get("pageIds").and_then(Value::as_array).is_some_and(Vec::is_empty)
+                && manifest.keys().all(|key| key == "v" || key == "pageIds")
+        }) { object.remove("inkPages"); }
+    }
+    fn anchor(value: Option<&mut Value>) {
+        if let Some(object) = value.and_then(Value::as_object_mut) {
+            if object.get("kind").and_then(Value::as_str) != Some("region") { omit_empty_strings(object, &["prefix", "suffix"]); }
+        }
+    }
+    if let Some(value) = record.get_mut("board") { board(value, snapshot); }
+    for key in if snapshot_payload { &["footnote_boards", "footnoteBoards"][..] } else { &["footnote_boards"][..] } {
+        if let Some(children) = record.get_mut(*key).and_then(Value::as_object_mut) {
+            for child in children.values_mut() {
+                if let Some(value) = child.get_mut("board") { board(value, snapshot); }
+            }
+        }
+        omit_empty_map(record, key);
+    }
+    if let Some(messages) = record.get_mut("agent").and_then(Value::as_array_mut) {
+        for message in messages.iter_mut().filter_map(Value::as_object_mut) {
+            omit_empty_strings(message, MESSAGE_EMPTY_STRING_KEYS);
+            if message.get("artifactFootnoteIds") == Some(&Value::Null) { message.remove("artifactFootnoteIds"); }
+        }
+    }
+    if let Some(notes) = record.get_mut("footnotes").and_then(Value::as_array_mut) {
+        for note in notes.iter_mut().filter_map(Value::as_object_mut) {
+            omit_empty_strings(note, &["title", "blockText", "query", "url", "excerpt", "color"]);
+            omit_empty_lists(note, &["palette"]);
+            anchor(note.get_mut("anchor"));
+            for key in ["userLinks", "whiteboards", "notes", "subMarks"] {
+                if let Some(entries) = note.get_mut(key).and_then(Value::as_array_mut) {
+                    for entry in entries.iter_mut().filter_map(Value::as_object_mut) {
+                        if key == "subMarks" {
+                            anchor(entry.get_mut("anchor"));
+                            omit_empty_strings(entry, &["excerpt", "color"]);
+                            omit_empty_lists(entry, &["palette"]);
+                        } else if key == "notes" { omit_empty_strings(entry, &["field", "by"]); }
+                        else { omit_empty_strings(entry, &["title"]); }
+                    }
+                }
+            }
+        }
+    }
+    if snapshot_payload {
+        omit_empty_lists(record, &["edges"]);
+        omit_empty_map(record, "footnoteInk");
     }
 }
 
@@ -116,13 +219,14 @@ pub fn normalize_record(value: &Value) -> Result<Value> {
     canonical_json(value)?;
     let mut value = value.clone();
     let object = value.as_object_mut().unwrap();
+    normalize_empty_defaults(object, false, false);
     for key in RECORD_TRANSPORT_KEYS { object.remove(*key); }
     if let Some(board) = object.get_mut("board") { normalize_board(board); }
     if let Some(boards) = object.get_mut("footnote_boards").and_then(Value::as_object_mut) {
         for content in boards.values_mut() {
             if let Some(board) = content.get_mut("board") { normalize_board(board); }
         }
-        // The book format defaults an absent map to empty and omits it when empty.
+        // The book format defaults an absent map to empty.
         if boards.is_empty() { object.remove("footnote_boards"); }
     }
     if let Some(messages) = object.get_mut("agent").and_then(Value::as_array_mut) {
@@ -307,6 +411,13 @@ mod tests {
             assert_eq!(canonical_json(&normalize_record(&value).unwrap()).unwrap(), item["canonical"].as_str().unwrap());
             assert_eq!(record_hash(&value).unwrap(), item["hash"].as_str().unwrap());
         }
+        for item in fixture["snapshotDefaults"].as_array().unwrap() {
+            let mut value: Value = serde_json::from_str(item["input"].as_str().unwrap()).unwrap();
+            value["payload"] = crate::pads::snapshot_copies::normalized_payload(&value["payload"]).unwrap();
+            let text = canonical_json(&value).unwrap();
+            assert_eq!(text, item["canonical"].as_str().unwrap(), "{}", item["name"]);
+            assert_eq!(hash_bytes(text.as_bytes()), item["hash"].as_str().unwrap());
+        }
     }
 
     #[test]
@@ -322,16 +433,72 @@ mod tests {
         assert_eq!(normalize_record(&empty).unwrap(), missing);
         assert_eq!(record_hash(&empty).unwrap(), record_hash(&missing).unwrap());
         assert_eq!(normalize_record(&json!({"agent":[],"footnote_boards":{}})).unwrap(), json!({}));
-        assert_ne!(record_hash(&json!({"footnotes":[]})).unwrap(), record_hash(&json!({})).unwrap());
+        assert_eq!(record_hash(&json!({"footnotes":[]})).unwrap(), record_hash(&json!({})).unwrap());
         for extra in [json!({"artifactFootnoteIds":[]}), json!({"future":[]}), json!({"bridgePending":true}),
             json!({"attachments":[{}]}), json!({"processEvents":[{}]})] {
             assert_ne!(record_hash(&json!({"agent":[extra]})).unwrap(), record_hash(&json!({"agent":[{}]})).unwrap());
         }
-        for extra in [json!({"title":""}), json!({"palette":[]}), json!({"updatedAt":0}), json!({"pending":""})] {
+        for extra in [json!({"title":"Named"}), json!({"palette":["#111111","#222222"]}), json!({"updatedAt":0}), json!({"pending":""})] {
             assert_ne!(record_hash(&json!({"footnotes":[extra]})).unwrap(), record_hash(&json!({"footnotes":[{}]})).unwrap());
         }
         assert_ne!(record_hash(&json!({"agent":[{"attachments":[{"sendToModel":false}]}]})).unwrap(),
             record_hash(&json!({"agent":[{"attachments":[{}]}]})).unwrap());
+    }
+
+    #[test]
+    fn needs_care_empties_match_absence_in_records_and_snapshots() {
+        let cases = [
+            (json!({"id":"book"}), json!({"id":"book","label":""})),
+            (json!({"footnotes":[{}]}), json!({"footnotes":[{"blockText":"","query":"","url":"","excerpt":""}]})),
+            (json!({"footnotes":[{"subMarks":[{}]}]}),
+                json!({"footnotes":[{"color":"","palette":[],"subMarks":[{"color":"","palette":[],"excerpt":""}]}]})),
+            (json!({"footnotes":[{"notes":[{"text":"legacy"}]}]}),
+                json!({"footnotes":[{"notes":[{"text":"legacy","by":""}]}]})),
+            (json!({"board":{"appState":{"zoom":1}},"footnote_boards":{"child":{"board":{"appState":{"zoom":1}}}}}),
+                json!({"board":{"appState":{"zoom":1,"linedPaperMode":null,"linedPitch":null,"linedPitchWide":null,"linedPitchCollege":null,"linedRule":null},"inkPalettes":null},
+                    "footnote_boards":{"child":{"board":{"appState":{"zoom":1,"linedPaperMode":null,"linedPitch":null,"linedPitchWide":null,"linedPitchCollege":null,"linedRule":null},"inkPalettes":null}}}})),
+            (json!({"agent":[{"id":"message"}]}), json!({"agent":[{"id":"message","artifactFootnoteIds":null}]})),
+        ];
+        for (missing, empty) in cases {
+            assert_eq!(normalize_record(&empty).unwrap(), normalize_record(&missing).unwrap());
+            assert_eq!(record_hash(&empty).unwrap(), record_hash(&missing).unwrap());
+            assert_eq!(crate::pads::snapshot_copies::normalized_payload(&empty).unwrap(),
+                crate::pads::snapshot_copies::normalized_payload(&missing).unwrap());
+        }
+        for populated in [json!({"label":"Named"}), json!({"footnotes":[{"query":"search"}]}),
+            json!({"footnotes":[{"color":"#123456","palette":["#123456","#abcdef"]}]}),
+            json!({"footnotes":[{"notes":[{"by":"reader"}]}]}),
+            json!({"board":{"appState":{"linedPaperMode":"off","linedRule":"college","linedPitch":28}}}),
+            json!({"board":{"inkPalettes":{"items":[["#123456","#abcdef"]],"index":0}}}),
+            json!({"agent":[{"artifactFootnoteIds":[]}]})] {
+            assert_eq!(normalize_record(&populated).unwrap(), populated);
+        }
+        let unknown = json!({"future":{"label":"","color":"","palette":[],"by":"","artifactFootnoteIds":null,"linedRule":null},
+            "board":{"appState":{"future":null}},"footnotes":[{"by":""}]});
+        assert_eq!(normalize_record(&unknown).unwrap(), unknown);
+    }
+
+    #[test]
+    fn uncaptured_snapshots_and_whole_record_defaults_match_absence() {
+        let missing = json!({"id":"book"});
+        let explicit = json!({"id":"book","footnotes":[],"agent":[],"artifacts":null});
+        assert_eq!(normalize_record(&explicit).unwrap(), missing);
+        assert_eq!(record_hash(&explicit).unwrap(), record_hash(&missing).unwrap());
+        let payload = json!({"name":"Book","board":{"v":1}});
+        let nulls = json!({"name":"Book","board":{"v":1},"source":null,"agent":null,
+            "footnotes":null,"ink":null,"footnoteInk":{"child":null},"artifactBundle":null});
+        crate::pads::validate_snapshot_payload(&nulls).unwrap();
+        assert_eq!(crate::pads::snapshot_copies::normalized_payload(&nulls).unwrap(), payload);
+        for captured in [json!({"source":""}), json!({"agent":[]}), json!({"footnotes":[]}),
+            json!({"ink":[]}), json!({"footnoteInk":{"child":[]}})] {
+            assert_eq!(crate::pads::snapshot_copies::normalized_payload(&captured).unwrap(), captured);
+            assert_ne!(captured, json!({}));
+        }
+        for unknown in [json!({"future":{"artifacts":null,"footnotes":[],"source":null}}),
+            json!({"artifacts":{"v":1,"parent":{"kind":"annotate","id":"book"},"revision":"c1","artifacts":[]}})] {
+            assert_eq!(normalize_record(&unknown).unwrap(), unknown);
+            assert_eq!(crate::pads::snapshot_copies::normalized_payload(&unknown).unwrap(), unknown);
+        }
     }
 
     #[test]

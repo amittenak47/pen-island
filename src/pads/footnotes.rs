@@ -70,22 +70,22 @@ pub struct WorkspaceItem {
 /// under it, the library items it may link, and the kind of document asking.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FootnoteExtras {
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub palette: Vec<String>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub mark_text: String,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub workspace_items: Vec<WorkspaceItem>,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub doc_kind: String,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub focus: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub per_page: Option<u8>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub references: Vec<super::annotation_jobs::JobReference>,
     /// What the reader is reading and how they want the notes shaped.
-    #[serde(default, skip_serializing_if = "super::reading::ReadingStyle::is_empty")]
+    #[serde(default)]
     pub reading: super::reading::ReadingStyle,
 }
 
@@ -116,29 +116,29 @@ pub struct FootnoteSubmission {
     #[serde(default)]
     pub workspace_links: Vec<String>,
     /// The body as labelled fields, when the request names a preset.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub fields: Vec<super::reading::NoteField>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct FootnoteResult {
     pub notes: Vec<String>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub links: Vec<FootnoteLink>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub color: Option<u8>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub marks: Vec<FootnoteMark>,
     /// Resolved from the request, so the device needs nothing else to link them.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub workspace_links: Vec<WorkspaceItem>,
     /// The asking document's kind ("annotate" or "web"), the link's other end.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub link_from: String,
     /// Preset field labels the notes use, in order; each such note opens "**Label:**".
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub fields: Vec<String>,
 }
 
@@ -714,6 +714,17 @@ mod reading_tests {
     use crate::pads::reading::ReadingStyle;
 
     fn field(label: &str, text: &str) -> NoteField { NoteField { label: label.into(), text: text.into() } }
+
+    #[test]
+    fn persisted_empty_request_extras_and_results_are_explicit() {
+        let extras = serde_json::to_value(FootnoteExtras::default()).unwrap();
+        assert_eq!(extras, serde_json::json!({"palette":[], "mark_text":"", "workspace_items":[],
+            "doc_kind":"", "focus":"", "references":[], "reading":{"kind":"", "fields":[], "fill":"", "preset":""}}));
+        assert_eq!(serde_json::to_value(FootnoteResult::default()).unwrap(),
+            serde_json::json!({"notes":[], "links":[], "marks":[], "workspace_links":[], "link_from":"", "fields":[]}));
+        assert_eq!(serde_json::from_value::<FootnoteExtras>(serde_json::json!({})).unwrap(), FootnoteExtras::default());
+        assert_eq!(serde_json::to_value(FootnoteSubmission::default()).unwrap()["fields"], serde_json::json!([]));
+    }
 
     #[test]
     fn a_selection_answer_in_fields_is_folded_against_its_preset() {

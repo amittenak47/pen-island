@@ -47,7 +47,7 @@ function baseElement(skeleton: ConvertSkeletonInput, id: string): Record<string,
     updated: 1,
     link: null,
     locked: skeleton.locked ?? false,
-    customData: skeleton.customData ?? null,
+    customData: skeleton.customData ?? {},
   };
 }
 

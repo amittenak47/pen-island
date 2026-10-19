@@ -147,11 +147,11 @@ function parseContent(value: unknown): ArtifactContent {
 }
 
 /**
- * Absence is legacy, malformed/newer data is NOT an empty catalog. Fail closed
+ * Absence or null is legacy, malformed/newer data is NOT an empty catalog. Fail closed
  * rather than drop an unrecognised row and advertise a successful sync.
  */
 export function parseArtifactCatalog(value: unknown): ArtifactCatalog | undefined {
-  if (value === undefined) return undefined;
+  if (value == null) return undefined;
   if (!record(value) || value.v !== 1 || !identity(value.revision) || !Array.isArray(value.artifacts)) return invalid();
   const parent = parseParent(value.parent);
   if (!parent) return invalid();
@@ -181,9 +181,9 @@ export function parseArtifactCatalog(value: unknown): ArtifactCatalog | undefine
 export function artifactCatalogFields(
   value: unknown,
   parent: ArtifactParent,
-): { artifacts?: ArtifactCatalog } {
+): { artifacts: ArtifactCatalog | null } {
   const artifacts = parseArtifactCatalog(value);
-  if (!artifacts) return {};
+  if (!artifacts) return { artifacts: null };
   if (artifacts.parent.kind !== parent.kind || artifacts.parent.id !== parent.id) {
     throw new Error("Artifact catalog belongs to a different parent; existing content was kept.");
   }
@@ -192,7 +192,7 @@ export function artifactCatalogFields(
 
 /** An older hub can accept the PUT yet silently discard an unknown field. */
 export function requireArtifactCatalogAck(
-  sent: ArtifactCatalog | undefined,
+  sent: ArtifactCatalog | null | undefined,
   received: unknown,
   parent: ArtifactParent,
 ): void {

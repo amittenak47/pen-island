@@ -5,7 +5,7 @@ import { abortTransaction, withTransaction, STORE_BOOK_META, STORE_CONTENT, STOR
   STORE_INK_PAGES, STORE_SYNC_STATE, STORE_SYNC_RECOVERY } from "./idb";
 import { allocateChangeSeqRange, seedSyncState, syncStateKey, type BookIdentity, type BookMeta, type SyncState } from "./syncState";
 import { inkPageKey, inkPageKeyRange, type InkPageRecord } from "./inkPageStore";
-import { notifyBookMetadataChanged, LocalBookConflictError } from "./localBookStore";
+import { canonicalBookMetadata, notifyBookMetadataChanged, LocalBookConflictError } from "./localBookStore";
 import { LOCAL_VIEW_KEYS, recordHash, hashBytes } from "./syncContent";
 import { recordAuthoredExtras } from "./recordAuthoredExtras";
 import { mergeAgentMessages } from "../modes/coachSessions";
@@ -55,7 +55,7 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
   if (!object(payload.board) || payload.board.v !== 1 || !Array.isArray(payload.board.elements)) throw new Error("The saved book is unreadable. Its content was kept.");
   const common = { ...(object(meta.authoredExtras) ? meta.authoredExtras : {}), id,
     board: payload.board, agent: canonicalAgentMessages(Array.isArray(payload.agent) ? payload.agent : []),
-    ...(payload.artifacts !== undefined ? { artifacts: payload.artifacts } : {}) };
+    artifacts: payload.artifacts ?? null };
   if (kind === "whiteboard") return { ...common, title: meta.title, page_count: meta.pageCount, updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
   if (kind === "problem") return { ...common, dataset: meta.dataset, task_id: meta.taskId, updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
   const footnotes = payload.footnotes ?? [];
@@ -70,7 +70,7 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
   }
   return { ...common, name: meta.name, hash: meta.hash, doc_type: meta.docType ?? "markdown",
     ...(meta.localFileHash ? { local_file_hash: meta.localFileHash } : {}),
-    ...(typeof meta.label === "string" && meta.label.trim() ? { label: meta.label } : {}),
+    label: typeof meta.label === "string" && meta.label.trim() ? meta.label : "",
     source: payload.source ?? "", footnotes: canonicalFootnotes(footnotes), footnote_boards: children,
     updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
 }
@@ -190,19 +190,21 @@ export function preserveRecordView(remote: Record<string, unknown>, local: Recor
   return record;
 }
 function localRecordParts(owner: BookIdentity, record: Record<string, unknown>, capture: BookCapture) {
-  const metadata: BookMeta = { ...capture.metadata, kind: owner.kind, id: owner.id, authoredExtras: recordAuthoredExtras(record),
+  const metadata: BookMeta = canonicalBookMetadata({ ...capture.metadata, kind: owner.kind, id: owner.id, authoredExtras: recordAuthoredExtras(record),
     updatedAt: record.updated_at ?? capture.metadata?.updatedAt ?? 0, syncSeq: record.sync_seq ?? capture.metadata?.syncSeq ?? 0,
-    hubAckUpdatedAt: record.updated_at ?? 0, lastSyncedAt: Date.now() };
+    hubAckUpdatedAt: record.updated_at ?? 0, lastSyncedAt: Date.now() });
   if (owner.kind === "annotate") Object.assign(metadata, { name: record.name, hash: record.hash, docType: record.doc_type,
     localFileHash: typeof record.local_file_hash === "string" ? record.local_file_hash : undefined,
-    ...(record.label !== undefined ? { label: record.label } : { label: undefined }) });
+    label: typeof record.label === "string" ? record.label : "" });
   else if (owner.kind === "whiteboard") Object.assign(metadata, { title: record.title, pageCount: record.page_count });
   else Object.assign(metadata, { dataset: record.dataset, taskId: record.task_id });
-  const payload = { ...(capture.payload ?? {}), board: record.board,
+  const payload: Record<string, unknown> = { ...(capture.payload ?? {}), board: record.board,
     agent: mergeAgentMessages(Array.isArray(capture.payload?.agent) ? capture.payload.agent : [], Array.isArray(record.agent) ? record.agent : []),
     ...(record.source !== undefined ? { source: record.source } : {}),
     ...(record.footnotes !== undefined ? { footnotes: record.footnotes } : {}),
-    ...(record.artifacts !== undefined ? { artifacts: record.artifacts } : {}) };
+    artifacts: record.artifacts ?? null };
+  if (Array.isArray(payload.footnotes)) payload.footnotes = canonicalFootnotes(payload.footnotes);
+  if (owner.kind === "annotate" && metadata.docType === "web") payload.captures ??= [];
   return { metadata, payload };
 }
 
@@ -235,7 +237,7 @@ export async function acknowledgeBook(capture: BookCapture, attempt: NonNullable
             // acknowledge edits made after that deletion was submitted.
             next.bootstrap = false;
             const meta = tx.objectStore(STORE_BOOK_META).get(syncStateKey(capture.kind, capture.id));
-            meta.onsuccess = () => { if (meta.result) tx.objectStore(STORE_BOOK_META).put({ ...meta.result, deleteAcked: true }, syncStateKey(capture.kind, capture.id)); };
+            meta.onsuccess = () => { if (meta.result) tx.objectStore(STORE_BOOK_META).put(canonicalBookMetadata({ ...meta.result, deleteAcked: true }), syncStateKey(capture.kind, capture.id)); };
           }
         }
         if (current.lastAttempt?.uploadId === attempt.uploadId) next.lastAttempt = null;
@@ -247,7 +249,7 @@ export async function acknowledgeBook(capture: BookCapture, attempt: NonNullable
           const page = tx.objectStore(STORE_INK_PAGES).get(key);
           page.onsuccess = () => {
             const row = page.result as InkPageRecord | undefined;
-            if (row && accepted.rev >= (row.syncedRev ?? 0) && submitted.capturedSeq >= (row.syncedChangeSeq ?? 0)) tx.objectStore(STORE_INK_PAGES).put({ ...row,
+            if (row && accepted.rev >= (row.syncedRev ?? 0) && submitted.capturedSeq >= (row.syncedChangeSeq ?? 0)) tx.objectStore(STORE_INK_PAGES).put({ ...row, layoutPending: row.layoutPending ?? false,
               syncedRev: accepted.rev, baseWireHash: accepted.hash, baseLocalHash: submitted.localHash,
               syncedChangeSeq: Math.max(row.syncedChangeSeq ?? 0, submitted.capturedSeq), bootstrap: false,
               dirty: (row.changeSeq ?? 1) > Math.max(row.syncedChangeSeq ?? 0, submitted.capturedSeq) }, key);
@@ -326,12 +328,12 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
                 }
               }
               if (prepared.settleDelete && capture.metadata) {
-                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deleteAcked: true }, syncStateKey(capture.kind, capture.id));
+                tx.objectStore(STORE_BOOK_META).put(canonicalBookMetadata({ ...capture.metadata, deleteAcked: true }), syncStateKey(capture.kind, capture.id));
               }
               if (prepared.trashFromHub && capture.metadata) {
                 const now = Date.now();
-                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deletedAt: now, deleteAcked: true,
-                  deleteFollowed: prepared.trashFromHub.followed, lastTouch: now }, syncStateKey(capture.kind, capture.id));
+                tx.objectStore(STORE_BOOK_META).put(canonicalBookMetadata({ ...capture.metadata, deletedAt: now, deleteAcked: true,
+                  deleteFollowed: prepared.trashFromHub.followed, lastTouch: now }), syncStateKey(capture.kind, capture.id));
               }
               if (prepared.replacePages) for (const row of capture.pages) {
                 if (!prepared.pages.some(page => page.row.docKey === row.docKey && page.row.pageId === row.pageId)) {
@@ -340,7 +342,7 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
               }
               for (let index = 0; index < prepared.pages.length; index++) {
                 const page = prepared.pages[index]!, seq = first + index + 1;
-                tx.objectStore(STORE_INK_PAGES).put({ ...page.row, changeSeq: seq,
+                tx.objectStore(STORE_INK_PAGES).put({ ...page.row, layoutPending: page.row.layoutPending ?? false, changeSeq: seq,
                   syncedChangeSeq: prepared.authored ? 0 : seq, syncedRev: page.remote.rev,
                   baseWireHash: page.remote.hash, baseLocalHash: page.localHash,
                   bootstrap: false, dirty: prepared.authored === true }, inkPageKey(page.row.docKey, page.row.pageId));

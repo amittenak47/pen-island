@@ -17,9 +17,9 @@ export async function reconcileArtifactConflict(client: LcClient, parent: Artifa
 }
 
 /** Stage copies without publishing: callers can commit a whole parent atomically. */
-export async function prepareArtifactConflict(client: LcClient, parent: ArtifactParent, local: ArtifactCatalog | undefined, rawRemote: unknown, preference: "local" | "server"): Promise<ArtifactCatalog | undefined> {
+export async function prepareArtifactConflict(client: LcClient, parent: ArtifactParent, local: ArtifactCatalog | null | undefined, rawRemote: unknown, preference: "local" | "server"): Promise<ArtifactCatalog | undefined> {
   const remote = artifactCatalogFields(rawRemote, parent).artifacts;
-  if (!remote) return local;
+  if (!remote) return local ?? undefined;
   if (local?.revision === remote.revision && JSON.stringify(local) === JSON.stringify(remote)) return local;
   await downloadArtifactAssets(client, remote);
   const entries = new Map((local?.artifacts ?? []).map(item => [item.id, item]));

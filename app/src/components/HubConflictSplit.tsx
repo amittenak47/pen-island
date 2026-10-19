@@ -128,7 +128,7 @@ function unlistedFieldsMatch(
   const same = (x: unknown, y: unknown) => JSON.stringify(x ?? null) === JSON.stringify(y ?? null);
   return (
     a.name === b.name &&
-    (a.label ?? null) === (b.label ?? null) &&
+    (a.label || null) === (b.label || null) &&
     a.hash === b.hash &&
     a.doc_type === b.doc_type &&
     a.source === b.source &&

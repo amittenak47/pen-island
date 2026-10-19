@@ -195,7 +195,7 @@ describe("PDF ink through atomic two-device sync", () => {
     savePdfPageSizes(hash, pdfSizes);
     expect(await localizePendingPdfInk(owner.id)).toBe(1);
     const converted = (await getInkPageRecord(docKey, pageId))!;
-    expect(converted.layoutPending).toBeUndefined();
+    expect(converted.layoutPending).toBe(false);
     expect((await readPage()).layout).toEqual(desktopLayout);
     expectMarks(decodeInkOps(await readPage()), desktopLayout, [101, 102]);
     expect(await localizePendingPdfInk(owner.id)).toBe(0);

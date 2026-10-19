@@ -368,7 +368,7 @@ export function ArtifactPicker({
       const board = {
         v: 1 as const,
         elements: convertToExcalidrawElements(nextKind === "whiteboard" ? buildWhiteboardTemplate(1, isDarkTheme(themeId)) : buildAnnotateTemplate(1600, isDarkTheme(themeId))),
-        appState: { scrollX: 0, scrollY: 0, zoom: 1 },
+        appState: { scrollX: 0, scrollY: 0, zoom: 1, linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null }, inkPalettes: null,
       };
       const ref = await createArtifact(parent, name, filing(), nextKind === "whiteboard"
         ? { kind: nextKind, value: { board, pageCount: 1, programs: [], ink: new Map() } }
@@ -395,7 +395,7 @@ export function ArtifactPicker({
     const captured = source === "files" ? await captureLibraryReference(id, page) : await capturePage?.(id, page);
     if (!captured) throw new Error("The selected page is no longer available.");
     const board = { v: 1 as const, elements: convertToExcalidrawElements(buildAnnotateTemplate(1600, isDarkTheme(themeId))),
-      appState: { scrollX: 0, scrollY: 0, zoom: 1 } };
+      appState: { scrollX: 0, scrollY: 0, zoom: 1, linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null }, inkPalettes: null };
     const ref = await createArtifact(parent, captured.title, filing(), { kind: captured.kind, value: referenceSnapshot(captured, board) });
     await onAttach(ref, filing());
     requestClose();

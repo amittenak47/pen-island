@@ -108,6 +108,7 @@ import {
   currentInkPalette,
   cycleInkPalettePrev,
   normalizeInkPaletteHistory,
+  normalizePalette,
   seedInkPaletteHistory,
   setInkPaletteSlot,
   type InkPaletteHistory,
@@ -311,6 +312,7 @@ import {
   activeLinedPitch,
   ensureLinedPitchPair,
   isLinedPaperMode,
+  isLinedRuling,
   linedFirstRuleScene,
   linedPaperCssGap,
   linedPaperLabel,
@@ -1657,12 +1659,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     seedInkPaletteHistory(themeId),
   );
   const inkPaletteHistoryRef = useLatest(inkPaletteHistory);
+  const inkPaletteAuthoredRef = useRef(false);
   const inkPalette = useMemo(
     () => currentInkPalette(inkPaletteHistory),
     [inkPaletteHistory],
   );
   const applyInkPaletteHistory = useCallback(
-    (next: InkPaletteHistory) => {
+    (next: InkPaletteHistory, authored = true) => {
+      inkPaletteAuthoredRef.current = authored;
       setInkPaletteHistory(next);
       const palette = currentInkPalette(next);
       const ink = resolveInkColor(themeId, inkColorRef.current, palette);
@@ -1710,6 +1714,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   useEffect(() => () => resetInkPaletteBridge(filmScope), [filmScope]);
   const [linedPaperMode, setLinedPaperMode] = useState<LinedPaperMode>(loadLinedPaperMode);
   const linedPaperRef = useLatest(linedPaperMode);
+  const linedPaperAuthoredRef = useRef(false);
+  const linedRuleAuthoredRef = useRef(false);
   /**
    * Both rulings from the write-time zoom. Overlay on or off, resize and
    * reload scale this pair — they do not recapture 36px/28px on this screen.
@@ -1717,6 +1723,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const linedPitchPairRef = useRef<LinedPitchPair | null>(null);
   const linedFirstFitZoomRef = useRef<number | null>(null);
   const linedStoredPitchRef = useRef(false);
+  /** Keep missing pitches unset when restore derives a pair from device defaults. */
+  const linedSavedPitchesRef = useRef<{ linedPitch: number | null; linedPitchWide: number | null; linedPitchCollege: number | null }>({
+    linedPitch: null, linedPitchWide: null, linedPitchCollege: null,
+  });
   /** Which original paper the ink was written to (or picked as the better fit). */
   const linedRuleRef = useRef<LinedRuling | null>(null);
   /** Active scene pitch — the chosen ruling from the pair. */
@@ -9708,7 +9718,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         );
         templateRef.current = next;
         rasterInkRef.current?.clear();
-        applyInkPaletteHistoryRef.current(seedInkPaletteHistory(themeId));
+        applyInkPaletteHistoryRef.current(seedInkPaletteHistory(themeId), false);
         apiRef.current?.updateScene({
           elements: next as unknown[],
           captureUpdate: CaptureUpdateAction.NEVER,
@@ -10338,7 +10348,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         const inkC = assemble
           ? (rasterInkRef.current?.assembleEncoded() ?? encodeInkOps([]))
           : { v: 2 as const, ops: [] };
-        const pageIds = rasterInkRef.current?.inkPageIds() ?? [];
+        const pageIds = rasterInkRef.current?.inkPageIds();
+        const captureRuling = linedRuleAuthoredRef.current || (!linedStoredPitchRef.current && rasterInkRef.current?.hasInk());
         const rawFiles = (api?.getFiles() ?? {}) as Record<string, BoardBinaryFile>;
         const files: Record<string, BoardBinaryFile> = {};
         for (const [id, file] of Object.entries(rawFiles)) {
@@ -10357,15 +10368,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
             scrollX: state.scrollX ?? 0,
             scrollY: state.scrollY ?? 0,
             zoom: state.zoom?.value ?? 1,
-            linedPaperMode: linedPaperRef.current,
-            ...(linedPitchRef.current > 0 ? { linedPitch: storedLinedPitch(linedPitchRef.current) } : {}),
-            ...(linedPitchPairRef.current
-              ? {
-                  linedPitchWide: storedLinedPitch(linedPitchPairRef.current.wide),
-                  linedPitchCollege: storedLinedPitch(linedPitchPairRef.current.college),
-                }
-              : {}),
-            ...(linedRuleRef.current ? { linedRule: linedRuleRef.current } : {}),
+            linedPaperMode: linedPaperAuthoredRef.current ? linedPaperRef.current : null,
+            linedPitch: captureRuling && linedPitchRef.current > 0 ? storedLinedPitch(linedPitchRef.current) : linedSavedPitchesRef.current.linedPitch,
+            linedPitchWide: captureRuling && linedPitchPairRef.current ? storedLinedPitch(linedPitchPairRef.current.wide) : linedSavedPitchesRef.current.linedPitchWide,
+            linedPitchCollege: captureRuling && linedPitchPairRef.current ? storedLinedPitch(linedPitchPairRef.current.college) : linedSavedPitchesRef.current.linedPitchCollege,
+            linedRule: linedRuleAuthoredRef.current ? linedRuleRef.current : null,
             ...(pdfDocumentRef.current ? { pdfPage: (() => {
               const origin = pageBoundsRef.current?.minY ?? 0;
               const frames = offsetPageFrames(peekPdfReadingFrames(filmScope), origin);
@@ -10391,12 +10398,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           // Encoded, not raw — `ink` stays readable forever but is never
           // written again. See `inkCodec`; read it back with `inkOpsFrom`.
           inkC,
-          ...(pageIds.length > 0 ? { inkPages: { v: 1 as const, pageIds } } : {}),
-          inkPalettes: {
+          ...(pageIds !== undefined ? { inkPages: { v: 1 as const, pageIds } } : {}),
+          inkPalettes: inkPaletteAuthoredRef.current ? {
             items: inkPaletteHistoryRef.current.items,
             index: inkPaletteHistoryRef.current.index,
-          },
-          ...(Object.keys(files).length > 0 ? { files } : {}),
+          } : null,
+          files,
         };
       },
       restoreBoard: (nextElements, appState, options) => {
@@ -10444,6 +10451,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         // Also drop tool/selection: a board saved while annotating would restore
         // Select, and finger-scroll dies until the toolbar is toggled.
         const saved = { ...((appState as Record<string, unknown> | undefined) ?? {}) };
+        linedPaperAuthoredRef.current = isLinedPaperMode(saved.linedPaperMode);
+        linedRuleAuthoredRef.current = isLinedRuling(saved.linedRule);
+        for (const key of ["linedPitch", "linedPitchWide", "linedPitchCollege"] as const) {
+          const pitch = saved[key];
+          linedSavedPitchesRef.current[key] = typeof pitch === "number" && Number.isFinite(pitch) && pitch > 0 ? pitch : null;
+        }
         const lined = linedPitchStateFromAppState(appState, linedPaperRef.current);
         linedPitchPairRef.current = lined.pair;
         linedStoredPitchRef.current = lined.pair != null;
@@ -10501,6 +10514,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         }
         applyInkPaletteHistoryRef.current(
           normalizeInkPaletteHistory(options?.inkPalettes, themeId),
+          Array.isArray(options?.inkPalettes?.items) && options.inkPalettes.items.some(palette => normalizePalette(palette)),
         );
         ensureReadingHand();
         requestAnimationFrame(() => {
@@ -11047,12 +11061,14 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                       onClick={() => {
                         const next = nextLinedPaperMode(linedPaperRef.current);
                         linedPaperRef.current = next;
+                        linedPaperAuthoredRef.current = true;
                         linedPaperOnRef.current =
                           next !== "off" && isDrawPageRegion(mobileRegionRef.current);
                         setLinedPaperMode(next);
                         saveLinedPaperMode(next);
                         if (next !== "off") {
                           linedRuleRef.current = next;
+                          linedRuleAuthoredRef.current = true;
                           const live = liveCameraRef.current;
                           const zoom = Math.max(
                             0.05,

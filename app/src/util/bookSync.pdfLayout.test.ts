@@ -110,7 +110,8 @@ it.each(["same-layout", "translated", "pending-layout", "empty", "corrupt"])("st
   expect(result.status).toBe("synced");
   const row = (await getInkPageRecord(`md:${owner.id}`, 50))!, stored = (await encodedFromRecord(row))!;
   expect(row.sum).toEqual({ v: 1, len: row.gz!.byteLength, ...summarizeEncodedInk(stored) });
-  expect(row.layoutPending === true).toBe(mode === "pending-layout");
+  expect(row.layoutPending).toBe(mode === "pending-layout");
+  expect(row.bootstrap).toBe(false);
   expect(row.baseLocalHash).toBe((await validateInk(row.gz!)).wireHash);
   if (mode === "translated") expect(row.baseLocalHash).not.toBe(checked.wireHash);
   const timer = vi.spyOn(globalThis, "setTimeout");

@@ -258,6 +258,24 @@ describe("marks made on a wider copy of the same page", () => {
     } finally { act(() => root.unmount()); }
   });
 
+  it("paints missing and empty footnote and sub-mark themes with the same defaults", () => {
+    const styles = (empty: boolean) => {
+      const inherited = empty ? { color: "", palette: [] } : {};
+      const mark: DocFootnote = { ...REGION_MARK, ...inherited, subMarks: [{ id: "sub", kind: "underline",
+        excerpt: "Contents", start: 0, end: 8, bands: REGION_MARK.bands, ...inherited }] };
+      const { host, root } = mountScaled(0.5, "", [mark]);
+      act(() => window.dispatchEvent(new Event("resize")));
+      const band = host.querySelector<HTMLElement>(".lc-doc-footnote-band");
+      const sub = host.querySelector<HTMLElement>(".lc-doc-submark-paint");
+      expect(band).not.toBeNull();
+      expect(sub).not.toBeNull();
+      const result = [band!.style.cssText, sub!.style.cssText];
+      act(() => root.unmount());
+      return result;
+    };
+    expect(styles(true)).toEqual(styles(false));
+  });
+
   it("preserves the authored bands relative to their page, excluding earlier page gaps", () => {
     const {host,root,setFootnotes} = mountScaled(0.5,"",[REGION_MARK],false,[{pageId:6,minY:4000,maxY:5000}]);
     setFootnotes([{...REGION_MARK}]);

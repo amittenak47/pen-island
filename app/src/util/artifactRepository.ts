@@ -16,7 +16,7 @@ export async function readArtifactCatalog(parent: ArtifactParent): Promise<Artif
   const record = parent.kind === "annotate" ? await getAnnotateDoc(parent.id) :
     parent.kind === "whiteboard" ? await getWhiteboardNotebook(parent.id) : await getProblemBoard(parent.id);
   if (!record || ("deletedAt" in record && record.deletedAt)) throw new Error("The attachment's parent is unavailable or in Trash.");
-  return record.artifacts;
+  return record.artifacts ?? undefined;
 }
 
 export async function mutateArtifacts(parent: ArtifactParent, base: string | null, edit: ArtifactCatalogEdit) {

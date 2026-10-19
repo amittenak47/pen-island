@@ -7,6 +7,7 @@ import { ensureBookReadyForAtomicSync, getCachedBookMeta, hydrateBookMetadata, l
   mutateLocalBook, promoteBookFallbacks, readFallbackContent, refreshBookMetadata, resetLocalBookStoreForTests,
   type FallbackBookEnvelope } from "./localBookStore";
 import { getBookSyncState, seedSyncState } from "./syncState";
+import { getProblemBoard, putProblemBoard } from "./problemBoardStore";
 
 const owner = { kind: "annotate" as const, id: "book" };
 let factory: IDBFactory;
@@ -39,6 +40,27 @@ beforeEach(async () => {
 afterEach(async () => { await closeDbForTests(); resetLocalBookStoreForTests(); vi.unstubAllGlobals(); });
 
 describe("durable fallback and guarded book promotion", () => {
+  it("writes empty authored extras for all book kinds and explicit local flags", async () => {
+    for (const kind of ["annotate", "whiteboard", "problem"] as const) {
+      const identity = { kind, id: kind };
+      await mutateLocalBook(identity, {}, ctx => ctx.setMetadata(identity));
+      const stored = await run(STORE_BOOK_META, "readonly", store => store.get(`${kind}:${kind}`));
+      expect(stored).toMatchObject({ authoredExtras: {} });
+      if (kind === "annotate") expect(stored).toMatchObject({ locked: false, owned: false });
+      if (kind === "whiteboard") expect(stored).toMatchObject({ locked: false, named: false });
+      await mutateLocalBook(identity, {}, ctx => ctx.setMetadata({ ...ctx.metadata!, authoredExtras: { future: 1 }, locked: true }));
+      expect(getCachedBookMeta(kind, kind)).toMatchObject({ authoredExtras: { future: 1 }, locked: true });
+    }
+  });
+  it("writes empty extras in a newly saved problem and preserves authored extras on later saves", async () => {
+    const record = { id: "dataset/task", dataset: "dataset", taskId: "task", updatedAt: 1,
+      board: { v: 1 as const, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } } };
+    await putProblemBoard(record);
+    expect(await getProblemBoard(record.id)).toHaveProperty("authoredExtras", {});
+    await putProblemBoard({ ...record, authoredExtras: { future: true } });
+    await putProblemBoard(record);
+    expect(await getProblemBoard(record.id)).toHaveProperty("authoredExtras", { future: true });
+  });
   it("round-trips payload, canonical metadata, lifecycle and token without IndexedDB", async () => {
     vi.stubGlobal("indexedDB", undefined);
     await mutateLocalBook(owner, {}, ctx => {

@@ -65,7 +65,10 @@ it("transfers retained snapshots with nested events and typed scratch ink withou
   const body = putSnapshotCopy.mock.calls[0]![3];
   const { kind: _kind, key: _key, tier, writtenAt: _writtenAt, snapshotId: _snapshotId, ...payload } = snapshot;
   const expected = { tier, payload: JSON.parse(JSON.stringify(payload)) };
-  expect(body.payload).toStrictEqual(expected.payload);
+  // What was not captured is written as null, never left out; the hash still
+  // equals the older form that omitted those fields.
+  expect(body.payload).toStrictEqual({ ...expected.payload, artifactBundle: null, footnotes: null, ink: null,
+    footnoteInk: { scratch: null } });
   expect(putSnapshotCopy.mock.calls[0]![2]).toBe(await snapshotCopyHash(expected));
   expect(snapshot).toStrictEqual(saved);
 });

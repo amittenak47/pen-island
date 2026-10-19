@@ -464,9 +464,9 @@ export function FootnoteOverview({
   const [draft, setDraft] = useState("");
   const [localMiniNotes, setLocalMiniNotes] = useState<MiniNoteRef[]>([]);
   const palette =
-    normalizePalette(displayTheme?.palette ?? footnote.palette) ?? paletteForMarkIndex((footnoteNumber ?? 1) - 1);
+    normalizePalette(displayTheme?.palette) ?? normalizePalette(footnote.palette) ?? paletteForMarkIndex((footnoteNumber ?? 1) - 1);
   const handedness = loadInkHandedness();
-  const markColor = displayTheme?.color ?? footnote.color ?? palette[0] ?? "#0d9488";
+  const markColor = displayTheme?.color || footnote.color || palette[0] || "#0d9488";
   const userLinks = footnote.userLinks ?? [];
   const notes = footnote.notes ?? [];
   const whiteboards = footnote.whiteboards ?? [];
@@ -499,10 +499,10 @@ export function FootnoteOverview({
   // Underline or highlight armed: the wheel paints the new sub-mark, not the footnote.
   const underlineArmed = subMarkMode === "underline" || subMarkMode === "highlight";
   const wheelPalette = underlineArmed
-    ? (subMarkPaintTheme?.palette ?? stepFallbackPalette(palette, 1))
+    ? (normalizePalette(subMarkPaintTheme?.palette) ?? stepFallbackPalette(palette, 1))
     : palette;
   const wheelColor = underlineArmed
-    ? (subMarkPaintTheme?.color ?? wheelPalette[0] ?? "#0d9488")
+    ? (subMarkPaintTheme?.color || wheelPalette[0] || "#0d9488")
     : markColor;
   const persistWheel = (nextPalette: string[], nextColor: string) => {
     if (underlineArmed) {
@@ -849,8 +849,8 @@ export function FootnoteOverview({
   const selectSubMark = (mark: (typeof subMarks)[number]) => {
     if (!underlineArmed) return;
     const nextPalette =
-      normalizePalette(mark.palette) ?? subMarkPaintTheme?.palette ?? stepFallbackPalette(palette, 1);
-    const nextColor = mark.color ?? nextPalette[0] ?? "#0d9488";
+      normalizePalette(mark.palette) ?? normalizePalette(subMarkPaintTheme?.palette) ?? stepFallbackPalette(palette, 1);
+    const nextColor = mark.color || nextPalette[0] || "#0d9488";
     onActiveSubMarkIdChange?.(mark.id);
     onSubMarkPaintTheme?.({ palette: nextPalette, color: nextColor });
   };

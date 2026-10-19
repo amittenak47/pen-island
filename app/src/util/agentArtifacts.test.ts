@@ -15,6 +15,8 @@ describe("agent-owned output", () => {
       const snapshot = artifactProposalSnapshot({ kind, title: "Answer", source: "explanation" }, false);
       expect(snapshot.value).toMatchObject({ owned: true, source: "explanation", docType: kind });
       expect(snapshot.value.board).not.toHaveProperty("inkC");
+      expect(snapshot.value.board).toMatchObject({ appState: { scrollX: 0, scrollY: 0, zoom: 1,
+        linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null }, inkPalettes: null });
       expect(snapshot.value.ink.size).toBe(0);
     }
   });

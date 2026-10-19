@@ -23,7 +23,7 @@ export function artifactProposalSnapshot(proposal: AgentArtifactProposal, dark: 
   const rawPrograms = proposal.programs ?? [];
   if (typeof source !== "string" || new TextEncoder().encode(source).length > 512_000 || !Array.isArray(rawPrograms) || rawPrograms.length > 8) throw new Error("Attachment proposal exceeds its limit.");
   if (proposal.kind !== "whiteboard" && rawPrograms.length || proposal.kind === "whiteboard" && source.length) throw new Error("Attachment content does not match its kind.");
-  const board = { v: 1 as const, elements: convertToExcalidrawElements(proposal.kind === "whiteboard" ? buildWhiteboardTemplate(1, dark) : buildAnnotateTemplate(1600, dark)) as unknown[], appState: { scrollX: 0, scrollY: 0, zoom: 1 } };
+  const board = { v: 1 as const, elements: convertToExcalidrawElements(proposal.kind === "whiteboard" ? buildWhiteboardTemplate(1, dark) : buildAnnotateTemplate(1600, dark)) as unknown[], appState: { scrollX: 0, scrollY: 0, zoom: 1, linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null }, inkPalettes: null };
   if (proposal.kind !== "whiteboard") return { kind: proposal.kind, value: { owned: true, docType: proposal.kind,
     name: proposal.title, source, board, footnotes: [], agent: proposal.messages ?? [], ink: new Map() } };
   const programs = rawPrograms.map(program => { const parsed = parseVizProgram(program); if (!parsed) throw new Error("Invalid attachment drawing."); return parsed; });
