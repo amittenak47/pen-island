@@ -78,7 +78,7 @@ it("shows the tab's progress ring with the number of books synced so far", async
 it("a clean finish says synced and closes like the tab's notification", async () => {
   vi.useFakeTimers(); const finish = holdPass(); mount(); click(trigger());
   complete([row("good", "synced")]); await act(async () => { finish(); });
-  expect(pop()!.querySelector(".lc-doc-sync-line")!.textContent).toBe("synced");
+  expect(pop()!.querySelector(".lc-doc-sync-line")!.textContent).toBe("Synced");
   act(() => { vi.advanceTimersByTime(2_600); }); expect(pop()).toBeNull();
 });
 

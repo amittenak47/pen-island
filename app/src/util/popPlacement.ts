@@ -5,6 +5,11 @@
  * run past the right side of the window, its right edge on the button's right
  * instead (a button near the right edge, like Home's sync). Above the button
  * when there is no room below. Always at least `margin` inside the window.
+ *
+ * It never covers its button: when it does not fit on either side it takes
+ * the roomier one, and `maxHeight` is the room there (the notification
+ * scrolls inside it). A kept side is kept the same way, so a list opening
+ * inside an open notification grows into the room it has, not off screen.
  */
 export interface PopRect { top: number; left: number; bottom: number; right: number }
 
@@ -18,7 +23,7 @@ export function popPlacement(
   prefer: "below" | "above" = "below",
   /** Keep this side (a notification that is already open must not flip when it resizes). */
   side?: "below" | "above",
-): { top: number; left: number; above: boolean } {
+): { top: number; left: number; above: boolean; maxHeight: number } {
   const maxLeft = Math.max(margin, viewport.width - pop.width - margin);
   const leftAligned = button.left;
   const rightAligned = button.right - pop.width;
@@ -27,7 +32,12 @@ export function popPlacement(
   const fitsBelow = below + pop.height + margin <= viewport.height;
   const above = button.top - gap - pop.height;
   const fitsAbove = above >= margin;
-  const useAbove = side ? side === "above" : prefer === "above" ? fitsAbove || !fitsBelow : !fitsBelow && fitsAbove;
-  const top = useAbove ? Math.max(margin, above) : Math.max(margin, Math.min(below, viewport.height - pop.height - margin));
-  return { top, left, above: useAbove };
+  const roomAbove = button.top - gap - margin;
+  const roomBelow = viewport.height - below - margin;
+  const useAbove = side ? side === "above"
+    : !fitsAbove && !fitsBelow ? roomAbove > roomBelow
+    : prefer === "above" ? fitsAbove : !fitsBelow;
+  const maxHeight = Math.max(0, useAbove ? roomAbove : roomBelow);
+  const top = useAbove ? button.top - gap - Math.min(pop.height, maxHeight) : below;
+  return { top, left, above: useAbove, maxHeight };
 }

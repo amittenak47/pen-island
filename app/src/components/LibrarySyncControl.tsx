@@ -98,7 +98,7 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
     : activity.busy ? "Sync in progress"
     : error ? error
     : failures.length && result ? librarySyncSummary(result)
-    : result ? "synced" : "not synced";
+    : result ? "Synced" : "Not synced";
   // Hover (mouse or pen) shows the status without syncing; touch has no hover.
   const visible = open || hover;
   const enter = (event: { pointerType: string }) => {
@@ -107,7 +107,6 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
   };
   const leave = () => { window.clearTimeout(leaveTimer.current); leaveTimer.current = window.setTimeout(() => setHover(false), HOVER_LEAVE_MS); };
   useEffect(() => () => window.clearTimeout(leaveTimer.current), []);
-  // Above the icon: below it the notification would sit over the Start tiles.
   /*
    * The card slides between widths (its text changes from "Syncing 6 of 20
    * books" to a summary, groups fold): measure the new natural width, start
@@ -133,7 +132,10 @@ export function LibrarySyncControl({ client, canOpen, onOpen }: {
     el.style.transition = "width 200ms cubic-bezier(0.22, 1, 0.36, 1)";
     el.style.width = `${target}px`;
   }, [presence.mounted, presence.leaving, line, books.length, groupOpen, syncing]);
-  const placed = usePopPlacement(trigger, pop, presence.mounted, `${line}|${books.length}`, "above");
+  // Under the icon, like the tab's Sync. Above it there is little room (the
+  // Start row is near the top), so a list opening ran off the top of the
+  // window and the card jumped once anything re-placed it.
+  const placed = usePopPlacement(trigger, pop, presence.mounted, `${line}|${books.length}`);
   const status = syncing ? `syncing, ${synced} synced so far` : failures.length && result ? librarySyncSummary({ time: 0, books: failures }) : result ? "all books synced" : "not synced yet";
 
   return <>
