@@ -68,6 +68,12 @@ export async function assertBytesUnambiguous(hash:string):Promise<void> {
     throw new MigrationError(`Multiple retained byte copies claim ${hash}. Resolve the collision before reading or publishing this document.`);
 }
 
+function identityOf(copy:RecoveryCopy):RecoveryCopy {
+  const {trashedAt:_trashed,...rest}=copy;
+  const {retainedAt:_kept,...provenance}=copy.provenance??{};
+  return {...rest,provenance};
+}
+
 /** Immutable insertion is useful to guarded conflict publication as well. */
 export async function retainRecoveryCopy(copy:RecoveryCopy, requiredByteHash?:string):Promise<void> {
   await withTransaction<void>(requiredByteHash ? [STORE_SYNC_RECOVERY,STORE_BYTES] : [STORE_SYNC_RECOVERY],"readwrite",(tx,setResult)=>{
@@ -80,7 +86,8 @@ export async function retainRecoveryCopy(copy:RecoveryCopy, requiredByteHash?:st
         abortTransaction(tx,new MigrationError("The current document's file is missing; a complete backup cannot be kept.")); return;
       }
       if(request.result===undefined)store.add(copy,copy.id);
-      else if(!equalStored(request.result,copy))abortTransaction(tx,new MigrationError("A retained recovery copy changed identity; the original copy was kept."));
+      // Being in the trash, or when it was kept, is not part of what the copy is.
+      else if(!equalStored(identityOf(request.result as RecoveryCopy),identityOf(copy)))abortTransaction(tx,new MigrationError("A retained recovery copy changed identity; the original copy was kept."));
       setResult(undefined);
     };
     request.onsuccess=ready;

@@ -93,7 +93,7 @@ export async function restoreRetainedRecord(id: string, options: RestorePadOptio
     // Preserve the losing local alternative before replacing any active reference.
     if (ctx.content || ctx.metadata || ink.length || Object.keys(children).length) {
       const retained: RecoveryCopy = { id: `restore-alternative:${newBookToken()}`, type: "conflict", ...{ kind: owner.kind, bookId: owner.id },
-        provenance: { source: "explicit-recovery-restore", recoveryId: id },
+        provenance: { source: "explicit-recovery-restore", recoveryId: id, retainedAt: Date.now() },
         content: { metadata: ctx.metadata, payload: ctx.content, children, ink } };
       ctx.tx.objectStore(STORE_SYNC_RECOVERY).add(retained, retained.id);
     }
