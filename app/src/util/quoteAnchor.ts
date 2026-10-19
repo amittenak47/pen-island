@@ -41,8 +41,8 @@ export function quoteFromStream(
   const suffix = text.slice(end, Math.min(text.length, end + context));
   return {
     exact,
-    ...(prefix ? { prefix } : {}),
-    ...(suffix ? { suffix } : {}),
+    prefix,
+    suffix,
   };
 }
 

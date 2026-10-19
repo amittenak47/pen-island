@@ -12,12 +12,13 @@
  *   before its answer (by role), then by id.
  * - A message's fields are written in name order.
  * - Empty is written, never left out: the on/off flags as `false`, the lists
- *   as `[]`. These are exactly the fields the sync fingerprint already treats
+ *   as `[]`, the optional text as `""`, inherited artifact footnotes as `null`.
+ *   These are exactly the fields the sync fingerprint treats
  *   as "empty equals absent" (see syncContent.ts), so writing them changes no
  *   fingerprint. Values whose presence means something (a deletion time, a
  *   reply target) stay absent until they are set.
  */
-import { FOOTNOTE_EMPTY_LIST_KEYS, MESSAGE_EMPTY_LIST_KEYS, MESSAGE_FALSE_DEFAULT_KEYS } from "./syncContent";
+import { FOOTNOTE_EMPTY_LIST_KEYS, MESSAGE_EMPTY_LIST_KEYS, MESSAGE_EMPTY_STRING_KEYS, MESSAGE_FALSE_DEFAULT_KEYS } from "./syncContent";
 
 const isRow = (value: unknown): value is Record<string, unknown> =>
   !!value && typeof value === "object" && !Array.isArray(value);
@@ -29,6 +30,16 @@ function withEmptyLists<T extends Record<string, unknown>>(row: T, keys: readonl
     if (row[key] !== undefined && row[key] !== null) continue;
     next ??= { ...row };
     next[key] = [];
+  }
+  return (next ?? row) as T;
+}
+
+function withEmptyStrings<T extends Record<string, unknown>>(row: T, keys: readonly string[]): T {
+  let next: Record<string, unknown> | null = null;
+  for (const key of keys) {
+    if (row[key] !== undefined && row[key] !== null) continue;
+    next ??= { ...row };
+    next[key] = "";
   }
   return (next ?? row) as T;
 }
@@ -64,7 +75,8 @@ function idOf(value: unknown): string {
 }
 
 function canonicalMessage(message: Record<string, unknown>): Record<string, unknown> {
-  let row = withEmptyLists(message, MESSAGE_EMPTY_LIST_KEYS);
+  let row = withEmptyStrings(withEmptyLists(message, MESSAGE_EMPTY_LIST_KEYS), MESSAGE_EMPTY_STRING_KEYS);
+  if (row.artifactFootnoteIds === undefined) row = { ...row, artifactFootnoteIds: null };
   for (const flag of MESSAGE_FALSE_DEFAULT_KEYS) {
     if (typeof row[flag] === "boolean") continue;
     if (row === message) row = { ...message };
@@ -94,14 +106,33 @@ export function canonicalAgentMessages<T = unknown>(messages: readonly T[]): T[]
     .map(({ row }) => row);
 }
 
-/** Footnotes keep their order; their lists, and their notes' and marks' lists, are written as `[]`. */
+/** Legacy messages inherit the current attachments; an explicit list stays fixed. */
+export function artifactFootnoteIdsForMessage(
+  message: { artifactFootnoteIds?: string[] | null } | undefined,
+  attachedFootnoteIds: string[],
+): string[] {
+  return message?.artifactFootnoteIds ?? attachedFootnoteIds;
+}
+
+/** Footnotes keep their order; empty lists and optional text are written explicitly. */
 export function canonicalFootnotes<T = unknown>(footnotes: readonly T[]): T[] {
   return footnotes.map((footnote) => {
     if (!isRow(footnote)) return footnote;
     let row: Record<string, unknown> = withEmptyLists(footnote as Record<string, unknown>, FOOTNOTE_EMPTY_LIST_KEYS);
-    const notes = mapRows(row.notes, (note) => withEmptyLists(note, ["images"]));
-    const marks = mapRows(row.subMarks, (mark) => withEmptyLists(mark, ["bands"]));
+    row = withEmptyStrings(withEmptyLists(row, ["palette"]), ["title", "blockText", "query", "url", "excerpt", "color"]);
+    const anchor = (row: Record<string, unknown>) => {
+      if (!isRow(row.anchor) || row.anchor.kind === "region") return row;
+      const fixed = withEmptyStrings(row.anchor, ["prefix", "suffix"]);
+      return fixed === row.anchor ? row : { ...row, anchor: fixed };
+    };
+    row = anchor(row);
+    const notes = mapRows(row.notes, (note) => withEmptyStrings(withEmptyLists(note, ["images"]), ["field", "by"]));
+    const marks = mapRows(row.subMarks, (mark) => anchor(withEmptyStrings(withEmptyLists(mark, ["bands", "palette"]), ["color", "excerpt"])));
     if (notes !== row.notes || marks !== row.subMarks) row = { ...row, notes, subMarks: marks };
+    for (const key of ["userLinks", "whiteboards"]) {
+      const entries = mapRows(row[key], (entry) => withEmptyStrings(entry, ["title"]));
+      if (entries !== row[key]) row = { ...row, [key]: entries };
+    }
     return row as unknown as T;
   });
 }

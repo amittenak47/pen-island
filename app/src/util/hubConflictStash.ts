@@ -755,7 +755,7 @@ export function combineFootnotePair(
   const noteId = local.id;
   const shell = parent.local ? local : incoming;
   const quotesMatch =
-    (local.blockText ?? local.excerpt) === (incoming.blockText ?? incoming.excerpt);
+    (local.blockText || local.excerpt) === (incoming.blockText || incoming.excerpt);
   const underlineParent =
     parent.local && parent.server && !quotesMatch
       ? { local: true, server: false }

@@ -92,7 +92,7 @@ export function resolveWikiRef(ref: WikiRef, index: WikiIndex): NodeRef {
   }
   const wanted = ref.target.toLowerCase();
   const byLabel = index.annotate.find((entry) => entry.label?.trim().toLowerCase() === wanted);
-  if (byLabel) return { type: "annotate", id: byLabel.id, title: byLabel.label ?? byLabel.name };
+  if (byLabel) return { type: "annotate", id: byLabel.id, title: byLabel.label || byLabel.name };
   const byName = index.annotate.find(
     (entry) =>
       entry.name.toLowerCase() === wanted || baseName(entry.name).toLowerCase() === wanted,

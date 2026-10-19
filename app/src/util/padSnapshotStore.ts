@@ -11,7 +11,7 @@ import type { BoardBlob } from "../canvas/BoardHandle";
 import { run, STORE_SNAPSHOTS, withStore } from "./idb";
 import type { DocFootnote } from "./docFootnotes";
 import type { Edge } from "./noteLinks";
-import type { SnapshotInkPage } from "./padSnapshotPayload";
+import { snapshotFootnoteInk, type SnapshotInkPage } from "./padSnapshotPayload";
 import { parseArtifactSnapshotBundle, type ArtifactSnapshotBundle } from "./artifactSnapshot";
 import { newBookToken } from "./bookCoordinator";
 
@@ -31,22 +31,22 @@ export const PAD_SNAPSHOT_TIERS: ReadonlyArray<{
 export interface PadSnapshot {
   /** Stable identity for an additional recovered copy of a rolling tier. */
   snapshotId?: string;
-  artifactBundle?: ArtifactSnapshotBundle;
+  artifactBundle?: ArtifactSnapshotBundle | null;
   kind: PadSnapshotKind;
   key: string;
   tier: PadSnapshotTier;
   writtenAt: number;
   name: string;
   board: BoardBlob;
-  footnotes?: DocFootnote[];
-  agent?: unknown[];
+  footnotes?: DocFootnote[] | null;
+  agent?: unknown[] | null;
   pageCount?: number;
   /** Per-page gzip ink. The board blob no longer carries the same strokes. */
-  ink?: SnapshotInkPage[];
+  ink?: SnapshotInkPage[] | null;
   /** Graph edges that name this pad. Apply is idempotent on edge id. */
   edges?: Edge[];
   /** Source text; live row has it, snapshots did not. */
-  source?: string;
+  source?: string | null;
   /** Footnote-owned scratch boards, keyed by whiteboard id. */
   footnoteBoards?: Record<string, { board: BoardBlob; pageCount: number }>;
   /**
@@ -57,7 +57,7 @@ export interface PadSnapshot {
    * restore the boards as blank paper. Same shape as `ink` above, once per
    * board — a restore is a replace, and this is what it replaces them with.
    */
-  footnoteInk?: Record<string, SnapshotInkPage[]>;
+  footnoteInk?: Record<string, SnapshotInkPage[] | null>;
 }
 
 export type PadSnapshotExtras = Pick<
@@ -160,12 +160,13 @@ export async function recordRollingSnapshots(input: {
   const extra: PadSnapshotExtras = input.extras
     ? await input.extras()
     : {
-        ...(input.ink && input.ink.length > 0 ? { ink: input.ink } : {}),
-        ...(input.edges && input.edges.length > 0 ? { edges: input.edges } : {}),
+        ink: input.ink ?? null,
+        ...(input.edges !== undefined ? { edges: input.edges } : {}),
         ...(typeof input.source === "string" ? { source: input.source } : {}),
       };
   const board = boardWithoutInk(input.board);
   const artifactBundle = parseArtifactSnapshotBundle(extra.artifactBundle, { kind: input.kind, id: key });
+  const footnoteInk = snapshotFootnoteInk(extra.footnoteBoards, extra.footnoteInk);
   const written: PadSnapshot[] = [];
   for (const tierId of due) {
     const id = recordKey(input.kind, key, tierId);
@@ -176,18 +177,18 @@ export async function recordRollingSnapshots(input: {
       writtenAt: now,
       name: input.name,
       board,
-      ...(artifactBundle ? { artifactBundle } : {}),
-      ...(input.footnotes ? { footnotes: input.footnotes } : {}),
-      ...(input.agent ? { agent: input.agent } : {}),
+      artifactBundle: artifactBundle ?? null,
+      footnotes: input.footnotes ?? null,
+      agent: input.agent ?? null,
       ...(input.pageCount != null ? { pageCount: input.pageCount } : {}),
-      ...(extra.ink && extra.ink.length > 0 ? { ink: extra.ink } : {}),
-      ...(extra.edges && extra.edges.length > 0 ? { edges: extra.edges } : {}),
-        ...(typeof extra.source === "string" ? { source: extra.source } : {}),
-        ...(extra.footnoteBoards && Object.keys(extra.footnoteBoards).length > 0
+      ink: extra.ink ?? null,
+      ...(extra.edges !== undefined ? { edges: extra.edges } : {}),
+        source: extra.source ?? null,
+        ...(extra.footnoteBoards !== undefined
           ? { footnoteBoards: extra.footnoteBoards }
           : {}),
-        ...(extra.footnoteInk && Object.keys(extra.footnoteInk).length > 0
-          ? { footnoteInk: extra.footnoteInk }
+        ...(footnoteInk !== undefined
+          ? { footnoteInk }
           : {}),
     };
     try {

@@ -44,7 +44,7 @@ import {
   type AgentReasoningLevel,
 } from "../util/agentPrefs";
 import { footnoteThemeVars } from "../util/footnoteTheme";
-import { paletteForMarkIndex } from "../util/inkPaletteHistory";
+import { normalizePalette, paletteForMarkIndex } from "../util/inkPaletteHistory";
 import { useIsMobile } from "../util/mobile";
 import { PHOTO_ATTACH_LIMIT, pickPhotos } from "../util/photoAttach";
 import { drawingHeading } from "../viz/vizProse";
@@ -696,7 +696,7 @@ export interface CoachAttachment {
 
 export interface AgentChatMessage {
   artifactProposals?: AgentArtifactProposal[];
-  artifactFootnoteIds?: string[];
+  artifactFootnoteIds?: string[] | null;
   id: string;
   /**
    * `app` is the harness talking, not the student and not the coach — test
@@ -2589,7 +2589,7 @@ export function AgentSidePanel({
                   className={`lc-footnote-chip lc-hold-danger${overflow ? " is-overflow" : ""}`}
                   label={chipLabel}
                   ariaLabel={`Hold to remove ${chipLabel}`}
-                  style={footnoteThemeVars(mark.color, mark.palette ?? paletteForMarkIndex((mark.number ?? 1) - 1))}
+                  style={footnoteThemeVars(mark.color, normalizePalette(mark.palette) ?? paletteForMarkIndex((mark.number ?? 1) - 1))}
                   dataTip={
                     overflow
                       ? "Will not be sent — this Ask is full. Hold to remove."
@@ -2988,7 +2988,7 @@ export function AgentSidePanel({
             return <button key={mark.id} type="button" role="menuitemcheckbox" aria-checked={picked}
               aria-label={footnoteChipLabel(mark.number, mark.title)} disabled={annotateUnavailable}
               className={`lc-footnote-chip${picked ? " is-picked" : ""}`}
-              style={footnoteThemeVars(mark.color, mark.palette ?? paletteForMarkIndex((mark.number ?? 1) - 1))} onClick={() => onToggleAttached?.(mark.id)}>
+              style={footnoteThemeVars(mark.color, normalizePalette(mark.palette) ?? paletteForMarkIndex((mark.number ?? 1) - 1))} onClick={() => onToggleAttached?.(mark.id)}>
               <span className="lc-fn-badge" aria-hidden>{mark.number ?? ""}</span>
               {mark.title?.trim() ? <span className="lc-footnote-chip-label">{mark.title.trim()}</span> : null}
             </button>;

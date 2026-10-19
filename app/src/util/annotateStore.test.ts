@@ -27,8 +27,8 @@ import {
   type AnnotateDoc,
 } from "./annotateStore";
 /** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
-const FLAGS_OFF = { pending: false, queued: false, bridgePending: false,
-  attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false, requestNote: "", reasoning: "", bridgeError: "",
+  attachments: [], artifacts: [], artifactProposals: [], artifactFootnoteIds: null, flags: [], processEvents: [] };
 
 const deleteDocBytes = vi.fn(async (_hash?: string) => {});
 vi.mock("./docBytes", () => ({
@@ -73,6 +73,20 @@ describe("hashMarkdown", () => {
 });
 
 describe("saveAnnotateDoc", () => {
+  it("writes false flags and empty extras and preserves omitted web captures after merging", async () => {
+    const saved = await saveAnnotateDoc({ id: "web", name: "Page", hash: "https://example.com", docType: "web", source: "page", board: board() });
+    expect(saved).toMatchObject({ locked: false, owned: false, authoredExtras: {}, captures: [] });
+    await setAnnotateDocLocked(saved.id, true);
+    await setAnnotateDocLocked(saved.id, false);
+    expect(await getAnnotateDoc(saved.id)).toHaveProperty("locked", false);
+    const capture = { id: "c", capturedAt: 1, html: "old page" };
+    await saveAnnotateDoc({ ...saved, captures: [capture] });
+    const { captures: _captures, ...partial } = saved;
+    await saveAnnotateDoc({ ...partial, source: "updated" });
+    expect((await getAnnotateDoc(saved.id))?.captures).toEqual([capture]);
+    await saveAnnotateDoc({ ...partial, captures: [] });
+    expect((await getAnnotateDoc(saved.id))?.captures).toEqual([]);
+  });
   it("updates the entry it is given the id of", async () => {
     const hash = hashMarkdown("# Notes");
     const first = await saveAnnotateDoc({ name: "notes.md", hash, source: "# Notes", board: board("one") });
@@ -295,9 +309,8 @@ describe("owned notes", () => {
 
   it("treats anything opened from a file as imported", async () => {
     await saveAnnotateDoc({ name: "dp.pdf", hash: "h", source: "", board: board() });
-    // Absent rather than false — an old row that predates New file has to read
-    // as imported too, and that is what a missing value means.
-    expect(listAnnotateDocs()[0]!.owned).toBeUndefined();
+    // Imported documents store the same false flag that legacy absence means.
+    expect(listAnnotateDocs()[0]!.owned).toBe(false);
   });
 
   it("keeps ownership across a save that does not mention it", async () => {
@@ -368,6 +381,10 @@ describe("annotateDocLabel", () => {
     expect(annotateDocLabel(meta({ label: "   " })).startsWith("dp.pdf — ")).toBe(true);
   });
 
+  it("uses the same display name for an empty and an absent label", () => {
+    expect(annotateDocLabel(meta({ label: "" }))).toBe(annotateDocLabel(meta()));
+  });
+
   it("falls back to the bare name when the timestamp is unusable", () => {
     expect(annotateDocLabel(meta({ updatedAt: Number.NaN }))).toBe("dp.pdf");
   });
@@ -397,7 +414,7 @@ describe("setAnnotateDocLabel", () => {
       board: board(),
     });
     await setAnnotateDocLabel(saved.id, "  ");
-    expect(listAnnotateDocs()[0]!.label).toBeUndefined();
+    expect(listAnnotateDocs()[0]!.label).toBe("");
   });
 
   it("keeps a label across a save that does not mention one", async () => {
@@ -508,6 +525,7 @@ describe("footnotes on an entry", () => {
     });
     // Stored with every list written, empty or not (see agentMessageFormat).
     expect((await getAnnotateDoc(saved.id))?.footnotes).toEqual([{ ...mark(0, 9),
+      anchor: { ...mark(0, 9).anchor, prefix: "", suffix: "" }, title: "", blockText: "", color: "", palette: [], url: "",
       notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [] }]);
   });
 

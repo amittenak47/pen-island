@@ -98,7 +98,7 @@ export function formatFootnoteContext(
     number != null ? `Annotation ${number}` : `Annotation ${footnote.id.slice(0, 8)}`;
   const lines: string[] = [`### ${label}`];
 
-  const body = (footnote.blockText ?? footnote.excerpt ?? "").trim();
+  const body = (footnote.blockText || footnote.excerpt || "").trim();
   if (body) lines.push("Text:", condense(body));
 
   const links: string[] = [];

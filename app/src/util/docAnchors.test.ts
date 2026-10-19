@@ -123,7 +123,7 @@ describe("anchor round trip", () => {
      * is what the mark recovers by when they stop meaning anything.
      */
     expect(anchor).toMatchObject({ exact: "Hash", suffix: " maps collide" });
-    expect(anchor).not.toHaveProperty("prefix");
+    expect(anchor).toHaveProperty("prefix", "");
   });
 
   it("spans element boundaries", () => {
@@ -237,7 +237,7 @@ describe("scopes", () => {
 
 describe("normalizeAnchor", () => {
   it("tags an untagged legacy anchor as text", () => {
-    expect(normalizeAnchor({ start: 1, end: 5 })).toEqual({ kind: "text", start: 1, end: 5 });
+    expect(normalizeAnchor({ start: 1, end: 5 })).toEqual({ kind: "text", start: 1, end: 5, prefix: "", suffix: "" });
   });
 
   it("keeps a scope", () => {

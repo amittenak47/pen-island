@@ -154,7 +154,7 @@ function labelDate(): Intl.DateTimeFormat {
 }
 
 export interface AnnotateDoc extends AnnotateDocMeta {
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   /**
    * The markdown or source text, so an entry can be reopened without hunting
    * for the file again.
@@ -208,7 +208,7 @@ const PRE_RENAME_INDEX = "lc.md-ink.index.v1";
 
 /** The heavy half of an entry, stored per-id in IndexedDB. See `contentStore`. */
 interface AnnotateContent {
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   source: string;
   board: BoardBlob;
   footnotes: DocFootnote[];
@@ -434,7 +434,7 @@ export async function setAnnotateDocLabel(id: string, label: string): Promise<bo
     const trimmed = label.trim();
     if (trimmed === (meta.label?.trim() ?? "")) return false;
     const next = { ...meta, kind: "annotate" as const };
-    if (trimmed) next.label = trimmed; else delete next.label;
+    next.label = trimmed;
     ctx.setMetadata(next);
     return true;
   });
@@ -652,7 +652,7 @@ export async function migrateAnnotateKeysToId(): Promise<number> {
  */
 export async function saveAnnotateDoc(input: {
   /** Omitted by ink-only autosave; preserve the existing catalog. */
-  artifacts?: ArtifactCatalog;
+  artifacts?: ArtifactCatalog | null;
   id?: string;
   name: string;
   hash: string;
@@ -698,11 +698,11 @@ export async function saveAnnotateDoc(input: {
   // reading session built up.
   const prior =
     input.footnotes && Array.isArray(input.agent) &&
-      !(existing?.artifactRevision && input.artifacts === undefined)
+      !(existing?.artifactRevision && input.artifacts == null)
       ? null
       : await getContent<AnnotateContent>(id);
   const artifactFields = artifactCatalogFields(
-    input.artifacts === undefined ? prior?.artifacts : input.artifacts,
+    input.artifacts == null ? prior?.artifacts : input.artifacts,
     { kind: "annotate", id },
   );
   /*
@@ -710,7 +710,7 @@ export async function saveAnnotateDoc(input: {
    * captures", not "there are none". An autosave that omits them must not drop
    * the older page a stranded mark is still standing on.
    */
-  const label = input.label?.trim() || existing?.label;
+  const label = input.label?.trim() || existing?.label || "";
   const owned = input.owned ?? existing?.owned;
   const meta: AnnotateDocMeta = {
     id,
@@ -719,10 +719,11 @@ export async function saveAnnotateDoc(input: {
     hash: input.hash,
     docType: input.docType ?? existing?.docType ?? "markdown",
     updatedAt: now,
-    ...(label ? { label } : {}),
-    ...(owned ? { owned: true } : {}),
+    label,
+    owned: Boolean(owned),
+    authoredExtras: existing?.authoredExtras ?? {},
     ...((input.localFileHash ?? existing?.localFileHash) ? { localFileHash: input.localFileHash ?? existing?.localFileHash } : {}),
-    ...(existing?.locked ? { locked: true } : {}),
+    locked: Boolean(existing?.locked),
     syncSeq: existing?.syncSeq ?? 0,
     lastTouch: now,
     lastSyncedAt: existing?.lastSyncedAt,
@@ -743,9 +744,10 @@ export async function saveAnnotateDoc(input: {
       hubAckUpdatedAt: current?.hubAckUpdatedAt,
     };
     if (current && input.metadataIntent !== "rename") {
-      if (current.label) next.label = current.label; else delete next.label;
+      next.label = current.label ?? "";
     }
-    if (current?.locked) next.locked = true; else delete next.locked;
+    next.locked = Boolean(current?.locked);
+    next.authoredExtras = current?.authoredExtras ?? {};
     if (input.owned === undefined && current?.owned) next.owned = true;
     if (saved.artifacts) next.artifactRevision = saved.artifacts.revision;
     return next;
@@ -800,9 +802,9 @@ export async function markAnnotateHubAck(id: string, updatedAt: number): Promise
 
 export async function setAnnotateDocLocked(id: string, locked: boolean): Promise<void> {
   await editMetadata(id, (meta, ctx) => {
-    if (!meta || Boolean(meta.locked) === locked) return;
+    if (!meta || meta.locked === locked) return;
     const next = { ...meta, kind: "annotate" as const };
-    if (locked) next.locked = true; else delete next.locked;
+    next.locked = locked;
     ctx.setMetadata(next);
   });
 }
@@ -882,7 +884,7 @@ export async function restoreAnnotateDoc(entry: AnnotateDoc): Promise<void> {
     ...(captures !== undefined ? { captures } : {}), ...(padKind !== undefined ? { padKind } : {}),
   }, { allowCatalogReplacement: true, metadata: (current, saved) => {
     if (JSON.stringify(current) !== JSON.stringify(captured)) throw new Error("Document changed during restore; current work was kept.");
-    const next = { ...current, ...meta };
+    const next = { ...current, ...meta, label: meta.label ?? current?.label ?? "" };
     if (saved.artifacts) next.artifactRevision = saved.artifacts.revision;
     return next;
   } });

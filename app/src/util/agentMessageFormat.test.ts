@@ -1,10 +1,31 @@
 import { describe, expect, it } from "vitest";
-import { canonicalAgentMessages } from "./agentMessageFormat";
+import { artifactFootnoteIdsForMessage, canonicalAgentMessages, canonicalFootnotes } from "./agentMessageFormat";
 import { mergeAgentMessages } from "../modes/coachSessions";
 
 const msg = (id: string, at: number, extra: Record<string, unknown> = {}) => ({ id, role: "user", content: id, at, ...extra });
 
 describe("canonicalAgentMessages", () => {
+  it("writes null for inherited artifact footnotes and preserves explicit lists", () => {
+    const attached = ["attached"];
+    const [missing, empty, populated] = canonicalAgentMessages<Record<string, unknown>>([
+      msg("missing", 1), msg("empty", 2, { artifactFootnoteIds: [] }), msg("populated", 3, { artifactFootnoteIds: ["saved"] }),
+    ]);
+    expect(missing).toHaveProperty("artifactFootnoteIds", null);
+    expect(empty).toHaveProperty("artifactFootnoteIds", []);
+    expect(populated).toHaveProperty("artifactFootnoteIds", ["saved"]);
+    expect(artifactFootnoteIdsForMessage({}, attached)).toBe(attached);
+    expect(artifactFootnoteIdsForMessage({ artifactFootnoteIds: null }, attached)).toBe(attached);
+    expect(artifactFootnoteIdsForMessage({ artifactFootnoteIds: [] }, attached)).toEqual([]);
+    expect(artifactFootnoteIdsForMessage({ artifactFootnoteIds: ["saved"] }, attached)).toEqual(["saved"]);
+  });
+  it("writes empty optional strings, including a legacy null bridge error", () => {
+    const input = msg("m", 1, { bridgeError: null });
+    const [row] = canonicalAgentMessages([input]);
+    expect(row).toMatchObject({ requestNote: "", reasoning: "", bridgeError: "" });
+    expect(input).toHaveProperty("bridgeError", null);
+    const [populated] = canonicalAgentMessages([msg("n", 2, { requestNote: "request", reasoning: "thought", bridgeError: "failed" })]);
+    expect(populated).toMatchObject({ requestNote: "request", reasoning: "thought", bridgeError: "failed" });
+  });
   it("orders by time, then id, and writes every on/off flag", () => {
     const out = canonicalAgentMessages([msg("b", 2), msg("a", 2, { pending: true }), msg("c", 1, { queued: true })]);
     expect(out.map((row) => (row as { id: string }).id)).toEqual(["c", "a", "b"]);
@@ -25,4 +46,17 @@ describe("canonicalAgentMessages", () => {
     expect(JSON.stringify(here)).toBe(JSON.stringify(there));
     expect(here.map((row) => (row as { id: string }).id)).toEqual(["q1", "a1", "q2", "q3"]);
   });
+});
+
+it("canonicalizes empty footnote text without inventing presence-sensitive fields", () => {
+  const input = [{ id: "n", anchor: { kind: "text", start: 0, end: 1 },
+    notes: [{ text: "note" }], userLinks: [{ url: "https://example.com" }], whiteboards: [{ id: "w" }],
+    subMarks: [{ anchor: { kind: "text", start: 0, end: 1 } }] }];
+  const [row] = canonicalFootnotes(input);
+  expect(row).toMatchObject({ title: "", blockText: "", query: "", url: "", excerpt: "", color: "", palette: [],
+    anchor: { prefix: "", suffix: "" }, notes: [{ field: "", by: "", images: [] }],
+    userLinks: [{ title: "" }], whiteboards: [{ title: "" }], subMarks: [{ color: "", palette: [], excerpt: "", anchor: { prefix: "", suffix: "" }, bands: [] }] });
+  for (const key of ["pending", "by"]) expect(row).not.toHaveProperty(key);
+  expect(canonicalFootnotes([row])).toEqual([row]);
+  expect(input[0]).not.toHaveProperty("title");
 });

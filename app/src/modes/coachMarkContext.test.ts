@@ -19,6 +19,11 @@ function mark(partial: Partial<DocFootnote> & Pick<DocFootnote, "id">): DocFootn
 }
 
 describe("coachMarkContext", () => {
+  it("uses the excerpt for missing and empty block text", () => {
+    const missing = mark({ id: "legacy" });
+    expect(formatFootnoteContext({ ...missing, blockText: "" }, 1)).toBe(formatFootnoteContext(missing, 1));
+    expect(formatFootnoteContext(missing, 1)).toContain("hello");
+  });
   it("packs text, links, notes, and threads for one mark", () => {
     const footnote = mark({
       id: "a",

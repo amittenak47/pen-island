@@ -457,9 +457,7 @@ export function buildAnnotateSidecar(input: {
     sourceName: input.sourceName,
     contentHash: input.contentHash,
     board: input.board,
-    ...(input.footnotes && input.footnotes.length > 0
-      ? { footnotes: [...input.footnotes] }
-      : {}),
+    footnotes: [...(input.footnotes ?? [])],
     ...(input.frameWidth ? { frameWidth: Math.round(input.frameWidth) } : {}),
   };
 }

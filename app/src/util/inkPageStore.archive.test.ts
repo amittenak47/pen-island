@@ -2,7 +2,7 @@ import { IDBFactory, IDBKeyRange as FakeKeyRange, IDBObjectStore as FakeObjectSt
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { encodeInkOps } from "../canvas/inkCodec";
 import { markInkPageSynced, putInkPageArchive, putInkPages, getInkPageRecord,
-  copyInkPages, renameInkPages, deleteInkPages, authoredInkRow, type InkPageRecord } from "./inkPageStore";
+  copyInkPages, renameInkPages, deleteInkPages, authoredInkRow, getInkPageRecords, inkPageKey, type InkPageRecord } from "./inkPageStore";
 import { closeDbForTests, openDb, run, STORE_INK_PAGES, STORE_SYNC_STATE } from "./idb";
 import { getBookSyncState } from "./syncState";
 import { resetBookCoordinatorForTests } from "./bookCoordinator";
@@ -16,6 +16,17 @@ const encoded = encodeInkOps([]);
 const row = () => getInkPageRecord("wb:test", 1);
 
 describe("ink archive and sync revisions", () => {
+  it.each([undefined, true, false])("materializes legacy bootstrap %s as a boolean and preserves pending layout", async bootstrap => {
+    const legacy: InkPageRecord = { v: 1, docKey: "wb:test", pageId: 1, inkC: encoded, dirty: true, updatedAt: 100,
+      ...(bootstrap !== undefined ? { bootstrap } : {}) };
+    await run(STORE_INK_PAGES, "readwrite", store => store.put(legacy, inkPageKey("wb:test", 1)));
+    expect(await getInkPageRecords("wb:test", { metadataOnly: true })).toMatchObject([{ bootstrap: bootstrap ?? true, layoutPending: false }]);
+    await putInkPages("wb:test", [[1, encoded]], { now: 200 });
+    expect(await row()).toMatchObject({ bootstrap: bootstrap ?? true, layoutPending: false });
+    expect(authoredInkRow({ ...legacy, layoutPending: true }, legacy, 8)).toMatchObject({ bootstrap: bootstrap ?? true, layoutPending: true });
+    expect(await putInkPageArchive("wb:test", 1, new Uint8Array([7]), 200)).toBe(true);
+    expect(await row()).toMatchObject({ bootstrap: bootstrap ?? true, layoutPending: false });
+  });
   it("archives without changing the authored revision or losing its hub ack", async () => {
     await putInkPages("wb:test", [[1, encoded]], { now: 100 });
     await markInkPageSynced("wb:test", 1, 100);

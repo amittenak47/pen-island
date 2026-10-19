@@ -27,6 +27,8 @@ vi.mock("./annotateStore", () => ({
 
 const PALETTE = ["#60a5fa", "#f472b6", "#facc15", "#34d399"];
 const TEXT = "We now explore  depth-first search\non directed graphs.";
+const EMPTY_EXTRAS = { palette: [], mark_text: "", workspace_items: [], doc_kind: "", focus: "", references: [],
+  reading: { kind: "", fields: [], fill: "", preset: "" } };
 
 function mark(patch: Partial<DocFootnote> = {}): DocFootnote {
   return {
@@ -51,6 +53,16 @@ it("saves empty answer collections and note image lists explicitly", () => {
 });
 
 describe("rich ChatBot answers", () => {
+  it("places answer sub-marks in the excerpt with missing or empty block text", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(50);
+    const result = { id: "fr-1", notes: [], marks: [{ kind: "underline" as const, quote: "directed graphs" }] };
+    const [missing] = applyFootnoteResult([mark({ blockText: undefined })], result, 50);
+    const [empty] = applyFootnoteResult([mark({ blockText: "" })], result, 50);
+    expect(empty.subMarks).toEqual(missing.subMarks);
+    expect(empty.subMarks).toHaveLength(1);
+    expect(empty.subMarks![0]).toMatchObject({ excerpt: "directed graphs", color: "", palette: [] });
+    now.mockRestore();
+  });
   it("sets an empty title and color from the mark's palette, and places marks on the quoted words", () => {
     const [next] = applyFootnoteResult([mark()], {
       id: "fr-1",
@@ -68,7 +80,7 @@ describe("rich ChatBot answers", () => {
     expect(highlight).toMatchObject({ kind: "highlight", excerpt: "depth-first search", color: "#60a5fa" });
     expect(TEXT.slice(highlight!.start, highlight!.end)).toBe("depth-first search");
     expect(underline).toMatchObject({ kind: "underline", excerpt: "directed graphs" });
-    expect(underline!.color).toBeUndefined();
+    expect(underline!.color).toBe("");
     expect(next!.updatedAt).toBe(50);
   });
 
@@ -116,6 +128,7 @@ describe("rich ChatBot answers", () => {
       docKind: "annotate",
     });
     expect(request.extras).toEqual({
+      ...EMPTY_EXTRAS,
       palette: PALETTE,
       mark_text: TEXT,
       workspace_items: [{ id: "whiteboard:wb-1", kind: "whiteboard", title: "DFS notes" }],
@@ -126,7 +139,7 @@ describe("rich ChatBot answers", () => {
       anchor: { kind: "text", start: 0, end: 4 }, excerpt: "x",
       pageText: null, pages: null, viewerPage: null, footnotes: [], exceptId: "fn-1",
     });
-    expect(bare.extras).toBeUndefined();
+    expect(bare.extras).toEqual(EMPTY_EXTRAS);
   });
 
   it("carries the sheet's focus, density and generic attachments on a selection request", () => {
@@ -144,6 +157,7 @@ describe("rich ChatBot answers", () => {
     expect(request.page).toBe(91);
     expect(request.answer_mode).toBe("app");
     expect(request.extras).toEqual({
+      ...EMPTY_EXTRAS,
       focus: "Preview the next chapter's problems.", per_page: 8, references,
     });
     expect(request.extras!.references![0]).not.toBe(references[0]);
@@ -157,10 +171,13 @@ describe("rich ChatBot answers", () => {
       pageText: null, pages: null, viewerPage: null, footnotes: [], exceptId: "fn-1",
     };
     expect(buildFootnoteRequest({ ...input, focus: "x".repeat(1100), perPage: 4 }).extras).toEqual({
+      ...EMPTY_EXTRAS,
       focus: "x".repeat(1000), per_page: 4,
     });
-    expect(buildFootnoteRequest({ ...input, focus: "  ", perPage: 0, references: [] }).extras).toBeUndefined();
-    expect(buildFootnoteRequest({ ...input, perPage: 8.5 }).extras).toBeUndefined();
+    expect(buildFootnoteRequest({ ...input, focus: "  ", perPage: 0, references: [] }).extras).toEqual(EMPTY_EXTRAS);
+    expect(buildFootnoteRequest({ ...input, perPage: 8.5 }).extras).toEqual(EMPTY_EXTRAS);
+    expect(buildFootnoteRequest({ ...input, reading: { kind: "story" } }).extras?.reading)
+      .toEqual({ kind: "story", fields: [], fill: "", preset: "" });
   });
 
   it("links the document to each chosen library item once the answer is saved", async () => {

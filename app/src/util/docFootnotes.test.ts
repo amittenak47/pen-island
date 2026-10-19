@@ -13,6 +13,8 @@ import {
   markChipLeft,
   threadTitleFrom,
   googleSearchUrl,
+  suggestedLinksFor,
+  noteIsAi,
   removeFootnote,
   sanitizeFootnotes,
   searchQueryFor,
@@ -31,6 +33,46 @@ function footnote(patch: Partial<DocFootnote> = {}): DocFootnote {
     ...patch,
   };
 }
+
+it("writes empty fallback text and inherited themes on legacy marks", () => {
+  const [row] = sanitizeFootnotes([{ ...footnote(), excerpt: undefined,
+    subMarks: [{ id: "sub", kind: "underline", start: 0, end: 1 }],
+    notes: [{ id: "note", text: "legacy", createdAt: 1, updatedAt: 1 }],
+  }]);
+  expect(row).toMatchObject({ blockText: "", query: "", url: "", excerpt: "", color: "", palette: [],
+    subMarks: [{ excerpt: "", color: "", palette: [] }], notes: [{ by: "" }] });
+});
+
+it("uses the same search suggestions for missing and empty query, URL and excerpt", () => {
+  const missing = { ...footnote(), excerpt: undefined } as unknown as DocFootnote;
+  const explicit = { ...missing, query: "", url: "", excerpt: "" };
+  const expected = suggestedLinksFor("a selected passage", missing);
+  expect(suggestedLinksFor("a selected passage", explicit)).toEqual(expected);
+  expect(expected.find(link => link.title === "Google")!.url).toBe(googleSearchUrl("a selected passage"));
+  const withExcerpt = footnote({ excerpt: "the marked words" });
+  expect(suggestedLinksFor("fallback", { ...withExcerpt, query: "", url: "" })).toEqual(suggestedLinksFor("fallback", withExcerpt));
+});
+
+it.each(["ai", "note"])("inherits note authorship from a %s parent for missing and empty by", kind => {
+  const note = { id: "note", text: "legacy", createdAt: 1, updatedAt: 1 };
+  expect(noteIsAi({ ...note, by: "" }, { kind })).toBe(noteIsAi(note, { kind }));
+  expect(noteIsAi(note, { kind })).toBe(kind === "ai");
+  expect(noteIsAi({ ...note, by: "ai" }, { kind })).toBe(true);
+  expect(noteIsAi({ ...note, by: "reader" }, { kind })).toBe(false);
+});
+
+it("sanitizes empty titles and fields and assigns the fallback excerpt", () => {
+  const [row] = sanitizeFootnotes([{ ...footnote(), excerpt: 42, title: "  ",
+    userLinks: [{ url: "https://example.com", title: " " }], whiteboards: [{ id: "w", title: " " }],
+    notes: [{ id: "n", text: "note", field: " " }],
+  }]);
+  expect(row).toMatchObject({ excerpt: "", title: "", anchor: { prefix: "", suffix: "" },
+    userLinks: [{ title: "" }], whiteboards: [{ title: "" }], notes: [{ field: "" }] });
+  const [legacy] = sanitizeFootnotes([{ ...footnote(), excerpt: undefined, userNotes: "old note" }]);
+  expect(legacy.excerpt).toBe("");
+  expect(legacy.notes![0].field).toBe("");
+  expect(sanitizeFootnotes([footnote({ excerpt: "kept" })])[0].excerpt).toBe("kept");
+});
 
 it("retains explicitly empty lists and images on read without filling legacy omissions", () => {
   const [saved] = sanitizeFootnotes([footnote({ notes: [{ id: "n", text: "words", images: [], createdAt: 1, updatedAt: 1 }],
@@ -196,7 +238,7 @@ describe("sanitizeFootnotes", () => {
             excerpt: "band",
             start: 25,
             end: 29,
-            anchor: { kind: "text", start: 30, end: 34, scope: "ch-1" },
+            anchor: { kind: "text", start: 30, end: 34, scope: "ch-1", prefix: "", suffix: "" },
             color: "#3ec8ac",
             palette: ["#83e4b5", "#3ec8ac", "#4e90a4", "#6e60a0"],
           },
@@ -226,19 +268,19 @@ describe("sanitizeFootnotes", () => {
     ]);
     expect(kept.blockText).toBe("full paragraph under the band");
     expect(kept.subMarks).toEqual([
-      { id: "sm-1", kind: "underline", excerpt: "full", start: 0, end: 4 },
+      { id: "sm-1", kind: "underline", excerpt: "full", start: 0, end: 4, color: "", palette: [] },
       {
         id: "sm-2",
         kind: "highlight",
         excerpt: "band",
         start: 25,
         end: 29,
-        anchor: { kind: "text", start: 30, end: 34, scope: "ch-1" },
+        anchor: { kind: "text", start: 30, end: 34, scope: "ch-1", prefix: "", suffix: "" },
         color: "#3ec8ac",
         palette: ["#83e4b5", "#3ec8ac", "#4e90a4", "#6e60a0"],
       },
-      { id: "sm-bad-color", kind: "underline", excerpt: "x", start: 0, end: 1 },
-      { id: "sm-bad-anchor", kind: "underline", excerpt: "x", start: 0, end: 1 },
+      { id: "sm-bad-color", kind: "underline", excerpt: "x", start: 0, end: 1, color: "", palette: [] },
+      { id: "sm-bad-anchor", kind: "underline", excerpt: "x", start: 0, end: 1, color: "", palette: [] },
     ]);
   });
 });
@@ -346,7 +388,7 @@ describe("sanitizeFootnotes migration", () => {
       { id: "old", kind: "search", anchor: { start: 4, end: 9 }, excerpt: "x", createdAt: 1 },
     ]);
     expect(kept).toHaveLength(1);
-    expect(kept[0].anchor).toEqual({ kind: "text", start: 4, end: 9 });
+    expect(kept[0].anchor).toEqual({ kind: "text", start: 4, end: 9, prefix: "", suffix: "" });
   });
 
   it("keeps a region anchor", () => {
@@ -497,7 +539,7 @@ describe("note entries", () => {
           { id: "n2" },
         ] },
     ]);
-    expect(kept.notes).toEqual([{ id: "n1", text: "kept", createdAt: 5, updatedAt: 6 }]);
+    expect(kept.notes).toEqual([{ id: "n1", text: "kept", field: "", by: "", createdAt: 5, updatedAt: 6 }]);
   });
 
   it("prefers entries over a legacy box when both are present", () => {
@@ -608,12 +650,12 @@ describe("sanitizeFootnotes title and palette", () => {
     expect(kept.palette).toEqual(["#83e4b5", "#3ec8ac", "#4e90a4", "#6e60a0"]);
   });
 
-  it("drops a blank title and a short palette", () => {
+  it("writes a blank title and drops a short palette", () => {
     const [kept] = sanitizeFootnotes([
       footnote({ title: "   ", palette: ["#fff"] }),
     ]);
-    expect(kept.title).toBeUndefined();
-    expect(kept.palette).toBeUndefined();
+    expect(kept.title).toBe("");
+    expect(kept.palette).toEqual([]);
   });
 });
 

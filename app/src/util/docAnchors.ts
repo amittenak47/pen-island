@@ -143,8 +143,8 @@ export function normalizeAnchor(value: unknown): DocAnchor | null {
     end: raw.end,
     ...(scope ? { scope } : {}),
     ...(exact ? { exact } : {}),
-    ...(exact && str(raw.prefix) ? { prefix: str(raw.prefix) } : {}),
-    ...(exact && str(raw.suffix) ? { suffix: str(raw.suffix) } : {}),
+    prefix: exact ? str(raw.prefix) ?? "" : "",
+    suffix: exact ? str(raw.suffix) ?? "" : "",
   };
 }
 

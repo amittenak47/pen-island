@@ -39,7 +39,7 @@ describe("applyMetadata", () => {
 
   it("leaves untagged elements untagged", () => {
     const [element] = applyMetadata(converted([{ id: "stroke" }]), []);
-    expect(element.customData).toBeUndefined();
+    expect(element.customData).toEqual({});
   });
 
   it("applies a fallback when one is given", () => {

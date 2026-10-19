@@ -32,11 +32,11 @@ export interface BoardBlob {
     scrollY: number;
     zoom: number;
     pdfPage?: number;
-    linedPitch?: number;
-    linedPitchWide?: number;
-    linedPitchCollege?: number;
-    linedRule?: "wide" | "college";
-    linedPaperMode?: "wide" | "college" | "off";
+    linedPitch?: number | null;
+    linedPitchWide?: number | null;
+    linedPitchCollege?: number | null;
+    linedRule?: "wide" | "college" | null;
+    linedPaperMode?: "wide" | "college" | "off" | null;
   };
   /** Raster pen/eraser ops as written before the codec — still read, never written. */
   ink?: InkOp[];
@@ -56,7 +56,7 @@ export interface BoardBlob {
    * Ink colour-wheel history for this annotation.
    * Optional on older saves — restore seeds the theme default palette.
    */
-  inkPalettes?: { items: string[][]; index: number };
+  inkPalettes?: { items: string[][]; index: number } | null;
 }
 
 /** Persisted image binary — mirrors Excalidraw BinaryFileData fields we need. */
@@ -271,7 +271,7 @@ export interface BoardHandle {
       skeletons?: Skeleton[];
       ink?: InkOp[];
       files?: Record<string, BoardBinaryFile>;
-      inkPalettes?: { items: string[][]; index: number };
+      inkPalettes?: { items: string[][]; index: number } | null;
       /** Skip the post-restore fit — caller will size the frame then restoreView. */
       skipFit?: boolean;
     },

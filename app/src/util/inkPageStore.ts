@@ -114,7 +114,7 @@ function requireOwner(docKey: string) {
 
 /** Preserve the last common base while replacing this authored representation. */
 export function authoredInkRow(row: InkPageRecord, existing: InkPageRecord | undefined, seq: number): InkPageRecord {
-  return { ...row, changeSeq: seq, syncedChangeSeq: existing?.syncedChangeSeq ?? 0,
+  return { ...row, layoutPending: row.layoutPending ?? false, changeSeq: seq, syncedChangeSeq: existing?.syncedChangeSeq ?? 0,
     syncedRev: existing?.syncedRev ?? 0, baseWireHash: existing?.baseWireHash ?? null,
     baseLocalHash: existing?.baseLocalHash ?? null, bootstrap: existing?.bootstrap ?? true,
     syncedUpdatedAt: existing?.syncedUpdatedAt };
@@ -258,7 +258,7 @@ export async function putInkPageArchive(
       // Compare and replace in one transaction. Compression changes storage,
       // not the authored revision used by sync conflict detection.
       const { inkC: _wal, ...row } = existing!;
-      store.put({ ...row, gz, dirty: false }, key);
+      store.put({ ...row, layoutPending: row.layoutPending ?? false, bootstrap: row.bootstrap ?? true, gz, dirty: false }, key);
       promoted = true;
     };
   });
@@ -275,7 +275,7 @@ export async function markInkPageSynced(
     request.onsuccess = () => {
       const row = request.result as InkPageRecord | undefined;
       if (!row || row.updatedAt < updatedAt || (row.syncedUpdatedAt ?? 0) > updatedAt) return;
-      store.put({ ...row, syncedUpdatedAt: updatedAt,
+      store.put({ ...row, layoutPending: row.layoutPending ?? false, bootstrap: row.bootstrap ?? true, syncedUpdatedAt: updatedAt,
         ...(row.updatedAt === updatedAt && row.changeSeq != null ? { syncedChangeSeq: row.changeSeq } : {}) }, key);
     };
   });
@@ -356,7 +356,7 @@ function scheduleSummaryBackfill(docKey: string, pages: [InkPageRecord, EncodedI
             const current = request.result as InkPageRecord | undefined;
             if (!current || current.inkC || current.updatedAt !== updatedAt) return;
             if (current.gz?.byteLength !== sum.len) return;
-            store.put({ ...current, sum }, key);
+            store.put({ ...current, layoutPending: current.layoutPending ?? false, bootstrap: current.bootstrap ?? true, sum }, key);
           };
         }
       });
@@ -380,8 +380,8 @@ export async function getInkPageRecords(docKey: string, opts: { metadataOnly?: b
             dirty: value.dirty, updatedAt: value.updatedAt, syncedUpdatedAt: value.syncedUpdatedAt,
             changeSeq: value.changeSeq, syncedChangeSeq: value.syncedChangeSeq,
             syncedRev: value.syncedRev, baseWireHash: value.baseWireHash,
-            baseLocalHash: value.baseLocalHash, bootstrap: value.bootstrap,
-            ...(value.layoutPending ? { layoutPending: true } : {}),
+            baseLocalHash: value.baseLocalHash, bootstrap: value.bootstrap ?? true,
+            layoutPending: value.layoutPending ?? false,
           } : value);
         }
       };
@@ -489,7 +489,7 @@ export async function renameInkPages(fromKey: string, toKey: string): Promise<nu
 
 function sameStoredInk(left: InkPageRecord | undefined, right: InkPageRecord | undefined): boolean {
   if (!left || !right) return left === right;
-  if (left.changeSeq !== right.changeSeq || left.updatedAt !== right.updatedAt || left.layoutPending !== right.layoutPending) return false;
+  if (left.changeSeq !== right.changeSeq || left.updatedAt !== right.updatedAt || (left.layoutPending ?? false) !== (right.layoutPending ?? false)) return false;
   const bytes = (row: InkPageRecord) => row.inkC ? packEncodedInk(row.inkC) : row.gz;
   const a = bytes(left), b = bytes(right);
   return !!a && !!b && a.length === b.length && a.every((value, index) => value === b[index]);

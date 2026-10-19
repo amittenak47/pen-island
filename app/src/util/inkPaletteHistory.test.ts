@@ -158,3 +158,15 @@ describe("per-mark palettes", () => {
     expect(remapColorToPalette(undefined, prev, next)).toBe("#aaaaaa");
   });
 });
+
+it.each(["storm", "paper"])("inherits the same %s palette for null and absent history", theme => {
+  expect(normalizeInkPaletteHistory(null, theme)).toEqual(normalizeInkPaletteHistory(undefined, theme));
+  expect(normalizeInkPaletteHistory(null, theme)).toEqual(seedInkPaletteHistory(theme));
+});
+
+it("inherits the same footnote theme for missing and empty colours and palettes", () => {
+  expect(footnoteDisplayThemes([{ id: "mark", color: "", palette: [] }]))
+    .toEqual(footnoteDisplayThemes([{ id: "mark" }]));
+  expect(footnoteThemeSeed([{ color: "", palette: [] }])).toEqual(footnoteThemeSeed([{}]));
+  expect(remapColorToPalette("", [], [])).toBe(remapColorToPalette(undefined, [], []));
+});

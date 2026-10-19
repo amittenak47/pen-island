@@ -24,10 +24,10 @@ function associationKey(association: ArtifactAssociation): string {
     association.kind === "thread" ? association.rootId : association.footnoteId]);
 }
 
-/** Shared local/remote transition rules. Omission by older callers preserves data. */
+/** Shared local/remote transition rules. Omission or null preserves data. */
 export function requireArtifactCatalogTransition(
   previous: unknown, incoming: unknown, parent: ArtifactParent,
-): ArtifactCatalog | undefined {
+): ArtifactCatalog | null {
   const before = artifactCatalogFields(previous, parent).artifacts;
   const next = artifactCatalogFields(incoming, parent).artifacts;
   if (!next) return before;
@@ -58,7 +58,7 @@ export function requireArtifactCatalogTransition(
  * revision AGAIN inside its write transaction after staging dependencies.
  */
 export function editArtifactCatalog(
-  previous: ArtifactCatalog | undefined, parent: ArtifactParent,
+  previous: ArtifactCatalog | null | undefined, parent: ArtifactParent,
   expectedCatalogRevision: string | null, edit: ArtifactCatalogEdit, now = Date.now(),
 ): ArtifactCatalog {
   const before = artifactCatalogFields(previous, parent).artifacts;

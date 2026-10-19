@@ -144,9 +144,9 @@ fn parse(value: &Value, kind: &str, id: &str) -> Result<Catalog> {
 pub(super) fn validate(
     incoming: Option<&Value>, previous: Option<&Value>, kind: &str, id: &str,
 ) -> Result<()> {
-    let Some(incoming) = incoming else { return Ok(()) };
+    let Some(incoming) = incoming.filter(|value| !value.is_null()) else { return Ok(()) };
     let next = parse(incoming, kind, id)?;
-    let Some(previous) = previous else { return Ok(()) };
+    let Some(previous) = previous.filter(|value| !value.is_null()) else { return Ok(()) };
     let before = parse(previous, kind, id)?;
     if next.revision == before.revision {
         ensure!(incoming == previous, "artifact catalog revision reused for different content");
@@ -180,7 +180,7 @@ pub(super) fn validate(
 /// Dependencies are immutable and never removed during staging/publication.
 /// A parent PUT cannot advertise missing scene/source/ink revisions as usable.
 pub(super) fn require_assets(conn: &Connection, value: Option<&Value>, kind: &str, id: &str) -> Result<()> {
-    let Some(value) = value else { return Ok(()) };
+    let Some(value) = value.filter(|value| !value.is_null()) else { return Ok(()) };
     let catalog = parse(value, kind, id)?;
     let read = |dependency| -> Result<Value> {
         let locator = AssetLocator {
@@ -220,7 +220,7 @@ pub(super) fn require_assets(conn: &Connection, value: Option<&Value>, kind: &st
 
 /// A backup is self-contained; do not rely on the hub's current asset cache.
 pub(super) fn validate_snapshot_bundle(value: Option<&Value>, kind: &str, id: &str) -> Result<()> {
-    let Some(bundle) = value else { return Ok(()) };
+    let Some(bundle) = value.filter(|value| !value.is_null()) else { return Ok(()) };
     ensure!(bundle["v"] == 1, "invalid attachment backup version");
     let catalog = parse(&bundle["catalog"], kind, id)?;
     let raw_assets = bundle["assets"].as_array().ok_or_else(|| anyhow::anyhow!("missing backup assets"))?;
@@ -289,7 +289,13 @@ mod tests {
     fn old_clients_and_identical_retries_preserve_the_catalog() {
         let saved = catalog();
         assert!(validate(None, Some(&saved), "annotate", "a1").is_ok());
+        assert!(validate(Some(&Value::Null), Some(&saved), "annotate", "a1").is_ok());
+        assert!(validate(Some(&saved), Some(&Value::Null), "annotate", "a1").is_ok());
         assert!(validate(Some(&saved), Some(&saved), "annotate", "a1").is_ok());
+        assert!(validate_snapshot_bundle(Some(&Value::Null), "annotate", "a1").is_ok());
+        let empty = json!({"v":1,"parent":{"kind":"annotate","id":"a1"},"revision":"empty","artifacts":[]});
+        assert!(validate(Some(&empty), None, "annotate", "a1").is_ok());
+        assert!(validate(Some(&json!({})), None, "annotate", "a1").is_err());
     }
 
     #[test]

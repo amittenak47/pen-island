@@ -23,6 +23,7 @@ import { artifactCatalogFields } from "./padArtifacts";
 import { downloadArtifactAssets } from "./artifactAssetSync";
 import { clearProblemArtifactConflict, stashProblemArtifactConflict } from "./problemArtifactConflict";
 import { parseArtifactSnapshotBundle, stageArtifactSnapshot } from "./artifactSnapshot";
+import { snapshotFootnoteInk } from "./padSnapshotPayload";
 import {
   deleteAnnotateDoc,
   getAnnotateDoc,
@@ -303,11 +304,7 @@ export async function applyHubAnnotate(
     agent: mergeAgentMessages(local?.agent ?? [], Array.isArray(row.agent) ? row.agent : []),
     syncSeq: row.sync_seq,
     hubAckUpdatedAt: row.updated_at,
-    ...(typeof row.label === "string" && row.label.trim()
-      ? { label: row.label.trim() }
-      : local?.label
-        ? { label: local.label }
-        : {}),
+    label: typeof row.label === "string" ? row.label.trim() : local?.label ?? "",
     ...(local?.locked ? { locked: true } : {}),
     ...(local?.owned ? { owned: true } : {}),
   });
@@ -468,7 +465,7 @@ export async function annotatePadBody(doc: AnnotateDoc): Promise<AnnotatePadDto>
     ...artifactCatalogFields(doc.artifacts, { kind: "annotate", id: doc.id }),
     id: doc.id,
     name: doc.name,
-    ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
+    label: doc.label?.trim() || "",
     hash: doc.hash,
     doc_type: doc.docType,
     ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
@@ -595,15 +592,15 @@ export async function pushPadSnapshot(client: LcClient, snap: PadSnapshot): Prom
     payload: {
       name: snap.name,
       board: snap.board,
-      footnotes: snap.footnotes,
-      agent: snap.agent,
+      footnotes: snap.footnotes ?? null,
+      agent: snap.agent ?? null,
       pageCount: snap.pageCount,
-      ...(artifactBundle ? { artifactBundle } : {}),
+      artifactBundle: artifactBundle ?? null,
       ...(snap.footnoteBoards ? { footnoteBoards: snap.footnoteBoards } : {}),
-      ...(snap.footnoteInk ? { footnoteInk: snap.footnoteInk } : {}),
-      ...(snap.ink && snap.ink.length > 0 ? { ink: snap.ink } : {}),
+      footnoteInk: snapshotFootnoteInk(snap.footnoteBoards, snap.footnoteInk),
+      ink: snap.ink ?? null,
       ...(snap.edges && snap.edges.length > 0 ? { edges: snap.edges } : {}),
-      ...(typeof snap.source === "string" ? { source: snap.source } : {}),
+      source: snap.source ?? null,
     },
   };
   if (isPadHubOffline()) throw new Error("Can't reach the hub. Snapshots are kept on this device.");
@@ -931,7 +928,7 @@ async function pushRestoreAllFour(
     ...artifactCatalogFields(doc.artifacts, { kind: "annotate", id: doc.id }),
       id: doc.id,
       name: doc.name,
-      ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
+      label: doc.label?.trim() || "",
       hash: doc.hash,
       doc_type: doc.docType,
       ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
@@ -955,15 +952,15 @@ async function pushRestoreAllFour(
       payload: {
         name: row.name,
         board: row.board,
-        footnotes: row.footnotes,
-        agent: row.agent,
+        footnotes: row.footnotes ?? null,
+        agent: row.agent ?? null,
         pageCount: row.pageCount,
-        ...(row.artifactBundle ? { artifactBundle: parseArtifactSnapshotBundle(row.artifactBundle, { kind, id: padId }) } : {}),
-        ...(row.ink ? { ink: row.ink } : {}),
+        artifactBundle: parseArtifactSnapshotBundle(row.artifactBundle, { kind, id: padId }) ?? null,
+        ink: row.ink ?? null,
         ...(row.edges ? { edges: row.edges } : {}),
-        ...(typeof row.source === "string" ? { source: row.source } : {}),
+        source: row.source ?? null,
         ...(row.footnoteBoards ? { footnoteBoards: row.footnoteBoards } : {}),
-        ...(row.footnoteInk ? { footnoteInk: row.footnoteInk } : {}),
+        footnoteInk: snapshotFootnoteInk(row.footnoteBoards, row.footnoteInk),
       },
     });
   }
@@ -1000,7 +997,7 @@ export async function discoverHubPads(client: LcClient, report:HubLibraryPullRep
     const result = await syncBookPass(client, { ping: digest, libraryPull: true });
     for (const book of result.books) {
       const remote = digest.books?.find(row => row.kind === book.kind && row.id === book.id);
-      const name = String(remote && "record" in remote ? remote.record?.label ?? remote.record?.title ?? remote.record?.name ?? "Book" : "Book");
+      const name = String(remote && "record" in remote ? remote.record?.label || remote.record?.title || remote.record?.name || "Book" : "Book");
       if (book.status === "failed" || book.status === "needs_choice") {
         const { bookFailureMessage } = await import("./bookSyncMessages");
         report.failures.push({ name, message: bookFailureMessage(book, true) });
@@ -1524,23 +1521,21 @@ async function writeSnapshotIfNewer(
     source?: unknown;
   };
   const snap: PadSnapshot = {
-    ...(payload.artifactBundle !== undefined ? {
-      artifactBundle: await stageArtifactSnapshot(payload.artifactBundle, { kind, id: key }),
-    } : {}),
+    artifactBundle: await stageArtifactSnapshot(payload.artifactBundle, { kind, id: key }) ?? null,
     kind,
     key,
     tier,
     writtenAt: row.written_at,
     name: payload.name ?? key,
     board: payload.board as BoardBlob,
-    footnotes: payload.footnotes,
-    agent: payload.agent,
+    footnotes: payload.footnotes ?? null,
+    agent: payload.agent ?? null,
     pageCount: payload.pageCount,
     ...(payload.footnoteBoards ? { footnoteBoards: payload.footnoteBoards } : {}),
-    ...(payload.footnoteInk ? { footnoteInk: payload.footnoteInk } : {}),
-    ...(Array.isArray(payload.ink) ? { ink: payload.ink as PadSnapshot["ink"] } : {}),
+    footnoteInk: snapshotFootnoteInk(payload.footnoteBoards, payload.footnoteInk),
+    ink: Array.isArray(payload.ink) ? payload.ink as PadSnapshot["ink"] : null,
     ...(Array.isArray(payload.edges) ? { edges: payload.edges as PadSnapshot["edges"] } : {}),
-    ...(typeof payload.source === "string" ? { source: payload.source } : {}),
+    source: typeof payload.source === "string" ? payload.source : null,
   };
   try {
     const { run: idbRun, STORE_SNAPSHOTS } = await import("./idb");

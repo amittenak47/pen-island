@@ -33,9 +33,9 @@ import { validateInk } from "./syncContent";
 
 export interface PadSnapshotExtras {
   artifactBundle?: PadSnapshot["artifactBundle"];
-  ink?: SnapshotInkPage[];
+  ink?: SnapshotInkPage[] | null;
   edges?: PadSnapshot["edges"];
-  source?: string;
+  source?: string | null;
   footnoteBoards?: PadSnapshot["footnoteBoards"];
   footnoteInk?: PadSnapshot["footnoteInk"];
 }
@@ -92,21 +92,21 @@ export async function gatherPadSnapshotExtras(
   const footnoteBoards =
     kind === "annotate"
       ? await collectFootnoteBoards(key, annotate?.footnotes ?? [], { slim: false })
-      : undefined;
+      : {};
   const footnoteInk: Record<string, SnapshotInkPage[]> = {};
   if (kind === "annotate") {
     for (const wbId of whiteboardIdsOn(annotate?.footnotes ?? [])) {
       const pages = await inkPagesForSnapshot(footnoteWhiteboardDocKey(key, wbId));
-      if (pages.length > 0) footnoteInk[wbId] = pages;
+      footnoteInk[wbId] = pages;
     }
   }
   return {
-    ...(artifactBundle ? { artifactBundle } : {}),
-    ...(ink.length > 0 ? { ink } : {}),
-    ...(edges.length > 0 ? { edges } : {}),
-    ...(typeof source === "string" && source.length > 0 ? { source } : {}),
-    ...(footnoteBoards && Object.keys(footnoteBoards).length > 0 ? { footnoteBoards } : {}),
-    ...(Object.keys(footnoteInk).length > 0 ? { footnoteInk } : {}),
+    artifactBundle: artifactBundle ?? null,
+    ink,
+    edges,
+    source: source ?? null,
+    footnoteBoards,
+    footnoteInk,
   };
 }
 

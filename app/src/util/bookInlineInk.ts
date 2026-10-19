@@ -51,7 +51,7 @@ export async function convertInlineBook(owner: BookIdentity, original: Record<st
       await validateInk(packEncodedInk(inkC));
       rows.push({ v: 1, docKey: localPageKey(owner, key), pageId, inkC, updatedAt: Number(record.updated_at ?? 0),
         dirty: true, changeSeq, syncedChangeSeq: 0, syncedRev: 0, baseWireHash: null, baseLocalHash: null, bootstrap: true,
-        ...(primaryPdf && !ctx ? { layoutPending: true } : {}) });
+        layoutPending: primaryPdf && !ctx });
     }
     delete board.ink; delete board.inkC; converted = true;
   };

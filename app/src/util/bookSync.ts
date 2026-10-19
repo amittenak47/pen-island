@@ -170,6 +170,7 @@ export async function saveHubSnapshotCopy(client: LcClient, capture: BookCapture
     throw new BookSyncError("invalid", "The hub snapshot identity is invalid");
   }
   const ink: SnapshotInkPage[] = [], footnoteInk: Record<string, SnapshotInkPage[]> = {};
+  for (const id of Object.keys(remote.record.footnote_boards ?? {})) footnoteInk[id] = [];
   for (const page of remote.pages) {
     localPageKey(capture, page.key);
     const dto = await boundedBookRequest(() => client.getInkPage(capture.kind as "annotate" | "whiteboard", page.key, page.page_id,
@@ -186,9 +187,10 @@ export async function saveHubSnapshotCopy(client: LcClient, capture: BookCapture
   const payload = { name: String(remote.record.title ?? remote.record.name ?? "Book"), board: remote.record.board,
     agent: canonicalAgentMessages(Array.isArray(remote.record.agent) ? remote.record.agent : []), ink, bookRecord: remote.record,
     ...(remote.record.page_count !== undefined ? { pageCount: remote.record.page_count } : {}),
-    ...(capture.kind === "annotate" ? { source: remote.record.source ?? "", footnotes: canonicalFootnotes(Array.isArray(remote.record.footnotes) ? remote.record.footnotes : []),
-      footnoteBoards: remote.record.footnote_boards ?? {}, footnoteInk } : {}),
-    ...(artifactBundle ? { artifactBundle } : {}) };
+    source: capture.kind === "annotate" ? remote.record.source ?? "" : null,
+    footnotes: capture.kind === "annotate" ? canonicalFootnotes(Array.isArray(remote.record.footnotes) ? remote.record.footnotes : []) : null,
+    ...(capture.kind === "annotate" ? { footnoteBoards: remote.record.footnote_boards ?? {}, footnoteInk } : {}),
+    artifactBundle: artifactBundle ?? null };
   const body: PadSnapshotDto = { kind: capture.kind, key: capture.id, tier: "2h", written_at: Date.now(), payload };
   const hash = await snapshotCopyHash(body);
   await boundedBookRequest(() => client.checkBookHead(capture.kind, capture.id, remote.book_rev, { timeoutMs: options.timeoutMs }), signal, options.timeoutMs);
@@ -245,7 +247,8 @@ async function acquirePage(client: LcClient, capture: BookCapture, remote: BookS
     stop(signal);
     return { remote: page, localHash: checked.wireHash, row: { v: 1, docKey, pageId: page.page_id,
       gz: bytes, sum: { v: 1, len: bytes.byteLength, ...summarizeEncodedInk(encoded) }, dirty: false, updatedAt: dto.updated_at,
-      ...(capture.kind === "annotate" && (remote.record?.doc_type ?? capture.metadata?.docType) === "pdf" && page.key === capture.id && !localized.localized ? { layoutPending: true } : {}) } };
+      bootstrap: true,
+      layoutPending: capture.kind === "annotate" && (remote.record?.doc_type ?? capture.metadata?.docType) === "pdf" && page.key === capture.id && !localized.localized } };
   } catch (cause) {
     if (cause instanceof HubSyncCancelled || cause instanceof LcApiError && cause.status === 409) throw cause;
     throw new BookSyncError("hub_page", "Hub handwriting cannot be read", [{ key: page.key, pageId: page.page_id }], cause);
@@ -833,7 +836,7 @@ async function executeBook(client: LcClient, owner: BookIdentity, inventory: Boo
             if (afterAck.state.changeSeq !== capture.state.changeSeq) throw new LocalBookConflictError("A newer edit remains dirty after the upload");
             for (const before of capture.pages) {
               const after = afterAck.pages.find(row => row.docKey === before.docKey && row.pageId === before.pageId);
-              if (!after || JSON.stringify([before.inkC, before.gz, before.layoutPending]) !== JSON.stringify([after.inkC, after.gz, after.layoutPending])) throw new LocalBookConflictError("Handwriting layout changed while syncing");
+              if (!after || JSON.stringify([before.inkC, before.gz, before.layoutPending ?? false]) !== JSON.stringify([after.inkC, after.gz, after.layoutPending ?? false])) throw new LocalBookConflictError("Handwriting layout changed while syncing");
             }
             publicationCapture = afterAck;
             const capturedIdentities = new Map(capture.pages.map(row => [pageIdentity(wirePageKey(capture, row.docKey), row.pageId), row]));

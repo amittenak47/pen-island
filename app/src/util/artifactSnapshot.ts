@@ -10,7 +10,7 @@ export interface ArtifactSnapshotBundle {
 }
 
 export function parseArtifactSnapshotBundle(raw: unknown, parent: ArtifactParent): ArtifactSnapshotBundle | undefined {
-  if (raw === undefined) return undefined;
+  if (raw == null) return undefined;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Invalid attachment backup.");
   const value = raw as Partial<ArtifactSnapshotBundle>;
   const catalog = artifactCatalogFields(value.catalog, parent).artifacts;
@@ -43,7 +43,7 @@ export function parseArtifactSnapshotBundle(raw: unknown, parent: ArtifactParent
   return { v: 1, catalog, assets };
 }
 
-export async function captureArtifactSnapshot(catalog: ArtifactCatalog | undefined): Promise<ArtifactSnapshotBundle | undefined> {
+export async function captureArtifactSnapshot(catalog: ArtifactCatalog | null | undefined): Promise<ArtifactSnapshotBundle | undefined> {
   if (!catalog) return undefined;
   const checked = artifactCatalogFields(catalog, catalog.parent).artifacts!;
   const assets = new Map<string, ArtifactAsset>();

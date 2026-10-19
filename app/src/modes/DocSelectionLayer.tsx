@@ -49,7 +49,7 @@ import { AI_TAB_HEIGHT, AI_TAB_WIDTH, aiBookTabLeft, stackAiTabTops, edgeBookTab
 import { useBooktabs } from "../util/booktabsPref";
 import { footnoteCaptionRoom } from "../util/footnoteCaption";
 import { useBooktabPages } from "../util/booktabPages";
-import { footnoteDisplayThemes, paletteForMarkIndex } from "../util/inkPaletteHistory";
+import { footnoteDisplayThemes, normalizePalette, paletteForMarkIndex } from "../util/inkPaletteHistory";
 import { HoldButton } from "../components/HoldButton";
 import {
   HOLD_SENSITIVE_MS,
@@ -2561,7 +2561,7 @@ export function DocSelectionLayer({
   }, [subMarkLive]);
 
   const subMarkTint = subMarkParent
-    ? footnoteThemeVars(subMarkParent.color ?? inkPalette[0], inkPalette)
+    ? footnoteThemeVars(subMarkParent.color || inkPalette[0], inkPalette)
     : undefined;
   const subMarkLiveTint = subMarkPaintTheme
     ? footnoteThemeVars(subMarkPaintTheme.color, subMarkPaintTheme.palette)
@@ -2749,8 +2749,8 @@ export function DocSelectionLayer({
              * stay on the right so both sides identify the same passage.
              */
             const displayTheme = displayThemes.get(footnote.id);
-            const markPalette = displayTheme?.palette ?? footnote.palette ?? paletteForMarkIndex(number - 1);
-            const tint = footnoteThemeVars(displayTheme?.color ?? footnote.color ?? markPalette[0], markPalette);
+            const markPalette = normalizePalette(displayTheme?.palette) ?? normalizePalette(footnote.palette) ?? paletteForMarkIndex(number - 1);
+            const tint = footnoteThemeVars(displayTheme?.color || footnote.color || markPalette[0], markPalette);
             const paintBands = (
               useBands && bands.length > 0 ? bands : at ? [at] : []
             ).filter(
@@ -2933,7 +2933,7 @@ export function DocSelectionLayer({
                   width: box.width,
                   height: box.height,
                   ...(entry.color
-                    ? footnoteThemeVars(entry.color, entry.palette ?? inkPalette)
+                    ? footnoteThemeVars(entry.color, normalizePalette(entry.palette) ?? inkPalette)
                     : subMarkTint),
                 }}
               />
@@ -3237,7 +3237,7 @@ function footnoteTitle(footnote: DocFootnote, number: number): string {
   const head = named ? `${number}. ${named}` : `${number}.`;
   switch (footnote.kind) {
     case "search":
-      return `${head} Search — ${footnote.query ?? what}`;
+      return `${head} Search — ${footnote.query || what}`;
     case "note":
       return `${head} Highlight — ${what}`;
     case "ai":
@@ -3492,8 +3492,8 @@ function collectPaintedSubMarks(
               id: mark.id,
               kind: mark.kind,
               rects,
-              color: mark.color ?? footnote.color,
-              palette: mark.palette,
+              color: mark.color || footnote.color,
+              palette: normalizePalette(mark.palette) ?? undefined,
               scope: footnote.anchor.scope,
             });
             continue;
@@ -3506,8 +3506,8 @@ function collectPaintedSubMarks(
           id: mark.id,
           kind: mark.kind,
           rects: mark.bands,
-          color: mark.color ?? footnote.color,
-          palette: mark.palette,
+          color: mark.color || footnote.color,
+          palette: normalizePalette(mark.palette) ?? undefined,
           scope: footnote.anchor.scope,
         });
       }

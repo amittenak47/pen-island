@@ -38,7 +38,7 @@ export function RetainedCopies({ kind, onRestored }: { kind: "annotate" | "white
     <p className="lc-muted">Retained copies stay on this device after restoration. Restoring keeps the current book as another retained copy.</p>
     <div className="lc-settings-choice lc-retained-copies">
     {copies.map(copy => <div className="lc-scratch-load-entry lc-library-entry" key={copy.id}>
-      {(() => { const name = String(copy.record?.meta.label ?? copy.record?.meta.title ?? copy.record?.meta.name ?? "Retained local copy"); return <strong className="lc-library-subtitle" title={name}>{name}</strong>; })()}
+      {(() => { const name = String(copy.record?.meta.label || copy.record?.meta.title || copy.record?.meta.name || "Retained local copy"); return <strong className="lc-library-subtitle" title={name}>{name}</strong>; })()}
       <span className="lc-retained-actions">
       <button type="button" className="lc-secondary lc-dialog-action" disabled={pending} onClick={() => void perform(async () => exportValue(copy.bookId ?? "retained", await exportRecoveryCopy(copy.id)))}>Export copy</button>
       {(copy.type === "record" || copy.type === "conflict" && !!(copy.content as { metadata?: unknown; payload?: unknown } | undefined)?.metadata

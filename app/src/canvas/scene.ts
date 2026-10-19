@@ -65,7 +65,7 @@ export function applyMetadata<T extends ConvertedElement>(
     };
     const lineHeight = lineHeights.get(element.id);
     let next: T =
-      Object.keys(merged).length > 0 ? { ...element, customData: merged } : element;
+      { ...element, customData: merged };
     if (lineHeight != null && next.lineHeight !== lineHeight) {
       next = { ...next, lineHeight };
     }

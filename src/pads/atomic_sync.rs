@@ -191,9 +191,9 @@ pub struct BookState {
     pub record_hash: Option<String>,
     pub record: Option<Value>,
     pub pages: Vec<BookPage>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub retained_restore_pages: Vec<BookPage>,
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    #[serde(default)]
     pub retained_unpublished: bool,
 }
 
@@ -550,7 +550,7 @@ fn effective_record(request: &CommitRequest, current: &BookState) -> Result<Opti
     if let Some(existing) = existing_extra {
         let target = record.as_object_mut().unwrap();
         for (key, value) in existing {
-            if !target.contains_key(&key) {
+            if !target.contains_key(&key) || key == "artifacts" && target.get(&key).is_some_and(Value::is_null) {
                 target.insert(key, value);
             }
         }
