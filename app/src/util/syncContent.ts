@@ -5,6 +5,8 @@
  * footnotes and footnote_boards; agent[].attachments/artifacts/artifactProposals/
  * flags/processEvents, agent[].pending/queued/bridgePending=false,
  * agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
+ * agent[].drawing.expanded/frameIndex are this device's view of a diagram
+ * (open or not, which frame), excluded like the camera;
  * footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
  * footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
  * Also empty strings at agent[].requestNote/reasoning/bridgeError,
@@ -92,6 +94,8 @@ export const PAGE_FRAME_LOCAL_KEYS = ["width", "height", "version", "versionNonc
 /** Agent message flags whose `false` is the same as leaving them out. */
 export const MESSAGE_FALSE_DEFAULT_KEYS = ["pending", "queued", "bridgePending"] as const;
 export const MESSAGE_EMPTY_LIST_KEYS = ["attachments", "artifacts", "artifactProposals", "flags", "processEvents"] as const;
+/** How a diagram in a message is being viewed: per device, like the camera, never authored. */
+export const MESSAGE_DRAWING_VIEW_KEYS = ["expanded", "frameIndex"] as const;
 export const MESSAGE_EMPTY_STRING_KEYS = ["requestNote", "reasoning", "bridgeError"] as const;
 export const FOOTNOTE_EMPTY_LIST_KEYS = ["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"] as const;
 
@@ -215,7 +219,12 @@ export function normalizeRecord(value: unknown): Record<string, unknown> {
     if (!plainObject(message)) continue;
     emptyLists(message, MESSAGE_EMPTY_LIST_KEYS);
     for (const key of MESSAGE_FALSE_DEFAULT_KEYS) if (message[key] === false) delete message[key];
-    if (plainObject(message.drawing) && message.drawing.redacted === false) delete message.drawing.redacted;
+    if (plainObject(message.drawing)) {
+      if (message.drawing.redacted === false) delete message.drawing.redacted;
+      // Opening a diagram or scrubbing its frames on one device is not an
+      // edit: it made the same answer differ and sync kept both copies.
+      for (const key of MESSAGE_DRAWING_VIEW_KEYS) delete message.drawing[key];
+    }
     if (Array.isArray(message.artifactProposals)) for (const proposal of message.artifactProposals) {
       if (plainObject(proposal)) emptyLists(proposal, ["programs", "messages"]);
     }

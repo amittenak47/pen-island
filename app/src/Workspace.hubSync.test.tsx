@@ -199,6 +199,34 @@ it("a tab Sync tap prepares the live pad, reports progress, ignores window reloa
   await reload(); expect(mocks.board.restoreBoard).toHaveBeenCalledTimes(2);
 });
 
+it("asks the hub again after the walk's index step fails, and clears the error once it has the index", async () => {
+  // The hub lives in the desktop app; while it restarts, the walk's index step fails.
+  const client = mocks.shell.client as unknown as { getDocIndex: ReturnType<typeof vi.fn> };
+  const status = () => vi.mocked(mocks.shell.setChrome).mock.lastCall?.[0]?.docIndex?.status;
+  await mount();
+  client.getDocIndex.mockRejectedValue(new Error("hub unreachable"));
+  await tapSync();
+  for (let i = 0; i < 8; i++) await advance(250);
+  expect(status()).toBe("error");
+  client.getDocIndex.mockResolvedValue({ indexed: true, page_count: 1, embed_state: "full" });
+  await advance(5_000);
+  await advance(250);
+  expect(status()).toBe("indexed");
+});
+
+it("stops asking the hub again after a few tries", async () => {
+  const client = mocks.shell.client as unknown as { getDocIndex: ReturnType<typeof vi.fn> };
+  await mount();
+  client.getDocIndex.mockRejectedValue(new Error("hub unreachable"));
+  await tapSync();
+  for (let i = 0; i < 8; i++) await advance(250);
+  const calls = client.getDocIndex.mock.calls.length;
+  await advance(5_000 + 15_000 + 30_000 + 60_000 + 120_000 + 1_000);
+  expect(client.getDocIndex.mock.calls.length).toBe(calls + 5);
+  await advance(600_000);
+  expect(client.getDocIndex.mock.calls.length).toBe(calls + 5);
+});
+
 it("holds autosave throughout an asynchronous hub apply and releases it afterwards", async () => {
   await mount();
   const ink = deferred<Map<number, never>>(); mocks.inkPages.mockReturnValueOnce(ink.promise);

@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import type { DocIndexStatus, SearchOptions } from "../api/client";
 import type { ProblemDetail } from "../api/types";
 import type { BoardHandle } from "../canvas/BoardHandle";
@@ -114,6 +114,9 @@ function changedRevisionParts(before: string | null, after: string): string {
  * Workspace. As in useAnnotateSession, effect bodies are registered there at
  * their original sites so their order relative to other modes is unchanged.
  */
+/** When to ask the hub again after the walk's index step failed (see indexRecheckRef). */
+const INDEX_RECHECK_MS = [5_000, 15_000, 30_000, 60_000, 120_000];
+
 export function useHubSync({
   client, tab, boardRef, whiteboardNotebookIdRef, annotateDocIdRef,
   annotateSourceRef, annotateFootnotesRef, footnoteBoardRef, footnoteBoardSessionRef,
@@ -140,6 +143,16 @@ export function useHubSync({
   const syncWorkingRevisionRef = useRef<(() => string)>(() => "");
   /** A Sync tap is running: it reloads the open pad itself, at its end. */
   const syncWalkActiveRef = useRef(false);
+  /**
+   * After the walk's index step fails, ask the hub again a few times.
+   *
+   * The hub lives in the desktop app: when it restarts mid-walk, or the local
+   * model for embedding is off, the step fails though the hub may well have
+   * the document indexed. The chip then said "index error" until the
+   * document was opened again. Read-only: this never re-runs indexing.
+   */
+  const indexRecheckRef = useRef(0);
+  useEffect(() => () => window.clearTimeout(indexRecheckRef.current), []);
   const syncPreparedRevisionRef = useRef<string | null>(null);
   /**
    * Live rehydrate after a walk (and after auto-sync apply).
@@ -372,6 +385,7 @@ export function useHubSync({
         // or found it already there. Nothing used to say so, so the chip kept
         // reading "not indexed" about a document that was.
         onIndexDone: () => {
+          window.clearTimeout(indexRecheckRef.current);
           const { indexInputsRef } = getContext();
           setDocIndexStatus("indexed");
           setDocIndexError(null);
@@ -391,9 +405,26 @@ export function useHubSync({
             .catch(() => {});
         },
         onIndexError: (message) => {
+          window.clearTimeout(indexRecheckRef.current);
           if (message) {
             setDocIndexStatus("error");
             setDocIndexError(message);
+            const hash = getContext().indexInputsRef.current?.hash;
+            const recheck = (attempt: number) => {
+              const wait = INDEX_RECHECK_MS[attempt];
+              if (!hash || wait === undefined) return;
+              indexRecheckRef.current = window.setTimeout(() => {
+                if (getContext().indexInputsRef.current?.hash !== hash) return;
+                void client.getDocIndex(hash).then((meta) => {
+                  if (getContext().indexInputsRef.current?.hash !== hash) return;
+                  if (!meta?.indexed || !(meta.page_count ?? 0)) { recheck(attempt + 1); return; }
+                  setDocIndexStatus("indexed");
+                  setDocIndexError(null);
+                  setDocIndexMeta(meta);
+                }, () => recheck(attempt + 1));
+              }, wait);
+            };
+            recheck(0);
           } else {
             setDocIndexStatus("idle");
             setDocIndexError(null);
