@@ -2591,9 +2591,9 @@ export function DocSelectionLayer({
   const visibleSubMarks = useMemo(
     () =>
       paintedSubMarks.filter((entry) =>
-        footnoteVisibleOnViewPages(entry.scope, viewPages),
+        footnoteVisibleOnViewPages(entry.scope, markPages),
       ),
-    [paintedSubMarks, viewPages],
+    [paintedSubMarks, markPages],
   );
 
   const pageMarkGroups = useMemo(() => {

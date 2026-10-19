@@ -69,7 +69,7 @@ beforeEach(() => {
   markBootSettled();
   vi.mocked(paintTurn).mockClear();
   vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue({
-    setTransform: vi.fn(), drawImage: vi.fn(), fillRect: vi.fn(),
+    setTransform: vi.fn(), drawImage: vi.fn(), fillRect: vi.fn(), clearRect: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
   gesture.release.mockClear();
   gesture.protect.mockReset().mockReturnValue(gesture.release);

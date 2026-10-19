@@ -23151,6 +23151,17 @@ html[data-corners="rounded"] {
 .lc-footnote-note-actions .lc-footnote-mark-tool:disabled { opacity: .4; cursor: default; }
 .lc-footnote-note-actions .lc-footnote-mark-tool[aria-pressed="true"] { box-shadow: inset 0 0 0 1px var(--lc-fn-color); }
 .lc-footnote-note-actions .lc-footnote-mark-tool:focus-visible { outline: 2px solid var(--lc-fn-color); outline-offset: 1px; }
+/* A mini note scrolls with no visible bar, like the panel and its lists. */
+.lc-footnote-mini-note .lc-footnote-note-body,
+.lc-footnote-mini-note .lc-footnote-note-body pre {
+  scrollbar-width: none;
+}
+
+.lc-footnote-mini-note .lc-footnote-note-body::-webkit-scrollbar,
+.lc-footnote-mini-note .lc-footnote-note-body pre::-webkit-scrollbar {
+  display: none;
+}
+
 .lc-footnote-mini-note.is-chatbot-complete .lc-footnote-note-body,
 .lc-footnote-note-workspace.is-chatbot-complete .lc-footnote-note-body {
   background-image: radial-gradient(ellipse at 100% 0, color-mix(in srgb, var(--lc-fn-light) 22%, transparent), transparent 58%);
