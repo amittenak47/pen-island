@@ -17,11 +17,11 @@
  * conflict or an old format leaves (`attached`) belong to the book too: they
  * go when the book is deleted for good, and are otherwise left alone.
  */
-import { run, STORE_SYNC_RECOVERY, withStore } from "./idb";
+import { run, STORE_CONTENT, STORE_INK_PAGES, STORE_SYNC_RECOVERY, withStore } from "./idb";
 import { lengthFromHash } from "./docBytes";
 import type { RecoveryCopy } from "./syncRecovery";
 import type { BookMeta } from "./syncState";
-import type { InkPageRecord } from "./inkPageStore";
+import { getInkPageRecords, type InkPageRecord } from "./inkPageStore";
 
 export type RetainedKind = "annotate" | "whiteboard";
 
@@ -41,6 +41,8 @@ export interface RetainedVersion {
   label: string;
   /** The document file this version draws on; "" for whiteboards and text. */
   hash: string;
+  /** "pdf", "markdown", "web"…; "" for whiteboards. */
+  docType: string;
   /** Its own data and ink, in bytes (the file is counted by the reader of this). */
   dataBytes: number;
   /** Trashed on its own, on this device. */
@@ -117,7 +119,7 @@ function summarize(copy: RecoveryCopy): Summary {
   return { attached: null, version: {
     id: copy.id, kind, bookId: copy.bookId, editedAt, keptAt: keptStamp ?? editedAt,
     reason: REASONS[source] ?? "Kept copy",
-    name: text("name") || text("title"), label: text("label"), hash: text("hash"),
+    name: text("name") || text("title"), label: text("label"), hash: text("hash"), docType: text("docType"),
     dataBytes: approxBytes(record ? { payload: record.payload, children: record.children, ink: record.ink } : copy.content),
     trashedAt, restore: record ? "record" : "branch",
   } };
@@ -211,4 +213,37 @@ export async function deleteRetainedCopies(ids: readonly string[]): Promise<void
 export async function deleteBookRetainedCopies(kind: RetainedKind, bookId: string): Promise<void> {
   const { versions, attached } = await versionsByBook(kind);
   await deleteRetainedCopies([...(versions.get(bookId) ?? []), ...(attached.get(bookId) ?? [])].map(row => row.id));
+}
+
+/*
+ * What the current book takes on this device: its saved data, its ink, its
+ * scratch boards, and its file. Read once per edit (`updatedAt`): opening the
+ * list must not re-read every book's handwriting each time.
+ */
+const bookSizes = new Map<string, { updatedAt: number; bytes: number }>();
+
+export async function bookBytes(kind: RetainedKind, id: string, updatedAt: number, hash?: string): Promise<number> {
+  const key = `${kind}:${id}`;
+  const cached = bookSizes.get(key);
+  if (cached && cached.updatedAt === updatedAt) return cached.bytes + (hash ? lengthFromHash(hash) ?? 0 : 0);
+  let data = approxBytes(await run<unknown>(STORE_CONTENT, "readonly", store => store.get(id)));
+  data += approxBytes(await getInkPageRecords(`${kind === "annotate" ? "md" : "wb"}:${id}`));
+  if (kind === "annotate") {
+    const prefix = `fnwb:${id}:`;
+    // Scratch boards and their ink sit under the book's prefix in both stores.
+    for (const name of [STORE_CONTENT, STORE_INK_PAGES]) await withStore(name, "readonly", store => {
+      const request = store.openCursor(IDBKeyRange.bound(prefix, `${prefix}￿`));
+      request.onsuccess = () => { const cursor = request.result; if (cursor) { data += approxBytes(cursor.value); cursor.continue(); } };
+    });
+  }
+  bookSizes.set(key, { updatedAt, bytes: data });
+  return data + (hash ? lengthFromHash(hash) ?? 0 : 0);
+}
+
+/** "2.3 MB", "640 KB", "12 B". */
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(bytes < 10 * 1024 * 1024 ? 1 : 0)} MB`;
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`;
 }

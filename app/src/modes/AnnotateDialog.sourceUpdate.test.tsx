@@ -25,7 +25,6 @@ vi.mock("../util/docSourceUpdate", () => ({ checkDocSource: source.check, update
 vi.mock("../util/docSourceNative", () => ({ nativeSourcePickerAvailable: native.available, pickSourceFolder: native.pickFolder, listSourceFolder: native.listFolder, statDocumentSource: native.stat }));
 vi.mock("../util/padSnapshotStore", () => ({ listPadSnapshots: async () => [], PAD_SNAPSHOT_TIERS: [] }));
 vi.mock("../util/padSync", () => ({ TOMBSTONE_COPY: "Trash on this device." }));
-vi.mock("./RetainedCopies", () => ({ RetainedCopies: () => null }));
 
 import { AnnotateDialog } from "./AnnotateDialog";
 

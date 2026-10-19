@@ -24,6 +24,7 @@ import { usePdfSession } from "./workspace/usePdfSession";
 import { useAnnotateSession } from "./workspace/useAnnotateSession";
 import { useHubSync } from "./workspace/useHubSync";
 
+import { requestExportOnOpen, takePendingExport } from "./util/pendingExport";
 import { hubDidNotAnswer, LcApiError, type AnnotatePadDto, type DocIndexStatus, type ProposedAnnotation, type SearchOptions } from "./api/client";
 import { AmbientCoach, defaultCoachSocketFactory, type AmbientProbe } from "./api/coachSocket";
 import { mergeProcessEvent } from "./modes/processEvents";
@@ -9287,6 +9288,76 @@ export const Workspace = memo(function Workspace({
   [annotateDocId, annotateSource, footnoteBoardSession, linkedSourceName, sourceChecking, linkNewer, checkSourceFor, linkSourceFor, unlinkSourceFor]);
   const annotateSyncPair = menuSyncPair(entryKind !== "web" ? annotateLink : null);
 
+  /** Import a whiteboard backup, or export the open notebook (backup file or picture). */
+  const runWhiteboardTransfer = (choice: "import" | "export" | "export-png") => {
+    setWhiteboardEntryOpen(false);
+    const board = boardRef.current;
+    const id = whiteboardNotebookIdRef.current;
+    const title = padDefaultName || "Whiteboard";
+    const messages = persistableAgentMessages(agentMessagesRef.current);
+    void (async () => {
+      try {
+        const transfer = await import("./util/whiteboardTransfer");
+        if (choice === "import") {
+          const picked = await pickSidecarFile();
+          if (!picked) return;
+          const saved = await transfer.importWhiteboardBackup(picked.text);
+          openOrReloadWhiteboard(saved.id);
+          setNotice(`Imported ${saved.title} as a new whiteboard.`);
+          return;
+        }
+        if (!board) return;
+        const backup = await transfer.captureWhiteboardBackup(board, id, title, whiteboardPageCount, messages);
+        const name = backup.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
+        const blob = choice === "export-png" ? await board.exportNotesPng(backup.board)
+          : new Blob([await (await import("./util/gzip")).gzipText(JSON.stringify(backup))], {type:"application/gzip"});
+        const {saveDocumentExport} = await import("./util/saveDocumentExport");
+        const result = await saveDocumentExport({name: name + (choice === "export-png" ? ".png" : ".whiteboard.json.gz"),blob}, new AbortController().signal, setNotice);
+        if (result) setNotice(result);
+      } catch (cause) { setError(messageOf(cause)); }
+    })();
+  };
+  const whiteboardTransferRef = useRef(runWhiteboardTransfer);
+  whiteboardTransferRef.current = runWhiteboardTransfer;
+
+  /*
+   * A Recents row's export button, tapped: the annotated document (a PDF
+   * with the ink, or the notebook as a picture). It needs the book laid out,
+   * so it opens the book here and starts Export once it is open.
+   *
+   * A retained copy is not exported this way yet: laying out a copy without
+   * opening it over the real book needs a read-only open that never saves,
+   * which is its own piece of work. Its backup file is a hold away.
+   */
+  const [exportPoke, setExportPoke] = useState(0);
+  const exportVersion = useCallback((kind: "annotate" | "whiteboard", bookId: string, copyId: string | null) => {
+    if (copyId) {
+      setNotice("A retained copy can't be exported with its ink yet. Hold the export button for its backup file.");
+      return;
+    }
+    if (kind === "annotate" && getAnnotateDocMeta(bookId)?.docType === "web") {
+      setNotice("A web page has no document to export. Hold the export button for its backup file.");
+      return;
+    }
+    setAnnotateEntryOpen(false);
+    setWhiteboardEntryOpen(false);
+    requestExportOnOpen(kind, bookId);
+    setExportPoke(value => value + 1);
+    if (kind === "annotate" ? annotateDocId === bookId : whiteboardNotebookId === bookId) return;
+    if (kind === "annotate") openLinkedNode({ type: "annotate", id: bookId });
+    else openOrReloadWhiteboard(bookId);
+  }, [annotateDocId, openLinkedNode, openOrReloadWhiteboard, setNotice, whiteboardNotebookId]);
+  // The workspace showing that book, once it is laid out, starts the export.
+  useEffect(() => {
+    if (!active || boardPreparing) return;
+    if (takePendingExport("annotate", annotateDocId)) {
+      setDocumentExportFormat("pdf");
+      setDocumentExportOpen(true);
+    } else if (takePendingExport("whiteboard", whiteboardNotebookId)) {
+      whiteboardTransferRef.current("export-png");
+    }
+  }, [active, annotateDocId, boardPreparing, exportPoke, whiteboardNotebookId]);
+
   /*
    * The prompt belongs to one chip. Switching away answers it by walking off,
    * which is an answer — leave the empty tab where it is and take the modal
@@ -11505,6 +11576,10 @@ export const Workspace = memo(function Workspace({
         <AnnotateDialog
           mode="entry"
           syncPair={annotateSyncPair}
+          onExportVersion={(bookId, copyId) => exportVersion("annotate", bookId, copyId)}
+          onPrepareRestore={async (bookId) => {
+            if (annotateDocIdRef.current === bookId && !annotateUntouched()) await saveAnnotateSession({ throwOnError: true });
+          }}
           onNotice={setNotice}
           kind={entryKind}
           pending={busy !== null || boardPreparing}
@@ -11602,6 +11677,8 @@ export const Workspace = memo(function Workspace({
                       docType: entry.docType,
                       text: entry.source,
                       docId: entry.id,
+                      // Already open here (a copy just restored over it): load it again in place.
+                      ...(annotateDocIdRef.current === entry.id ? { tabId: tab.id } : {}),
                     });
                     void checkSourceFor(entry.id);
                     return;
@@ -11625,6 +11702,7 @@ export const Workspace = memo(function Workspace({
                     docType: entry.docType,
                     bytes,
                     docId: entry.id,
+                    ...(annotateDocIdRef.current === entry.id ? { tabId: tab.id } : {}),
                   });
                   void checkSourceFor(entry.id);
                 } finally {
@@ -11662,6 +11740,11 @@ export const Workspace = memo(function Workspace({
         <WhiteboardDialog
           mode="entry"
           syncPair={menuSyncPair(null)}
+          onExportVersion={(bookId, copyId) => exportVersion("whiteboard", bookId, copyId)}
+          onPrepareRestore={async (bookId) => {
+            if (whiteboardNotebookIdRef.current === bookId && !whiteboardUntouched()) await saveWhiteboardNow(undefined, { quiet: true, throwOnError: true });
+          }}
+          onNotice={setNotice}
           pending={busy !== null || boardPreparing}
           allowSave={Boolean(problem && isWhiteboard(problem))}
           snapshotKey={whiteboardNotebookId}
@@ -11683,32 +11766,7 @@ export const Workspace = memo(function Workspace({
               return;
             }
             if (choice === "import" || choice === "export" || choice === "export-png") {
-              setWhiteboardEntryOpen(false);
-              const board = boardRef.current;
-              const id = whiteboardNotebookIdRef.current;
-              const title = padDefaultName || "Whiteboard";
-              const messages = persistableAgentMessages(agentMessagesRef.current);
-              void (async () => {
-                try {
-                  const transfer = await import("./util/whiteboardTransfer");
-                  if (choice === "import") {
-                    const picked = await pickSidecarFile();
-                    if (!picked) return;
-                    const saved = await transfer.importWhiteboardBackup(picked.text);
-                    openOrReloadWhiteboard(saved.id);
-                    setNotice(`Imported ${saved.title} as a new whiteboard.`);
-                    return;
-                  }
-                  if (!board) return;
-                  const backup = await transfer.captureWhiteboardBackup(board, id, title, whiteboardPageCount, messages);
-                  const name = backup.title.replace(/[<>:"/\\|?*\x00-\x1f]/g, "_");
-                  const blob = choice === "export-png" ? await board.exportNotesPng(backup.board)
-                    : new Blob([await (await import("./util/gzip")).gzipText(JSON.stringify(backup))], {type:"application/gzip"});
-                  const {saveDocumentExport} = await import("./util/saveDocumentExport");
-                  const result = await saveDocumentExport({name: name + (choice === "export-png" ? ".png" : ".whiteboard.json.gz"),blob}, new AbortController().signal, setNotice);
-                  if (result) setNotice(result);
-                } catch (cause) { setError(messageOf(cause)); }
-              })();
+              runWhiteboardTransfer(choice);
               return;
             }
             if (choice === "load" && notebookId) {

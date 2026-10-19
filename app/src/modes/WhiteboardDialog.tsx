@@ -1,7 +1,9 @@
-import { RetainedCopies } from "./RetainedCopies";
 import { useIsPresent } from "motion/react";
 import { DialogBackdrop, DialogPresence } from "../components/DialogMotion";
 import {LibraryTrashRow} from "./LibraryTrashRow";
+import { copyLine, useRetainedRows, VersionPicker, VersionShare } from "./RetainedRow";
+import { exportVersionBackup, restoreVersion } from "./retainedActions";
+import { deleteBookRetainedCopies, deleteRetainedCopies, formatBytes, trashRetainedCopy, versionBytes, type RetainedVersion } from "../util/retainedVersions";
 import {useLibraryMorph} from "./useLibraryMorph";
 /**
  * Scratchpad leave / entry menus — save, discard, load, or start blank.
@@ -64,6 +66,15 @@ interface LeaveProps extends NotebookContextProps {
 }
 
 interface EntryProps extends NotebookContextProps {
+  /** The annotated export for a Load row: the current notebook (copyId null) or one retained copy. */
+  onExportVersion?: (bookId: string, copyId: string | null) => void;
+  /**
+   * Before a copy of this book replaces it: save what is open, so the
+   * version being replaced (kept as copy 1) includes the latest edits.
+   */
+  onPrepareRestore?: (bookId: string) => Promise<void>;
+  /** A one-line notice outside the menu ("Saved …"). */
+  onNotice?: (message: string) => void;
   /** [Sync] beside the open notebook's name: the tab's Sync. A notebook has no file to link. */
   syncPair?: DocSyncLinkPairProps | null;
   mode: "entry";
@@ -121,7 +132,6 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
   const bodyRef = useRef<HTMLDivElement>(null);
   const [pickingLoad, setPickingLoad] = useState(false);
   const [pickingSnapshots, setPickingSnapshots] = useState(false);
-  const [pickingRecovery, setPickingRecovery] = useState(false);
   const [snapshots, setSnapshots] = useState<PadSnapshotMeta[]>([]);
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [removeError, setRemoveError] = useState<string | null>(null);
@@ -136,6 +146,10 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
   const lastTapRef = useRef({ id: "", at: 0 });
   const backdropDown = useRef(false);
   const { tapArmed, arm } = useLibraryDeleteArm();
+  /** A retained-copy action is running (restore, trash, export). */
+  const [retainedBusy, setRetainedBusy] = useState(false);
+  /** Restoring a copy the hub refused: another device changed the notebook. */
+  const [restoreStale, setRestoreStale] = useState<{ bookId: string; version: RetainedVersion } | null>(null);
 
   useEffect(() => {
     const refresh = () => {
@@ -155,7 +169,6 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
     setTrash(listWhiteboardTrash());
     setPickingLoad(false);
     setPickingSnapshots(false);
-    setPickingRecovery(false);
     setSaveTitle(null);
     setRenamingId(null);
     setLibraryQuery("");
@@ -176,7 +189,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
   const isLeave = props.mode === "leave";
   const allowSave = props.mode === "entry" && Boolean(props.allowSave);
   const snapshotKey = props.mode === "entry" ? props.snapshotKey ?? null : null;
-  const locked = pending || exiting || !present;
+  const locked = pending || exiting || !present || retainedBusy;
   const needsName = Boolean(props.needsName);
   const defaultName = props.defaultName?.trim() || "";
   const onRename = props.mode === "entry" ? props.onRename : undefined;
@@ -261,8 +274,43 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
     refreshList();
   };
 
-  const morphRef = useLibraryMorph(`${section}:${pickingLoad}:${pickingSnapshots}:${pickingRecovery}:${saveTitle!==null}`);
+  const morphRef = useLibraryMorph(`${section}:${pickingLoad}:${pickingSnapshots}:${saveTitle!==null}`);
   const archived = props.mode === "entry" ? trash : [];
+  const retained = useRetainedRows("whiteboard", props.mode === "entry", notebooks, pickingLoad);
+  const knownIds = new Set([...notebooks, ...trash].map(entry => entry.id));
+  /* Copies whose notebook is gone wait in the trash as that notebook. */
+  const orphans = [...retained.versions.entries()]
+    .filter(([bookId]) => !knownIds.has(bookId))
+    .map(([bookId, rows]) => ({ bookId, rows, newest: rows[0]! }))
+    .filter(({ newest }) => newest.name.toLocaleLowerCase().includes(libraryQuery.trim().toLocaleLowerCase()));
+  const copiesDetail = (bookId: string) => {
+    const rows = retained.versions.get(bookId) ?? [];
+    const bytes = rows.reduce((sum, row) => sum + versionBytes(row, undefined), 0);
+    const count = rows.length ? `${rows.length} retained ${rows.length === 1 ? "copy" : "copies"}` : "";
+    return [count, bytes ? formatBytes(bytes) : ""].filter(Boolean).join(" · ") || undefined;
+  };
+  const retainedAction = async (work: () => Promise<void>) => {
+    setRetainedBusy(true); setStorageError(null);
+    try { await work(); }
+    catch (cause) { setStorageError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setRetainedBusy(false); retained.refresh(); }
+  };
+  /** Hold to load on a copy: it becomes the current version (the old current is kept as copy 1), then loads. */
+  const openVersion = (bookId: string, version: RetainedVersion, force = false) => retainedAction(async () => {
+    if (props.mode === "entry") await props.onPrepareRestore?.(bookId);
+    if (await restoreVersion(version, force) === "stale") { setRestoreStale({ bookId, version }); return; }
+    setRestoreStale(null); retained.pick(bookId, null); refreshList();
+    if (props.mode === "entry") props.onChoose("load", bookId);
+  });
+  /** A copy's trash: the first hold marks it (!), the next deletes it for good. Its notebook is untouched. */
+  const trashVersion = (bookId: string, version: RetainedVersion) => retainedAction(async () => {
+    if (version.trashedAt) { await deleteRetainedCopies([version.id]); retained.pick(bookId, null); }
+    else await trashRetainedCopy(version.id);
+  });
+  const backupVersion = (bookId: string, name: string, version: RetainedVersion | null) => retainedAction(async () => {
+    const message = await exportVersionBackup("whiteboard", bookId, name, version);
+    if (message && props.mode === "entry") props.onNotice?.(message);
+  });
 
   return (
     <DialogBackdrop exiting={exiting}
@@ -283,10 +331,10 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
       }}
     >
       <DialogFrame ref={morphRef} exiting={exiting}
-        className={`lc-attempt-modal lc-library-holds lc-library-menu lc-library-whiteboard lc-whiteboard-dialog${pickingRecovery ? " lc-library-tall" : ""}`}
+        className={`lc-attempt-modal lc-library-holds lc-library-menu lc-library-whiteboard lc-whiteboard-dialog`}
         ariaLabel={isLeave ? "Leave whiteboard?" : "Open whiteboard"}
         titleId="lc-whiteboard-dialog-title"
-        title={isLeave ? "Leave whiteboard?" : pickingRecovery ? "Retained copies" : pickingLoad ? "Load" : pickingSnapshots ? "Restore" : section === "open" ? "Open" : section === "export" ? "Export" : "Whiteboard"}
+        title={isLeave ? "Leave whiteboard?" : pickingLoad ? "Load" : pickingSnapshots ? "Restore" : section === "open" ? "Open" : section === "export" ? "Export" : "Whiteboard"}
         subtitle="Notebooks"
         icon={<NotebookIcon />}
         mode="whiteboard"
@@ -303,7 +351,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
         </div>}
         <div ref={bodyRef} className="lc-settings-body lc-dialog-body lc-scroll-pane">
           {pickingLoad && <LibrarySearch value={libraryQuery} onChange={setLibraryQuery} label="Search saved whiteboards" disabled={locked} showTrash={showTrash} onTrashChange={setShowTrash}/>}
-          {pickingLoad && !(showTrash ? [] : notebooks).some(matchesQuery) && !archived.some(matchesQuery) && <p className="lc-muted">No matching saved items.</p>}
+          {pickingLoad && !(showTrash ? [] : notebooks).some(matchesQuery) && !archived.some(matchesQuery) && !orphans.length && <p className="lc-muted">No matching saved items.</p>}
           {error && <div className="lc-warning">{error}</div>}
 
           {saveTitle !== null ? (
@@ -328,8 +376,6 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                 <span className="lc-muted">Keep this notebook in the library.</span>
               </HoldButton>
             </div>
-          ) : pickingRecovery ? (
-            <RetainedCopies kind="whiteboard" onRestored={refreshList} />
           ) : pickingSnapshots ? (
             <div className="lc-settings-choice">
               {PAD_SNAPSHOT_TIERS.flatMap(tier => {
@@ -373,8 +419,11 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                 surface is the row and the hold target fills what the trash
                 leaves.
               */}
-              {(showTrash ? [] : notebooks).filter(matchesQuery).map((entry) => (
-                <div key={entry.id} className="lc-scratch-load-entry">
+              {(showTrash ? [] : notebooks).filter(matchesQuery).map((entry) => {
+                const copy = retained.pickedOf(entry.id);
+                const size = copy ? versionBytes(copy, undefined) : retained.sizes[entry.id];
+                return (
+                <div key={entry.id} className={`lc-scratch-load-entry${copy ? " is-copy" : ""}${copy?.trashedAt ? " is-trashed-copy" : ""}`}>
                   {renamingId === entry.id ? (
                     <PadNameField
                       value={renameDraft}
@@ -386,18 +435,24 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                     />
                   ) : (
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
-                    label={`Load ${entry.title}`}
+                    label={copy ? `Restore copy ${copy.number} of ${entry.title}` : `Load ${entry.title}`}
                     className="lc-scratch-load-hold"
                     disabled={locked}
-                    onTap={onRename ? () => tapLoadRow(entry.id, entry.title) : undefined}
-                    onConfirm={() => props.onChoose("load", entry.id)}
+                    onTap={onRename && !copy ? () => tapLoadRow(entry.id, entry.title) : undefined}
+                    onConfirm={() => copy ? void openVersion(entry.id, copy) : props.onChoose("load", entry.id)}
                     resetKey={error}
                   >
-                    <strong>{entry.title}</strong>
-                    <span className="lc-muted">
-                      {entry.pageCount} page{entry.pageCount === 1 ? "" : "s"}
-                    </span>
-                    <LibraryTimes {...entry}/>
+                    {/* Showing a copy: its own title, date and why it was kept. */}
+                    <strong>{copy?.name || entry.title}</strong>
+                    {copy
+                      ? <span className="lc-muted lc-version-line">{copyLine(copy)}{copy.trashedAt ? " · in the trash (!)" : ""}</span>
+                      : <>
+                        <span className="lc-muted">
+                          {entry.pageCount} page{entry.pageCount === 1 ? "" : "s"}
+                        </span>
+                        <LibraryTimes {...entry}/>
+                      </>}
+                    {size !== undefined && <span className="lc-muted lc-library-size">{formatBytes(size)}</span>}
                   </HoldButton>
                   )}
                   {renamingId !== entry.id && (
@@ -413,7 +468,38 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                       } catch (cause) { setStorageError(cause instanceof Error ? cause.message : String(cause)); }
                     }}
                   />
-                  {!entry.locked && (
+                  <VersionPicker name={entry.title} versions={retained.versions.get(entry.id) ?? []} picked={copy}
+                    currentBytes={retained.sizes[entry.id]} disabled={locked} onPick={id => retained.pick(entry.id, id)} />
+                  <VersionShare name={copy ? `copy ${copy.number} of ${entry.title}` : entry.title} disabled={locked}
+                    onAnnotated={() => { if (props.mode === "entry") props.onExportVersion?.(entry.id, copy?.id ?? null); }}
+                    onBackup={() => void backupVersion(entry.id, entry.title, copy)} />
+                  {!entry.locked && copy && (
+                  <HoldButton holdMs={LIBRARY_HOLD_MS}
+                    label={copy.trashedAt ? `Delete copy ${copy.number} of ${entry.title} for good` : `Move copy ${copy.number} of ${entry.title} to the trash`}
+                    className={`lc-scratch-load-trash${copy.trashedAt ? " lc-hold-danger" : ""}`}
+                    disabled={locked}
+                    onConfirm={() => void trashVersion(entry.id, copy)}
+                    resetKey={error}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 6h16" />
+                      <path d="M9 6V4h6v2" />
+                      <path d="M6 6l1 14h10l1-14" />
+                      <path d="M10 10v7M14 10v7" />
+                    </svg>
+                  </HoldButton>
+                  )}
+                  {!entry.locked && !copy && (
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
                     label={`Delete ${entry.title}`}
                     className="lc-scratch-load-trash"
@@ -451,14 +537,23 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                   </>
                   )}
                 </div>
-              ))}
-              {archived.some(matchesQuery) && (
+                );
+              })}
+              {(archived.some(matchesQuery) || orphans.length > 0) && (
                 <section className="lc-library-trash-section" aria-label="Trash">
                   <h3>Trash</h3>
+                  {/* A notebook in the trash has its copies with it; deleting it for good deletes them too. */}
                   {archived.filter(matchesQuery).map((entry) => (
                     <LibraryTrashRow key={`arch-${entry.id}`} name={entry.title} updatedAt={entry.updatedAt} disabled={locked}
+                      detail={copiesDetail(entry.id)}
                       onRestore={async()=>{if(props.mode!=="entry")return;await props.onRestoreTrash?.(entry.id);refreshList();}}
-                      onDelete={async()=>{await deleteWhiteboardNotebook(entry.id,true);refreshList();}}/>
+                      onDelete={async()=>{await deleteWhiteboardNotebook(entry.id,true);await deleteBookRetainedCopies("whiteboard",entry.id);retained.refresh();refreshList();}}/>
+                  ))}
+                  {orphans.map(({ bookId, newest }) => (
+                    <LibraryTrashRow key={`orphan-${bookId}`} name={newest.name || "Retained copy"} updatedAt={newest.editedAt} disabled={locked}
+                      detail={`Only retained copies · ${copiesDetail(bookId)}`}
+                      onRestore={async()=>{await openVersion(bookId, newest);}}
+                      onDelete={async()=>{await deleteBookRetainedCopies("whiteboard",bookId);retained.refresh();}}/>
                   ))}
                 </section>
               )}
@@ -480,9 +575,8 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                     {allowSave && <WhiteboardMenuRow label="Restore" disabled={locked || !snapshotKey} onConfirm={openSnapshots} />}
                   </>}
                   {section === "open" && <>
-                    <WhiteboardMenuRow label="Retained copies" disabled={locked} onConfirm={() => setPickingRecovery(true)} />
-                    <WhiteboardMenuRow label="Load" disabled={locked || (!notebooks.length && !archived.length)} onConfirm={() => setPickingLoad(true)} />
-                    <WhiteboardMenuRow label="Recents" disabled={locked || (!notebooks.length && !archived.length)} onConfirm={() => setPickingLoad(true)} />
+                    <WhiteboardMenuRow label="Load" disabled={locked || (!notebooks.length && !archived.length && !orphans.length)} onConfirm={() => setPickingLoad(true)} />
+                    <WhiteboardMenuRow label="Recents" disabled={locked || (!notebooks.length && !archived.length && !orphans.length)} onConfirm={() => setPickingLoad(true)} />
                     <WhiteboardMenuRow label="Import backup" disabled={locked} onConfirm={() => props.onChoose("import")} />
                   </>}
                   {section === "export" && <>
@@ -497,17 +591,16 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
 
         <div className="lc-settings-foot lc-dialog-foot">
           <span className="lc-dialog-foot-spacer" aria-hidden="true" />
-          {(section !== "main" || pickingLoad || pickingSnapshots || pickingRecovery || saveTitle !== null) && (
+          {(section !== "main" || pickingLoad || pickingSnapshots || saveTitle !== null) && (
             <button
               type="button"
               className="lc-secondary lc-dialog-action"
               disabled={locked}
               onClick={() => {
-                if (!pickingLoad && !pickingSnapshots && !pickingRecovery && saveTitle === null) setSection("main");
+                if (!pickingLoad && !pickingSnapshots && saveTitle === null) setSection("main");
                 setPickingLoad(false);
                 setPickingSnapshots(false);
-                setPickingRecovery(false);
-                setSaveTitle(null);
+                            setSaveTitle(null);
                 setRenamingId(null);
               }}
             >
@@ -542,6 +635,17 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
           error={removeError}
           onConfirm={() => void confirmRemove(staleId, true)}
           onCancel={() => { setStaleId(null); setRemoveError(null); }}
+        />
+      )}</DialogPresence>
+      <DialogPresence>{restoreStale && (
+        <ConfirmDialog
+          title="Changed on another device"
+          message="It changed since your last sync. Restore this copy anyway? Their version is kept as a snapshot."
+          confirmLabel="Restore anyway"
+          pending={retainedBusy}
+          pendingLabel="Restoring…"
+          onConfirm={() => void openVersion(restoreStale.bookId, restoreStale.version, true)}
+          onCancel={() => setRestoreStale(null)}
         />
       )}</DialogPresence>
     </DialogBackdrop>

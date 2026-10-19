@@ -1,7 +1,9 @@
-import { RetainedCopies } from "./RetainedCopies";
 import { motion, useIsPresent, useReducedMotion } from "motion/react";
 import { DialogBackdrop, DialogPresence } from "../components/DialogMotion";
 import {LibraryTrashRow} from "./LibraryTrashRow";
+import { copyLine, useRetainedRows, VersionPicker, VersionShare } from "./RetainedRow";
+import { exportVersionBackup, restoreVersion } from "./retainedActions";
+import { deleteBookRetainedCopies, deleteRetainedCopies, formatBytes, trashRetainedCopy, versionBytes, type RetainedVersion } from "../util/retainedVersions";
 import {useLibraryMorph} from "./useLibraryMorph";
 /**
  * Markdown Ink entry / leave menus.
@@ -103,6 +105,16 @@ interface LeaveProps {
 interface EntryProps {
   /** [Sync | Link] beside the open document's name: the tab's Sync and its linked file. */
   syncPair?: DocSyncLinkPairProps | null;
+  /**
+   * The annotated document for a Recents row: the current version (copyId
+   * null) or one retained copy, exported without changing the library.
+   */
+  onExportVersion?: (bookId: string, copyId: string | null) => void;
+  /**
+   * Before a copy of this book replaces it: save what is open, so the
+   * version being replaced (kept as copy 1) includes the latest edits.
+   */
+  onPrepareRestore?: (bookId: string) => Promise<void>;
   onNotice?: (message: string) => void;
   mode: "entry";
   /** Wording and choices. Defaults to the document library. */
@@ -165,7 +177,6 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const [trash, setTrash] = useState<AnnotateDocMeta[]>(() => listAnnotateTrash());
   const [pickingRecent, setPickingRecent] = useState(false);
   const [pickingSnapshots, setPickingSnapshots] = useState(false);
-  const [pickingRecovery, setPickingRecovery] = useState(false);
   const [section, setSection] = useState<"main" | "open" | "new" | "sets" | "export">("main");
   const bodyRef = useRef<HTMLDivElement>(null);
   const backdropDown = useRef(false);
@@ -199,6 +210,10 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const sourceBusy = sourceChecking || sourceUpdating;
   const lastTapRef = useRef({ id: "", at: 0 });
   const { tapArmed, arm } = useLibraryDeleteArm();
+  /** A retained-copy action is running (restore, trash, export). */
+  const [retainedBusy, setRetainedBusy] = useState(false);
+  /** Restoring a copy the hub refused: another device changed the book. */
+  const [restoreStale, setRestoreStale] = useState<{ bookId: string; version: RetainedVersion } | null>(null);
 
   useEffect(() => {
     const refresh = () => {
@@ -222,7 +237,6 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     setTrash(listAnnotateTrash());
     setPickingRecent(false);
     setPickingSnapshots(false);
-    setPickingRecovery(false);
     setSection("main");
     setSaveTitle(null);
     setRenamingId(null);
@@ -266,7 +280,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const entry = props.mode === "entry" ? props : null;
   const allowSave = Boolean(entry?.allowSave);
   const isWeb = props.kind === "web";
-  const locked = pending || exiting || !present || sourceBusy || sourceCandidates !== null || folderMatches !== null;
+  const locked = pending || exiting || !present || sourceBusy || retainedBusy || sourceCandidates !== null || folderMatches !== null;
   const needsName = Boolean(props.needsName);
   const defaultName = props.defaultName?.trim() || "";
   const onRename = entry?.onRename;
@@ -544,8 +558,46 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     }
   };
 
-  const morphRef = useLibraryMorph(`${section}:${pickingRecent}:${pickingSnapshots}:${pickingRecovery}:${newTitle!==null}:${saveTitle!==null}`);
+  const morphRef = useLibraryMorph(`${section}:${pickingRecent}:${pickingSnapshots}:${newTitle!==null}:${saveTitle!==null}`);
   const archived = visibleTrash;
+  const retained = useRetainedRows("annotate", props.mode === "entry", visibleDocs, pickingRecent);
+  const knownIds = new Set([...docs, ...trash].map(doc => doc.id));
+  /*
+   * Copies whose book is gone (deleted for good earlier, or never opened
+   * here): they wait in the trash as that book, to restore or delete.
+   */
+  const orphans = [...retained.versions.entries()]
+    .filter(([bookId, rows]) => !knownIds.has(bookId) && (rows[0]!.docType === "web") === isWeb)
+    .map(([bookId, rows]) => ({ bookId, rows, newest: rows[0]! }))
+    .filter(({ newest }) => `${newest.name} ${newest.label}`.toLocaleLowerCase().includes(libraryQuery.trim().toLocaleLowerCase()));
+  const copiesDetail = (bookId: string, hash?: string) => {
+    const rows = retained.versions.get(bookId) ?? [];
+    const bytes = rows.reduce((sum, row) => sum + versionBytes(row, hash), 0);
+    const count = rows.length ? `${rows.length} retained ${rows.length === 1 ? "copy" : "copies"}` : "";
+    return [count, bytes ? formatBytes(bytes) : ""].filter(Boolean).join(" · ") || undefined;
+  };
+  const retainedAction = async (work: () => Promise<void>) => {
+    setRetainedBusy(true); setStorageError(null);
+    try { await work(); }
+    catch (cause) { setStorageError(cause instanceof Error ? cause.message : String(cause)); }
+    finally { setRetainedBusy(false); retained.refresh(); }
+  };
+  /** Hold to open on a copy: it becomes the current version (the old current is kept as copy 1), then opens. */
+  const openVersion = (bookId: string, version: RetainedVersion, force = false) => retainedAction(async () => {
+    await entry?.onPrepareRestore?.(bookId);
+    if (await restoreVersion(version, force) === "stale") { setRestoreStale({ bookId, version }); return; }
+    setRestoreStale(null); retained.pick(bookId, null); refreshList();
+    entry?.onChoose("recent", bookId);
+  });
+  /** A copy's trash: the first hold marks it (!), the next deletes it for good. Its book is untouched. */
+  const trashVersion = (bookId: string, version: RetainedVersion) => retainedAction(async () => {
+    if (version.trashedAt) { await deleteRetainedCopies([version.id]); retained.pick(bookId, null); }
+    else await trashRetainedCopy(version.id);
+  });
+  const backupVersion = (bookId: string, name: string, version: RetainedVersion | null) => retainedAction(async () => {
+    const message = await exportVersionBackup("annotate", bookId, name, version);
+    if (message) announceSource(message);
+  });
 
   return (
     <DialogBackdrop exiting={exiting}
@@ -563,9 +615,9 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     >
       <DialogFrame ref={morphRef} exiting={exiting}
         inert={sourceCandidates !== null || folderMatches !== null}
-        className={`lc-attempt-modal lc-library-holds lc-library-menu lc-annotate-dialog ${isWeb ? "lc-library-web" : "lc-library-annotate"}${pickingRecovery ? " lc-library-tall" : ""}`}
+        className={`lc-attempt-modal lc-library-holds lc-library-menu lc-annotate-dialog ${isWeb ? "lc-library-web" : "lc-library-annotate"}`}
         titleId="lc-annotate-dialog-title"
-        title={isLeave ? "Leave document?" : pickingRecovery ? "Retained copies" : section === "open" && !pickingRecent ? "Open" : section === "new" ? "New" : section === "export" ? "Export" : section === "sets" ? "Annotations" : pickingRecent ? "Recents" : isWeb ? "Web" : "Annotate"}
+        title={isLeave ? "Leave document?" : section === "open" && !pickingRecent ? "Open" : section === "new" ? "New" : section === "export" ? "Export" : section === "sets" ? "Annotations" : pickingRecent ? "Recents" : isWeb ? "Web" : "Annotate"}
         subtitle={isWeb ? "Write onto a page snapshot" : "Ink for this document"}
         icon={<DocumentIcon web={isWeb} />}
         mode={isWeb ? "browse" : "annotate"}
@@ -585,7 +637,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
               : "Name the note. It lives in this app — there is no file on disk until you export it."}
           </p>}
           {pickingRecent && <LibrarySearch value={libraryQuery} onChange={setLibraryQuery} label={isWeb ? "Search saved pages" : "Search saved documents"} disabled={locked} filters={libraryFilters} onToggleFilter={toggleFilter} kinds={isWeb ? [] : ["pdf","markdown","epub"]} showTrash={showTrash} onTrashChange={setShowTrash}/>}
-          {pickingRecent && !(showTrash ? [] : visibleDocs).some(matchesQuery) && !archived.some(matchesQuery) && <p className="lc-muted">No matching saved items.</p>}
+          {pickingRecent && !(showTrash ? [] : visibleDocs).some(matchesQuery) && !archived.some(matchesQuery) && !orphans.length && <p className="lc-muted">No matching saved items.</p>}
           {error && <div className="lc-warning">{error}</div>}
           <DialogPresence>{(sourceChecking || sourceNotice) && <motion.p key="source-notice" className="lc-muted lc-doc-source-notice" role="status"
             initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
@@ -642,8 +694,6 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                 </span>
               </HoldButton>
             </div>
-          ) : pickingRecovery ? (
-            <RetainedCopies kind="annotate" onRestored={refreshList} />
           ) : pickingSnapshots && entry ? (
             <div className="lc-settings-choice">
               {PAD_SNAPSHOT_TIERS.flatMap(tier => {
@@ -673,8 +723,10 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
             <div className="lc-settings-choice">
               {(showTrash ? [] : visibleDocs).filter(matchesQuery).map((doc) => {
                 const title = annotateDocLabel(doc);
+                const copy = retained.pickedOf(doc.id);
+                const size = copy ? versionBytes(copy, doc.hash) : retained.sizes[doc.id];
                 return (
-                <div key={doc.id} className="lc-scratch-load-entry">
+                <div key={doc.id} className={`lc-scratch-load-entry${copy ? " is-copy" : ""}${copy?.trashedAt ? " is-trashed-copy" : ""}`}>
                   {renamingId === doc.id ? (
                     <PadNameField
                       value={renameDraft}
@@ -686,16 +738,21 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                     />
                   ) : (
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
-                    label={`Open ${title}`}
+                    label={copy ? `Restore copy ${copy.number} of ${title}` : `Open ${title}`}
                     className="lc-scratch-load-hold"
                     disabled={locked}
-                    onTap={onRename ? () => tapLoadRow(doc.id, title) : undefined}
-                    onConfirm={() => entry.onChoose("recent", doc.id)}
+                    onTap={onRename && !copy ? () => tapLoadRow(doc.id, title) : undefined}
+                    onConfirm={() => copy ? void openVersion(doc.id, copy) : entry.onChoose("recent", doc.id)}
                     resetKey={error}
                   >
-                    <strong title={doc.name}>{doc.name}</strong>
-                    {doc.label?.trim() && doc.label.trim() !== doc.name.trim() && <span className="lc-muted lc-library-subtitle" title={doc.label}>{doc.label}</span>}
-                    <LibraryTimes {...doc}/>
+                    {/* Showing a copy: its own name, label, date and why it was kept. */}
+                    <strong title={copy?.name || doc.name}>{copy?.name || doc.name}</strong>
+                    {(() => { const label = (copy ? copy.label : doc.label)?.trim(); const name = (copy?.name || doc.name).trim();
+                      return label && label !== name ? <span className="lc-muted lc-library-subtitle" title={label}>{label}</span> : null; })()}
+                    {copy
+                      ? <span className="lc-muted lc-version-line">{copyLine(copy)}{copy.trashedAt ? " · in the trash (!)" : ""}</span>
+                      : <LibraryTimes {...doc}/>}
+                    {size !== undefined && <span className="lc-muted lc-library-size">{formatBytes(size)}</span>}
                   </HoldButton>
                   )}
                   {renamingId !== doc.id && (
@@ -711,7 +768,38 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                       } catch (cause) { setStorageError(cause instanceof Error ? cause.message : String(cause)); }
                     }}
                   />
-                  {!doc.locked && (
+                  <VersionPicker name={title} versions={retained.versions.get(doc.id) ?? []} picked={copy}
+                    currentBytes={retained.sizes[doc.id]} currentHash={doc.hash} disabled={locked} onPick={id => retained.pick(doc.id, id)} />
+                  <VersionShare name={copy ? `copy ${copy.number} of ${title}` : title} disabled={locked}
+                    onAnnotated={() => entry.onExportVersion?.(doc.id, copy?.id ?? null)}
+                    onBackup={() => void backupVersion(doc.id, doc.name, copy)} />
+                  {!doc.locked && copy && (
+                  <HoldButton holdMs={LIBRARY_HOLD_MS}
+                    label={copy.trashedAt ? `Delete copy ${copy.number} of ${title} for good` : `Move copy ${copy.number} of ${title} to the trash`}
+                    className={`lc-scratch-load-trash${copy.trashedAt ? " lc-hold-danger" : ""}`}
+                    disabled={locked}
+                    onConfirm={() => void trashVersion(doc.id, copy)}
+                    resetKey={error}
+                  >
+                    <svg
+                      viewBox="0 0 24 24"
+                      width="15"
+                      height="15"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="1.75"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      aria-hidden="true"
+                    >
+                      <path d="M4 6h16" />
+                      <path d="M9 6V4h6v2" />
+                      <path d="M6 6l1 14h10l1-14" />
+                      <path d="M10 10v7M14 10v7" />
+                    </svg>
+                  </HoldButton>
+                  )}
+                  {!doc.locked && !copy && (
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
                     label={`Delete annotations for ${title}`}
                     className="lc-scratch-load-trash"
@@ -751,13 +839,21 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                 </div>
               );
               })}
-              {archived.some(matchesQuery) && (
+              {(archived.some(matchesQuery) || orphans.length > 0) && (
                 <section className="lc-library-trash-section" aria-label="Trash">
                   <h3>Trash</h3>
+                  {/* A book in the trash has its copies with it; deleting it for good deletes them too. */}
                   {archived.filter(matchesQuery).map((doc) => (
                     <LibraryTrashRow key={`arch-${doc.id}`} name={annotateDocLabel(doc)} updatedAt={doc.updatedAt} disabled={locked}
+                      detail={copiesDetail(doc.id, doc.hash)}
                       onRestore={async()=>{if(props.mode!=="entry")return;await props.onRestoreTrash?.(doc.id);refreshList();}}
-                      onDelete={async()=>{await deleteAnnotateDoc(doc.id,true);refreshList();}}/>
+                      onDelete={async()=>{await deleteAnnotateDoc(doc.id,true);await deleteBookRetainedCopies("annotate",doc.id);retained.refresh();refreshList();}}/>
+                  ))}
+                  {orphans.map(({ bookId, newest }) => (
+                    <LibraryTrashRow key={`orphan-${bookId}`} name={newest.label || newest.name || "Retained copy"} updatedAt={newest.editedAt} disabled={locked}
+                      detail={`Only retained copies · ${copiesDetail(bookId, newest.hash)}`}
+                      onRestore={async()=>{await openVersion(bookId, newest);}}
+                      onDelete={async()=>{await deleteBookRetainedCopies("annotate",bookId);retained.refresh();}}/>
                   ))}
                 </section>
               )}
@@ -776,7 +872,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                     {isWeb && <MainMenuRow label="New" description="Start a blank page" disabled={locked} onConfirm={() => props.onChoose("page")} />}
                     {!allowSave && !isWeb && <MainMenuRow label="New" disabled={locked} onConfirm={() => setSection("new")} />}
                     {isWeb
-                      ? <MainMenuRow label="Recent" description="Reopen a page you were on" disabled={locked || (!visibleDocs.length && !archived.length)} onConfirm={() => setPickingRecent(true)} />
+                      ? <MainMenuRow label="Recent" description="Reopen a page you were on" disabled={locked || (!visibleDocs.length && !archived.length && !orphans.length)} onConfirm={() => setPickingRecent(true)} />
                       : <MainMenuRow label="Open" description="Load ink from a saved file" disabled={locked} onConfirm={() => setSection("open")} />}
                     {allowSave && !isWeb && <>
                       <MainMenuRow label="Export" description="Share the document with your ink on it" disabled={locked} onConfirm={() => setSection("export")} />
@@ -784,9 +880,8 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                     </>}
                   </>}
                   {section === "open" && <>
-                    <LibraryMenuRow label="Retained copies" disabled={locked} onConfirm={() => setPickingRecovery(true)} />
                     <LibraryMenuRow label="Load" disabled={locked} onConfirm={() => props.onChoose("open")} />
-                    <LibraryMenuRow label="Recents" disabled={locked || (!visibleDocs.length && !archived.length)} onConfirm={() => setPickingRecent(true)} />
+                    <LibraryMenuRow label="Recents" disabled={locked || (!visibleDocs.length && !archived.length && !orphans.length)} onConfirm={() => setPickingRecent(true)} />
                     {allowSave && <LibraryMenuRow label="Annotations" disabled={locked} onConfirm={() => setSection("sets")} />}
                   </>}
                   {section === "new" && <LibraryMenuRow label="Markdown file" disabled={locked} onConfirm={() => setNewTitle("")} />}
@@ -820,17 +915,16 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
             <LinkIcon />
           </motion.button>}</DialogPresence>
           <span className="lc-dialog-foot-spacer" aria-hidden="true" />
-          {(section !== "main" || pickingRecent || pickingSnapshots || pickingRecovery || newTitle !== null || saveTitle !== null) && (
+          {(section !== "main" || pickingRecent || pickingSnapshots || newTitle !== null || saveTitle !== null) && (
             <button
               type="button"
               className="lc-secondary lc-dialog-action"
               disabled={locked}
               onClick={() => {
-                if (!pickingRecent && !pickingSnapshots && !pickingRecovery && newTitle === null && saveTitle === null) setSection(section === "sets" ? "open" : "main");
+                if (!pickingRecent && !pickingSnapshots && newTitle === null && saveTitle === null) setSection(section === "sets" ? "open" : "main");
                 setPickingRecent(false);
                 setPickingSnapshots(false);
-                setPickingRecovery(false);
-                setNewTitle(null);
+                            setNewTitle(null);
                 setSaveTitle(null);
                 setRenamingId(null);
               }}
@@ -911,6 +1005,17 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           error={removeError}
           onConfirm={() => void confirmRemove(staleId, true)}
           onCancel={() => { setStaleId(null); setRemoveError(null); }}
+        />
+      )}</DialogPresence>
+      <DialogPresence>{restoreStale && (
+        <ConfirmDialog
+          title="Changed on another device"
+          message="It changed since your last sync. Restore this copy anyway? Their version is kept as a snapshot."
+          confirmLabel="Restore anyway"
+          pending={retainedBusy}
+          pendingLabel="Restoring…"
+          onConfirm={() => void openVersion(restoreStale.bookId, restoreStale.version, true)}
+          onCancel={() => setRestoreStale(null)}
         />
       )}</DialogPresence>
     </DialogBackdrop>

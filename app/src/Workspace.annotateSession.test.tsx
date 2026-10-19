@@ -25,7 +25,7 @@ const mocks = vi.hoisted(() => ({
   paper: null as PaperProps | null, boardProps: null as ComponentProps<typeof Board> | null,
   selection: null as SelectionProps | null,
   agent: null as ComponentProps<typeof import("./modes/AgentSidePanel").AgentSidePanel> | null,
-  marks: [] as DocFootnote[], docs: new Map<string, AnnotateDoc>(),
+  marks: [] as DocFootnote[], docs: new Map<string, AnnotateDoc>(), listed: [] as AnnotateDoc[],
   height: 2400, save: vi.fn(), restore: vi.fn(), remove: vi.fn(), snapshots: vi.fn(),
   sourceCheck: vi.fn(), sourceUpdate: vi.fn(), sourceLink: vi.fn(), sourceJustLink: vi.fn(), sourceUnlink: vi.fn(), pickSource: vi.fn(), pick: vi.fn(),
 }));
@@ -97,7 +97,7 @@ vi.mock("./util/annotateFs", async original => ({
 }));
 vi.mock("./util/annotateStore", async original => ({
   ...await original<typeof import("./util/annotateStore")>(),
-  listAnnotateDocs: () => [], migrateAnnotateKeysToId: async () => {},
+  listAnnotateDocs: () => mocks.listed, migrateAnnotateKeysToId: async () => {},
   getAnnotateDoc: async (id: string) => mocks.docs.get(id) ?? null,
   getAnnotateDocMeta: (id: string) => mocks.docs.get(id) ?? null,
   findAnnotateDocByHash: async () => null, listAnnotateDocsByHash: () => [], findStaleAnnotateDoc: () => null,
@@ -578,4 +578,54 @@ it("writes blank block text on a selection with no text", async () => {
   await click(saveLabel);
   const saved = mocks.save.mock.calls.at(-1)![0].footnotes.find((mark: DocFootnote) => mark.anchor.kind === "text");
   expect(saved).toHaveProperty("blockText", "");
+});
+
+it("tapping export on the open book's Recents row starts its annotated export", async () => {
+  await mount();
+  mocks.listed = [mocks.docs.get("first")!];
+  try {
+    const hold = async (label: string) => {
+      const target = button(label);
+      await act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+      await advance(HOLD_FILL_MS + 50);
+      await act(async () => { target.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+      await advance(400);
+    };
+    await hold("Markdown documents: tap to save now, hold for save / open menu");
+    await hold("Hold to confirm: Open");
+    await hold("Hold to confirm: Recents");
+    const share = [...document.querySelectorAll<HTMLButtonElement>(".lc-annotate-dialog button")]
+      .find(b => /^Export First\.md.*: tap for the annotated document, hold for the backup file$/.test(b.getAttribute("aria-label") ?? ""))!;
+    expect(share).toBeTruthy();
+    await act(async () => { share.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    await advance(50);
+    await act(async () => { share.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+    for (let i = 0; i < 4; i++) await advance(250);
+    expect(document.querySelector(".lc-document-export")).not.toBeNull();
+    expect(document.querySelector(".lc-annotate-dialog")).toBeNull();
+  } finally { mocks.listed = []; }
+});
+
+it("reopening the book that is open here from Recents loads it again in place (a copy restored over it)", async () => {
+  await mount();
+  mocks.listed = [mocks.docs.get("first")!];
+  try {
+    // What a restore does to the stored book while it is open.
+    mocks.docs.set("first", { ...mocks.docs.get("first")!, source: "# Restored copy" });
+    const hold = async (target: HTMLElement) => {
+      await act(async () => { target.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+      await advance(HOLD_FILL_MS + 50);
+      await act(async () => { target.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+      await advance(400);
+    };
+    await hold(button("Markdown documents: tap to save now, hold for save / open menu"));
+    await hold(button("Hold to confirm: Open"));
+    await hold(button("Hold to confirm: Recents"));
+    const open = [...document.querySelectorAll<HTMLButtonElement>(".lc-annotate-dialog button")]
+      .find(b => /^Open First\.md/.test(b.getAttribute("aria-label") ?? ""))!;
+    expect(open).toBeTruthy();
+    await hold(open);
+    for (let i = 0; i < 12; i++) await advance(250);
+    expect(mocks.paper!.source).toBe("# Restored copy");
+  } finally { mocks.listed = []; }
 });
