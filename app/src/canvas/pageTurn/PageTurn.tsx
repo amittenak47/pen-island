@@ -23,6 +23,7 @@ import type { PageFrame } from "../inkPageIndex";
 import { peekPdfFilmCurrent, publishPdfReadAhead, publishPdfPreloadPages, peekPdfPreloadPages, subscribePdfFilmCurrent, wakePdfPaintPump } from "../../modes/pdfFilm";
 import { waitForPdfTurnPreview } from "./pdfTurnPreview";
 import { constrainCorner, cornerForCrease, cornerForGrip, turnCommits, type Point } from "./curl";
+import type { TurnEdge } from "./paintTurn";
 import { flatSheet, paintTurn, type TurnLayout } from "./paintTurn";
 import { boardResizeDeferred } from "../../util/splitResize";
 import { afterBootSettled, isBootSettled } from "../../util/bootSettled";
@@ -491,16 +492,53 @@ interface Turn {
   abort: AbortController;
   /** This sheet hid the live booktabs and squares (its pictures carry them). */
   marksHidden?: boolean;
+  /** Room around the page on the canvas, in CSS px, for booktabs sticking out (single sheets). */
+  margin: number;
+}
+
+/** Room a single sheet's canvas keeps around the page for its booktabs. */
+const EDGE_MARGIN = 40;
+
+/** The colour and thickness of a bottom rule drawn as an inset shadow (an underline). */
+function insetRule(shadow: string): { color: string; size: number } | null {
+  if (!shadow || shadow === "none" || !shadow.includes("inset")) return null;
+  const color = /^(rgba?\([^)]*\)|color\([^)]*\)|#[0-9a-f]+)/i.exec(shadow.trim())?.[1];
+  const offsets = shadow.replace(/^(rgba?\([^)]*\)|color\([^)]*\)|#[0-9a-f]+)/i, "").match(/-?[\d.]+px/g);
+  const y = offsets ? parseFloat(offsets[1] ?? "0") : 0;
+  return color && y < 0 ? { color, size: -y } : null;
 }
 
 /**
- * A booktab or footnote square painted onto a page's picture as it looks on
- * the page: its box, fill, edge and number.
+ * A page mark painted onto a page's picture as it looks on the page: a
+ * booktab or footnote square (box, fill, edge, number), a quote band or
+ * highlight (a wash, multiplied into the paper like on screen), an underline
+ * (its rule) or a caption (its words).
  */
 function paintMark(ctx: CanvasRenderingContext2D, element: HTMLElement, box: DOMRect): void {
   const style = getComputedStyle(element);
+  if (element.classList.contains("lc-doc-footnote-caption")) {
+    const text = element.textContent?.trim();
+    if (!text) return;
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(box.left, box.top, box.width, box.height);
+    ctx.clip();
+    ctx.fillStyle = style.color;
+    ctx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+    ctx.textAlign = "left";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, box.left + (parseFloat(style.paddingLeft) || 0), box.top + box.height / 2);
+    ctx.restore();
+    return;
+  }
   const radius = Math.min(parseFloat(style.borderTopLeftRadius) || 0, box.width / 2, box.height / 2);
   ctx.save();
+  if (style.mixBlendMode === "multiply") ctx.globalCompositeOperation = "multiply";
+  const rule = insetRule(style.boxShadow);
+  if (rule) {
+    ctx.fillStyle = rule.color;
+    ctx.fillRect(box.left, box.bottom - rule.size, box.width, rule.size);
+  }
   ctx.beginPath();
   ctx.roundRect(box.left, box.top, box.width, box.height, radius);
   const fill = style.backgroundColor;
@@ -833,7 +871,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
 
     /*
-     * Booktabs and footnote squares turn with their page.
+     * Booktabs and footnote squares turn with their page, and so do its quote
+     * bands, highlights, underlines and captions.
      *
      * They live on the layer above the page mask, not in the page's picture,
      * so a turn showed them staying put over the moving sheet (or vanishing
@@ -843,13 +882,21 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      */
     const marksLayer = () =>
       document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-booktabs-slot") ?? null;
+    /** The page's own marks: quote bands, highlights, underlines, captions. */
+    const pageMarksLayer = () =>
+      document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-marks-slot:not(.lc-page-booktabs-slot)") ?? null;
     const withMarks = (b: BoardHandle, scene: Scene, picture: HTMLCanvasElement | null): HTMLCanvasElement | null => {
       const layer = picture ? marksLayer() : null;
       if (!picture || !layer) return picture;
       const tl = b.sceneToClient(scene.x, scene.y);
       const br = b.sceneToClient(scene.x + scene.width, scene.y + scene.height);
       if (!tl || !br || br.x - tl.x < 1) return picture;
-      const marks = [...layer.querySelectorAll<HTMLElement>(".lc-doc-footnote-tab, .lc-doc-footnote-bookmark")]
+      const marks = [
+        // Washes and rules first, words over them, the tabs and squares on top.
+        ...(pageMarksLayer()?.querySelectorAll<HTMLElement>(".lc-doc-footnote-band, .lc-doc-submark-paint") ?? []),
+        ...(pageMarksLayer()?.querySelectorAll<HTMLElement>(".lc-doc-footnote-caption") ?? []),
+        ...layer.querySelectorAll<HTMLElement>(".lc-doc-footnote-tab, .lc-doc-footnote-bookmark"),
+      ]
         .map((element) => ({ element, box: element.getBoundingClientRect() }))
         .filter(({ box }) => box.width > 0 && box.right > tl.x && box.left < br.x && box.bottom > tl.y && box.top < br.y);
       if (marks.length === 0) return picture;
@@ -862,8 +909,25 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const k = picture.width / (br.x - tl.x);
       ctx.setTransform(k, 0, 0, k, -tl.x * k, -tl.y * k);
       for (const { element, box } of marks) paintMark(ctx, element, box);
+      // Booktabs sticking out past the page: their own picture, a margin wider.
+      const tabs = marks.filter(({ element }) => !element.closest(".lc-page-marks-slot:not(.lc-page-booktabs-slot)"));
+      const out = Math.max(0, ...tabs.map(({ box }) => Math.max(tl.x - box.left, box.right - br.x, tl.y - box.top, box.bottom - br.y)));
+      if (out > 0.5) {
+        const pad = Math.min(EDGE_MARGIN, Math.ceil(out) + 2);
+        const edge = document.createElement("canvas");
+        edge.width = Math.round(copy.width + 2 * pad * k);
+        edge.height = Math.round(copy.height + 2 * pad * k);
+        const ectx = edge.getContext("2d");
+        if (ectx) {
+          ectx.setTransform(k, 0, 0, k, (pad - tl.x) * k, (pad - tl.y) * k);
+          for (const { element, box } of tabs) paintMark(ectx, element, box);
+          edges.set(copy, { image: edge, pad });
+        }
+      }
       return copy;
     };
+    /** A marked picture's booktabs that stick out past its page. */
+    const edges = new WeakMap<CanvasImageSource, TurnEdge>();
     let marksHidden = 0;
     const hideMarks = (on: boolean) => {
       marksHidden = Math.max(0, marksHidden + (on ? 1 : -1));
@@ -908,8 +972,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         hideMarks(true);
       }
       for (const layer of turn.under ? [turn.under, turn.canvas] : [turn.canvas]) {
-        layer.style.left = left;
-        layer.style.top = top;
+        const inset = layer === turn.canvas ? turn.margin : 0;
+        layer.style.left = `${parseFloat(left) - inset}px`;
+        layer.style.top = `${parseFloat(top) - inset}px`;
         // Forward sheets peel above the next one; returning sheets arrive
         // on top, leaving the earlier return visible as their backdrop.
         const above = turn.direction === "next"
@@ -1188,6 +1253,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         detached: false,
         sheetOnly: direction === "prev" && [...liveTurns].some(other => other.detached && other.direction === "prev"),
         abort: new AbortController(),
+        margin: 0,
       };
       liveTurns.add(turn);
       layers.add(turn);
@@ -1250,16 +1316,18 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       })();
       const layout: TurnLayout =
         pagedRef.current && !spreadRef.current && from.maxY - from.minY < columnWidth * 0.9 ? "book" : "sheet";
+      // A single sheet's booktabs stick out past it: room for them around the page.
+      const margin = layout === "sheet" ? EDGE_MARGIN : 0;
       const canvas = document.createElement("canvas");
       const dpr = Math.min(2, window.devicePixelRatio || 1);
-      canvas.width = Math.round(rect.width * dpr);
-      canvas.height = Math.round(rect.height * dpr);
+      canvas.width = Math.round((rect.width + 2 * margin) * dpr);
+      canvas.height = Math.round((rect.height + 2 * margin) * dpr);
       canvas.className = "lc-page-turn";
       Object.assign(canvas.style, {
-        left: `${rect.left}px`,
-        top: `${rect.top}px`,
-        width: `${rect.width}px`,
-        height: `${rect.height}px`,
+        left: `${rect.left - margin}px`,
+        top: `${rect.top - margin}px`,
+        width: `${rect.width + 2 * margin}px`,
+        height: `${rect.height + 2 * margin}px`,
       });
       const w = layout === "book" ? rect.width / 2 : rect.width;
       const restY = heldAt(rect, bottom, edgeClientY);
@@ -1279,6 +1347,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         // hand can only hold its crease. Everything else, its corner.
         byFold: layout === "sheet" && direction === "prev",
         canvas,
+        margin,
         images: null,
         under: null,
         underSheet: false,
@@ -1372,8 +1441,10 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     const paint = (turn: Turn) => {
       const ctx = turn.canvas.getContext("2d");
       if (!ctx || !turn.images) return;
-      const dpr = turn.canvas.width / turn.rect.width;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const dpr = turn.canvas.width / (turn.rect.width + 2 * turn.margin);
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+      if (turn.margin) ctx.clearRect(0, 0, turn.canvas.width, turn.canvas.height);
+      ctx.setTransform(dpr, 0, 0, dpr, turn.margin * dpr, turn.margin * dpr);
       paintTurn(ctx, {
         layout: turn.layout,
         width: turn.rect.width,
@@ -1388,6 +1459,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         paper: turnPaperColor(paperColor(), pagedRef.current),
         sheetOnly: turn.sheetOnly,
         toBlur: softenedPicture(turn.images.to),
+        fromEdge: turn.margin && turn.images.from ? edges.get(turn.images.from) ?? null : null,
+        toEdge: turn.margin && turn.images.to ? edges.get(turn.images.to) ?? null : null,
       });
       clipUnder(turn);
     };
@@ -1465,8 +1538,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           const b = board();
           turn.under = b ? liveUnder(b, turn, turn.scene, shotScale(turn.rect.width, turn.scene.width), turn.from) : null;
           if (turn.under && turn.canvas.parentNode) {
-            turn.under.style.left = turn.canvas.style.left;
-            turn.under.style.top = turn.canvas.style.top;
+            // The page itself, not the canvas's room around it for booktabs.
+            turn.under.style.left = `${parseFloat(turn.canvas.style.left) + turn.margin}px`;
+            turn.under.style.top = `${parseFloat(turn.canvas.style.top) + turn.margin}px`;
             turn.under.style.zIndex = "45";
             turn.canvas.before(turn.under);
           }

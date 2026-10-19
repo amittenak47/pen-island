@@ -19,6 +19,16 @@ import { curlGeometry, foldReflection, sheetPart, type Point } from "./curl";
 
 export type TurnLayout = "sheet" | "book";
 
+/**
+ * What sticks out past a page's edges (booktabs), as a picture `pad` CSS
+ * pixels bigger than the page on every side. Only the part outside the page
+ * is drawn from it; the page's own picture has the rest.
+ */
+export interface TurnEdge {
+  image: CanvasImageSource;
+  pad: number;
+}
+
 export interface TurnFrame {
   layout: TurnLayout;
   /** View size in CSS pixels. */
@@ -51,6 +61,46 @@ export interface TurnFrame {
    * as out of focus rather than pixelated.
    */
   toBlur?: CanvasImageSource | null;
+  /**
+   * The booktabs sticking out past each page (single sheets only). They go
+   * with the part of the sheet they hang from: flat, or folded over with it.
+   * The canvas needs room around the page for them.
+   */
+  fromEdge?: TurnEdge | null;
+  toEdge?: TurnEdge | null;
+}
+
+/** An edge picture's part outside the page, drawn in page coordinates. */
+function drawEdge(ctx: CanvasRenderingContext2D, edge: TurnEdge, W: number, H: number): void {
+  const { pad } = edge;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(-pad, -pad, W + 2 * pad, H + 2 * pad);
+  ctx.rect(0, 0, W, H);
+  ctx.clip("evenodd");
+  ctx.drawImage(edge.image, -pad, -pad, W + 2 * pad, H + 2 * pad);
+  ctx.restore();
+}
+
+/** The page being turned to: its tabs come in as the sheet comes off it. */
+function drawUnderEdge(ctx: CanvasRenderingContext2D, frame: TurnFrame, progress: number): void {
+  if (!frame.toEdge || frame.sheetOnly || progress <= 0) return;
+  const alpha = ctx.globalAlpha;
+  ctx.globalAlpha = alpha * Math.min(1, progress * 2);
+  drawEdge(ctx, frame.toEdge, frame.width, frame.height);
+  ctx.globalAlpha = alpha;
+}
+
+/** Everything on one side of a line through `p` with normal `n` (`side` +1 or -1), as a big quad. */
+function halfPlane(p: Point, n: Point, side: number, reach: number): Point[] {
+  const t = { x: -n.y * reach, y: n.x * reach };
+  const m = { x: n.x * side * reach, y: n.y * side * reach };
+  return [
+    { x: p.x + t.x, y: p.y + t.y },
+    { x: p.x - t.x, y: p.y - t.y },
+    { x: p.x - t.x + m.x, y: p.y - t.y + m.y },
+    { x: p.x + t.x + m.x, y: p.y + t.y + m.y },
+  ];
 }
 
 /** How much of the softened page shows over the sharp one at this point of the turn. */
@@ -117,6 +167,7 @@ function paintSideFold(ctx: CanvasRenderingContext2D, frame: TurnFrame): number 
   const top = (i: number) => snap(f.ys[i]!);
   const rowH = (i: number) => top(i + 1) - top(i);
   ctx.clearRect(0, 0, W, H);
+  drawUnderEdge(ctx, frame, f.progress);
 
   // The page being turned to, where the sheet has come off it.
   ctx.save();
@@ -209,6 +260,30 @@ function paintSideFold(ctx: CanvasRenderingContext2D, frame: TurnFrame): number 
     ctx.strokeStyle = `rgba(0,0,0,${0.22 * lift})`;
     ctx.stroke();
     ctx.restore();
+  }
+  // The sheet's tabs: as they lie left of the fold, mirrored with it right of it.
+  const edge = frame.fromEdge;
+  if (edge && f.progress <= 0) drawEdge(ctx, edge, W, H);
+  else if (edge) {
+    for (let i = 0; i < SIDE_ROWS; i += 1) {
+      const x = f.fold[i]!.x;
+      const y0 = i === 0 ? -edge.pad : top(i);
+      const y1 = i === SIDE_ROWS - 1 ? H + edge.pad : top(i + 1);
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(-edge.pad, y0, x + edge.pad, y1 - y0);
+      ctx.clip();
+      drawEdge(ctx, edge, W, H);
+      ctx.restore();
+      ctx.save();
+      ctx.translate(2 * x, 0);
+      ctx.scale(-1, 1);
+      ctx.beginPath();
+      ctx.rect(x, y0, W + edge.pad - x, y1 - y0);
+      ctx.clip();
+      drawEdge(ctx, edge, W, H);
+      ctx.restore();
+    }
   }
   return f.progress;
 }
@@ -310,6 +385,7 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
   } else {
     drawUnder(ctx, frame, g.progress, 0, 1, 0, W);
   }
+  if (!book) drawUnderEdge(ctx, frame, g.progress);
 
   ctx.save();
   ctx.translate(spine, 0);
@@ -396,6 +472,34 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     ctx.strokeStyle = `rgba(0,0,0,${0.22 * lift})`;
     ctx.stroke();
     ctx.restore();
+  }
+
+  // The sheet's tabs: with the part still lying flat as they are, with the
+  // flap reflected over the fold like the paper they hang from.
+  const edge = book ? null : frame.fromEdge;
+  if (edge && g.progress <= 0) drawEdge(ctx, edge, W, H);
+  else if (edge) {
+    const reach = 4 * (w + H);
+    const middle = (poly: readonly Point[]) => poly.reduce((sum, p) => ({ x: sum.x + p.x / poly.length, y: sum.y + p.y / poly.length }), { x: 0, y: 0 });
+    const probe = flat.length >= 3 ? middle(flat) : flap.length >= 3 ? middle(flap) : null;
+    const lean = probe ? (probe.x - fp.x) * n.x + (probe.y - fp.y) * n.y : 0;
+    const flatSide = (flat.length >= 3 ? 1 : -1) * (lean >= 0 ? 1 : -1);
+    if (flat.length >= 3) {
+      ctx.save();
+      tracePolygon(ctx, halfPlane(fp, n, flatSide, reach));
+      ctx.clip();
+      drawEdge(ctx, edge, W, H);
+      ctx.restore();
+    }
+    if (flap.length >= 3) {
+      ctx.save();
+      const [a, b, c, d, e, f] = foldReflection(g);
+      ctx.transform(a, b, c, d, e, f);
+      tracePolygon(ctx, halfPlane(fp, n, -flatSide, reach));
+      ctx.clip();
+      drawEdge(ctx, edge, W, H);
+      ctx.restore();
+    }
   }
 
   ctx.restore();

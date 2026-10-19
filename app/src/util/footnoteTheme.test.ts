@@ -62,9 +62,12 @@ describe("footnoteThemeVars", () => {
     const paperInk = String(style["--lc-fn-paper-ink" as keyof typeof style]);
     expect(contrastRatio(panelInk, "#ffffff")).toBeLessThan(3);
     expect(contrastRatio(paperInk, "#ffffff")).toBeGreaterThanOrEqual(4.5);
-    // A palette with a dark enough colour of its own uses it.
-    const own = footnoteThemeVars("#ff0000", ["#111111", "#888888", "#eeeeee", "#ff0000"], "#141416");
-    expect(own["--lc-fn-paper-ink" as keyof typeof own]).toBe("#111111");
+    // In the square's own hue (pink), darkened: not another palette colour.
+    const [r, g, b] = [1, 3, 5].map(i => parseInt(paperInk.slice(i, i + 2), 16));
+    expect(r).toBeGreaterThan(g!); expect(r).toBeGreaterThan(b!);
+    // A square colour that already reads on white is used as it is.
+    const own = footnoteThemeVars("#1d4ed8", ["#111111", "#888888", "#eeeeee", "#1d4ed8"], "#141416");
+    expect(own["--lc-fn-paper-ink" as keyof typeof own]).toBe("#1d4ed8");
   });
 
   it("tints nested chips from the palette, not the raw panel", () => {
