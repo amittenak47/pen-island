@@ -53,7 +53,7 @@ describe("cross-language content contract", () => {
             let target = changed;
             for (const part of here.slice(0, -1)) target = target[part];
             target[key] = value === false ? true : value === "" ? "content" : key === "footnote_boards"
-              ? { child: { board: {} } } : Array.isArray(value) ? ["content"] : { future: true };
+              ? { child: { board: { future: true } } } : Array.isArray(value) ? ["content"] : { future: true };
             expect(await recordHash(changed), here.join(".")).not.toBe(fixture.hash);
           } else if (value && typeof value === "object") {
             if (Array.isArray(value)) for (let i = 0; i < value.length; i++) await visit(value[i], [...here, i]);
@@ -68,7 +68,7 @@ describe("cross-language content contract", () => {
       expect(await recordHash({ agent: [{ [field]: [] }] })).not.toBe(await recordHash({ agent: [{}] }));
     }
     expect(await recordHash({ footnotes: [] })).not.toBe(await recordHash({}));
-    for (const value of [{ title: "Named" }, { palette: [] }, { updatedAt: 0 }, { pending: "" }]) {
+    for (const value of [{ title: "Named" }, { palette: ["#111111", "#222222"] }, { updatedAt: 0 }, { pending: "" }]) {
       expect(await recordHash({ footnotes: [value] })).not.toBe(await recordHash({ footnotes: [{}] }));
     }
     expect(await recordHash({ agent: [{ attachments: [{ sendToModel: false }] }] }))
@@ -98,7 +98,7 @@ describe("cross-language content contract", () => {
     expect(normalizeRecord({ future: { title: "", prefix: "", files: {}, customData: {} },
       footnotes: [{ anchor: { kind: "region", prefix: "", suffix: "" }, by: "", color: "", palette: [] }] }))
       .toEqual({ future: { title: "", prefix: "", files: {}, customData: {} },
-        footnotes: [{ anchor: { kind: "region", prefix: "", suffix: "" }, by: "", color: "", palette: [] }] });
+        footnotes: [{ anchor: { kind: "region", prefix: "", suffix: "" }, by: "" }] });
   });
   it("snapshot identity keeps camera, authored source, unknown fields and erasures", async () => {
     const input = structuredClone(snapshots.cases[0].input);

@@ -40,7 +40,7 @@ import { mutateLocalBook, resetLocalBookStoreForTests } from "./localBookStore";
 import { getBookSyncState } from "./syncState";
 /** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
 const FLAGS_OFF = { pending: false, queued: false, bridgePending: false, requestNote: "", reasoning: "", bridgeError: "",
-  attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
+  attachments: [], artifacts: [], artifactProposals: [], artifactFootnoteIds: null, flags: [], processEvents: [] };
 const durable = vi.hoisted(() => new Map<string, Map<IDBValidKey, unknown>>());
 vi.mock("./idb", async original => ({
   ...await original<typeof import("./idb")>(),
@@ -1200,4 +1200,16 @@ it("round trips a local web file marker using the existing annotate record", asy
   const restored = restoreAnnotateDoc.mock.calls.at(-1)![0] as Parameters<typeof annotatePadBody>[0];
   expect(restored).toMatchObject({ docType: "web", localFileHash: "original-hash", hash: "original-hash" });
   expect(await annotatePadBody(restored)).toMatchObject({ doc_type: "web", local_file_hash: "original-hash", hash: "original-hash", source: restored.source });
+});
+
+it.each([undefined, ""])("applies the legacy label presence policy for %s", async label => {
+  getAnnotateDoc.mockResolvedValue({ id: "label-book", name: "book.md", hash: "h", label: "Local label", updatedAt: 1, board: emptyBoard });
+  await applyHubAnnotate({ id: "label-book", name: "book.md", hash: "h", updated_at: 2, source: "", board: emptyBoard,
+    ...(label !== undefined ? { label } : {}) }, { emitReload: false });
+  expect(restoreAnnotateDoc).toHaveBeenLastCalledWith(expect.objectContaining({ label: label === "" ? "" : "Local label" }));
+});
+
+it("writes a blank label on an unlabeled legacy annotate upload", async () => {
+  const body = await annotatePadBody({ id: "label-book", name: "book.md", docType: "markdown", hash: "h", updatedAt: 1, source: "", board: emptyBoard, footnotes: [], agent: [] });
+  expect(body).toHaveProperty("label", "");
 });

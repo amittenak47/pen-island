@@ -264,10 +264,10 @@
       "hash": "51399fdb6b8898c16d7a6c57975b84cfef7108615b0d282a72ffac7b91a3a984"
     },
     {
-      "name": "nonqualifying empty palette still counts",
+      "name": "empty footnote palette inherits the default",
       "input": "{\"footnotes\":[{\"id\":\"mark\",\"palette\":[],\"title\":\"\"}]}",
-      "canonical": "{\"footnotes\":[{\"id\":\"mark\",\"palette\":[]}]}",
-      "hash": "582902f68cae9356a416421be96dbf24f1df76721d20b45bd91a3025763f01af"
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "hash": "0c3dfeaf3e3cc90102a019fb1bead2a568307ee35a3b0a5c538ddca0be88c12b"
     },
     {
       "name": "attachment false changes default model inclusion",
@@ -514,6 +514,78 @@
       "input": "{\"footnote_boards\":{},\"id\":\"a\"}",
       "canonical": "{\"id\":\"a\"}",
       "hash": "8489a5deb454a360345c7868bca8672de92b446caf3d3b014af6a56e3d549d30"
+    },
+    {
+      "name": "needs care book label: absent",
+      "input": "{\"id\":\"book\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "needs care book label: explicit",
+      "input": "{\"id\":\"book\",\"label\":\"\"}",
+      "canonical": "{\"id\":\"book\"}",
+      "hash": "97cb6669ed12b199f259522dfb4e6f60ea8546f3e37bf6641d5935a55ce2c339"
+    },
+    {
+      "name": "needs care footnote fallback text: absent",
+      "input": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "hash": "0c3dfeaf3e3cc90102a019fb1bead2a568307ee35a3b0a5c538ddca0be88c12b"
+    },
+    {
+      "name": "needs care footnote fallback text: explicit",
+      "input": "{\"footnotes\":[{\"blockText\":\"\",\"excerpt\":\"\",\"id\":\"mark\",\"query\":\"\",\"url\":\"\"}]}",
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\"}]}",
+      "hash": "0c3dfeaf3e3cc90102a019fb1bead2a568307ee35a3b0a5c538ddca0be88c12b"
+    },
+    {
+      "name": "needs care footnote inherited theme: absent",
+      "input": "{\"footnotes\":[{\"id\":\"mark\",\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\",\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "hash": "a9bb26538bb1c34fede69295e30122f0d6fea41374920ec98cde17a7febc3448"
+    },
+    {
+      "name": "needs care footnote inherited theme: explicit",
+      "input": "{\"footnotes\":[{\"color\":\"\",\"id\":\"mark\",\"palette\":[],\"subMarks\":[{\"color\":\"\",\"excerpt\":\"\",\"id\":\"sub\",\"palette\":[]}]}]}",
+      "canonical": "{\"footnotes\":[{\"id\":\"mark\",\"subMarks\":[{\"id\":\"sub\"}]}]}",
+      "hash": "a9bb26538bb1c34fede69295e30122f0d6fea41374920ec98cde17a7febc3448"
+    },
+    {
+      "name": "needs care note inherited authorship: absent",
+      "input": "{\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}]}",
+      "canonical": "{\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}]}",
+      "hash": "1ff69a4f7434f66c8248015c1356522423f26b4a17ba4c04b24eab37f28a379c"
+    },
+    {
+      "name": "needs care note inherited authorship: explicit",
+      "input": "{\"footnotes\":[{\"notes\":[{\"by\":\"\",\"text\":\"legacy\"}]}]}",
+      "canonical": "{\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}]}",
+      "hash": "1ff69a4f7434f66c8248015c1356522423f26b4a17ba4c04b24eab37f28a379c"
+    },
+    {
+      "name": "needs care board inherited ruling and palette: absent",
+      "input": "{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}}}}}",
+      "canonical": "{\"board\":{},\"footnote_boards\":{\"child\":{\"board\":{}}}}",
+      "hash": "5b70346e5efdb1d361086cc3502f53c2e98179e80c0b5a9a628489e43ea1cb6d"
+    },
+    {
+      "name": "needs care board inherited ruling and palette: explicit",
+      "input": "{\"board\":{\"appState\":{\"linedPaperMode\":null,\"linedPitch\":null,\"linedPitchCollege\":null,\"linedPitchWide\":null,\"linedRule\":null,\"scrollX\":0,\"scrollY\":0,\"zoom\":1},\"inkPalettes\":null},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"linedPaperMode\":null,\"linedPitch\":null,\"linedPitchCollege\":null,\"linedPitchWide\":null,\"linedRule\":null,\"scrollX\":0,\"scrollY\":0,\"zoom\":1},\"inkPalettes\":null}}}}",
+      "canonical": "{\"board\":{},\"footnote_boards\":{\"child\":{\"board\":{}}}}",
+      "hash": "5b70346e5efdb1d361086cc3502f53c2e98179e80c0b5a9a628489e43ea1cb6d"
+    },
+    {
+      "name": "needs care agent inherited artifact footnotes: absent",
+      "input": "{\"agent\":[{\"id\":\"message\"}]}",
+      "canonical": "{\"agent\":[{\"id\":\"message\"}]}",
+      "hash": "506cfc8d4fbb349dcaf90a8697f72c7df7482929b9adbc2704ff921396948e94"
+    },
+    {
+      "name": "needs care agent inherited artifact footnotes: explicit",
+      "input": "{\"agent\":[{\"artifactFootnoteIds\":null,\"id\":\"message\"}]}",
+      "canonical": "{\"agent\":[{\"id\":\"message\"}]}",
+      "hash": "506cfc8d4fbb349dcaf90a8697f72c7df7482929b9adbc2704ff921396948e94"
     }
   ],
   "ink": [
@@ -1508,6 +1580,102 @@
       "input": "{\"payload\":{\"bookRecord\":{\"footnoteBoards\":{\"child\":{\"board\":{\"elements\":[],\"inkPages\":{\"pageIds\":[],\"v\":1}},\"pageCount\":1}}}},\"tier\":\"24h\"}",
       "canonical": "{\"payload\":{\"bookRecord\":{\"footnoteBoards\":{\"child\":{\"board\":{\"elements\":[],\"inkPages\":{\"pageIds\":[],\"v\":1}},\"pageCount\":1}}}},\"tier\":\"24h\"}",
       "hash": "084b3ed11283773debfc9a6e83a68bcaaf6b97ad923cc2eb8cf576dbfa76490c"
+    },
+    {
+      "name": "needs care book label: absent",
+      "input": "{\"payload\":{\"id\":\"book\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"id\":\"book\"},\"tier\":\"24h\"}",
+      "hash": "4380c18ca864be6e11834f33dac040b200e455549968136540bc7fabc515c579"
+    },
+    {
+      "name": "needs care book label: explicit",
+      "input": "{\"payload\":{\"id\":\"book\",\"label\":\"\"},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"id\":\"book\"},\"tier\":\"24h\"}",
+      "hash": "4380c18ca864be6e11834f33dac040b200e455549968136540bc7fabc515c579"
+    },
+    {
+      "name": "needs care footnote fallback text: absent",
+      "input": "{\"payload\":{\"footnotes\":[{\"id\":\"mark\"}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnotes\":[{\"id\":\"mark\"}]},\"tier\":\"24h\"}",
+      "hash": "76a2df2ac73f8f6e41c17970b73787d5a72773a9282ec75fe0f3f21a3044bcae"
+    },
+    {
+      "name": "needs care footnote fallback text: explicit",
+      "input": "{\"payload\":{\"footnotes\":[{\"blockText\":\"\",\"excerpt\":\"\",\"id\":\"mark\",\"query\":\"\",\"url\":\"\"}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnotes\":[{\"id\":\"mark\"}]},\"tier\":\"24h\"}",
+      "hash": "76a2df2ac73f8f6e41c17970b73787d5a72773a9282ec75fe0f3f21a3044bcae"
+    },
+    {
+      "name": "needs care footnote inherited theme: absent",
+      "input": "{\"payload\":{\"footnotes\":[{\"id\":\"mark\",\"subMarks\":[{\"id\":\"sub\"}]}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnotes\":[{\"id\":\"mark\",\"subMarks\":[{\"id\":\"sub\"}]}]},\"tier\":\"24h\"}",
+      "hash": "69fca77da233bfd1c4ed9f067c9f26fa5c9d0ea2c12aa2a7643c25c3d92c894f"
+    },
+    {
+      "name": "needs care footnote inherited theme: explicit",
+      "input": "{\"payload\":{\"footnotes\":[{\"color\":\"\",\"id\":\"mark\",\"palette\":[],\"subMarks\":[{\"color\":\"\",\"excerpt\":\"\",\"id\":\"sub\",\"palette\":[]}]}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnotes\":[{\"id\":\"mark\",\"subMarks\":[{\"id\":\"sub\"}]}]},\"tier\":\"24h\"}",
+      "hash": "69fca77da233bfd1c4ed9f067c9f26fa5c9d0ea2c12aa2a7643c25c3d92c894f"
+    },
+    {
+      "name": "needs care note inherited authorship: absent",
+      "input": "{\"payload\":{\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}]},\"tier\":\"24h\"}",
+      "hash": "9de7fd1dfd996a9c664636f7324509816f4f8ef25daac03ed9d4b6ca53255d98"
+    },
+    {
+      "name": "needs care note inherited authorship: explicit",
+      "input": "{\"payload\":{\"footnotes\":[{\"notes\":[{\"by\":\"\",\"text\":\"legacy\"}]}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}]},\"tier\":\"24h\"}",
+      "hash": "9de7fd1dfd996a9c664636f7324509816f4f8ef25daac03ed9d4b6ca53255d98"
+    },
+    {
+      "name": "needs care board inherited ruling and palette: absent",
+      "input": "{\"payload\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}}}}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}}}}},\"tier\":\"24h\"}",
+      "hash": "a070ea6ab1fffa301c30b835dabbba4887527f19a14da6dcc0a44b48d0ca4803"
+    },
+    {
+      "name": "needs care board inherited ruling and palette: explicit",
+      "input": "{\"payload\":{\"board\":{\"appState\":{\"linedPaperMode\":null,\"linedPitch\":null,\"linedPitchCollege\":null,\"linedPitchWide\":null,\"linedRule\":null,\"scrollX\":0,\"scrollY\":0,\"zoom\":1},\"inkPalettes\":null},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"linedPaperMode\":null,\"linedPitch\":null,\"linedPitchCollege\":null,\"linedPitchWide\":null,\"linedRule\":null,\"scrollX\":0,\"scrollY\":0,\"zoom\":1},\"inkPalettes\":null}}}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}}}}},\"tier\":\"24h\"}",
+      "hash": "a070ea6ab1fffa301c30b835dabbba4887527f19a14da6dcc0a44b48d0ca4803"
+    },
+    {
+      "name": "needs care agent inherited artifact footnotes: absent",
+      "input": "{\"payload\":{\"agent\":[{\"id\":\"message\"}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"agent\":[{\"id\":\"message\"}]},\"tier\":\"24h\"}",
+      "hash": "ec5bf18458c310187556bdce240ca3bc6e47194cb0eeeb8313949be689bae100"
+    },
+    {
+      "name": "needs care agent inherited artifact footnotes: explicit",
+      "input": "{\"payload\":{\"agent\":[{\"artifactFootnoteIds\":null,\"id\":\"message\"}]},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"agent\":[{\"id\":\"message\"}]},\"tier\":\"24h\"}",
+      "hash": "ec5bf18458c310187556bdce240ca3bc6e47194cb0eeeb8313949be689bae100"
+    },
+    {
+      "name": "needs care retained bookRecord: absent",
+      "input": "{\"payload\":{\"bookRecord\":{\"agent\":[{\"id\":\"message\"}],\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}}}},\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}],\"id\":\"book\"}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"bookRecord\":{\"agent\":[{\"id\":\"message\"}],\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}}}},\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}],\"id\":\"book\"}},\"tier\":\"24h\"}",
+      "hash": "32be8ff1a83b6e297e942ce800f95dd4b1e6cdb6b26a71eb0f59eea455b33829"
+    },
+    {
+      "name": "needs care retained bookRecord: explicit",
+      "input": "{\"payload\":{\"bookRecord\":{\"agent\":[{\"artifactFootnoteIds\":null,\"id\":\"message\"}],\"board\":{\"appState\":{\"linedPaperMode\":null,\"linedPitch\":null,\"linedPitchCollege\":null,\"linedPitchWide\":null,\"linedRule\":null,\"scrollX\":0,\"scrollY\":0,\"zoom\":1},\"inkPalettes\":null},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"linedPaperMode\":null,\"linedPitch\":null,\"linedPitchCollege\":null,\"linedPitchWide\":null,\"linedRule\":null,\"scrollX\":0,\"scrollY\":0,\"zoom\":1},\"inkPalettes\":null}}},\"footnotes\":[{\"notes\":[{\"by\":\"\",\"text\":\"legacy\"}]}],\"id\":\"book\",\"label\":\"\"}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"bookRecord\":{\"agent\":[{\"id\":\"message\"}],\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}},\"footnote_boards\":{\"child\":{\"board\":{\"appState\":{\"scrollX\":0,\"scrollY\":0,\"zoom\":1}}}},\"footnotes\":[{\"notes\":[{\"text\":\"legacy\"}]}],\"id\":\"book\"}},\"tier\":\"24h\"}",
+      "hash": "32be8ff1a83b6e297e942ce800f95dd4b1e6cdb6b26a71eb0f59eea455b33829"
+    },
+    {
+      "name": "needs care artifact payload: absent",
+      "input": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"agent\\\":[{\\\"id\\\":\\\"message\\\"}],\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}},\\\"footnote_boards\\\":{\\\"child\\\":{\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}}}},\\\"footnotes\\\":[{\\\"notes\\\":[{\\\"text\\\":\\\"legacy\\\"}]}],\\\"id\\\":\\\"book\\\"}\"}]}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"agent\\\":[{\\\"id\\\":\\\"message\\\"}],\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}},\\\"footnote_boards\\\":{\\\"child\\\":{\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}}}},\\\"footnotes\\\":[{\\\"notes\\\":[{\\\"text\\\":\\\"legacy\\\"}]}],\\\"id\\\":\\\"book\\\"}\"}]}},\"tier\":\"24h\"}",
+      "hash": "1351958cda130715226e55204fc2095bc8f275a9e09a1beb5117ba9d0a05cd85"
+    },
+    {
+      "name": "needs care artifact payload: explicit",
+      "input": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"agent\\\":[{\\\"artifactFootnoteIds\\\":null,\\\"id\\\":\\\"message\\\"}],\\\"board\\\":{\\\"appState\\\":{\\\"linedPaperMode\\\":null,\\\"linedPitch\\\":null,\\\"linedPitchCollege\\\":null,\\\"linedPitchWide\\\":null,\\\"linedRule\\\":null,\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1},\\\"inkPalettes\\\":null},\\\"footnote_boards\\\":{\\\"child\\\":{\\\"board\\\":{\\\"appState\\\":{\\\"linedPaperMode\\\":null,\\\"linedPitch\\\":null,\\\"linedPitchCollege\\\":null,\\\"linedPitchWide\\\":null,\\\"linedRule\\\":null,\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1},\\\"inkPalettes\\\":null}}},\\\"footnotes\\\":[{\\\"notes\\\":[{\\\"by\\\":\\\"\\\",\\\"text\\\":\\\"legacy\\\"}]}],\\\"id\\\":\\\"book\\\",\\\"label\\\":\\\"\\\"}\"}]}},\"tier\":\"24h\"}",
+      "canonical": "{\"payload\":{\"artifactBundle\":{\"assets\":[{\"payload\":\"{\\\"agent\\\":[{\\\"id\\\":\\\"message\\\"}],\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}},\\\"footnote_boards\\\":{\\\"child\\\":{\\\"board\\\":{\\\"appState\\\":{\\\"scrollX\\\":0,\\\"scrollY\\\":0,\\\"zoom\\\":1}}}},\\\"footnotes\\\":[{\\\"notes\\\":[{\\\"text\\\":\\\"legacy\\\"}]}],\\\"id\\\":\\\"book\\\"}\"}]}},\"tier\":\"24h\"}",
+      "hash": "1351958cda130715226e55204fc2095bc8f275a9e09a1beb5117ba9d0a05cd85"
     }
   ]
 }

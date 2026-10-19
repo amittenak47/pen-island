@@ -91,3 +91,10 @@ it("replaces the complete local page set when bringing acknowledged trash back f
   expect(after.metadata?.deletedAt).toBeUndefined(); expect(after.pages).toEqual([]);
   expect((await listRecoveryCopies()).some(copy => copy.record?.ink?.some(page => page.pageId === 44))).toBe(true);
 });
+
+it.each([undefined, "", "   "])("writes an explicit empty wire label for %s", async label => {
+  const { saveAnnotateDoc } = await import("./annotateStore");
+  await saveAnnotateDoc({ id: "blank-label", name: "book.md", hash: "h", source: "", label,
+    board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } } });
+  expect((await captureBook({ kind: "annotate", id: "blank-label" })).record).toHaveProperty("label", "");
+});

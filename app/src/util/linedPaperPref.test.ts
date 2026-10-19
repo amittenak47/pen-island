@@ -182,3 +182,12 @@ describe("storedLinedPitch", () => {
     expect(storedLinedPitch(wide)).toBe(201.025641);
   });
 });
+
+it.each(["wide", "college", "off"] as const)("treats null ruling fields as missing with the %s fallback", mode => {
+  const empty = { linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null };
+  expect(linedPitchStateFromAppState(empty, mode)).toEqual(linedPitchStateFromAppState({}, mode));
+  expect(linedPitchFromAppState(empty, mode)).toBe(linedPitchFromAppState({}, mode));
+  expect(linedPaperModeFromAppState(empty)).toBe(linedPaperModeFromAppState({}));
+  expect(linedPitchStateFromAppState({ ...empty, linedPitch: 36 }, mode))
+    .toEqual(linedPitchStateFromAppState({ linedPitch: 36 }, mode));
+});

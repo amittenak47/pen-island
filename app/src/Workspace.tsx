@@ -121,6 +121,7 @@ import { REFERENCE_TEXT_LIMIT } from "./util/artifactReference";
 import { problemArtifactConflict, problemConflictPreview, resolveProblemArtifactConflict, stashProblemArtifactConflict, subscribeProblemArtifactConflict, type ProblemArtifactConflict } from "./util/problemArtifactConflict";
 import { applyHubProblem } from "./util/padSync";
 import { artifactCreationAssociations, artifactRefKey, type ArtifactParent, type ArtifactRef, type ArtifactAssociation } from "./util/padArtifacts";
+import { artifactFootnoteIdsForMessage } from "./util/agentMessageFormat";
 import { describeRunFailure, withConversationContext } from "./modes/coachContext";
 import { groupThreads, threadAnchorRef, visibleThreadMessages, sendConversationContext, conversationMessages, conversationMarkdown, messageThreadRoot } from "./modes/coachThreads";
 import { pruneDeletedThreadLinks } from "./util/threadLinks";
@@ -3414,7 +3415,7 @@ export const Workspace = memo(function Workspace({
       out.push({
         id,
         kind: "mark",
-        label: (mark?.excerpt ?? "mark").slice(0, 28),
+        label: (mark?.excerpt || "mark").slice(0, 28),
         x: box.left + box.width / 2,
         y: box.top + box.height / 2,
         hitKind: "mark",
@@ -4724,7 +4725,7 @@ export const Workspace = memo(function Workspace({
         await saveAnnotateDoc({
           id: sidecarId ?? undefined, name: input.name, hash, docType, localFileHash,
           source: input.text ?? "",
-          board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } },
+          board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1, linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null }, inkPalettes: null },
         });
       }
 
@@ -4828,7 +4829,7 @@ export const Workspace = memo(function Workspace({
           source,
           // A blank board with a real camera — the note is opened straight
           // after, and the open seeds the page template over this.
-          board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } },
+          board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1, linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null }, inkPalettes: null },
         });
         await openAnnotate({
           name: saved.name,
@@ -4880,7 +4881,7 @@ export const Workspace = memo(function Workspace({
         board: boardRef.current?.saveBoard({ assembleInk: false }) ?? { 
           v: 1,
           elements: [],
-          appState: { scrollX: 0, scrollY: 0, zoom: 1 },
+          appState: { scrollX: 0, scrollY: 0, zoom: 1, linedPaperMode: null, linedPitch: null, linedPitchWide: null, linedPitchCollege: null, linedRule: null }, inkPalettes: null,
         },
         footnotes: annotateFootnotesRef.current,
         agent: persistableAgentMessages(agentMessages),
@@ -6222,11 +6223,12 @@ export const Workspace = memo(function Workspace({
             artifactProposals: (sanitizeArtifactProposals(result.artifacts) ?? []).map(proposal => ({
               ...proposal, programs: proposal.programs ?? [], messages: proposal.messages ?? [],
             })),
-            artifactFootnoteIds,
+            artifactFootnoteIds: artifactFootnoteIds ?? null,
           },
           ...moreDrawings.map((drawable, index) => ({
             content: `Drew diagram ${index + 2} of ${drawables.length} on the board.`,
             drawing: withNewDrawing(drawable, drawingPage),
+            artifactFootnoteIds: null,
           })),
         ]);
         const sourceStillOpen = !docAsk?.view || annotateSourceRef.current?.hash === docAsk.view.document_hash;
@@ -6606,7 +6608,7 @@ export const Workspace = memo(function Workspace({
             threads: [thread],
             ...footnoteThemeSeed(current),
             bands: quoted.hitRects,
-            ...(quoted.text.trim() ? { blockText: quoted.text } : {}),
+            blockText: quoted.text.trim() ? quoted.text : "",
           }),
         );
         return;
@@ -7863,7 +7865,7 @@ export const Workspace = memo(function Workspace({
           ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
           ...footnoteThemeSeed(current),
           bands: selection.hitRects,
-          ...(selection.text.trim() ? { blockText: selection.text } : {}),
+          blockText: selection.text.trim() ? selection.text : "",
         }),
       );
       openFootnoteOverview(id, anchorRect);
@@ -7959,7 +7961,7 @@ export const Workspace = memo(function Workspace({
           url,
           ...footnoteThemeSeed(current),
           bands: selection.hitRects,
-          ...(selection.text.trim() ? { blockText: selection.text } : {}),
+          blockText: selection.text.trim() ? selection.text : "",
         }),
       );
       openFootnoteOverview(id, anchorRect);
@@ -8006,7 +8008,7 @@ export const Workspace = memo(function Workspace({
           footnotes,
           exceptId: mark.id,
           palette: normalizePalette(mark.palette) ?? footnoteDisplayThemes(footnotes).get(mark.id)?.palette,
-          markText: mark.blockText ?? mark.excerpt,
+          markText: mark.blockText || mark.excerpt,
           workspaceItems: chatBotWorkspaceItems(),
           docKind: hereNodeRef.current?.type === "web" ? "web" : "annotate",
           focus: ask.options?.focus,
@@ -8051,7 +8053,7 @@ export const Workspace = memo(function Workspace({
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(existing),
         bands: selection.hitRects,
-        ...(selection.text.trim() ? { blockText: selection.text } : {}),
+        blockText: selection.text.trim() ? selection.text : "",
       });
       heldFootnoteAsksRef.current = [
         ...heldFootnoteAsksRef.current.filter((ask) => ask.requestId !== requestId),
@@ -8144,7 +8146,7 @@ export const Workspace = memo(function Workspace({
       }
       if (problemRef.current !== problem || boardRef.current?.instanceId !== board.instanceId) throw new Error("The workspace changed. Reopen Attachments.");
       return { parent, messageId: message?.id, footnoteId,
-        associations: artifactCreationAssociations({ activeFootnoteId: footnoteId, attachedFootnoteIds: message?.artifactFootnoteIds ?? attachedFootnoteIds,
+        associations: artifactCreationAssociations({ activeFootnoteId: footnoteId, attachedFootnoteIds: artifactFootnoteIdsForMessage(message, attachedFootnoteIds),
           threadRootId: threadRootIdRef.current ?? message?.replyTo?.id ?? message?.id }) };
     } catch (cause) { setError(messageOf(cause)); }
   };
@@ -8269,7 +8271,8 @@ export const Workspace = memo(function Workspace({
             ...mark,
             bands: mark.bands ?? [],
             id: minted,
-            ...(theme ? { color: theme.color, palette: theme.palette } : {}),
+            color: theme?.color || mark.color || "",
+            palette: normalizePalette(theme?.palette) ?? normalizePalette(mark.palette) ?? [],
           };
           return { ...entry, subMarks: [...existing, next] };
         }),
@@ -8298,7 +8301,7 @@ export const Workspace = memo(function Workspace({
         ...(captureIdRef.current ? { captureId: captureIdRef.current } : {}),
         ...footnoteThemeSeed(current),
         bands: selection.hitRects,
-        ...(selection.text.trim() ? { blockText: selection.text } : {}),
+        blockText: selection.text.trim() ? selection.text : "",
       }),
     );
   }, []);
@@ -11337,7 +11340,7 @@ export const Workspace = memo(function Workspace({
             const here = hereNode;
             const mark = annotateFootnotesRef.current.find((entry) => entry.id === originId);
             // A mark names itself by its excerpt; a circled passage or image by its pick's label.
-            const originLabel = mark?.excerpt?.slice(0, 40) ?? origin?.label ?? originId;
+            const originLabel = mark?.excerpt?.slice(0, 40) || origin?.label || originId;
             /*
              * A suggestion is a passage, not a workspace — it has no node of
              * its own to point at, so the edge lands on this pad's own text

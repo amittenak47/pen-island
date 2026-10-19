@@ -11,6 +11,10 @@
 //! footnotes[].title, .notes[].field, .userLinks[]/.whiteboards[].title and
 //! .anchor/.subMarks[].anchor.prefix/suffix; board.files={} and
 //! board.elements[].customData=null/{} (including footnote boards).
+//! Also label=""; footnotes[].blockText/query/url/excerpt/color="", palette=[],
+//! .notes[].by="" and .subMarks[].excerpt/color="", palette=[];
+//! agent[].artifactFootnoteIds=null; board.inkPalettes=null and
+//! board.appState.linedPaperMode/linedPitch/linedPitchWide/linedPitchCollege/linedRule=null.
 //! Snapshots use these same defaults without view exclusions, plus empty
 //! edges/footnoteBoards/footnoteInk and known-empty board.inkPages manifests.
 //! Snapshot artifact payload JSON and retained bookRecord use the same record defaults.
@@ -104,11 +108,18 @@ fn omit_empty_map(object: &mut serde_json::Map<String, Value>, key: &str) {
     if object.get(key).and_then(Value::as_object).is_some_and(serde_json::Map::is_empty) { object.remove(key); }
 }
 
-/// Only the safe empty defaults; snapshots retain view state and populated manifests.
+/// Only named empty defaults; snapshots retain view state and populated manifests.
 pub fn normalize_empty_defaults(record: &mut serde_json::Map<String, Value>, snapshot: bool, snapshot_payload: bool) {
+    omit_empty_strings(record, &["label"]);
     fn board(value: &mut Value, snapshot: bool) {
         let Some(object) = value.as_object_mut() else { return };
         omit_empty_map(object, "files");
+        if object.get("inkPalettes") == Some(&Value::Null) { object.remove("inkPalettes"); }
+        if let Some(state) = object.get_mut("appState").and_then(Value::as_object_mut) {
+            for key in ["linedPaperMode", "linedPitch", "linedPitchWide", "linedPitchCollege", "linedRule"] {
+                if state.get(key) == Some(&Value::Null) { state.remove(key); }
+            }
+        }
         if let Some(elements) = object.get_mut("elements").and_then(Value::as_array_mut) {
             for element in elements.iter_mut().filter_map(Value::as_object_mut) {
                 if element.get("customData") == Some(&Value::Null) { element.remove("customData"); }
@@ -136,17 +147,25 @@ pub fn normalize_empty_defaults(record: &mut serde_json::Map<String, Value>, sna
         omit_empty_map(record, key);
     }
     if let Some(messages) = record.get_mut("agent").and_then(Value::as_array_mut) {
-        for message in messages.iter_mut().filter_map(Value::as_object_mut) { omit_empty_strings(message, MESSAGE_EMPTY_STRING_KEYS); }
+        for message in messages.iter_mut().filter_map(Value::as_object_mut) {
+            omit_empty_strings(message, MESSAGE_EMPTY_STRING_KEYS);
+            if message.get("artifactFootnoteIds") == Some(&Value::Null) { message.remove("artifactFootnoteIds"); }
+        }
     }
     if let Some(notes) = record.get_mut("footnotes").and_then(Value::as_array_mut) {
         for note in notes.iter_mut().filter_map(Value::as_object_mut) {
-            omit_empty_strings(note, &["title"]);
+            omit_empty_strings(note, &["title", "blockText", "query", "url", "excerpt", "color"]);
+            omit_empty_lists(note, &["palette"]);
             anchor(note.get_mut("anchor"));
             for key in ["userLinks", "whiteboards", "notes", "subMarks"] {
                 if let Some(entries) = note.get_mut(key).and_then(Value::as_array_mut) {
                     for entry in entries.iter_mut().filter_map(Value::as_object_mut) {
-                        if key == "subMarks" { anchor(entry.get_mut("anchor")); }
-                        else { omit_empty_strings(entry, &[if key == "notes" { "field" } else { "title" }]); }
+                        if key == "subMarks" {
+                            anchor(entry.get_mut("anchor"));
+                            omit_empty_strings(entry, &["excerpt", "color"]);
+                            omit_empty_lists(entry, &["palette"]);
+                        } else if key == "notes" { omit_empty_strings(entry, &["field", "by"]); }
+                        else { omit_empty_strings(entry, &["title"]); }
                     }
                 }
             }
@@ -407,11 +426,44 @@ mod tests {
             json!({"attachments":[{}]}), json!({"processEvents":[{}]})] {
             assert_ne!(record_hash(&json!({"agent":[extra]})).unwrap(), record_hash(&json!({"agent":[{}]})).unwrap());
         }
-        for extra in [json!({"title":"Named"}), json!({"palette":[]}), json!({"updatedAt":0}), json!({"pending":""})] {
+        for extra in [json!({"title":"Named"}), json!({"palette":["#111111","#222222"]}), json!({"updatedAt":0}), json!({"pending":""})] {
             assert_ne!(record_hash(&json!({"footnotes":[extra]})).unwrap(), record_hash(&json!({"footnotes":[{}]})).unwrap());
         }
         assert_ne!(record_hash(&json!({"agent":[{"attachments":[{"sendToModel":false}]}]})).unwrap(),
             record_hash(&json!({"agent":[{"attachments":[{}]}]})).unwrap());
+    }
+
+    #[test]
+    fn needs_care_empties_match_absence_in_records_and_snapshots() {
+        let cases = [
+            (json!({"id":"book"}), json!({"id":"book","label":""})),
+            (json!({"footnotes":[{}]}), json!({"footnotes":[{"blockText":"","query":"","url":"","excerpt":""}]})),
+            (json!({"footnotes":[{"subMarks":[{}]}]}),
+                json!({"footnotes":[{"color":"","palette":[],"subMarks":[{"color":"","palette":[],"excerpt":""}]}]})),
+            (json!({"footnotes":[{"notes":[{"text":"legacy"}]}]}),
+                json!({"footnotes":[{"notes":[{"text":"legacy","by":""}]}]})),
+            (json!({"board":{"appState":{"zoom":1}},"footnote_boards":{"child":{"board":{"appState":{"zoom":1}}}}}),
+                json!({"board":{"appState":{"zoom":1,"linedPaperMode":null,"linedPitch":null,"linedPitchWide":null,"linedPitchCollege":null,"linedRule":null},"inkPalettes":null},
+                    "footnote_boards":{"child":{"board":{"appState":{"zoom":1,"linedPaperMode":null,"linedPitch":null,"linedPitchWide":null,"linedPitchCollege":null,"linedRule":null},"inkPalettes":null}}}})),
+            (json!({"agent":[{"id":"message"}]}), json!({"agent":[{"id":"message","artifactFootnoteIds":null}]})),
+        ];
+        for (missing, empty) in cases {
+            assert_eq!(normalize_record(&empty).unwrap(), normalize_record(&missing).unwrap());
+            assert_eq!(record_hash(&empty).unwrap(), record_hash(&missing).unwrap());
+            assert_eq!(crate::pads::snapshot_copies::normalized_payload(&empty).unwrap(),
+                crate::pads::snapshot_copies::normalized_payload(&missing).unwrap());
+        }
+        for populated in [json!({"label":"Named"}), json!({"footnotes":[{"query":"search"}]}),
+            json!({"footnotes":[{"color":"#123456","palette":["#123456","#abcdef"]}]}),
+            json!({"footnotes":[{"notes":[{"by":"reader"}]}]}),
+            json!({"board":{"appState":{"linedPaperMode":"off","linedRule":"college","linedPitch":28}}}),
+            json!({"board":{"inkPalettes":{"items":[["#123456","#abcdef"]],"index":0}}}),
+            json!({"agent":[{"artifactFootnoteIds":[]}]})] {
+            assert_eq!(normalize_record(&populated).unwrap(), populated);
+        }
+        let unknown = json!({"future":{"label":"","color":"","palette":[],"by":"","artifactFootnoteIds":null,"linedRule":null},
+            "board":{"appState":{"future":null}},"footnotes":[{"by":""}]});
+        assert_eq!(normalize_record(&unknown).unwrap(), unknown);
     }
 
     #[test]

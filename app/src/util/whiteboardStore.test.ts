@@ -58,7 +58,7 @@ describe("saveWhiteboardNotebook", () => {
     const saved = await saveWhiteboardNotebook({ board: board(), pageCount: 1, agent: [{ id: "message" }] });
     expect((await getWhiteboardNotebook(saved.id))?.agent).toEqual([{
       id: "message", requestNote: "", reasoning: "", bridgeError: "", pending: false, queued: false, bridgePending: false,
-      attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [],
+      attachments: [], artifacts: [], artifactProposals: [], artifactFootnoteIds: null, flags: [], processEvents: [],
     }]);
   });
   it("keeps one entry per id and moves it to the front", async () => {

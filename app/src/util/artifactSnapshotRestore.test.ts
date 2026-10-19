@@ -152,7 +152,7 @@ it.each([true, false])("restores a hub snapshot's captured source identity over 
   const restored = (await h.capture()).record!;
   expect(restored.hash).toBe("saved-source"); expect(restored.doc_type).toBe("pdf");
   expect(restored.local_file_hash).toBe(optional ? "saved-source" : undefined);
-  expect(restored.label).toBe(optional ? "Saved label" : undefined); expect(restored.future).toEqual({ author: "saved" });
+  expect(restored.label).toBe(optional ? "Saved label" : ""); expect(restored.future).toEqual({ author: "saved" });
 });
 
 describe("snapshot restore hub checks", () => {

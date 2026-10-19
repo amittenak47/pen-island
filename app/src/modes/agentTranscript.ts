@@ -50,6 +50,7 @@ export function restoreAgentMessages(stored: unknown[]): AgentChatMessage[] {
     if (deletedAt) {
       const tombstone: AgentChatMessage = {
         ...message,
+        artifactFootnoteIds: Array.isArray(message.artifactFootnoteIds) ? message.artifactFootnoteIds : null,
         id: message.id,
         role: message.role as AgentChatMessage["role"],
         content,
@@ -96,7 +97,7 @@ export function restoreAgentMessages(stored: unknown[]): AgentChatMessage[] {
         attachments: message.attachments,
         ...(artifacts ? { artifacts } : {}),
         ...(artifactProposals ? { artifactProposals } : {}),
-        ...(Array.isArray(message.artifactFootnoteIds) ? { artifactFootnoteIds: message.artifactFootnoteIds.filter(id => typeof id === "string") } : {}),
+        artifactFootnoteIds: Array.isArray(message.artifactFootnoteIds) ? message.artifactFootnoteIds.filter(id => typeof id === "string") : null,
         ...(flags && flags.length > 0 ? { flags } : {}),
         ...(processEvents ? { processEvents } : {}),
         ...(reasoning ? { reasoning } : {}),
@@ -123,6 +124,7 @@ export function persistableAgentMessages(messages: AgentChatMessage[]): AgentCha
   return organizeIntoSessions(messages)
     .filter((message) => !message.pending || Boolean(message.requestState) || Boolean(message.deletedAt))
     .map((message) => {
+      if (message.artifactFootnoteIds === undefined) message = { ...message, artifactFootnoteIds: null };
       if (!message.attachments?.some((att) => att.thumb)) return message;
       return {
         ...message,

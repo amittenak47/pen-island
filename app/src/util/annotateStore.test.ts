@@ -28,7 +28,7 @@ import {
 } from "./annotateStore";
 /** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
 const FLAGS_OFF = { pending: false, queued: false, bridgePending: false, requestNote: "", reasoning: "", bridgeError: "",
-  attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
+  attachments: [], artifacts: [], artifactProposals: [], artifactFootnoteIds: null, flags: [], processEvents: [] };
 
 const deleteDocBytes = vi.fn(async (_hash?: string) => {});
 vi.mock("./docBytes", () => ({
@@ -381,6 +381,10 @@ describe("annotateDocLabel", () => {
     expect(annotateDocLabel(meta({ label: "   " })).startsWith("dp.pdf — ")).toBe(true);
   });
 
+  it("uses the same display name for an empty and an absent label", () => {
+    expect(annotateDocLabel(meta({ label: "" }))).toBe(annotateDocLabel(meta()));
+  });
+
   it("falls back to the bare name when the timestamp is unusable", () => {
     expect(annotateDocLabel(meta({ updatedAt: Number.NaN }))).toBe("dp.pdf");
   });
@@ -410,7 +414,7 @@ describe("setAnnotateDocLabel", () => {
       board: board(),
     });
     await setAnnotateDocLabel(saved.id, "  ");
-    expect(listAnnotateDocs()[0]!.label).toBeUndefined();
+    expect(listAnnotateDocs()[0]!.label).toBe("");
   });
 
   it("keeps a label across a save that does not mention one", async () => {
@@ -521,7 +525,7 @@ describe("footnotes on an entry", () => {
     });
     // Stored with every list written, empty or not (see agentMessageFormat).
     expect((await getAnnotateDoc(saved.id))?.footnotes).toEqual([{ ...mark(0, 9),
-      anchor: { ...mark(0, 9).anchor, prefix: "", suffix: "" }, title: "",
+      anchor: { ...mark(0, 9).anchor, prefix: "", suffix: "" }, title: "", blockText: "", color: "", palette: [], url: "",
       notes: [], threads: [], bands: [], subMarks: [], userLinks: [], whiteboards: [], artifacts: [] }]);
   });
 

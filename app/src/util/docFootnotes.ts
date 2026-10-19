@@ -58,9 +58,9 @@ export interface DocFootnoteNote {
   images?: string[];
   /**
    * Who wrote it: an assistant ("ai") or the reader. Notes saved before this
-   * existed have none; on a ChatBot footnote they count as the assistant's.
+   * existed have none; empty also inherits the ChatBot footnote's authorship.
    */
-  by?: "ai" | "reader";
+  by?: "" | "ai" | "reader";
   /** The preset field this note fills ("Character"); its text opens "**Field:**". */
   field?: string;
   /** The ChatBot run that added this note to an earlier footnote, so Undo can take it back out. */
@@ -71,7 +71,7 @@ export interface DocFootnoteNote {
 
 /** Whether a note on `footnote` was written by an assistant. */
 export function noteIsAi(note: DocFootnoteNote, footnote: { kind: string }): boolean {
-  return note.by === "ai" || (note.by === undefined && footnote.kind === "ai");
+  return note.by === "ai" || ((note.by === undefined || note.by === "") && footnote.kind === "ai");
 }
 
 /** The id a mini note or note tab uses for all of a footnote's notes together. */
@@ -89,6 +89,7 @@ export function combinedNote(footnote: { notes?: readonly DocFootnoteNote[] }): 
     id: ALL_NOTES_ID,
     text: notes.map((note) => note.text.trim()).filter(Boolean).join("\n\n---\n\n"),
     images,
+    by: "",
     createdAt: Math.min(...notes.map((note) => note.createdAt)),
     updatedAt: Math.max(...notes.map((note) => note.updatedAt)),
   };
@@ -736,7 +737,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
             id: candidate.id,
             text: candidate.text,
             ...(Array.isArray(candidate.images) ? { images } : {}),
-            ...(candidate.by === "ai" || candidate.by === "reader" ? { by: candidate.by } : {}),
+            by: candidate.by === "ai" || candidate.by === "reader" ? candidate.by : "",
             field: typeof candidate.field === "string" && candidate.field.length <= 40 ? candidate.field.trim() : "",
             ...(typeof candidate.jobId === "string" && candidate.jobId ? { jobId: candidate.jobId } : {}),
             createdAt,
@@ -746,7 +747,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
       })
     : [];
   if (entries.length === 0 && typeof legacy === "string" && legacy.trim()) {
-    entries.push({ id: "nt-legacy", text: legacy, images: [], field: "", createdAt: now, updatedAt: now });
+    entries.push({ id: "nt-legacy", text: legacy, images: [], by: "", field: "", createdAt: now, updatedAt: now });
   }
   return entries.length > 0 ? entries : undefined;
 }
@@ -874,11 +875,13 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
           ...(artifacts || Array.isArray(rawArtifacts) ? { artifacts: artifacts ?? [] } : {}),
           threads: threads ?? (Array.isArray(candidate.threads) ? [] : undefined),
           ...(userLinks || Array.isArray(candidate.userLinks) ? { userLinks: userLinks ?? [] } : {}),
-          ...(color ? { color } : {}),
-          ...(palette ? { palette } : {}),
+          color: color ?? "",
+          palette: palette ?? [],
           title: title ?? "",
           ...(bands || Array.isArray(candidate.bands) ? { bands: bands ?? [] } : {}),
-          ...(blockText ? { blockText } : {}),
+          blockText: blockText ?? "",
+          query: typeof candidate.query === "string" ? candidate.query : "",
+          url: typeof candidate.url === "string" ? candidate.url : "",
           ...(subMarks || Array.isArray(candidate.subMarks) ? { subMarks: subMarks ?? [] } : {}),
           ...(updatedAt != null ? { updatedAt } : {}),
           ...(pending ? { pending } : {}),
@@ -946,8 +949,8 @@ function sanitizeSubMarks(value: unknown): DocFootnoteSubMark[] | undefined {
       start,
       end,
       ...(textAnchor ? { anchor: textAnchor } : {}),
-      ...(color ? { color } : {}),
-      ...(palette ? { palette } : {}),
+      color: color ?? "",
+      palette: palette ?? [],
       ...(bands || Array.isArray(mark.bands) ? { bands: bands ?? [] } : {}),
     });
   }
@@ -969,7 +972,7 @@ export function suggestedLinksFor(
   excerpt: string,
   footnote?: DocFootnote,
 ): { title: string; url: string }[] {
-  const query = footnote?.query ?? searchQueryFor(footnote?.excerpt ?? excerpt);
+  const query = footnote?.query || searchQueryFor(footnote?.excerpt || excerpt);
   const text = (query || excerpt || footnote?.excerpt || "").trim();
   if (!text) return [];
   const firstWord = text.split(/\s+/).filter(Boolean)[0] ?? text;
@@ -988,7 +991,7 @@ export function suggestedLinksFor(
     },
     {
       title: "Google",
-      url: footnote?.url ?? googleSearchUrl(text),
+      url: footnote?.url || googleSearchUrl(text),
     },
   ];
 }

@@ -461,7 +461,7 @@ export function mergeRunNotes(existing: DocFootnote, incoming: DocFootnote): Doc
   const texts = new Set(notes.map((note) => note.text.trim()));
   const ids = new Set(notes.map((note) => note.id));
   const added = (incoming.notes ?? []).filter((note) => note.text.trim() && !texts.has(note.text.trim()))
-    .map((note, index) => ({ ...note, id: ids.has(note.id) ? `${note.id}-${runId}-${index}` : note.id, by: note.by ?? "ai" as const, jobId: runId }));
+    .map((note, index) => ({ ...note, id: ids.has(note.id) ? `${note.id}-${runId}-${index}` : note.id, by: note.by || "ai" as const, jobId: runId }));
   if (!added.length) return existing;
   const links = existing.userLinks ?? [];
   const extraLinks = (incoming.userLinks ?? []).filter((link) => !links.some((own) => own.url === link.url));

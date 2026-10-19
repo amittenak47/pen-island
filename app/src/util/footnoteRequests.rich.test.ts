@@ -53,6 +53,16 @@ it("saves empty answer collections and note image lists explicitly", () => {
 });
 
 describe("rich ChatBot answers", () => {
+  it("places answer sub-marks in the excerpt with missing or empty block text", () => {
+    const now = vi.spyOn(Date, "now").mockReturnValue(50);
+    const result = { id: "fr-1", notes: [], marks: [{ kind: "underline" as const, quote: "directed graphs" }] };
+    const [missing] = applyFootnoteResult([mark({ blockText: undefined })], result, 50);
+    const [empty] = applyFootnoteResult([mark({ blockText: "" })], result, 50);
+    expect(empty.subMarks).toEqual(missing.subMarks);
+    expect(empty.subMarks).toHaveLength(1);
+    expect(empty.subMarks![0]).toMatchObject({ excerpt: "directed graphs", color: "", palette: [] });
+    now.mockRestore();
+  });
   it("sets an empty title and color from the mark's palette, and places marks on the quoted words", () => {
     const [next] = applyFootnoteResult([mark()], {
       id: "fr-1",
@@ -70,7 +80,7 @@ describe("rich ChatBot answers", () => {
     expect(highlight).toMatchObject({ kind: "highlight", excerpt: "depth-first search", color: "#60a5fa" });
     expect(TEXT.slice(highlight!.start, highlight!.end)).toBe("depth-first search");
     expect(underline).toMatchObject({ kind: "underline", excerpt: "directed graphs" });
-    expect(underline!.color).toBeUndefined();
+    expect(underline!.color).toBe("");
     expect(next!.updatedAt).toBe(50);
   });
 

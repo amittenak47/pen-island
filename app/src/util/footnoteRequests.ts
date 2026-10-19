@@ -300,7 +300,7 @@ export function applyFootnoteResult(
  */
 function mergeMarks(entry: DocFootnote, incoming: readonly FootnoteMarkDto[] | undefined): DocFootnoteSubMark[] | undefined {
   if (!incoming?.length || !isTextAnchor(entry.anchor)) return undefined;
-  const text = entry.blockText ?? entry.excerpt ?? "";
+  const text = entry.blockText || entry.excerpt || "";
   const out: DocFootnoteSubMark[] = [...(entry.subMarks ?? [])];
   let added = 0;
   for (const mark of incoming) {
@@ -317,7 +317,8 @@ function mergeMarks(entry: DocFootnote, incoming: readonly FootnoteMarkDto[] | u
       start: at.start,
       end: at.end,
       bands: [],
-      ...(color ? { color } : {}),
+      color: color ?? "",
+      palette: [],
     });
     added += 1;
   }

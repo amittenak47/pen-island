@@ -434,7 +434,7 @@ export async function setAnnotateDocLabel(id: string, label: string): Promise<bo
     const trimmed = label.trim();
     if (trimmed === (meta.label?.trim() ?? "")) return false;
     const next = { ...meta, kind: "annotate" as const };
-    if (trimmed) next.label = trimmed; else delete next.label;
+    next.label = trimmed;
     ctx.setMetadata(next);
     return true;
   });
@@ -710,7 +710,7 @@ export async function saveAnnotateDoc(input: {
    * captures", not "there are none". An autosave that omits them must not drop
    * the older page a stranded mark is still standing on.
    */
-  const label = input.label?.trim() || existing?.label;
+  const label = input.label?.trim() || existing?.label || "";
   const owned = input.owned ?? existing?.owned;
   const meta: AnnotateDocMeta = {
     id,
@@ -719,7 +719,7 @@ export async function saveAnnotateDoc(input: {
     hash: input.hash,
     docType: input.docType ?? existing?.docType ?? "markdown",
     updatedAt: now,
-    ...(label ? { label } : {}),
+    label,
     owned: Boolean(owned),
     authoredExtras: existing?.authoredExtras ?? {},
     ...((input.localFileHash ?? existing?.localFileHash) ? { localFileHash: input.localFileHash ?? existing?.localFileHash } : {}),
@@ -744,7 +744,7 @@ export async function saveAnnotateDoc(input: {
       hubAckUpdatedAt: current?.hubAckUpdatedAt,
     };
     if (current && input.metadataIntent !== "rename") {
-      if (current.label) next.label = current.label; else delete next.label;
+      next.label = current.label ?? "";
     }
     next.locked = Boolean(current?.locked);
     next.authoredExtras = current?.authoredExtras ?? {};
@@ -884,7 +884,7 @@ export async function restoreAnnotateDoc(entry: AnnotateDoc): Promise<void> {
     ...(captures !== undefined ? { captures } : {}), ...(padKind !== undefined ? { padKind } : {}),
   }, { allowCatalogReplacement: true, metadata: (current, saved) => {
     if (JSON.stringify(current) !== JSON.stringify(captured)) throw new Error("Document changed during restore; current work was kept.");
-    const next = { ...current, ...meta };
+    const next = { ...current, ...meta, label: meta.label ?? current?.label ?? "" };
     if (saved.artifacts) next.artifactRevision = saved.artifacts.revision;
     return next;
   } });

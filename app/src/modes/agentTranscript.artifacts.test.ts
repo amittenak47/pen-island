@@ -51,3 +51,11 @@ describe("artifact links in transcripts", () => {
     expect(restored!.replyTo!.id).toBe("root");
   });
 });
+
+it("writes null for legacy inherited footnotes and retains explicitly empty attachments", () => {
+  const message = { id: "legacy", role: "user" as const, content: "Review", at: 1 };
+  expect(restoreAgentMessages([message])[0]).toHaveProperty("artifactFootnoteIds", null);
+  expect(restoreAgentMessages([{ ...message, artifactFootnoteIds: null }])).toEqual(restoreAgentMessages([message]));
+  expect(restoreAgentMessages([{ ...message, artifactFootnoteIds: [] }])[0]).toHaveProperty("artifactFootnoteIds", []);
+  expect(persistableAgentMessages([message])[0]).toHaveProperty("artifactFootnoteIds", null);
+});

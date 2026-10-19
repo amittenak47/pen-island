@@ -8,7 +8,7 @@ export interface DrawingPageMark {
 
 /** Prefer a stored page, then a footnote scope, then the page the ask was on. */
 export function pageForNewDrawing(
-  footnoteIds: readonly string[] | undefined,
+  footnoteIds: readonly string[] | null | undefined,
   footnotes: readonly DrawingPageMark[],
   fallbackPage?: number | null,
 ): number | undefined {
@@ -30,7 +30,7 @@ export function pageFromDrawingScope(scope?: string | null): number | undefined 
 
 export function resolveDrawingPage(
   storedPage: number | undefined,
-  footnoteIds: readonly string[] | undefined,
+  footnoteIds: readonly string[] | null | undefined,
   footnotes: readonly DrawingPageMark[],
 ): number | undefined {
   if (storedPage != null && storedPage >= 1) return Math.floor(storedPage);

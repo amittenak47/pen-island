@@ -11,6 +11,10 @@
  * footnotes[].title, .notes[].field, .userLinks[]/.whiteboards[].title and
  * .anchor/.subMarks[].anchor.prefix/suffix; board.files={} and
  * board.elements[].customData=null/{} (including footnote boards).
+ * Also label=""; footnotes[].blockText/query/url/excerpt/color="", palette=[],
+ * .notes[].by="" and .subMarks[].excerpt/color="", palette=[];
+ * agent[].artifactFootnoteIds=null; board.inkPalettes=null and
+ * board.appState.linedPaperMode/linedPitch/linedPitchWide/linedPitchCollege/linedRule=null.
  * Snapshots use these same defaults without view exclusions, plus empty
  * edges/footnoteBoards/footnoteInk and known-empty board.inkPages manifests.
  * Snapshot artifact payload JSON and retained bookRecord use the same record defaults.
@@ -107,11 +111,16 @@ function emptyMap(row: Record<string, unknown>, key: string): void {
   if (plainObject(row[key]) && Object.keys(row[key]).length === 0) delete row[key];
 }
 
-/** Only the safe empty defaults; snapshots retain view state and populated manifests. */
+/** Only named empty defaults; snapshots retain view state and populated manifests. */
 function normalizeEmptyDefaults(record: Record<string, unknown>, snapshot = false, snapshotPayload = snapshot): void {
+  emptyStrings(record, ["label"]);
   const board = (value: unknown) => {
     if (!plainObject(value)) return;
     emptyMap(value, "files");
+    if (value.inkPalettes === null) delete value.inkPalettes;
+    if (plainObject(value.appState)) for (const key of ["linedPaperMode", "linedPitch", "linedPitchWide", "linedPitchCollege", "linedRule"]) {
+      if (value.appState[key] === null) delete value.appState[key];
+    }
     if (Array.isArray(value.elements)) for (const element of value.elements) {
       if (!plainObject(element)) continue;
       if (element.customData === null) delete element.customData;
@@ -130,21 +139,28 @@ function normalizeEmptyDefaults(record: Record<string, unknown>, snapshot = fals
     emptyMap(record, key);
   }
   if (Array.isArray(record.agent)) for (const message of record.agent) {
-    if (plainObject(message)) emptyStrings(message, MESSAGE_EMPTY_STRING_KEYS);
+    if (plainObject(message)) {
+      emptyStrings(message, MESSAGE_EMPTY_STRING_KEYS);
+      if (message.artifactFootnoteIds === null) delete message.artifactFootnoteIds;
+    }
   }
   const anchor = (value: unknown) => {
     if (plainObject(value) && value.kind !== "region") emptyStrings(value, ["prefix", "suffix"]);
   };
   if (Array.isArray(record.footnotes)) for (const note of record.footnotes) {
     if (!plainObject(note)) continue;
-    emptyStrings(note, ["title"]);
+    emptyStrings(note, ["title", "blockText", "query", "url", "excerpt", "color"]);
+    if (Array.isArray(note.palette) && note.palette.length === 0) delete note.palette;
     anchor(note.anchor);
     for (const key of ["userLinks", "whiteboards", "notes", "subMarks"]) {
       const entries = note[key];
       if (Array.isArray(entries)) for (const entry of entries) {
         if (!plainObject(entry)) continue;
-        if (key === "subMarks") anchor(entry.anchor);
-        else emptyStrings(entry, [key === "notes" ? "field" : "title"]);
+        if (key === "subMarks") {
+          anchor(entry.anchor);
+          emptyStrings(entry, ["excerpt", "color"]);
+          if (Array.isArray(entry.palette) && entry.palette.length === 0) delete entry.palette;
+        } else emptyStrings(entry, key === "notes" ? ["field", "by"] : ["title"]);
       }
     }
   }

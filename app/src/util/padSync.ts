@@ -303,11 +303,7 @@ export async function applyHubAnnotate(
     agent: mergeAgentMessages(local?.agent ?? [], Array.isArray(row.agent) ? row.agent : []),
     syncSeq: row.sync_seq,
     hubAckUpdatedAt: row.updated_at,
-    ...(typeof row.label === "string" && row.label.trim()
-      ? { label: row.label.trim() }
-      : local?.label
-        ? { label: local.label }
-        : {}),
+    label: typeof row.label === "string" ? row.label.trim() : local?.label ?? "",
     ...(local?.locked ? { locked: true } : {}),
     ...(local?.owned ? { owned: true } : {}),
   });
@@ -468,7 +464,7 @@ export async function annotatePadBody(doc: AnnotateDoc): Promise<AnnotatePadDto>
     ...artifactCatalogFields(doc.artifacts, { kind: "annotate", id: doc.id }),
     id: doc.id,
     name: doc.name,
-    ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
+    label: doc.label?.trim() || "",
     hash: doc.hash,
     doc_type: doc.docType,
     ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
@@ -931,7 +927,7 @@ async function pushRestoreAllFour(
     ...artifactCatalogFields(doc.artifacts, { kind: "annotate", id: doc.id }),
       id: doc.id,
       name: doc.name,
-      ...(doc.label?.trim() ? { label: doc.label.trim() } : {}),
+      label: doc.label?.trim() || "",
       hash: doc.hash,
       doc_type: doc.docType,
       ...(doc.localFileHash ? { local_file_hash: doc.localFileHash } : {}),
@@ -1000,7 +996,7 @@ export async function discoverHubPads(client: LcClient, report:HubLibraryPullRep
     const result = await syncBookPass(client, { ping: digest, libraryPull: true });
     for (const book of result.books) {
       const remote = digest.books?.find(row => row.kind === book.kind && row.id === book.id);
-      const name = String(remote && "record" in remote ? remote.record?.label ?? remote.record?.title ?? remote.record?.name ?? "Book" : "Book");
+      const name = String(remote && "record" in remote ? remote.record?.label || remote.record?.title || remote.record?.name || "Book" : "Book");
       if (book.status === "failed" || book.status === "needs_choice") {
         const { bookFailureMessage } = await import("./bookSyncMessages");
         report.failures.push({ name, message: bookFailureMessage(book, true) });

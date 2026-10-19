@@ -322,7 +322,7 @@ pub struct AnnotatePad {
     pub name: String,
     /// Display name for this annotation set. Empty means show `name` instead.
     /// Does not change the file on disk or a web pad's identity URL.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub label: String,
     pub hash: String,
     #[serde(default = "default_doc_type")]
@@ -2145,7 +2145,12 @@ mod tests {
         let got = get_annotate(&conn, "a1").unwrap().unwrap();
         assert!(got.label.is_empty(), "whitespace label stores as empty");
         let json = serde_json::to_value(&got).unwrap();
-        assert!(json.get("label").is_none(), "empty label is omitted on the wire");
+        assert_eq!(json["label"], "", "empty label is explicit on the wire");
+        let explicit: AnnotatePad = serde_json::from_value(json.clone()).unwrap();
+        let mut legacy = json;
+        legacy.as_object_mut().unwrap().remove("label");
+        let absent: AnnotatePad = serde_json::from_value(legacy).unwrap();
+        assert_eq!(explicit.label, absent.label, "empty and absent labels use the same fallback");
         let _ = std::fs::remove_file(path);
     }
 

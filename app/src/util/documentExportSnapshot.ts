@@ -135,7 +135,7 @@ export async function rasterAnnotation(bounds: SceneBounds, ops: readonly InkOp[
     paintSceneToExport(ctx,scene.elements,{minX:bounds.minX,minY:bounds.minY,padding:0,exportScale:scale,files:scene.files,images});
     ctx.setTransform(scale,0,0,scale,-bounds.minX*scale,-bounds.minY*scale);
     for(const mark of marks) {
-      ctx.fillStyle=mark.note.color ?? "#7651c5";
+      ctx.fillStyle=mark.note.color || "#7651c5";
       ctx.globalAlpha=.18;
       for(const r of mark.rects)ctx.fillRect(r.minX,r.minY,r.maxX-r.minX,r.maxY-r.minY);
       ctx.globalAlpha=1;
