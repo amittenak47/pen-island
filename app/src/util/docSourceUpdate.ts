@@ -1,6 +1,7 @@
 import { docIdentityHash, getAnnotateDocMeta, hashMarkdown, isBinaryDocType, type DocType } from "./annotateStore";
-import { getDocSource, setDocSource, type DocSourceRef } from "./docSourceStore";
-import { readDocumentSource, statDocumentSource } from "./docSourceNative";
+import { clearDocSource, getDocSource, setDocSource, type DocSourceRef } from "./docSourceStore";
+import { readDocumentSource, statDocumentSource, type SourcePick } from "./docSourceNative";
+import { docTypeForPicked } from "./annotateFs";
 import { captureBook, type BookCapture } from "./bookSnapshot";
 import { newBookToken } from "./bookCoordinator";
 import { retainRecoveryCopy } from "./syncRecovery";
@@ -23,6 +24,7 @@ export const DOC_SOURCE_UPDATING_EVENT = "lc-doc-source-updating";
 export const DOC_SOURCE_UPDATED_EVENT = "lc-doc-source-updated";
 export const DOC_SOURCE_CHECKED_EVENT = "lc-doc-source-checked";
 const updating = new Set<string>();
+const linkSources = new WeakMap<DocSourceCheck, DocSourceRef | null>();
 
 function sameSource(left: DocSourceRef | null, right: DocSourceRef): boolean {
   return left?.kind === right.kind && left.location === right.location;
@@ -33,6 +35,46 @@ export interface DocSourceCheck {
   bytes?: ArrayBuffer;
   text?: string;
   ref?: DocSourceRef;
+}
+
+export type DocSourceLink = { status: "linked" } | { status: "differs"; content: DocSourceCheck & { ref: DocSourceRef } };
+
+export async function linkDocSource(id: string, pick: SourcePick): Promise<DocSourceLink> {
+  const previous = getDocSource(id);
+  const bytes = await readDocumentSource(pick.kind, pick.location);
+  const meta = getAnnotateDocMeta(id);
+  if (!meta || meta.deletedAt !== undefined) throw new Error("This document is no longer in the library.");
+  if (docTypeForPicked(pick, bytes) !== meta.docType) throw new Error("That file is a different kind of document.");
+  if (!equalStored(getDocSource(id), previous)) throw new Error("The document's source changed while it was being linked. Try again.");
+  const binary = isBinaryDocType(meta.docType);
+  const original = binary ? undefined : new TextDecoder().decode(bytes);
+  const localFileHash = meta.docType === "web" ? hashMarkdown(original!) : undefined;
+  const hash = docIdentityHash({ docType: meta.docType, name: pick.name,
+    ...(binary ? { bytes } : { text: original, localFileHash }) });
+  const ref = { ...pick, hash, checkedAt: Date.now() };
+  if (hash === meta.hash) {
+    setDocSource(id, ref);
+    return { status: "linked" };
+  }
+  let text = original;
+  if (meta.docType === "web") {
+    const { freezeLocalHtml } = await import("./localHtmlRender");
+    text = await freezeLocalHtml(original!);
+  }
+  const content = { status: "newer" as const, ...(binary ? { bytes } : { text }), ref };
+  linkSources.set(content, previous);
+  return { status: "differs", content };
+}
+
+export function justLinkDocSource(id: string, ref: DocSourceRef): void {
+  const meta = getAnnotateDocMeta(id);
+  if (!meta || meta.deletedAt !== undefined) throw new Error("This document is no longer in the library.");
+  // This different file still needs a content check, even if its size/date match.
+  setDocSource(id, { ...ref, hash: meta.hash, checkedAt: 0 });
+}
+
+export function unlinkDocSource(id: string): void {
+  clearDocSource(id);
 }
 
 export interface UnplacedItem {
@@ -57,9 +99,10 @@ export async function checkDocSource(id: string): Promise<DocSourceCheck> {
   // changed. An Android document provider's can lag behind its content (the
   // Downloads index kept the old size and date of a file written in place), so
   // there the content itself is read and hashed every time.
-  if (ref.kind === "path" && stat.size === ref.size && stat.modified === ref.modified) return { status: "same", ref };
   const meta = getAnnotateDocMeta(id);
   if (!meta) return { status: "none" };
+  if (ref.kind === "path" && ref.hash === meta.hash && ref.checkedAt > 0 && ref.size !== null && ref.modified !== null
+    && stat.size === ref.size && stat.modified === ref.modified) return { status: "same", ref };
   const bytes = await readDocumentSource(ref.kind, ref.location);
   const binary = isBinaryDocType(meta.docType);
   const original = binary ? undefined : new TextDecoder().decode(bytes);
@@ -146,20 +189,23 @@ export async function updateDocFromSource(id: string, content: DocSourceCheck): 
   updating.add(id);
   const releases: (() => void)[] = [];
   try {
+    const previous = getDocSource(id);
+    if (linkSources.has(content) ? !equalStored(previous, linkSources.get(content))
+      : content.ref && !sameSource(previous, content.ref)) throw new Error("The document's source changed. Check again before updating.");
     const captures: Promise<DocSourceLiveCapture>[] = [];
     // Read live annotations without saving: backup failure must change nothing.
     if (typeof window !== "undefined") {
       const detail = { id, captures, releases };
       window.dispatchEvent(new CustomEvent(DOC_SOURCE_UPDATING_EVENT, { detail }));
     }
-    return await replaceDocFromSource(id, content, await Promise.all(captures));
+    return await replaceDocFromSource(id, content, await Promise.all(captures), previous);
   } finally {
     for (const release of releases) release();
     updating.delete(id);
   }
 }
 
-async function replaceDocFromSource(id: string, content: DocSourceCheck, live: DocSourceLiveCapture[]): Promise<{ unplaced: UnplacedItem[] }> {
+async function replaceDocFromSource(id: string, content: DocSourceCheck, live: DocSourceLiveCapture[], previous: DocSourceRef | null): Promise<{ unplaced: UnplacedItem[] }> {
   const owner = { kind: "annotate" as const, id };
   if (listBookFallbacks().some(entry => entry.owner.kind === owner.kind && entry.owner.id === id)) {
     throw new Error("Resolve this document's saved local copies before updating it. The app's copy was kept.");
@@ -172,7 +218,7 @@ async function replaceDocFromSource(id: string, content: DocSourceCheck, live: D
   if (binary ? !content.bytes?.byteLength : content.text === undefined) throw new Error("The newer document could not be read.");
   const ref = content.ref ?? getDocSource(id);
   if (!ref) throw new Error("This document has no source on this device.");
-  if (!sameSource(getDocSource(id), ref)) throw new Error("The document's source changed. Check again before updating.");
+  if (!equalStored(getDocSource(id), previous)) throw new Error("The document's source changed. Check again before updating.");
   const hash = docIdentityHash({ docType, name: String(meta.name), bytes: binary ? content.bytes : undefined,
     text: content.text, ...(docType === "web" ? { localFileHash: ref.hash } : {}) });
   const current: DocSourceLiveCapture = { payload: {}, pages: [], children: {} };
@@ -229,7 +275,7 @@ async function replaceDocFromSource(id: string, content: DocSourceCheck, live: D
   const now = Date.now();
   await mutateLocalBook(owner, { requireIdb: true, extraStores: [STORE_INK_PAGES] }, ctx => {
     if (ctx.state.changeSeq !== capture.state.changeSeq || !equalStored(ctx.metadata, meta) || !equalStored(ctx.content, capture.payload)
-      || !sameSource(getDocSource(id), ref)) {
+      || !equalStored(getDocSource(id), previous)) {
       throw new Error("This document changed while its newer version was prepared. Check again; both copies were kept.");
     }
     ctx.setMetadata({ ...meta, hash, ...(docType === "web" ? { localFileHash: hash } : {}), updatedAt: Math.max(now, Number(meta.updatedAt ?? 0) + 1), lastTouch: now });

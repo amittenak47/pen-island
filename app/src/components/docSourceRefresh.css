@@ -7,4 +7,9 @@
 .lc-doc-source-refresh.is-right { right: calc(12px + env(safe-area-inset-right, 0px) + var(--lc-doc-source-shift, 0px)); }
 .lc-doc-source-refresh.is-left { left: calc(12px + env(safe-area-inset-left, 0px) + var(--lc-doc-source-shift, 0px)); }
 .lc-doc-source-refresh:hover { color: var(--ink); }
+.lc-doc-source-refresh .lc-hold-reveal-label { position: static; display: flex; align-items: center; justify-content: center; }
+.lc-doc-source-refresh.is-unlinked .lc-icon-svg { opacity: .55; }
+.lc-doc-source-refresh.is-working .lc-hold-reveal-fill { display: none; }
+.lc-doc-source-link-badge { position: absolute; top: 2px; right: 2px; width: 9px; height: 9px; }
+.lc-doc-source-menu { pointer-events: auto; }
 @media (prefers-reduced-motion: reduce) { .lc-doc-source-refresh.lc-library-sync-trigger { transition: none; } }

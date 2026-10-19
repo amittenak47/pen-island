@@ -50,4 +50,6 @@
 .lc-doc-source-update-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: var(--lc-dialog-edge) solid var(--lc-dialog-line); cursor: pointer; }
 .lc-doc-source-update-row input { flex: 0 0 auto; width: 18px; height: 18px; accent-color: var(--accent); }
 .lc-doc-source-update-row span { min-width: 0; overflow-wrap: anywhere; }
+.lc-doc-source-folder-copy { display: flex; flex-direction: column; gap: 3px; }
+.lc-doc-source-folder-copy .lc-muted { font-size: 12px; }
 .lc-dialog-frame.lc-annotate-dialog .lc-doc-source-failures { margin: 8px 24px; padding-left: 20px; font-size: 12px; }

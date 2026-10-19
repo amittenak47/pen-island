@@ -23,7 +23,9 @@ import "./annotateDialog.css";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HubLibraryRefresh, type HubLibraryRefreshAction } from "../components/HubLibraryRefresh";
 import { listDocSources } from "../util/docSourceStore";
-import { checkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT } from "../util/docSourceUpdate";
+import { checkDocSource, linkDocSource, justLinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT } from "../util/docSourceUpdate";
+import { nativeSourcePickerAvailable, pickSourceFolder, listSourceFolder } from "../util/docSourceNative";
+import { matchDocSourceFolder, type FolderSourceMatch } from "../util/docSourceFolder";
 import { useLibraryDeleteArm } from "../util/armedDelete";
 import { DOUBLE_TAP_MS } from "../util/gesture";
 import { shouldDismissBackdrop } from "../util/backdropDismiss";
@@ -158,6 +160,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const present = useIsPresent();
   const reducedMotion = useReducedMotion();
   const sourceTitleId = useId();
+  const folderTitleId = useId();
   const [docs, setDocs] = useState<AnnotateDocMeta[]>(() => listAnnotateDocs());
   const [trash, setTrash] = useState<AnnotateDocMeta[]>(() => listAnnotateTrash());
   const [pickingRecent, setPickingRecent] = useState(false);
@@ -188,6 +191,10 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const [sourceProgress, setSourceProgress] = useState("");
   const [sourceFailures, setSourceFailures] = useState<string[]>([]);
   const [sourceNotice, setSourceNotice] = useState<string | null>(null);
+  const [folderMatches, setFolderMatches] = useState<FolderSourceMatch[] | null>(null);
+  const [folderSelected, setFolderSelected] = useState<string[]>([]);
+  const [folderDuplicates, setFolderDuplicates] = useState(0);
+  const [folderLinked, setFolderLinked] = useState<number | null>(null);
   const sourceRunning = useRef(false);
   const sourceBusy = sourceChecking || sourceUpdating;
   const lastTapRef = useRef({ id: "", at: 0 });
@@ -221,6 +228,8 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     setRenamingId(null);
     setLibraryQuery("");
     setSourceCandidates(null);
+    setFolderMatches(null);
+    setFolderLinked(null);
     setSourceFailures([]);
     setSourceNotice(null);
   }, [props.mode]);
@@ -239,12 +248,13 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || !present || props.pending || props.exiting || sourceBusy) return;
-      if (sourceCandidates !== null) setSourceCandidates(null);
+      if (sourceCandidates !== null) closeSourceCandidates();
+      else if (folderMatches !== null) setFolderMatches(null);
       else props.onCancel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props, present, sourceBusy, sourceCandidates]);
+  }, [props, present, sourceBusy, sourceCandidates, folderMatches, folderLinked]);
 
   const pending = Boolean(props.pending);
   const exiting = Boolean(props.exiting);
@@ -256,7 +266,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const entry = props.mode === "entry" ? props : null;
   const allowSave = Boolean(entry?.allowSave);
   const isWeb = props.kind === "web";
-  const locked = pending || exiting || !present || sourceBusy || sourceCandidates !== null;
+  const locked = pending || exiting || !present || sourceBusy || sourceCandidates !== null || folderMatches !== null;
   const needsName = Boolean(props.needsName);
   const defaultName = props.defaultName?.trim() || "";
   const onRename = entry?.onRename;
@@ -291,12 +301,92 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     else setSourceNotice(message);
   };
 
+  const announceFolder = (linked: number, updated = 0, unplaced = 0, failures = 0) => announceSource([
+    linked ? `Linked ${linked} ${linked === 1 ? "document" : "documents"}.` : "",
+    updated ? `${updated} ${updated === 1 ? "was" : "were"} updated.` : "",
+    unplaced ? `${unplaced} ${unplaced === 1 ? "annotation couldn't" : "annotations couldn't"} be placed and ${unplaced === 1 ? "stays" : "stay"} in the previous version (Recents → retained copies).` : "",
+    failures ? `${failures} ${failures === 1 ? "file couldn't" : "files couldn't"} be linked.` : "",
+  ].filter(Boolean).join(" "));
+
+  const pickFolderSources = async () => {
+    if (sourceRunning.current) return;
+    sourceRunning.current = true;
+    setSourceChecking(true);
+    setSourceNotice(null);
+    setSourceFailures([]);
+    setSourceProgress("Finding matching files…");
+    try {
+      const folder = await pickSourceFolder();
+      if (!folder) return;
+      const entries = await listSourceFolder(folder.kind, folder.location);
+      const result = await matchDocSourceFolder(listAnnotateDocs(), entries);
+      setSourceFailures(result.failures);
+      setFolderDuplicates(result.duplicateNames);
+      if (!result.matches.length) {
+        announceSource("No documents in this folder match your library.");
+        return;
+      }
+      setFolderMatches(result.matches);
+      setFolderSelected(result.matches.map(row => row.doc.id));
+    } catch (cause) {
+      announceSource(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      sourceRunning.current = false;
+      setSourceChecking(false);
+      setSourceProgress("");
+    }
+  };
+
+  const linkFolderSources = async () => {
+    if (sourceRunning.current || !folderMatches) return;
+    const selected = folderMatches.filter(row => folderSelected.includes(row.doc.id));
+    if (!selected.length) return;
+    sourceRunning.current = true;
+    setSourceUpdating(true);
+    let linked = 0;
+    const differs: SourceUpdateCandidate[] = [];
+    const failures: string[] = [];
+    try {
+      for (const [index, row] of selected.entries()) {
+        setSourceProgress(`Linking ${index + 1} of ${selected.length}: ${row.doc.name}`);
+        try {
+          const result = await linkDocSource(row.doc.id, row.entry);
+          if (result.status === "linked") {
+            linked++;
+            window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: row.doc.id, newer: false } }));
+          } else differs.push({ doc: row.doc, content: result.content });
+        } catch (cause) {
+          failures.push(`${row.doc.name}: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+      }
+      setFolderMatches(null);
+      setSourceFailures([...sourceFailures, ...failures]);
+      if (differs.length) {
+        setFolderLinked(linked);
+        setSourceCandidates(differs);
+        setSourceSelected(differs.map(row => row.doc.id));
+      } else announceFolder(linked, 0, 0, sourceFailures.length + failures.length);
+    } finally {
+      sourceRunning.current = false;
+      setSourceUpdating(false);
+      setSourceProgress("");
+    }
+  };
+
+  function closeSourceCandidates() {
+    if (sourceRunning.current) return;
+    if (folderLinked !== null && (folderLinked || sourceFailures.length)) announceFolder(folderLinked, 0, 0, sourceFailures.length);
+    setSourceCandidates(null);
+    setFolderLinked(null);
+  }
+
   const checkSources = async () => {
     if (sourceRunning.current) return;
     sourceRunning.current = true;
     setSourceChecking(true);
     setSourceNotice(null);
     setSourceFailures([]);
+    setFolderLinked(null);
     setSourceProgress(`Checking 0 of ${sourceDocs.length} files…`);
     const found: (SourceUpdateCandidate | undefined)[] = new Array(sourceDocs.length);
     const failures: string[] = [];
@@ -334,28 +424,44 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const updateSources = async () => {
     if (sourceRunning.current || !sourceCandidates) return;
     const selected = sourceCandidates.filter(row => sourceSelected.includes(row.doc.id));
-    if (!selected.length) return;
+    if (!selected.length && folderLinked === null) return;
     sourceRunning.current = true;
     setSourceUpdating(true);
     let updated = 0;
     let unplaced = 0;
+    let linked = folderLinked ?? 0;
     const failures: string[] = [];
     try {
+      if (folderLinked !== null) {
+        for (const row of sourceCandidates.filter(row => !sourceSelected.includes(row.doc.id))) {
+          try {
+            justLinkDocSource(row.doc.id, row.content.ref!);
+            linked++;
+            window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: row.doc.id, newer: true } }));
+          } catch (cause) {
+            failures.push(`${row.doc.name}: ${cause instanceof Error ? cause.message : String(cause)}`);
+          }
+        }
+      }
       for (const [index, row] of selected.entries()) {
         setSourceProgress(`Updating ${index + 1} of ${selected.length}: ${row.doc.name}`);
         try {
           const result = await updateDocFromSource(row.doc.id, row.content);
           updated++;
+          if (folderLinked !== null) linked++;
           unplaced += result.unplaced.length;
+          window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: row.doc.id, newer: false } }));
         } catch (cause) {
           failures.push(`${row.doc.name}: ${cause instanceof Error ? cause.message : String(cause)}`);
         }
       }
       setSourceCandidates(null);
+      setFolderLinked(null);
       setSourceFailures([...sourceFailures, ...failures]);
       refreshList();
       // Only what happened: "0 updates failed" reads like a problem.
-      announceSource([
+      if (folderLinked !== null) announceFolder(linked, updated, unplaced, sourceFailures.length + failures.length);
+      else announceSource([
         `Updated ${updated} ${updated === 1 ? "document" : "documents"}.`,
         unplaced ? `${unplaced} ${unplaced === 1 ? "annotation couldn't" : "annotations couldn't"} be placed and ${unplaced === 1 ? "stays" : "stay"} in the previous version (Recents → retained copies).` : "",
         failures.length ? `${failures.length} ${failures.length === 1 ? "update failed" : "updates failed"}.` : "",
@@ -457,7 +563,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
       }}
     >
       <DialogFrame ref={morphRef} exiting={exiting}
-        inert={sourceCandidates !== null}
+        inert={sourceCandidates !== null || folderMatches !== null}
         className={`lc-attempt-modal lc-library-holds lc-library-menu lc-annotate-dialog ${isWeb ? "lc-library-web" : "lc-library-annotate"}${pickingRecovery ? " lc-library-tall" : ""}`}
         titleId="lc-annotate-dialog-title"
         title={isLeave ? "Leave document?" : pickingRecovery ? "Retained copies" : section === "open" && !pickingRecent ? "Open" : section === "new" ? "New" : section === "export" ? "Export" : section === "sets" ? "Annotations" : pickingRecent ? "Recents" : isWeb ? "Web" : "Annotate"}
@@ -709,6 +815,11 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
             initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
             Check for newer versions
           </motion.button>}</DialogPresence>
+          <DialogPresence>{pickingRecent && nativeSourcePickerAvailable() && <motion.button key="link-folder" type="button"
+            className="lc-secondary lc-dialog-action lc-doc-source-bulk lc-doc-source-folder" disabled={locked} onClick={() => void pickFolderSources()}
+            initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
+            Link files from a folder…
+          </motion.button>}</DialogPresence>
           <span className="lc-dialog-foot-spacer" aria-hidden="true" />
           {(section !== "main" || pickingRecent || pickingSnapshots || pickingRecovery || newTitle !== null || saveTitle !== null) && (
             <button
@@ -733,10 +844,33 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           </button>
         </div>
       </DialogFrame>
+      <DialogPresence>{folderMatches !== null && <DialogBackdrop className="lc-modal-backdrop" key="source-folder" role="presentation"
+        onClick={event => { if (event.target === event.currentTarget && !sourceUpdating) setFolderMatches(null); }}>
+        <DialogFrame className="lc-modal lc-doc-source-updates" titleId={folderTitleId} title="Link files" subtitle="Choose the documents to link"
+          ariaLabel="Link files" shape="blocky" icon={<DocumentIcon />} onClose={() => setFolderMatches(null)} closeDisabled={sourceUpdating}>
+          <div className="lc-dialog-body lc-scroll-pane">
+            {folderDuplicates > 0 && <p className="lc-muted">{folderDuplicates} {folderDuplicates === 1 ? "name appears" : "names appear"} more than once and {folderDuplicates === 1 ? "was" : "were"} skipped</p>}
+            <div className="lc-doc-source-update-list">
+              {folderMatches.map(row => <label className="lc-doc-source-update-row" key={row.doc.id}>
+                <input type="checkbox" checked={folderSelected.includes(row.doc.id)} disabled={sourceUpdating}
+                  onChange={event => setFolderSelected(current => event.target.checked ? [...current, row.doc.id] : current.filter(id => id !== row.doc.id))} />
+                <span className="lc-doc-source-folder-copy"><span>{annotateDocLabel(row.doc)}</span><span className="lc-muted">{row.entry.relative}</span></span>
+              </label>)}
+            </div>
+            <DialogPresence>{sourceUpdating && <motion.p key="source-link-progress" className="lc-muted" role="status"
+              initial={reducedMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>{sourceProgress}</motion.p>}</DialogPresence>
+            {sourceFailures.length > 0 && <ul className="lc-warning">{sourceFailures.map((failure, index) => <li key={index}>{failure}</li>)}</ul>}
+          </div>
+          <div className="lc-modal-actions lc-settings-foot lc-dialog-foot">
+            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating} onClick={() => setFolderMatches(null)}>Cancel</button>
+            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating || !folderSelected.length} onClick={() => void linkFolderSources()}>Link selected</button>
+          </div>
+        </DialogFrame>
+      </DialogBackdrop>}</DialogPresence>
       <DialogPresence>{sourceCandidates !== null && <DialogBackdrop className="lc-modal-backdrop" key="source-updates" role="presentation"
-        onClick={event => { if (event.target === event.currentTarget && !sourceUpdating) setSourceCandidates(null); }}>
+        onClick={event => { if (event.target === event.currentTarget && !sourceUpdating) closeSourceCandidates(); }}>
         <DialogFrame className="lc-modal lc-doc-source-updates" titleId={sourceTitleId} title="Newer versions available" subtitle="Choose the documents to update"
-          ariaLabel="Newer versions available" shape="blocky" icon={<DocumentIcon />} onClose={() => setSourceCandidates(null)} closeDisabled={sourceUpdating}>
+          ariaLabel="Newer versions available" shape="blocky" icon={<DocumentIcon />} onClose={closeSourceCandidates} closeDisabled={sourceUpdating}>
           <div className="lc-dialog-body lc-scroll-pane">
             <div className="lc-doc-source-update-list">
               {sourceCandidates.map(row => <label className="lc-doc-source-update-row" key={row.doc.id}>
@@ -750,8 +884,8 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
             {sourceFailures.length > 0 && <ul className="lc-warning">{sourceFailures.map((failure, index) => <li key={index}>{failure}</li>)}</ul>}
           </div>
           <div className="lc-modal-actions lc-settings-foot lc-dialog-foot">
-            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating} onClick={() => setSourceCandidates(null)}>Cancel</button>
-            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating || !sourceSelected.length} onClick={() => void updateSources()}>Update selected</button>
+            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating} onClick={closeSourceCandidates}>Cancel</button>
+            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating || (!sourceSelected.length && folderLinked === null)} onClick={() => void updateSources()}>Update selected</button>
           </div>
         </DialogFrame>
       </DialogBackdrop>}</DialogPresence>
