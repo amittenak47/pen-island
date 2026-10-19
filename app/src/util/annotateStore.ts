@@ -39,7 +39,7 @@ import { hashBytes } from "./docBytes";
 import { webIdentityUrl } from "./webIdentity";
 import { artifactCatalogFields, type ArtifactCatalog } from "./padArtifacts";
 import { getCachedBookMetadata, mutateLocalBook, type LocalBookEdit } from "./localBookStore";
-import { canonicalAgentMessages } from "./agentMessageFormat";
+import { canonicalAgentMessages, canonicalFootnotes } from "./agentMessageFormat";
 
 export const ANNOTATE_LIBRARY_LIMIT = 250;
 export const ANNOTATE_TRASH_TTL_MS = 3 * 24 * 60 * 60 * 1000;
@@ -730,7 +730,7 @@ export async function saveAnnotateDoc(input: {
   };
   const accepted = await putParentRecord<AnnotateContent, AnnotateDocMeta>({ kind: "annotate", id }, {
     artifacts: input.artifacts, source: input.source, board: input.board,
-    ...(input.footnotes !== undefined ? { footnotes: [...input.footnotes] } : {}),
+    ...(input.footnotes !== undefined ? { footnotes: canonicalFootnotes(input.footnotes) } : {}),
     ...(Array.isArray(input.agent) ? { agent: canonicalAgentMessages(input.agent) } : {}),
     ...(input.captures !== undefined ? { captures: [...input.captures] } : {}),
     ...(input.padKind !== undefined ? { padKind: input.padKind } : {}),
@@ -878,7 +878,7 @@ export async function restoreAnnotateDoc(entry: AnnotateDoc): Promise<void> {
   const { source, board, footnotes, agent, artifacts, captures, padKind, ...meta } = entry;
   const captured = getAnnotateDocMeta(entry.id);
   await putParentRecord<AnnotateContent, AnnotateDocMeta>({ kind: "annotate", id: entry.id }, {
-    artifacts, source, board, footnotes: footnotes ?? [], agent: canonicalAgentMessages(Array.isArray(agent) ? agent : []),
+    artifacts, source, board, footnotes: canonicalFootnotes(footnotes ?? []), agent: canonicalAgentMessages(Array.isArray(agent) ? agent : []),
     ...(captures !== undefined ? { captures } : {}), ...(padKind !== undefined ? { padKind } : {}),
   }, { allowCatalogReplacement: true, metadata: (current, saved) => {
     if (JSON.stringify(current) !== JSON.stringify(captured)) throw new Error("Document changed during restore; current work was kept.");
