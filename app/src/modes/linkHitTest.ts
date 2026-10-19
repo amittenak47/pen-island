@@ -217,7 +217,9 @@ export function collectDomLinkHits(
       let top = box.top;
       let right = box.right;
       let bottom = box.bottom;
-      const pack = node.closest(".lc-doc-footnote-pack");
+      // The square sits in the booktabs layer, apart from its pack (quote bands).
+      const pack = node.closest(".lc-doc-footnote-pack")
+        ?? document.querySelector(`.lc-doc-footnote-pack[data-footnote-id="${CSS.escape(id)}"]`);
       const host = node.closest(".lc-doc-selectable-body");
       if (pack) {
         for (const band of pack.querySelectorAll(".lc-doc-footnote-band")) {

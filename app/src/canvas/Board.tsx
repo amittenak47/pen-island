@@ -10626,7 +10626,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       )}
       {pageContent && (
         <div ref={attachBooktabsSlot} className="lc-page-marks-slot lc-page-booktabs-slot"
-          style={{ width: contentSceneWidth + 24 }} aria-hidden />
+          style={{ width: contentSceneWidth + 24 }} />
       )}
       {linedPaperOn && linedSlotOn && (
         <div ref={linedSlotNodeRef} className="lc-board-lined-overlay" aria-hidden />

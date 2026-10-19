@@ -497,10 +497,13 @@ describe("booktab display choices", () => {
     const tab = (id: string) => host.querySelector<HTMLElement>(`[data-footnote-id="${id}"] .lc-doc-footnote-tab`);
     return { host, root, tab, marksSlot, tabsSlot };
   }
-  it("portals visual tabs above the page mask while controls stay in the marks layer", () => {
+  it("portals visual tabs and the squares above the page mask, the quote bands stay on the page", () => {
     const { root, marksSlot, tabsSlot } = mountTabs(true, true);
     try {
-      expect(marksSlot.querySelectorAll(".lc-doc-footnote-bookmark")).toHaveLength(4);
+      // The squares go up with the tabs: on the marks layer the page-turn lip covered them.
+      expect(marksSlot.querySelector(".lc-doc-footnote-bookmark")).toBeNull();
+      expect(tabsSlot.querySelectorAll(".lc-doc-footnote-bookmark")).toHaveLength(4);
+      expect(marksSlot.querySelectorAll(".lc-doc-footnote-pack").length).toBeGreaterThan(0);
       expect(marksSlot.querySelector(".lc-doc-footnote-tab")).toBeNull();
       expect(tabsSlot.querySelectorAll(".lc-doc-footnote-tab")).toHaveLength(3);
       expect(tabsSlot.querySelector(".lc-doc-footnote-tab")!.getAttribute("aria-hidden")).toBe("true");
