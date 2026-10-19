@@ -63,6 +63,9 @@ import { useHeaderModes } from "./util/headerModesPref";
 import { collectExploreGraph } from "./util/exploreGraphExport";
 import { HubSyncControl, padTabSync, tabOffersHubSync } from "./components/HubSyncControl";
 import { LibrarySyncControl } from "./components/LibrarySyncControl";
+import { DocSourceRefresh } from "./components/DocSourceRefresh";
+import { getDocSource, setDocSource, type DocSourceRef } from "./util/docSourceStore";
+import { checkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
 import { getCachedBookMeta } from "./util/localBookStore";
 import { LoadingDoodle } from "./components/LoadingDoodle";
 import { waitForTopBannersIdle } from "./components/StatusBanner";
@@ -132,6 +135,8 @@ import { ensureTypingImports } from "./util/pythonImports";
 
 /** Room under the last line of code so a note fits below it. */
 const CODE_PAGE_TAIL = 160;
+const newerDocSources = new Set<string>();
+const pendingSourcePrompts = new Map<string, { name: string; content: Awaited<ReturnType<typeof checkDocSource>> }>();
 import { WhiteboardLibraryDialog } from "./modes/WhiteboardLibraryDialog";
 import { formatTestReport, TestResultsModal } from "./modes/TestResultsModal";
 import { AmbientPanel, type AmbientEntry } from "./modes/AmbientPanel";
@@ -2086,6 +2091,8 @@ export const Workspace = memo(function Workspace({
    */
   const boardSaveSuspendedRef = useRef(false);
   const agentSaveSuspendedRef = useRef(false);
+  const sourceUpdateLocks = useRef(0);
+  const sourceUpdateSuspension = useRef<{ board: boolean; agent: boolean } | null>(null);
   const problemLocalSavesRef = useRef(new Set<Promise<unknown>>());
   const coachRef = useRef<AmbientCoach | null>(null);
   // The recognizer can be swapped after mount; read it through a ref so the
@@ -2275,7 +2282,7 @@ export const Workspace = memo(function Workspace({
     if (!problem) return;
     if (hubConflictAskRef.current?.problemConflict) return;
     const board = boardRef.current;
-    if (!board || boardSaveSuspendedRef.current || padHubApplyRef.current) return;
+    if (!board || boardSaveSuspendedRef.current || sourceUpdateLocks.current || padHubApplyRef.current) return;
     // Serialising the scene under the nib is felt as the stroke stopping.
     if (board.isInking()) return;
     /*
@@ -2377,6 +2384,7 @@ export const Workspace = memo(function Workspace({
         const sessionKey = footnoteWhiteboardDocKey(docId, session.wbId);
         void (async () => {
           await flushDirtyInk(board, sessionKey);
+          if (boardSaveSuspendedRef.current || sourceUpdateLocks.current) return;
           // Strokes stay in the `fnwb:` shards and ride `putInkPage` gzipped,
           // the way the notebook library and this document's own pages do.
           // Baking them back into the blob was what put a scratch board's
@@ -2396,6 +2404,7 @@ export const Workspace = memo(function Workspace({
       const docKey = docId ? annotateDocKey(docId) : null;
       void (async () => {
         await flushDirtyInk(board, docKey);
+        if (boardSaveSuspendedRef.current || sourceUpdateLocks.current || annotateSourceRef.current?.hash !== source.hash) return;
         const liveBoard = board.saveBoard({ assembleInk: false });
         try {
           /*
@@ -2472,6 +2481,7 @@ export const Workspace = memo(function Workspace({
         void (async () => {
           const sessionKey = footnoteWhiteboardDocKey(fnBind.docId, fnBind.wbId);
           await flushDirtyInk(board, sessionKey);
+          if (boardSaveSuspendedRef.current || sourceUpdateLocks.current) return;
           // Ink lives in the shards; see the annotate-side save above.
           const liveBoard = board.saveBoard({ assembleInk: false });
           try {
@@ -3584,6 +3594,7 @@ export const Workspace = memo(function Workspace({
       /** PDF and EPUB only. */
       bytes?: ArrayBuffer;
       docId?: string | null;
+      source?: DocSourceRef;
       /** The strip record this open fills. Written before the load starts. */
       tabId: string;
       /** Already computed by the caller that had to key the record on it. */
@@ -3606,6 +3617,7 @@ export const Workspace = memo(function Workspace({
        */
       existingDoc?: AnnotateDoc | null;
       userLoad?: boolean;
+      keepEntryOpen?: boolean;
     }) => {
       if (busyRef.current !== null) {
         // The silent no-op. Everything downstream — the library entry, the
@@ -3652,7 +3664,7 @@ export const Workspace = memo(function Workspace({
       setTests(null);
       setNudges([]);
       setAgentMessages([]);
-      setAnnotateEntryOpen(false);
+      if (!input.keepEntryOpen) setAnnotateEntryOpen(false);
       boardSaveSuspendedRef.current = true;
       agentSaveSuspendedRef.current = true;
       if (fromBrowse) {
@@ -3738,6 +3750,7 @@ export const Workspace = memo(function Workspace({
          * to lay down under an id nothing else knows about.
          */
         const sessionDocId = input.docId ?? existing?.id ?? freshAnnotateId();
+        if (input.source) setDocSource(sessionDocId, input.source);
         // The ink, read and unpacked while the page is prepared: it is waited
         // for only once the template is up, and was a second of the open.
         // Pages another device sent before this one could place them are moved
@@ -4635,6 +4648,7 @@ export const Workspace = memo(function Workspace({
       text?: string;
       bytes?: ArrayBuffer;
       docId?: string | null;
+      source?: DocSourceRef;
       /** Already has a record — the web paths, and any reopen from the strip. */
       tabId?: string;
     }) => {
@@ -4693,6 +4707,7 @@ export const Workspace = memo(function Workspace({
           sidecarId = freshAnnotateId();
         }
       }
+      if (input.source) setDocSource(sidecarId, input.source);
       /*
        * Nothing saved under this id yet — so the text has to ride the record.
        *
@@ -4937,7 +4952,7 @@ export const Workspace = memo(function Workspace({
   useEffect(() => {
     if (!editMarkdown || !annotateOwned || autosaveMs <= 0) return;
     if (editBuffer === (annotateSourceRef.current?.text ?? "")) return;
-    const timer = window.setTimeout(() => void saveEditBuffer(), Math.max(autosaveMs, 1500));
+    const timer = window.setTimeout(() => { if (!sourceUpdateLocks.current) void saveEditBuffer(); }, Math.max(autosaveMs, 1500));
     return () => window.clearTimeout(timer);
   }, [annotateOwned, autosaveMs, editBuffer, editMarkdown, saveEditBuffer]);
 
@@ -5153,6 +5168,7 @@ export const Workspace = memo(function Workspace({
         localFileHash: picked.localFileHash,
         text: picked.text,
         bytes: picked.bytes,
+        source: picked.source,
       });
     } catch (cause) {
       setError(messageOf(cause));
@@ -7150,7 +7166,7 @@ export const Workspace = memo(function Workspace({
   useEffect(() => {
     if (!problem || agentMessages.length === 0) return;
     const timer = window.setTimeout(() => {
-      if (agentSaveSuspendedRef.current) return;
+      if (agentSaveSuspendedRef.current || sourceUpdateLocks.current) return;
       const agent = persistableAgentMessages(agentMessages);
       if (isAnnotate(problem)) {
         // Board autosave only writes when the scene + marks fingerprint moves,
@@ -7165,6 +7181,7 @@ export const Workspace = memo(function Workspace({
             board,
             annotateDocIdRef.current ? annotateDocKey(annotateDocIdRef.current) : null,
           );
+          if (agentSaveSuspendedRef.current || sourceUpdateLocks.current || annotateSourceRef.current?.hash !== source.hash) return;
           const liveBoard = board.saveBoard({ assembleInk: false });
           try {
             const saved = await saveAnnotateDoc({
@@ -7195,6 +7212,7 @@ export const Workspace = memo(function Workspace({
           if (!board) return;
           void (async () => {
             await flushDirtyInk(board, footnoteWhiteboardDocKey(fnBind.docId, fnBind.wbId));
+            if (agentSaveSuspendedRef.current || sourceUpdateLocks.current) return;
             const packed = board.saveBoard({ assembleInk: false });
             await putFootnoteWhiteboard(fnBind.docId, fnBind.wbId, {
               board: packed,
@@ -9019,6 +9037,147 @@ export const Workspace = memo(function Workspace({
     patchTab(tab.id, { indexed: docIndexStatus });
   }, [docIndexStatus, patchTab, tab.id]);
 
+  const [sourceChecking, setSourceChecking] = useState(false);
+  const sourceChecks = useRef(new Set<string>());
+  const [sourceNewer, setSourceNewer] = useState<Record<string, boolean>>(() => Object.fromEntries([...newerDocSources].map(id => [id, true])));
+  const [sourceUpdatePrompt, setSourceUpdatePrompt] = useState<{
+    id: string; name: string; content: Awaited<ReturnType<typeof checkDocSource>>;
+  } | null>(null);
+  const [sourceUpdating, setSourceUpdating] = useState(false);
+  const [sourceUpdateError, setSourceUpdateError] = useState<string | null>(null);
+  useEffect(() => {
+    const checked = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string; newer: boolean }>).detail;
+      if (detail) {
+        if (detail.newer) newerDocSources.add(detail.id); else newerDocSources.delete(detail.id);
+        setSourceNewer(previous => ({ ...previous, [detail.id]: detail.newer }));
+      }
+    };
+    window.addEventListener(DOC_SOURCE_CHECKED_EVENT, checked);
+    return () => window.removeEventListener(DOC_SOURCE_CHECKED_EVENT, checked);
+  }, []);
+  useEffect(() => {
+    const capturing = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string; captures: Promise<DocSourceLiveCapture>[]; releases: (() => void)[] }>).detail;
+      const child = footnoteBoardRef.current;
+      if (!detail || (child?.docId !== detail.id && (annotateDocIdRef.current !== detail.id || !annotateSourceRef.current))) return;
+      if (!sourceUpdateLocks.current) sourceUpdateSuspension.current = {
+        board: boardSaveSuspendedRef.current, agent: agentSaveSuspendedRef.current,
+      };
+      sourceUpdateLocks.current++;
+      boardSaveSuspendedRef.current = true;
+      agentSaveSuspendedRef.current = true;
+      let released = false;
+      detail.releases.push(() => {
+        if (released) return;
+        released = true;
+        sourceUpdateLocks.current--;
+        if (!sourceUpdateLocks.current && sourceUpdateSuspension.current) {
+          const current = annotateSourceRef.current;
+          const meta = getAnnotateDocMeta(detail.id);
+          const stale = annotateDocIdRef.current === detail.id && current && meta && current.hash !== meta.hash;
+          boardSaveSuspendedRef.current = Boolean(stale) || sourceUpdateSuspension.current.board;
+          agentSaveSuspendedRef.current = Boolean(stale) || sourceUpdateSuspension.current.agent;
+          sourceUpdateSuspension.current = null;
+        }
+      });
+      detail.captures.push((async () => {
+        const board = boardRef.current;
+        if (boardPreparing || busyRef.current !== null || !board) throw new Error("Wait for the document to finish opening before updating it.");
+        if (board.isInking()) throw new Error("Finish the current pen stroke before updating this document.");
+        const meta = getAnnotateDocMeta(detail.id);
+        if (!child && meta && annotateSourceRef.current?.hash !== meta.hash) throw new Error("Reopen this document before updating it.");
+        const scene = board.saveBoard({ assembleInk: false });
+        const session = footnoteBoardSessionRef.current;
+        const wbId = child?.wbId ?? session?.wbId;
+        const docKey = wbId ? footnoteWhiteboardDocKey(detail.id, wbId) : annotateDocKey(detail.id);
+        const now = Date.now();
+        const pages = [...board.snapshotInkPages()].map(([pageId, inkC]) => ({ v: 1 as const, docKey, pageId, inkC, dirty: true, updatedAt: now }));
+        const children = wbId ? { [wbId]: { board: scene, pageCount: Math.max(1, countWhiteboardPages(scene.elements)) } } : undefined;
+        const source = annotateSourceRef.current;
+        return structuredClone({
+          payload: child ? {} : { board: session?.stashed ?? scene, source: source?.text ?? "",
+            footnotes: annotateFootnotesRef.current, agent: persistableAgentMessages(agentMessagesRef.current) },
+          pages,
+          ...(children ? { children } : {}),
+        });
+      })());
+    };
+    const updated = (event: Event) => {
+      const detail = (event as CustomEvent<{ id: string; reloads?: Promise<void>[] }>).detail;
+      if (!detail) return;
+      newerDocSources.delete(detail.id);
+      pendingSourcePrompts.delete(detail.id);
+      setSourceNewer(previous => ({ ...previous, [detail.id]: false }));
+      if (annotateDocIdRef.current !== detail.id || !annotateSourceRef.current) return;
+      const reload = (async () => {
+        const entry = await getAnnotateDoc(detail.id);
+        if (!entry || annotateDocIdRef.current !== detail.id) return;
+        const bytes = isBinaryDocType(entry.docType)
+          ? await loadBinaryDocBytesWithRetry(entry.hash, hash => client.getDocBytes(hash))
+          : null;
+        if (isBinaryDocType(entry.docType) && !bytes) throw new Error(missingAppFileCopy(entry.name));
+        if (annotateDocIdRef.current !== detail.id) return;
+        footnoteBoardSessionRef.current = null;
+        setFootnoteBoardSession(null);
+        await loadAnnotate({ name: entry.name, docType: entry.docType, localFileHash: entry.localFileHash,
+          hash: entry.hash, text: entry.source, bytes: bytes ?? undefined, bytesStored: Boolean(bytes),
+          docId: entry.id, existingDoc: entry, tabId: tab.id, keepEntryOpen: true });
+      })().catch(cause => { setError(messageOf(cause)); throw cause; });
+      detail.reloads?.push(reload);
+    };
+    window.addEventListener(DOC_SOURCE_UPDATING_EVENT, capturing);
+    window.addEventListener(DOC_SOURCE_UPDATED_EVENT, updated);
+    return () => { window.removeEventListener(DOC_SOURCE_UPDATING_EVENT, capturing); window.removeEventListener(DOC_SOURCE_UPDATED_EVENT, updated); };
+  }, [boardPreparing, client, loadAnnotate, setError, tab.id]);
+
+  useEffect(() => {
+    if (!active || !annotateDocId || !annotateSource || boardPreparing || sourceUpdating) return;
+    const pending = pendingSourcePrompts.get(annotateDocId);
+    if (!pending) return;
+    pendingSourcePrompts.delete(annotateDocId);
+    setSourceUpdateError(null);
+    setSourceUpdatePrompt({ id: annotateDocId, ...pending });
+  }, [active, annotateDocId, annotateSource, boardPreparing, sourceNewer, sourceUpdating]);
+
+  const checkSourceFor = useCallback(async (id: string, manual = false) => {
+    if (sourceChecks.current.has(id)) return;
+    sourceChecks.current.add(id);
+    if (manual) setSourceChecking(true);
+    try {
+      if (manual && annotateDocIdRef.current === id && !getAnnotateDocMeta(id)) {
+        if (!await saveAnnotateSession({ throwOnError: true })) throw new Error("The app's copy could not be saved before checking its source.");
+      }
+      const content = await checkDocSource(id);
+      if (content.status === "newer") pendingSourcePrompts.set(id, { name: content.ref?.name ?? getAnnotateDocMeta(id)?.name ?? "This file", content });
+      else pendingSourcePrompts.delete(id);
+      window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id, newer: content.status === "newer" } }));
+      if (manual && content.status === "same") setNotice("Up to date");
+      else if (manual && content.status === "missing") setNotice("The original file isn't on this device anymore; using the app's copy.");
+    } catch (cause) {
+      if (manual) setError(messageOf(cause));
+    } finally {
+      sourceChecks.current.delete(id);
+      if (manual) setSourceChecking(false);
+    }
+  }, [saveAnnotateSession, setError, setNotice]);
+  const applySourceUpdate = useCallback(async () => {
+    if (!sourceUpdatePrompt || sourceUpdating) return;
+    setSourceUpdating(true);
+    setSourceUpdateError(null);
+    try {
+      const { unplaced } = await updateDocFromSource(sourceUpdatePrompt.id, sourceUpdatePrompt.content);
+      setSourceUpdatePrompt(null);
+      window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: sourceUpdatePrompt.id, newer: false } }));
+      setNotice("Updated to the newer version." + (unplaced.length
+        ? ` ${unplaced.length} annotations couldn't be placed and stay in the previous version (Recents → retained copies).` : ""));
+    } catch (cause) {
+      setSourceUpdateError(messageOf(cause));
+    } finally {
+      setSourceUpdating(false);
+    }
+  }, [setNotice, sourceUpdatePrompt, sourceUpdating]);
+
   /*
    * The prompt belongs to one chip. Switching away answers it by walking off,
    * which is an answer — leave the empty tab where it is and take the modal
@@ -10430,6 +10589,9 @@ export const Workspace = memo(function Workspace({
               ) : null
             }
             pageTitle={null}
+            sourceRefresh={active && annotateDocId && !footnoteBoardSession && getDocSource(annotateDocId)
+              ? <DocSourceRefresh docId={annotateDocId} checking={sourceChecking} newer={sourceNewer[annotateDocId]} chromeHost={headerSlots.boardChrome}
+                  onCheck={() => void checkSourceFor(annotateDocId, true)} /> : null}
             pageContentHeight={
               problem && isAnnotate(problem) && !footnoteBoardSession
                 ? annotatePageHeight(annotateHeight)
@@ -11235,6 +11397,7 @@ export const Workspace = memo(function Workspace({
         <AnnotateDialog
           mode="entry"
           onRefreshHub={() => pullMissingHubFiles(client)}
+          onNotice={setNotice}
           kind={entryKind}
           pending={busy !== null || boardPreparing}
           allowSave={Boolean(problem && isAnnotate(problem))}
@@ -11332,6 +11495,7 @@ export const Workspace = memo(function Workspace({
                       text: entry.source,
                       docId: entry.id,
                     });
+                    void checkSourceFor(entry.id);
                     return;
                   }
                   /*
@@ -11354,6 +11518,7 @@ export const Workspace = memo(function Workspace({
                     bytes,
                     docId: entry.id,
                   });
+                  void checkSourceFor(entry.id);
                 } finally {
                   endPadOpen();
                 }
@@ -11365,6 +11530,13 @@ export const Workspace = memo(function Workspace({
           }}
           onCancel={() => setAnnotateEntryOpen(false)}
         />
+      )}</DialogPresence>
+
+      <DialogPresence>{sourceUpdatePrompt && (
+        <ConfirmDialog title="Newer version available"
+          message={`“${sourceUpdatePrompt.name}” has changed on this device since you opened it.`}
+          confirmLabel="Update" cancelLabel="Not now" pending={sourceUpdating} pendingLabel="Updating…" error={sourceUpdateError}
+          onConfirm={() => void applySourceUpdate()} onCancel={() => { if (!sourceUpdating) setSourceUpdatePrompt(null); }} />
       )}</DialogPresence>
 
 

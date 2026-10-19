@@ -13,6 +13,10 @@ import { footnoteRevision, type DocFootnote } from "./util/docFootnotes";
 import type { TabRecord } from "./util/tabs";
 import { annotatePageHeight } from "./templates/annotate";
 import { FNWB_SAVED_EVENT } from "./util/footnoteWhiteboardStore";
+import { getDocSource, setDocSource } from "./util/docSourceStore";
+import { HOLD_FILL_MS } from "./util/gesture";
+import type { DocSourceLiveCapture } from "./util/docSourceUpdate";
+import { encodeInkOps } from "./canvas/inkCodec";
 
 type PaperProps = ComponentProps<typeof import("./modes/AnnotateDocument").AnnotateDocument>;
 type SelectionProps = ComponentProps<typeof import("./modes/DocSelectionLayer").DocSelectionLayer>;
@@ -23,6 +27,7 @@ const mocks = vi.hoisted(() => ({
   agent: null as ComponentProps<typeof import("./modes/AgentSidePanel").AgentSidePanel> | null,
   marks: [] as DocFootnote[], docs: new Map<string, AnnotateDoc>(),
   height: 2400, save: vi.fn(), restore: vi.fn(), remove: vi.fn(), snapshots: vi.fn(),
+  sourceCheck: vi.fn(), sourceUpdate: vi.fn(), pick: vi.fn(),
 }));
 
 // Keep Workspace's loader, real height gate, fingerprinting, save and leave
@@ -34,7 +39,7 @@ vi.mock("./canvas/boardChunk", async () => {
   const BoardView = (props: ComponentProps<typeof Board>) => {
     mocks.boardProps = props;
     useImperativeHandle(props.ref, () => mocks.board, []);
-    return <section data-testid="board" data-height={props.pageContentHeight}>{props.pageContent}</section>;
+    return <section data-testid="board" data-height={props.pageContentHeight}>{props.pageContent}{props.sourceRefresh}</section>;
   };
   return { peekBoardComponent: () => BoardView };
 });
@@ -75,6 +80,14 @@ vi.mock("./components/LoadingDoodle", () => ({ LoadingDoodle: () => null }));
 vi.mock("./canvas/pageTurn/PageTurn", () => ({ PageTurn: () => null }));
 vi.mock("./util/bootSettled", () => ({ afterBootSettled: () => new Promise(() => {}) }));
 vi.mock("./util/loadingDoodleActivity", () => ({ isLoadingDoodleActive: () => false, waitForLoadingDoodleIdle: async () => {} }));
+vi.mock("./util/docSourceUpdate", () => ({
+  DOC_SOURCE_CHECKED_EVENT: "lc-doc-source-checked", DOC_SOURCE_UPDATING_EVENT: "lc-doc-source-updating", DOC_SOURCE_UPDATED_EVENT: "lc-doc-source-updated",
+  checkDocSource: (...args: unknown[]) => mocks.sourceCheck(...args),
+  updateDocFromSource: (...args: unknown[]) => mocks.sourceUpdate(...args),
+}));
+vi.mock("./util/annotateFs", async original => ({
+  ...await original<typeof import("./util/annotateFs")>(), pickDocumentFile: () => mocks.pick(),
+}));
 vi.mock("./util/annotateStore", async original => ({
   ...await original<typeof import("./util/annotateStore")>(),
   listAnnotateDocs: () => [], migrateAnnotateKeysToId: async () => {},
@@ -153,6 +166,9 @@ beforeEach(() => {
   mocks.restore.mockReset().mockImplementation(async saved => { mocks.docs.set(saved.id, structuredClone(saved)); });
   mocks.remove.mockReset().mockImplementation(async id => { mocks.docs.delete(id); });
   mocks.snapshots.mockReset().mockResolvedValue(undefined);
+  mocks.sourceCheck.mockReset().mockResolvedValue({ status: "same" });
+  mocks.sourceUpdate.mockReset().mockResolvedValue({ unplaced: [] });
+  mocks.pick.mockReset().mockResolvedValue(null);
   const noop = () => vi.fn();
   mocks.board = {
     getElements: vi.fn(() => []), getInkStrokes: vi.fn(() => []), getInkOps: vi.fn(() => []),
@@ -163,6 +179,7 @@ beforeEach(() => {
     getInkOpCount: vi.fn(() => 0), getInkRevision: vi.fn(() => 0), dirtyInkPageCount: vi.fn(() => 0),
     takeDirtyInkPages: vi.fn(() => new Map()), markInkPagesFlushed: noop(),
     inkFingerprint: vi.fn(() => "ink"), seedTemplate: noop(), setInkDoc: noop(), setInkOps: noop(), setInkSpread: noop(),
+    snapshotInkPages: vi.fn(() => new Map()),
     saveBoard: vi.fn(() => ({ v: 1, elements: [], appState: {} })),
   } as unknown as BoardHandle;
   const host = document.createElement("div"); const chrome = document.createElement("div"); const agentPanel = document.createElement("div");
@@ -317,4 +334,156 @@ it("updates only the open document's footnote board timestamps when another scra
   await act(async () => { window.dispatchEvent(new CustomEvent(FNWB_SAVED_EVENT, { detail: { docId: "first", wbId: "scratch" } })); });
   expect(mocks.marks[0]!.whiteboards![0]!.updatedAt).toBe(Date.now());
   await leave(); expect(leaveDialog()).toBeTruthy();
+});
+
+const sourceRefreshLabel = "Check for a newer version of this file";
+const sourceRef = { kind: "path" as const, location: "/First.md", name: "First.md", size: 7, modified: 1, hash: hashMarkdown("# First"), checkedAt: 1 };
+
+it("checks a source on demand, shows work while checking, and reports same and missing copies", async () => {
+  setDocSource("first", sourceRef);
+  await mount();
+  const checked = deferred<{ status: "same" }>(); mocks.sourceCheck.mockReturnValueOnce(checked.promise);
+  await click(sourceRefreshLabel);
+  expect(mocks.sourceCheck).toHaveBeenCalledWith("first");
+  expect(button(sourceRefreshLabel).getAttribute("aria-busy")).toBe("true");
+  expect(button(sourceRefreshLabel).querySelector(".lc-doc-index-ring")).not.toBeNull();
+  await act(async () => { checked.resolve({ status: "same" }); });
+  expect(mocks.shell.setNotice).toHaveBeenCalledWith("Up to date");
+  mocks.sourceCheck.mockResolvedValueOnce({ status: "missing" }); await click(sourceRefreshLabel);
+  expect(mocks.shell.setNotice).toHaveBeenCalledWith("The original file isn't on this device anymore; using the app's copy.");
+});
+
+it("keeps the newer dot after Not now and updates the same open tab before its success notice", async () => {
+  setDocSource("first", sourceRef);
+  const content = { status: "newer", text: "# Revised", ref: { ...sourceRef, hash: hashMarkdown("# Revised"), size: 9, modified: 2 } };
+  mocks.sourceCheck.mockResolvedValue(content);
+  await mount(); await click(sourceRefreshLabel);
+  expect(document.querySelector('[role="dialog"][aria-label="Newer version available"]')).not.toBeNull();
+  expect(document.body.textContent).toContain("“First.md” has changed on this device since you opened it.");
+  await click("Not now");
+  expect(button(sourceRefreshLabel).querySelector(".lc-library-sync-dot")).not.toBeNull();
+  expect(mocks.sourceUpdate).not.toHaveBeenCalled();
+  await click(sourceRefreshLabel);
+  mocks.sourceUpdate.mockImplementationOnce(async (id: string) => {
+    const captures: Promise<DocSourceLiveCapture>[] = [];
+    const releases: (() => void)[] = [];
+    window.dispatchEvent(new CustomEvent("lc-doc-source-updating", { detail: { id, captures, releases } }));
+    expect(await Promise.all(captures)).toEqual([expect.objectContaining({ payload: expect.objectContaining({ source: "# First", footnotes: mocks.marks }) })]);
+    expect(mocks.save).not.toHaveBeenCalled();
+    mocks.docs.set(id, { ...mocks.docs.get(id)!, source: content.text, hash: content.ref.hash });
+    const reloads: Promise<void>[] = [];
+    window.dispatchEvent(new CustomEvent("lc-doc-source-updated", { detail: { id, reloads } }));
+    await Promise.all(reloads);
+    for (const release of releases) release();
+    return { unplaced: [{ kind: "footnote", label: "A passage" }] };
+  });
+  const update = button("Hold to confirm: Update");
+  await act(async () => { update.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+  await advance(HOLD_FILL_MS + 50);
+  await act(async () => { update.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+  for (let i = 0; i < 12; i++) await advance(250);
+  expect(mocks.sourceUpdate).toHaveBeenCalledWith("first", content);
+  expect(mocks.paper!.source).toBe("# Revised");
+  expect(mocks.shell.patchTab).toHaveBeenCalledWith(tab.id, expect.objectContaining({ docId: "first", hash: content.ref.hash }));
+  expect(mocks.shell.setNotice).toHaveBeenCalledWith("Updated to the newer version. 1 annotations couldn't be placed and stay in the previous version (Recents → retained copies).");
+  expect(button(sourceRefreshLabel).querySelector(".lc-library-sync-dot")).toBeNull();
+});
+
+it("waits for the matching document to be active before presenting a completed background check", async () => {
+  setDocSource("first", sourceRef);
+  const checked = deferred<{ status: "newer"; text: string; ref: typeof sourceRef }>();
+  mocks.sourceCheck.mockReturnValueOnce(checked.promise);
+  await mount(); await click(sourceRefreshLabel);
+  await act(async () => { root.render(<Workspace key={tab.id} tab={tab} active={false} showing={false} />); });
+  await act(async () => { checked.resolve({ status: "newer", text: "# New", ref: sourceRef }); });
+  expect(document.querySelector('[role="dialog"][aria-label="Newer version available"]')).toBeNull();
+  await act(async () => { root.render(<Workspace key={tab.id} tab={tab} active showing />); });
+  expect(document.querySelector('[role="dialog"][aria-label="Newer version available"]')).not.toBeNull();
+  await click("Not now");
+});
+
+it("keeps a normal native pick's source on the annotation set selected by the open", async () => {
+  const home: TabRecord = { id: "home", kind: "home", title: "Home", dirty: false, lastActive: 0 };
+  const source = { ...sourceRef, name: "Native.md", location: "/Native.md", hash: hashMarkdown("# Native") };
+  mocks.pick.mockResolvedValue({ name: source.name, docType: "markdown", text: "# Native", source });
+  await mount(home);
+  await click("Document pad: tap to open a file, hold for recent documents");
+  for (let i = 0; i < 12 && !vi.mocked(mocks.shell.openWorkspace).mock.calls.length; i++) await advance(250);
+  expect(mocks.pick).toHaveBeenCalledOnce();
+  expect(mocks.shell.setError).not.toHaveBeenCalledWith(expect.any(String));
+  const opened = vi.mocked(mocks.shell.openWorkspace).mock.calls.at(-1)![0];
+  expect(opened).toMatchObject({ kind: "annotate", title: "Native.md", hash: source.hash });
+  expect(getDocSource(opened.kind === "annotate" ? opened.docId! : "")).toEqual(source);
+});
+
+it("captures unsaved marks and ink without an authored save when a source backup fails", async () => {
+  setDocSource("first", sourceRef);
+  const content = { status: "newer", text: "# Revised", ref: { ...sourceRef, hash: hashMarkdown("# Revised") } };
+  mocks.sourceCheck.mockResolvedValue(content);
+  await mount(); await click("Open mark-first"); await click("Edit title"); await click("Close footnote");
+  const original = structuredClone(mocks.docs.get("first")!);
+  const ink = encodeInkOps([]);
+  vi.mocked(mocks.board.snapshotInkPages).mockReturnValue(new Map([[3, ink]]));
+  let captured: DocSourceLiveCapture | undefined;
+  mocks.sourceUpdate.mockImplementationOnce(async (id: string) => {
+    const captures: Promise<DocSourceLiveCapture>[] = [], releases: (() => void)[] = [];
+    try {
+      window.dispatchEvent(new CustomEvent("lc-doc-source-updating", { detail: { id, captures, releases } }));
+      [captured] = await Promise.all(captures);
+      throw new Error("Backup failed");
+    } finally { for (const release of releases) release(); }
+  });
+  await click(sourceRefreshLabel);
+  const update = button("Hold to confirm: Update");
+  await act(async () => { update.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+  await advance(HOLD_FILL_MS + 50);
+  await act(async () => { update.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+  expect(captured).toMatchObject({ payload: { source: "# First", footnotes: [{ title: "Edited title" }] },
+    pages: [{ docKey: "md:first", pageId: 3, inkC: ink }] });
+  expect(mocks.save).not.toHaveBeenCalled();
+  expect(mocks.docs.get("first")).toEqual(original);
+  expect(mocks.paper!.source).toBe("# First");
+  expect(mocks.marks[0]!.title).toBe("Edited title");
+  expect(document.body.textContent).toContain("Backup failed");
+  await click("Not now");
+});
+
+it("keeps autosave suspended when the committed newer copy cannot reload and rejects a stale retry", async () => {
+  setDocSource("first", sourceRef);
+  const content = { status: "newer", text: "# Revised", ref: { ...sourceRef, hash: hashMarkdown("# Revised") } };
+  mocks.sourceCheck.mockResolvedValue(content);
+  await mount(); await click("Open mark-first"); await click("Edit title"); await click("Close footnote");
+  mocks.sourceUpdate.mockImplementationOnce(async (id: string) => {
+    const captures: Promise<DocSourceLiveCapture>[] = [], releases: (() => void)[] = [];
+    try {
+      window.dispatchEvent(new CustomEvent("lc-doc-source-updating", { detail: { id, captures, releases } }));
+      await Promise.all(captures);
+      mocks.docs.set(id, { ...mocks.docs.get(id)!, source: content.text, hash: content.ref.hash });
+      vi.spyOn(mocks.docs, "get").mockImplementationOnce(() => { throw new Error("Could not reopen the saved copy"); });
+      const reloads: Promise<void>[] = [];
+      window.dispatchEvent(new CustomEvent("lc-doc-source-updated", { detail: { id, reloads } }));
+      await Promise.all(reloads);
+      return { unplaced: [] };
+    } finally { for (const release of releases) release(); }
+  });
+  await click(sourceRefreshLabel);
+  const update = button("Hold to confirm: Update");
+  await act(async () => { update.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+  await advance(HOLD_FILL_MS + 50);
+  await act(async () => { update.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+  expect(document.body.textContent).toContain("Could not reopen the saved copy");
+  expect(mocks.shell.setNotice).not.toHaveBeenCalledWith("Updated to the newer version.");
+  mocks.shell.autosaveMs = 3000;
+  await act(async () => { root.render(<Workspace key={tab.id} tab={tab} active showing />); });
+  await advance(4_000);
+  expect(mocks.save).not.toHaveBeenCalled();
+  expect(mocks.docs.get("first")!.hash).toBe(content.ref.hash);
+  expect(mocks.paper!.source).toBe("# First");
+  const captures: Promise<DocSourceLiveCapture>[] = [], releases: (() => void)[] = [];
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent("lc-doc-source-updating", { detail: { id: "first", captures, releases } }));
+    await expect(Promise.all(captures)).rejects.toThrow("Reopen this document before updating it.");
+    for (const release of releases) release();
+  });
+  await click("Not now");
 });

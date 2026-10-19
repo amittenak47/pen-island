@@ -1,12 +1,9 @@
 /**
  * Getting a document file into the app, and an annotation set back out.
  *
- * Deliberately not a Tauri filesystem plugin in v1. The app runs in a WebView on
- * the tablet as well as on the desktop, and a hidden `<input type="file">` is
- * the one path that works in both without a Rust dependency, a capability
- * grant, or a permission prompt. Annotations live in `annotateStore` keyed by the
- * document's content hash, so reopening the same file finds its ink again
- * without ever knowing where on disk the file came from.
+ * Native picks retain a device-local source reference so the app's copy can
+ * be checked later. A hidden `<input type="file">` remains the browser path
+ * and the fallback when the native picker is unavailable.
  *
  * {@link exportAnnotateSidecar} is the escape hatch: it hands back a
  * `.lc-ink.json.gz` the writer can keep beside the source, so an annotation set
@@ -21,7 +18,9 @@ import { readBlobBytes } from "./docBytes";
 import { traceOpen } from "./messageOf";
 import { sanitizeFootnotes, type DocFootnote } from "./docFootnotes";
 import { canGzip, gzipText, textFromMaybeGzip } from "./gzip";
-import type { DocType } from "./annotateStore";
+import { docIdentityHash, hashMarkdown, type DocType } from "./annotateStore";
+import type { DocSourceRef } from "./docSourceStore";
+import { nativeSourcePickerAvailable, pickDocumentSource, readDocumentSource } from "./docSourceNative";
 
 export { CODE_SOURCE_MAX_CHARS, languageForName } from "./codeLanguages";
 
@@ -75,6 +74,7 @@ export interface OpenedMarkdown {
  * path does not fork before it has to.
  */
 export interface OpenedDocument {
+  source?: DocSourceRef;
   /** Original HTML content hash; also marks a frozen local file, not an address. */
   localFileHash?: string;
   name: string;
@@ -540,6 +540,32 @@ export function exportMarkdownNote(name: string, source: string): void {
  * Same dismiss contract as {@link pickMarkdownFile}.
  */
 export function pickDocumentFile(): Promise<OpenedDocument | null> {
+  if (nativeSourcePickerAvailable()) {
+    return (async () => {
+      try {
+        const picked = await pickDocumentSource();
+        if (!picked) return null;
+        const bytes = await readDocumentSource(picked.kind, picked.location);
+        const docType = docTypeForPicked(picked, bytes);
+        const name = picked.name || fallbackPickedName(docType);
+        const text = isTextDocType(docType) ? new TextDecoder().decode(bytes) : undefined;
+        const localFileHash = docType === "web" ? hashMarkdown(text!) : undefined;
+        const hash = docIdentityHash({ docType, name, ...(text !== undefined ? { text, localFileHash } : { bytes }) });
+        const source: DocSourceRef = { ...picked, name, hash, checkedAt: Date.now() };
+        if (docType === "web") {
+          const { freezeLocalHtml } = await import("./localHtmlRender");
+          return { name, docType, localFileHash, text: await freezeLocalHtml(text!), source };
+        }
+        return { name, docType, ...(text !== undefined ? { text } : { bytes }), source };
+      } catch {
+        return pickDocumentFromInput();
+      }
+    })();
+  }
+  return pickDocumentFromInput();
+}
+
+function pickDocumentFromInput(): Promise<OpenedDocument | null> {
   return pickFromHiddenInput(documentPickerAccept(), async (file) => {
     const bytes = await readBlobBytes(file);
     const docType = docTypeForPicked(file, bytes);

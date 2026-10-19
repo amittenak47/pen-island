@@ -77,3 +77,8 @@ strip = true
 libffi = { path = "../../third_party/libffi" }
 libffi-sys = { path = "../../third_party/libffi-sys" }
 pymath = { path = "../../third_party/pymath" }
+
+# The desktop file dialog that keeps a picked document's path (doc_source.rs).
+# Android picks through the gallerysave plugin instead.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-dialog = "2"

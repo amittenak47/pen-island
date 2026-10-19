@@ -1,0 +1,4 @@
+[[permission]]
+identifier = "allow-doc-source"
+description = "Pick, check and read device-local document sources"
+commands.allow = ["pick_document_source", "stat_document_source", "read_document_source"]

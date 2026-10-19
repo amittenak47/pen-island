@@ -1,5 +1,5 @@
 import { RetainedCopies } from "./RetainedCopies";
-import { useIsPresent } from "motion/react";
+import { motion, useIsPresent, useReducedMotion } from "motion/react";
 import { DialogBackdrop, DialogPresence } from "../components/DialogMotion";
 import {LibraryTrashRow} from "./LibraryTrashRow";
 import {useLibraryMorph} from "./useLibraryMorph";
@@ -13,7 +13,7 @@ import {useLibraryMorph} from "./useLibraryMorph";
  * rather than notebooks, and Open rather than New.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useId, useRef, useState } from "react";
 
 import { LIBRARY_HOLD_MS } from "../util/gesture";
 import { HoldButton } from "../components/HoldButton";
@@ -22,6 +22,8 @@ import { DialogFrame } from "../components/DialogFrame";
 import "./annotateDialog.css";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { HubLibraryRefresh, type HubLibraryRefreshAction } from "../components/HubLibraryRefresh";
+import { listDocSources } from "../util/docSourceStore";
+import { checkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT } from "../util/docSourceUpdate";
 import { useLibraryDeleteArm } from "../util/armedDelete";
 import { DOUBLE_TAP_MS } from "../util/gesture";
 import { shouldDismissBackdrop } from "../util/backdropDismiss";
@@ -99,6 +101,7 @@ interface LeaveProps {
 
 interface EntryProps {
   onRefreshHub?: HubLibraryRefreshAction;
+  onNotice?: (message: string) => void;
   mode: "entry";
   /** Wording and choices. Defaults to the document library. */
   kind?: AnnotateDialogKind;
@@ -122,6 +125,11 @@ interface EntryProps {
 }
 
 export type AnnotateDialogProps = LeaveProps | EntryProps;
+
+type SourceUpdateCandidate = {
+  doc: AnnotateDocMeta;
+  content: Awaited<ReturnType<typeof checkDocSource>>;
+};
 
 function DocumentIcon({ web = false }: { web?: boolean }) {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -148,6 +156,8 @@ function MainMenuRow({ label, description, disabled, onConfirm }: {
 
 export function AnnotateDialog(props: AnnotateDialogProps) {
   const present = useIsPresent();
+  const reducedMotion = useReducedMotion();
+  const sourceTitleId = useId();
   const [docs, setDocs] = useState<AnnotateDocMeta[]>(() => listAnnotateDocs());
   const [trash, setTrash] = useState<AnnotateDocMeta[]>(() => listAnnotateTrash());
   const [pickingRecent, setPickingRecent] = useState(false);
@@ -171,6 +181,15 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const [libraryFilters,setLibraryFilters] = useState<string[]>([]);
   const [showTrash,setShowTrash] = useState(false);
   const [libraryQuery,setLibraryQuery] = useState("");
+  const [sourceCandidates, setSourceCandidates] = useState<SourceUpdateCandidate[] | null>(null);
+  const [sourceSelected, setSourceSelected] = useState<string[]>([]);
+  const [sourceChecking, setSourceChecking] = useState(false);
+  const [sourceUpdating, setSourceUpdating] = useState(false);
+  const [sourceProgress, setSourceProgress] = useState("");
+  const [sourceFailures, setSourceFailures] = useState<string[]>([]);
+  const [sourceNotice, setSourceNotice] = useState<string | null>(null);
+  const sourceRunning = useRef(false);
+  const sourceBusy = sourceChecking || sourceUpdating;
   const lastTapRef = useRef({ id: "", at: 0 });
   const { tapArmed, arm } = useLibraryDeleteArm();
 
@@ -201,6 +220,9 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     setSaveTitle(null);
     setRenamingId(null);
     setLibraryQuery("");
+    setSourceCandidates(null);
+    setSourceFailures([]);
+    setSourceNotice(null);
   }, [props.mode]);
 
   const snapshotKey = props.mode === "entry" ? props.snapshotKey ?? null : null;
@@ -216,11 +238,13 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
 
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape" && present && !props.pending && !props.exiting) props.onCancel();
+      if (event.key !== "Escape" || !present || props.pending || props.exiting || sourceBusy) return;
+      if (sourceCandidates !== null) setSourceCandidates(null);
+      else props.onCancel();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [props, present]);
+  }, [props, present, sourceBusy, sourceCandidates]);
 
   const pending = Boolean(props.pending);
   const exiting = Boolean(props.exiting);
@@ -232,7 +256,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const entry = props.mode === "entry" ? props : null;
   const allowSave = Boolean(entry?.allowSave);
   const isWeb = props.kind === "web";
-  const locked = pending || exiting || !present;
+  const locked = pending || exiting || !present || sourceBusy || sourceCandidates !== null;
   const needsName = Boolean(props.needsName);
   const defaultName = props.defaultName?.trim() || "";
   const onRename = entry?.onRename;
@@ -251,6 +275,8 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
     (isWeb ? doc.docType === "web" : doc.docType !== "web") &&
     (section !== "sets" || (currentDoc && doc.hash === currentDoc.hash)),
   );
+  const sources = listDocSources();
+  const sourceDocs = docs.filter(doc => sources[doc.id]);
 
   const toggleFilter = (kind: string) => setLibraryFilters(current => current.includes(kind) ? current.filter(item => item !== kind) : [...current, kind]);
   const matchesQuery = (doc: AnnotateDocMeta) => (libraryFilters.length === 0 || libraryFilters.includes(doc.docType)) && `${doc.name} ${doc.label ?? ""}`.toLocaleLowerCase().includes(libraryQuery.trim().toLocaleLowerCase());
@@ -258,6 +284,82 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const refreshList = () => {
     setDocs(listAnnotateDocs());
     setTrash(listAnnotateTrash());
+  };
+
+  const announceSource = (message: string) => {
+    if (entry?.onNotice) entry.onNotice(message);
+    else setSourceNotice(message);
+  };
+
+  const checkSources = async () => {
+    if (sourceRunning.current) return;
+    sourceRunning.current = true;
+    setSourceChecking(true);
+    setSourceNotice(null);
+    setSourceFailures([]);
+    setSourceProgress(`Checking 0 of ${sourceDocs.length} files…`);
+    const found: (SourceUpdateCandidate | undefined)[] = new Array(sourceDocs.length);
+    const failures: string[] = [];
+    let next = 0;
+    let completed = 0;
+    try {
+      await Promise.all(Array.from({ length: Math.min(3, sourceDocs.length) }, async () => {
+        while (next < sourceDocs.length) {
+          const index = next++;
+          const doc = sourceDocs[index]!;
+          try {
+            const content = await checkDocSource(doc.id);
+            window.dispatchEvent(new CustomEvent(DOC_SOURCE_CHECKED_EVENT, { detail: { id: doc.id, newer: content.status === "newer" } }));
+            if (content.status === "newer") found[index] = { doc, content };
+          } catch (cause) {
+            failures.push(`${doc.name}: ${cause instanceof Error ? cause.message : String(cause)}`);
+          } finally {
+            setSourceProgress(`Checking ${++completed} of ${sourceDocs.length} files…`);
+          }
+        }
+      }));
+      const newer = found.filter((row): row is SourceUpdateCandidate => Boolean(row));
+      setSourceFailures(failures);
+      if (newer.length) {
+        setSourceCandidates(newer);
+        setSourceSelected(newer.map(row => row.doc.id));
+      } else announceSource(failures.length ? `${failures.length} files couldn't be checked.` : "Everything is up to date");
+    } finally {
+      sourceRunning.current = false;
+      setSourceChecking(false);
+      setSourceProgress("");
+    }
+  };
+
+  const updateSources = async () => {
+    if (sourceRunning.current || !sourceCandidates) return;
+    const selected = sourceCandidates.filter(row => sourceSelected.includes(row.doc.id));
+    if (!selected.length) return;
+    sourceRunning.current = true;
+    setSourceUpdating(true);
+    let updated = 0;
+    let unplaced = 0;
+    const failures: string[] = [];
+    try {
+      for (const [index, row] of selected.entries()) {
+        setSourceProgress(`Updating ${index + 1} of ${selected.length}: ${row.doc.name}`);
+        try {
+          const result = await updateDocFromSource(row.doc.id, row.content);
+          updated++;
+          unplaced += result.unplaced.length;
+        } catch (cause) {
+          failures.push(`${row.doc.name}: ${cause instanceof Error ? cause.message : String(cause)}`);
+        }
+      }
+      setSourceCandidates(null);
+      setSourceFailures([...sourceFailures, ...failures]);
+      refreshList();
+      announceSource(`Updated ${updated} ${updated === 1 ? "document" : "documents"}. ${unplaced} ${unplaced === 1 ? "annotation couldn't" : "annotations couldn't"} be placed. ${failures.length} ${failures.length === 1 ? "update failed" : "updates failed"}.${sourceFailures.length ? ` ${sourceFailures.length} files couldn't be checked.` : ""}${unplaced ? " Unplaced annotations stay in the previous version (Recents → retained copies)." : ""}`);
+    } finally {
+      sourceRunning.current = false;
+      setSourceUpdating(false);
+      setSourceProgress("");
+    }
   };
 
   const beginSave = () => {
@@ -349,6 +451,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
       }}
     >
       <DialogFrame ref={morphRef} exiting={exiting}
+        inert={sourceCandidates !== null}
         className={`lc-attempt-modal lc-library-holds lc-library-menu lc-annotate-dialog ${isWeb ? "lc-library-web" : "lc-library-annotate"}${pickingRecovery ? " lc-library-tall" : ""}`}
         titleId="lc-annotate-dialog-title"
         title={isLeave ? "Leave document?" : pickingRecovery ? "Retained copies" : section === "open" && !pickingRecent ? "Open" : section === "new" ? "New" : section === "export" ? "Export" : section === "sets" ? "Annotations" : pickingRecent ? "Recents" : isWeb ? "Web" : "Annotate"}
@@ -373,6 +476,14 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           {pickingRecent && <LibrarySearch value={libraryQuery} onChange={setLibraryQuery} label={isWeb ? "Search saved pages" : "Search saved documents"} disabled={locked} filters={libraryFilters} onToggleFilter={toggleFilter} kinds={isWeb ? [] : ["pdf","markdown","epub"]} showTrash={showTrash} onTrashChange={setShowTrash}/>}
           {pickingRecent && !(showTrash ? [] : visibleDocs).some(matchesQuery) && !archived.some(matchesQuery) && <p className="lc-muted">No matching saved items.</p>}
           {error && <div className="lc-warning">{error}</div>}
+          <DialogPresence>{(sourceChecking || sourceNotice) && <motion.p key="source-notice" className="lc-muted lc-doc-source-notice" role="status"
+            initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
+            {sourceChecking ? sourceProgress : sourceNotice}
+          </motion.p>}</DialogPresence>
+          <DialogPresence>{!sourceCandidates && sourceFailures.length > 0 && <motion.ul key="source-failures" className="lc-warning lc-doc-source-failures"
+            initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
+            {sourceFailures.map((failure, index) => <li key={index}>{failure}</li>)}
+          </motion.ul>}</DialogPresence>
 
           {saveTitle !== null ? (
             <div className="lc-settings-choice">
@@ -587,6 +698,11 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
         <div className="lc-settings-foot lc-dialog-foot">
           {!isLeave && entry?.onRefreshHub && <HubLibraryRefresh onRefresh={entry.onRefreshHub} disabled={locked}
             className="lc-library-footer-pull" resultsContainer={bodyRef}><MenuRowLabel label="Pull" /></HubLibraryRefresh>}
+          <DialogPresence>{pickingRecent && sourceDocs.length > 0 && <motion.button key="check-sources" type="button"
+            className="lc-secondary lc-dialog-action lc-doc-source-bulk" disabled={locked} onClick={() => void checkSources()}
+            initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
+            Check for newer versions
+          </motion.button>}</DialogPresence>
           <span className="lc-dialog-foot-spacer" aria-hidden="true" />
           {(section !== "main" || pickingRecent || pickingSnapshots || pickingRecovery || newTitle !== null || saveTitle !== null) && (
             <button
@@ -611,6 +727,28 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           </button>
         </div>
       </DialogFrame>
+      <DialogPresence>{sourceCandidates !== null && <DialogBackdrop className="lc-modal-backdrop" key="source-updates" role="presentation"
+        onClick={event => { if (event.target === event.currentTarget && !sourceUpdating) setSourceCandidates(null); }}>
+        <DialogFrame className="lc-modal lc-doc-source-updates" titleId={sourceTitleId} title="Newer versions available" subtitle="Choose the documents to update"
+          ariaLabel="Newer versions available" shape="blocky" icon={<DocumentIcon />} onClose={() => setSourceCandidates(null)} closeDisabled={sourceUpdating}>
+          <div className="lc-dialog-body lc-scroll-pane">
+            <div className="lc-doc-source-update-list">
+              {sourceCandidates.map(row => <label className="lc-doc-source-update-row" key={row.doc.id}>
+                <input type="checkbox" checked={sourceSelected.includes(row.doc.id)} disabled={sourceUpdating}
+                  onChange={event => setSourceSelected(current => event.target.checked ? [...current, row.doc.id] : current.filter(id => id !== row.doc.id))} />
+                <span>{annotateDocLabel(row.doc)}</span>
+              </label>)}
+            </div>
+            <DialogPresence>{sourceUpdating && <motion.p key="source-update-progress" className="lc-muted" role="status"
+              initial={reducedMotion ? false : { opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>{sourceProgress}</motion.p>}</DialogPresence>
+            {sourceFailures.length > 0 && <ul className="lc-warning">{sourceFailures.map((failure, index) => <li key={index}>{failure}</li>)}</ul>}
+          </div>
+          <div className="lc-modal-actions lc-settings-foot lc-dialog-foot">
+            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating} onClick={() => setSourceCandidates(null)}>Cancel</button>
+            <button type="button" className="lc-secondary lc-dialog-action" disabled={sourceUpdating || !sourceSelected.length} onClick={() => void updateSources()}>Update selected</button>
+          </div>
+        </DialogFrame>
+      </DialogBackdrop>}</DialogPresence>
       <DialogPresence>{pendingId && (
         <ConfirmDialog
           title="Remove this document?"
