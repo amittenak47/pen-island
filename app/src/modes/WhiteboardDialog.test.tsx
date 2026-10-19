@@ -217,7 +217,7 @@ describe("WhiteboardDialog", () => {
       // A notebook has no file to link: Sync alone, where "synced" used to sit.
       expect(view.host.querySelector(".lc-whiteboard-context-sync")).toBeNull();
       const sync = view.host.querySelectorAll<HTMLButtonElement>(".lc-whiteboard-context .lc-sync-link-pair button");
-      expect([...sync].map(b => b.textContent)).toEqual(["Sync"]);
+      expect([...sync].map(b => b.className.match(/lc-sync-link-(sync|link)/)?.[1])).toEqual(["sync"]);
       act(() => sync[0].click());
       expect(onSync).toHaveBeenCalledOnce();
       expect(view.host.querySelector(".lc-dialog-foot")?.textContent).toBe("Cancel");

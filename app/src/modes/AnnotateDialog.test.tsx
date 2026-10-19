@@ -230,7 +230,7 @@ describe("AnnotateDialog", () => {
     const view=mount({allowSave:true,snapshotKey:"d1",syncPair:pair});
     expect(view.host.querySelector('.lc-annotate-context-sync')).toBeNull();
     const halves=view.host.querySelectorAll<HTMLButtonElement>('.lc-annotate-context .lc-sync-link-pair button');
-    expect([...halves].map(b=>b.textContent)).toEqual(["Sync","Link"]);
+    expect([...halves].map(b=>b.className.match(/lc-sync-link-(sync|link)/)?.[1])).toEqual(["sync","link"]);
     act(()=>halves[0].click());
     expect(onSync).toHaveBeenCalledOnce();
     expect(view.host.textContent).not.toContain("Pull");

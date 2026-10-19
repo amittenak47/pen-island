@@ -11,6 +11,7 @@ import type { DocIndexStatus } from "../api/client";
 import { usePadHubStatus } from "../util/padHubStatus";
 import { MorphBar } from "./MorphBar";
 import { HubStatusDot } from "./HubStatusDot";
+import { DocLinkHalf, HALF_HOVER_EVENT, SyncDot, type DocLinkState, type SyncDotState } from "./DocSyncLinkPair";
 
 export type DocIndexChipStatus = "idle" | "indexing" | "indexed" | "error";
 
@@ -182,6 +183,11 @@ export interface DocIndexChipProps {
   walkNotice?: string | null;
   /** See DocIndexNote. */
   indexNote?: DocIndexNote | null;
+  /**
+   * The open document's linked file. With Sync, the tab shows the pair
+   * [● | 🔗] (as the menus do); absent for kinds with no file.
+   */
+  link?: DocLinkState | null;
   /** Resting pad sync, for tabs the walk is not currently walking. */
   padSync?: "synced" | "not-synced" | null;
   /**
@@ -213,6 +219,7 @@ export function DocIndexChip({
   walkMessage,
   walkNotice,
   indexNote,
+  link,
   padSync,
   onSync,
   viewportWait,
@@ -223,6 +230,17 @@ export function DocIndexChip({
   const [syncHover, setSyncHover] = useState(false);
   const syncLeaveRef = useRef(0);
   useEffect(() => () => window.clearTimeout(syncLeaveRef.current), []);
+  // The pair's other half was entered: its notification replaces this one.
+  const hoverTokenRef = useRef<object>({});
+  useEffect(() => {
+    const other = (event: Event) => {
+      if ((event as CustomEvent).detail === hoverTokenRef.current) return;
+      window.clearTimeout(syncLeaveRef.current);
+      setSyncHover(false);
+    };
+    window.addEventListener(HALF_HOVER_EVENT, other);
+    return () => window.removeEventListener(HALF_HOVER_EVENT, other);
+  }, []);
   const { status: hubStatus } = usePadHubStatus();
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const popRef = useRef<HTMLDivElement | null>(null);
@@ -323,12 +341,19 @@ export function DocIndexChip({
   const syncPresence = usePresence(Boolean(onSync) && syncShown);
   const syncPlaced = usePopPlacement(buttonRef, syncPopRef, syncPresence.mounted, `${syncText}|${walkNotice}|${indexText}`);
   const working = !walkError && walkWaiting !== "conflict" && (walking || indexRing);
-  const workProgress = walking ? walkProgress : status === "indexing" ? indexProgress : embedProgress;
-  const syncBtn = onSync ? (
+  /*
+   * The dot says it in colour: green synced, yellow syncing or waiting on
+   * the reader (a conflict), red not synced, failed or the hub offline.
+   */
+  const dotState: SyncDotState = walkError ? "unsynced"
+    : walkWaiting === "conflict" ? "waiting"
+      : working ? "syncing"
+        : offline || restPad !== "synced" ? "unsynced" : "synced";
+  const syncButton = onSync ? (
     <button
       ref={buttonRef}
       type="button"
-      className={`lc-doc-index-sync${walkError ? " is-bad" : ""}${walkWaiting === "conflict" ? " is-attention" : ""}`}
+      className={`lc-doc-index-sync lc-sync-link-sync${walkError ? " is-bad" : ""}${walkWaiting === "conflict" ? " is-attention" : ""}`}
       aria-label={walkError ? "Sync failed" : "Hub sync"}
       aria-busy={working}
       aria-expanded={syncOpen || open}
@@ -338,6 +363,7 @@ export function DocIndexChip({
       onPointerEnter={(event) => {
         if (event.pointerType === "touch") return;
         window.clearTimeout(syncLeaveRef.current);
+        window.dispatchEvent(new CustomEvent(HALF_HOVER_EVENT, { detail: hoverTokenRef.current }));
         setOpen(false);
         setSyncHover(true);
       }}
@@ -368,9 +394,15 @@ export function DocIndexChip({
         if (syncStartedRef.current) onSync();
       }}
     >
-      {walkError ? <span role="img" aria-label="Sync error">!</span> : working ? <WorkRing progress={workProgress ?? null} /> : <HubStatusDot />}
-      {walkError ? "Sync failed" : "Sync"}
+      <SyncDot state={dotState} />
     </button>
+  ) : null;
+  // [● | 🔗]: two small squares in one outline, like the menus' pair.
+  const syncBtn = syncButton ? (
+    <span className={`lc-sync-link-pair is-tab${link ? "" : " is-sync-only"}`} role="group" aria-label="Sync and linked file">
+      <span className="lc-sync-link-half">{syncButton}</span>
+      {link && <DocLinkHalf link={link} />}
+    </span>
   ) : null;
   if (!onSync && walking && walkError) {
     return withChipSync(

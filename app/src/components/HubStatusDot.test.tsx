@@ -53,8 +53,16 @@ describe("desktop hub status dot", () => {
     shared.status = "offline";
     act(() => root.render(<DocIndexChip status="idle" meta={null} error={null} padSync="synced" onSync={() => {}} />));
     expect(host.querySelector(".lc-doc-index-chip")).toBeNull();
-    expect(host.querySelector(".lc-doc-index-sync")?.textContent).toBe("Sync");
-    expect(host.querySelector('.lc-doc-index-sync [aria-label="Desktop hub offline"]')).not.toBeNull();
+    // With Sync, the tab's dot is the book's sync colour, and an offline hub
+    // makes it red even on a synced book: nothing can sync. The words are in
+    // Sync's notification.
+    expect(host.querySelector(".lc-doc-index-sync .lc-sync-link-dot")?.getAttribute("data-state")).toBe("unsynced");
+    expect(host.querySelector(".lc-doc-index-sync .lc-hub-status-dot")).toBeNull();
+    shared.status = "online";
+    act(() => root.render(<DocIndexChip status="idle" meta={null} error={null} padSync="synced" onSync={() => {}} />));
+    expect(host.querySelector(".lc-doc-index-sync .lc-sync-link-dot")?.getAttribute("data-state")).toBe("synced");
+    shared.status = "offline";
+    act(() => root.render(<DocIndexChip status="idle" meta={null} error={null} padSync="synced" onSync={() => {}} />));
     // One dot per tab: with a Sync button it lives inside the lone box.
     expect(host.querySelector('.lc-doc-index-chip [aria-label="Desktop hub offline"]')).toBeNull();
     act(() => root.render(<DocIndexChip status="idle" meta={null} error={null} padSync="synced" />));

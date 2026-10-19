@@ -371,7 +371,7 @@ it("checks a source on demand, shows work while checking, and reports same and m
   await clickLink();
   expect(mocks.sourceCheck).toHaveBeenCalledWith("first");
   expect((await linkHalf()).getAttribute("aria-busy")).toBe("true");
-  expect((await linkHalf()).querySelector(".lc-doc-index-ring")).not.toBeNull();
+  expect((await linkHalf()).classList.contains("is-working")).toBe(true);
   await act(async () => { checked.resolve({ status: "same" }); });
   expect(mocks.shell.setNotice).toHaveBeenCalledWith("Up to date");
   mocks.sourceCheck.mockResolvedValueOnce({ status: "missing" }); await clickLink();
@@ -443,7 +443,8 @@ it("keeps the newer dot after Not now and updates the same open tab before its s
   expect(document.querySelector('[role="dialog"][aria-label="Newer version available"]')).not.toBeNull();
   expect(document.body.textContent).toContain("“First.md” has changed on this device since you opened it.");
   await click("Not now");
-  expect((await linkHalf()).querySelector(".lc-library-sync-dot")).not.toBeNull();
+  // Yellow: a newer version is waiting.
+  expect((await linkHalf()).classList.contains("is-attention")).toBe(true);
   expect(mocks.sourceUpdate).not.toHaveBeenCalled();
   await clickLink();
   mocks.sourceUpdate.mockImplementationOnce(async (id: string) => {
@@ -468,7 +469,7 @@ it("keeps the newer dot after Not now and updates the same open tab before its s
   expect(mocks.paper!.source).toBe("# Revised");
   expect(mocks.shell.patchTab).toHaveBeenCalledWith(tab.id, expect.objectContaining({ docId: "first", hash: content.ref.hash }));
   expect(mocks.shell.setNotice).toHaveBeenCalledWith("Updated to the newer version. 1 annotations couldn't be placed and stay in the previous version (Recents → retained copies).");
-  expect((await linkHalf()).querySelector(".lc-library-sync-dot")).toBeNull();
+  expect((await linkHalf()).classList.contains("is-linked")).toBe(true);
 });
 
 it("waits for the matching document to be active before presenting a completed background check", async () => {

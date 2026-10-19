@@ -64,7 +64,7 @@ import { collectExploreGraph } from "./util/exploreGraphExport";
 import { HubSyncControl, padTabSync, tabOffersHubSync } from "./components/HubSyncControl";
 import { LibrarySyncControl } from "./components/LibrarySyncControl";
 import { DocSourceLinkDialog } from "./components/DocSourceLinkDialog";
-import type { DocSyncLinkPairProps } from "./components/DocSyncLinkPair";
+import type { DocLinkState, DocSyncLinkPairProps } from "./components/DocSyncLinkPair";
 import { getDocSource, setDocSource, type DocSourceRef } from "./util/docSourceStore";
 import { checkDocSource, justLinkDocSource, linkDocSource, unlinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
 import { nativeSourcePickerAvailable, pickDocumentSource } from "./util/docSourceNative";
@@ -9251,30 +9251,41 @@ export const Workspace = memo(function Workspace({
     const offered = tabOffersHubSync(tab.kind) && (tab.kind !== "practice" || !!problem && !isLocalPad(problem)) && !isFootnoteBoardTab(tab);
     if (!offered) return null;
     const stage = walkReport?.stage ?? null;
+    const padSync = padTabSync({
+      walkStage: stage, padEditSeq, hubHint,
+      hasDocument: Boolean(indexInputsRef.current),
+      hasPad: Boolean(annotateDocId || whiteboardNotebookId),
+    }) ?? "not-synced";
     return {
       syncLine: docSyncLine({
         walkStage: stage, walkJob: walkReport?.job ?? null, walkError: walkReport?.error ?? null,
-        walkWaiting: walkReport?.waiting ?? null, walkMessage: walkReport?.message ?? null,
-        padSync: padTabSync({
-          walkStage: stage, padEditSeq, hubHint,
-          hasDocument: Boolean(indexInputsRef.current),
-          hasPad: Boolean(annotateDocId || whiteboardNotebookId),
-        }) ?? "not-synced",
+        walkWaiting: walkReport?.waiting ?? null, walkMessage: walkReport?.message ?? null, padSync,
       }),
       syncing: stage != null && stage !== "idle" && stage !== "synced" && !walkReport?.error,
+      synced: !walkReport?.error && (stage === "synced" || padSync === "synced"),
       syncFailed: Boolean(walkReport?.error),
       onSync: onHubSync,
       link,
     };
   };
-  const annotateSyncPair = menuSyncPair(annotateDocId && entryKind !== "web" && nativeSourcePickerAvailable() ? {
-    name: getDocSource(annotateDocId)?.name ?? null,
-    checking: sourceChecking,
-    newer: Boolean(sourceNewer[annotateDocId]),
-    onCheck: () => void checkSourceFor(annotateDocId, true),
-    onLink: () => void linkSourceFor(annotateDocId),
-    onUnlink: () => unlinkSourceFor(annotateDocId),
-  } : null);
+  /*
+   * The open document's linked file, for the Link half in the tab and in the
+   * menu. Kept stable between renders: it rides the shell chrome, which is
+   * only republished when something in it changed.
+   */
+  const linkedSourceName = annotateDocId ? getDocSource(annotateDocId)?.name ?? null : null;
+  const linkNewer = annotateDocId ? Boolean(sourceNewer[annotateDocId]) : false;
+  const annotateLink = useMemo<DocLinkState | null>(() =>
+    annotateDocId && annotateSource && annotateSource.docType !== "web" && !footnoteBoardSession && nativeSourcePickerAvailable() ? {
+      name: linkedSourceName,
+      checking: sourceChecking,
+      newer: linkNewer,
+      onCheck: () => void checkSourceFor(annotateDocId, true),
+      onLink: () => void linkSourceFor(annotateDocId),
+      onUnlink: () => unlinkSourceFor(annotateDocId),
+    } : null,
+  [annotateDocId, annotateSource, footnoteBoardSession, linkedSourceName, sourceChecking, linkNewer, checkSourceFor, linkSourceFor, unlinkSourceFor]);
+  const annotateSyncPair = menuSyncPair(entryKind !== "web" ? annotateLink : null);
 
   /*
    * The prompt belongs to one chip. Switching away answers it by walking off,
@@ -9688,6 +9699,7 @@ export const Workspace = memo(function Workspace({
         walkMessage: walkReport?.message ?? null,
         walkNotice: walkReport?.notice ?? null,
         indexNote: docIndexNote,
+        link: annotateLink,
         walkWaiting: walkReport?.waiting ?? null,
         padSync: padTabSync({
           walkStage: walkReport?.stage ?? null,
@@ -9721,6 +9733,7 @@ export const Workspace = memo(function Workspace({
     docIndexMeta,
     docIndexNote,
     docIndexStatus,
+    annotateLink,
     docIndexProgress,
     docEmbedProgress,
     docEmbedEta,

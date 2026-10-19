@@ -16,6 +16,7 @@ function render(props: Partial<DocSyncLinkPairProps> = {}) {
   act(() => root.render(<DocSyncLinkPair syncLine="Not synced" syncing={false} onSync={onSync} link={link()} {...props} />));
 }
 const halves = () => [...host.querySelectorAll<HTMLButtonElement>(".lc-sync-link-pair button")];
+const kinds = () => halves().map(b => b.className.match(/lc-sync-link-(sync|link)/)?.[1]);
 const tip = () => document.querySelector<HTMLElement>(".lc-sync-link-tip");
 
 beforeEach(() => {
@@ -31,9 +32,13 @@ beforeEach(() => {
 });
 afterEach(() => { act(() => root.unmount()); document.body.textContent = ""; vi.restoreAllMocks(); vi.unstubAllGlobals(); vi.useRealTimers(); });
 
-it("is one [Sync | Link] pair; Sync runs the tab's Sync and Link checks the linked file", () => {
+it("is one [● | 🔗] pair of icons; Sync runs the tab's Sync and Link checks the linked file", () => {
   render();
-  expect(halves().map(b => b.textContent)).toEqual(["Sync", "Link"]);
+  expect(kinds()).toEqual(["sync", "link"]);
+  // Icons only: the words are in the labels and the notifications.
+  expect(halves().map(b => b.textContent)).toEqual(["", ""]);
+  expect(halves()[0].querySelector(".lc-sync-link-dot")).not.toBeNull();
+  expect(halves()[0].getAttribute("aria-label")).toBe("Sync. Not synced");
   act(() => halves()[0].click());
   expect(onSync).toHaveBeenCalledOnce();
   act(() => halves()[1].click());
@@ -41,7 +46,7 @@ it("is one [Sync | Link] pair; Sync runs the tab's Sync and Link checks the link
   expect(onLink).not.toHaveBeenCalled();
 });
 
-it("links an unlinked document on tap, with the icon dimmed", () => {
+it("links an unlinked document on tap", () => {
   render({ link: link({ name: null }) });
   expect(halves()[1].classList.contains("is-unlinked")).toBe(true);
   act(() => halves()[1].click());
@@ -70,7 +75,6 @@ it("says the desktop app is offline under Sync when the hub is", () => {
 it("does not start a second walk while one runs", () => {
   render({ syncing: true, syncLine: "Pad…" });
   expect(halves()[0].getAttribute("aria-busy")).toBe("true");
-  expect(halves()[0].querySelector(".lc-doc-index-ring")).not.toBeNull();
   act(() => halves()[0].click());
   expect(onSync).not.toHaveBeenCalled();
 });
@@ -94,16 +98,27 @@ it("opens the linked file hold menu and runs each action", async () => {
   }
 });
 
-it("marks a newer version with a dot, and shows a working ring while checking", () => {
-  render({ link: link({ newer: true }) });
-  expect(halves()[1].querySelector(".lc-library-sync-dot")).not.toBeNull();
-  render({ link: link({ checking: true }) });
-  expect(halves()[1].querySelector(".lc-doc-index-ring")).not.toBeNull();
+it("colours Sync green when synced, yellow while syncing, red when not synced, failed or offline", () => {
+  const dot = () => halves()[0].querySelector(".lc-sync-link-dot")?.getAttribute("data-state");
+  render({ synced: true }); expect(dot()).toBe("synced");
+  render({ syncing: true }); expect(dot()).toBe("syncing");
+  render({ synced: false }); expect(dot()).toBe("unsynced");
+  render({ synced: true, syncFailed: true }); expect(dot()).toBe("unsynced");
+  hub.status = "offline";
+  render({ synced: true }); expect(dot()).toBe("unsynced");
+});
+
+it("colours Link green when linked, yellow for a newer version or a check, red when not linked", () => {
+  const state = () => ["linked", "attention", "unlinked"].find(name => halves()[1].classList.contains(`is-${name}`));
+  render(); expect(state()).toBe("linked");
+  render({ link: link({ newer: true }) }); expect(state()).toBe("attention");
+  render({ link: link({ checking: true }) }); expect(state()).toBe("attention");
   expect(halves()[1].disabled).toBe(true);
+  render({ link: link({ name: null }) }); expect(state()).toBe("unlinked");
 });
 
 it("is Sync alone for a kind with no file", () => {
   render({ link: null });
-  expect(halves().map(b => b.textContent)).toEqual(["Sync"]);
+  expect(kinds()).toEqual(["sync"]);
   expect(host.querySelector(".lc-sync-link-pair")?.classList.contains("is-sync-only")).toBe(true);
 });

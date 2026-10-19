@@ -23858,6 +23858,25 @@ html[data-corners="rounded"] {
 }
 
 /*
+ * The tab's [● | 🔗]: the menus' pair, smaller than the old Sync box, and
+ * outlined in the tab's own colour as that box was.
+ */
+.lc-header .lc-doc-index-chip-row > .lc-sync-link-pair.is-tab {
+  --lc-dialog-mode: var(--lc-tab-mode, var(--accent));
+  --lc-dialog-edge: 1px;
+  --lc-dialog-line: color-mix(in srgb, var(--lc-tab-mode, var(--accent)) 55%, transparent);
+  --lc-dialog-control-radius: max(4px, var(--lc-r-round));
+}
+.lc-header .lc-sync-link-pair.is-tab :is(.lc-sync-link-sync, .lc-sync-link-link) {
+  min-width: 22px; height: 20px; min-height: 20px; padding: 0 5px;
+}
+.lc-mobile .lc-header .lc-sync-link-pair.is-tab :is(.lc-sync-link-sync, .lc-sync-link-link) {
+  min-width: 26px; height: 24px; min-height: 24px; padding: 0 6px;
+}
+.lc-header .lc-sync-link-pair.is-tab .lc-sync-link-dot { width: 8px; height: 8px; }
+.lc-header .lc-sync-link-pair.is-tab .lc-sync-link-link .lc-icon-svg { width: 12px; height: 12px; }
+
+/*
  * The file menu starts with a hairline on the side facing the tabs, as Home
  * ends with one: the group reads as its own block. The first button in
  * document order is the one beside the tabs in either hand.
