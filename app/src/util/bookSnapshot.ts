@@ -117,7 +117,8 @@ function readCapture(tx: IDBTransaction, owner: BookIdentity, done: (capture: Bo
 }
 
 function retainedRecord(capture: BookCapture, id: string, source: string, hubRecordHash?: string) {
-  return { id, type: "record", kind: capture.kind, bookId: capture.id, provenance: hubRecordHash ? { source, hubRecordHash } : { source },
+  return { id, type: "record", kind: capture.kind, bookId: capture.id,
+    provenance: { source, retainedAt: Date.now(), ...(hubRecordHash ? { hubRecordHash } : {}) },
     record: { meta: capture.metadata ?? { kind: capture.kind, id: capture.id }, payload: capture.payload ?? {},
       children: capture.children, ink: capture.pages, wire: capture.record } };
 }

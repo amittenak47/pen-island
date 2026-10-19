@@ -123,7 +123,7 @@ export async function restorePadSnapshotLocally(parent: SnapshotParent, snap: Pa
     if (before || previousInk.length || Object.keys(previousChildren).length) {
       const id = `snapshot-restore:${newBookToken()}`;
       ctx.tx.objectStore(STORE_SYNC_RECOVERY).put({ id, type: "conflict", kind: parent.kind, bookId: parent.id,
-        provenance: { source: "snapshot-restore", snapshotId: snap.snapshotId ?? null },
+        provenance: { source: "snapshot-restore", snapshotId: snap.snapshotId ?? null, retainedAt: Date.now() },
         ...(ctx.metadata && before && prepared.capture.record ? { record: { meta: ctx.metadata, payload: before,
           children: Object.fromEntries(Object.entries(previousChildren).map(([key, value]) => [key.slice(`fnwb:${parent.id}:`.length), value])),
           ink: previousInk, wire: prepared.capture.record } } : {}),

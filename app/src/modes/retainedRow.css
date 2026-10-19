@@ -1,0 +1,37 @@
+/* The numbered versions and the export, between a row's padlock and trash. */
+.lc-library-menu .lc-version-pick,
+.lc-library-menu .lc-hold-reveal.lc-version-share {
+  flex-shrink: 0; display: inline-flex; align-items: center; justify-content: center; gap: 3px;
+  min-width: 30px; min-height: 32px; height: 32px; padding: 0 5px; align-self: center;
+  border: 0; border-radius: max(6px, var(--lc-r-round)); background: transparent; color: var(--hint);
+  font: inherit; font-size: 11px; cursor: pointer; transition: color 160ms ease, background-color 160ms ease;
+}
+.lc-library-menu .lc-version-share { width: 30px; padding: 0; }
+.lc-library-menu .lc-version-share:not([data-filling]) .lc-hold-reveal-fill { visibility: hidden; }
+.lc-library-menu .lc-version-share .lc-hold-reveal-label { position: static; display: inline-flex; align-items: center; justify-content: center; }
+.lc-library-menu :is(.lc-version-pick, .lc-version-share):hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.lc-library-menu .lc-version-pick b { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Showing a copy: the row's colour says it is not the current version. */
+.lc-library-menu .lc-version-pick.is-picked { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lc-library-menu .lc-version-pick.is-trashed { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
+.lc-scratch-load-entry.is-copy .lc-scratch-load-hold strong { color: var(--accent); }
+.lc-scratch-load-entry.is-trashed-copy .lc-scratch-load-hold strong,
+.lc-scratch-load-entry.is-trashed-copy .lc-version-line { color: var(--bad); }
+.lc-version-line, .lc-library-size { display: block; font-size: 11px; }
+
+.lc-doc-sync-pop.lc-version-menu { z-index: 130; width: 260px; max-width: calc(100vw - 16px); pointer-events: auto; }
+.lc-version-menu button { display: flex; align-items: center; gap: 10px; text-align: left; }
+.lc-version-menu .lc-version-num { flex: 0 0 34px; font-weight: 600; font-variant-numeric: tabular-nums; color: var(--hint); }
+.lc-version-menu .lc-version-copy { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.lc-version-menu .lc-version-copy strong { font-size: 12px; font-weight: 600; }
+.lc-version-menu .lc-version-copy small { font-size: 11px; color: var(--hint); overflow-wrap: anywhere; }
+.lc-version-menu button.is-current { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.lc-version-menu button.is-trashed :is(.lc-version-num, strong, small) { color: var(--bad); }
+
+@media (pointer: coarse) {
+  .lc-library-menu .lc-version-pick,
+  .lc-library-menu .lc-hold-reveal.lc-version-share { min-width: 40px; height: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .lc-library-menu :is(.lc-version-pick, .lc-version-share) { transition: none; }
+}

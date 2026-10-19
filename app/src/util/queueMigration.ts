@@ -27,6 +27,8 @@ export interface RecoveryCopy {
   claimedHash?:string; provenance:Record<string,unknown>;
   record?:{meta:BookMeta;payload:Record<string,unknown>;children?:Record<string,unknown>;wire?:Record<string,unknown>;ink?:import("./inkPageStore").InkPageRecord[]};
   bytes?:unknown; dependencies?:unknown; content?:unknown;
+  /** Trashed on its own, on this device (see retainedVersions). Never part of its identity. */
+  trashedAt?:number;
 }
 type ObjectValue = Record<string,unknown>;
 interface LegacyJob extends ObjectValue { id:string;op:string;enqueuedAt?:number;seq?:number;kind?:PadKind;padId?:string;body?:ObjectValue;hash?:string;bytes?:unknown }
