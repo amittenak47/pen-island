@@ -7,10 +7,15 @@
   font: inherit; font-size: 11px; cursor: pointer; transition: color 160ms ease, background-color 160ms ease;
 }
 .lc-library-menu .lc-version-share { width: 30px; padding: 0; }
+/* A fixed width, whatever the count: every row's controls stay in their columns. */
+.lc-library-menu .lc-version-pick { position: relative; width: 42px; min-width: 42px; padding: 0 4px; }
+.lc-library-menu .lc-version-bang { position: absolute; top: 1px; right: 0; font-size: 9px; font-weight: 700; line-height: 1; }
 .lc-library-menu .lc-version-share:not([data-filling]) .lc-hold-reveal-fill { visibility: hidden; }
 .lc-library-menu .lc-version-share .lc-hold-reveal-label { position: static; display: inline-flex; align-items: center; justify-content: center; }
 .lc-library-menu :is(.lc-version-pick, .lc-version-share):hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); }
 .lc-library-menu .lc-version-pick b { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* No copies: the same box, quieter, so the columns stay put. */
+.lc-library-menu .lc-version-pick.is-empty:disabled { opacity: .45; cursor: default; }
 /* Showing a copy: the row's colour says it is not the current version. */
 .lc-library-menu .lc-version-pick.is-picked { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
 .lc-library-menu .lc-version-pick.is-trashed { color: var(--bad); background: color-mix(in srgb, var(--bad) 10%, transparent); }
@@ -29,8 +34,8 @@
 .lc-version-menu button.is-trashed :is(.lc-version-num, strong, small) { color: var(--bad); }
 
 @media (pointer: coarse) {
-  .lc-library-menu .lc-version-pick,
-  .lc-library-menu .lc-hold-reveal.lc-version-share { min-width: 40px; height: 40px; }
+  .lc-library-menu .lc-version-pick { width: 48px; min-width: 48px; height: 40px; }
+  .lc-library-menu .lc-hold-reveal.lc-version-share { width: 40px; min-width: 40px; height: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lc-library-menu :is(.lc-version-pick, .lc-version-share) { transition: none; }
