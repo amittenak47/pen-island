@@ -76,9 +76,11 @@ export function WebDocument({
       if (localFileRef.current || !href || href.startsWith("#") || href.startsWith("mailto:")) return;
       onNavigateRef.current?.(href);
     };
+    // A middle click on a link would open it in a new window: links open
+    // here, in this tab, with a plain click only.
     const onAuxClick = (event: MouseEvent) => {
       const anchor = event.target instanceof Element ? event.target.closest("a") : null;
-      if (anchor && (localFileRef.current || anchor.getAttribute("href")?.startsWith("#"))) event.preventDefault();
+      if (anchor) event.preventDefault();
     };
     node.addEventListener("click", onClick);
     node.addEventListener("auxclick", onAuxClick);

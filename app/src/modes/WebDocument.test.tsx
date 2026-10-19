@@ -37,6 +37,19 @@ it.each([true, false])("external links browse only address documents (local file
   act(() => root.unmount());
 });
 
+it("a middle click on a link opens nothing new: no window, no navigation", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  const navigate = vi.fn();
+  await act(async () => root.render(<WebDocument html='<a href="https://example.com/next">Next</a>' url="https://example.com" onNavigate={navigate} />));
+  const event = new MouseEvent("auxclick", { bubbles: true, cancelable: true, button: 1 });
+  host.querySelector("a")!.dispatchEvent(event);
+  expect(event.defaultPrevented).toBe(true);
+  expect(navigate).not.toHaveBeenCalled();
+  act(() => root.unmount());
+});
+
 it("waits for a real column before reporting its height", async () => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   let resized: (() => void) | null = null;
