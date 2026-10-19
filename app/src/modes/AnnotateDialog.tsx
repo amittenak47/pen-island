@@ -17,11 +17,10 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { LIBRARY_HOLD_MS } from "../util/gesture";
 import { HoldButton } from "../components/HoldButton";
-import { HubStatusDot } from "../components/HubStatusDot";
+import { DocSyncLinkPair, type DocSyncLinkPairProps } from "../components/DocSyncLinkPair";
 import { DialogFrame } from "../components/DialogFrame";
 import "./annotateDialog.css";
 import { ConfirmDialog } from "../components/ConfirmDialog";
-import { HubLibraryRefresh, type HubLibraryRefreshAction } from "../components/HubLibraryRefresh";
 import { listDocSources } from "../util/docSourceStore";
 import { checkDocSource, linkDocSource, justLinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT } from "../util/docSourceUpdate";
 import { nativeSourcePickerAvailable, pickSourceFolder, listSourceFolder } from "../util/docSourceNative";
@@ -102,7 +101,8 @@ interface LeaveProps {
 }
 
 interface EntryProps {
-  onRefreshHub?: HubLibraryRefreshAction;
+  /** [Sync | Link] beside the open document's name: the tab's Sync and its linked file. */
+  syncPair?: DocSyncLinkPairProps | null;
   onNotice?: (message: string) => void;
   mode: "entry";
   /** Wording and choices. Defaults to the document library. */
@@ -276,7 +276,6 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
   const contextDoc = contextCandidate && (contextCandidate.docType === "web") === isWeb ? contextCandidate : undefined;
   const hasContext = isLeave || (allowSave && ((entry?.docType ?? contextDoc?.docType) === "web") === isWeb);
   const contextName = hasContext ? props.docName?.trim() || contextDoc?.name || "" : "";
-  const syncStatus = contextDoc ? (contextDoc.hubAckUpdatedAt === contextDoc.updatedAt && !props.dirty ? "synced" : "not synced") : null;
   const visibleDocs = docs.filter((doc) =>
     (isWeb ? doc.docType === "web" : doc.docType !== "web") &&
     (section !== "sets" || (currentDoc && doc.hash === currentDoc.hash)),
@@ -577,7 +576,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
       >
         {contextName && <div className="lc-dialog-context"><div className="lc-annotate-context">
           <DocumentIcon web={isWeb} /><span className="lc-annotate-context-title" title={contextName}>{contextName}</span>
-          {syncStatus && <span className="lc-annotate-context-sync"><HubStatusDot />{syncStatus}</span>}
+          {entry?.syncPair && <DocSyncLinkPair {...entry.syncPair} disabled={locked || entry.syncPair.disabled} />}
         </div></div>}
         <div ref={bodyRef} className="lc-settings-body lc-dialog-body lc-scroll-pane">
           {(saveTitle !== null || newTitle !== null) && <p className="lc-muted">
@@ -808,8 +807,6 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
         </div>
 
         <div className="lc-settings-foot lc-dialog-foot">
-          {!isLeave && entry?.onRefreshHub && <HubLibraryRefresh onRefresh={entry.onRefreshHub} disabled={locked}
-            className="lc-library-footer-pull" resultsContainer={bodyRef}><MenuRowLabel label="Pull" /></HubLibraryRefresh>}
           <DialogPresence>{pickingRecent && sourceDocs.length > 0 && <motion.button key="check-sources" type="button"
             className="lc-secondary lc-dialog-action lc-doc-source-bulk" disabled={locked} onClick={() => void checkSources()}
             initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>

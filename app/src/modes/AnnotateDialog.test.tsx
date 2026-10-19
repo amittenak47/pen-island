@@ -224,19 +224,25 @@ describe("AnnotateDialog", () => {
     } finally {view.unmount();}
   });
 
-  it("uses real sync state and omits document context from a Web entry", () => {
-    live.rows[0].hubAckUpdatedAt=live.rows[0].updatedAt;
-    const synced=mount({allowSave:true,snapshotKey:"d1"});
-    expect(synced.host.querySelector('.lc-annotate-context-sync')?.textContent).toBe("synced");synced.unmount();
-    const dirty=mount({allowSave:true,snapshotKey:"d1",dirty:true});
-    expect(dirty.host.querySelector('.lc-annotate-context-sync')?.textContent).toBe("not synced");dirty.unmount();
-    const web=mount({kind:"web",allowSave:true,snapshotKey:"d1",docType:"pdf",docName:"Wrong PDF"});
+  it("puts the tab's [Sync | Link] beside the document name, and no Pull or context on a Web entry", async () => {
+    const onSync=vi.fn(), onCheck=vi.fn();
+    const pair={syncLine:"Not synced",syncing:false,onSync,link:{name:"Lecture.pdf",checking:false,newer:false,onCheck,onLink:vi.fn(),onUnlink:vi.fn()}};
+    const view=mount({allowSave:true,snapshotKey:"d1",syncPair:pair});
+    expect(view.host.querySelector('.lc-annotate-context-sync')).toBeNull();
+    const halves=view.host.querySelectorAll<HTMLButtonElement>('.lc-annotate-context .lc-sync-link-pair button');
+    expect([...halves].map(b=>b.textContent)).toEqual(["Sync","Link"]);
+    act(()=>halves[0].click());
+    expect(onSync).toHaveBeenCalledOnce();
+    expect(view.host.textContent).not.toContain("Pull");
+    view.unmount();
+    const web=mount({kind:"web",allowSave:true,snapshotKey:"d1",docType:"pdf",docName:"Wrong PDF",syncPair:pair});
     expect(web.host.querySelector('.lc-annotate-context')).toBeNull();web.unmount();
   });
 
-  it("locks Pull, header close and menu rows during an operation", () => {
-    const onRefreshHub=vi.fn();
-    const view=mount({pending:true,allowSave:true,onRefreshHub});
+  it("locks the Sync pair, header close and menu rows during an operation", () => {
+    const onSync=vi.fn();
+    const view=mount({pending:true,allowSave:true,snapshotKey:"d1",syncPair:{syncLine:null,syncing:false,onSync,link:null}});
+    expect(view.host.querySelector('.lc-sync-link-pair')).not.toBeNull();
     expect([...view.host.querySelectorAll('button')].every(b=>b.disabled)).toBe(true);
     view.unmount();
   });

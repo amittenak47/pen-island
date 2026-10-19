@@ -14,23 +14,24 @@ beforeEach(() => { vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT",true); host=document
 afterEach(() => { act(() => root.unmount()); host.remove(); vi.unstubAllGlobals(); });
 const graph:ExploreGraphExport = {format:"pen-island-graph",version:1,exportedAt:"2026-10-07T00:00:00.000Z",nodes:[],edges:[]};
 const button = (label:string) => document.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)!;
-async function show(onPull=vi.fn(async () => 1),getGraph=vi.fn(async () => graph),onOpen=vi.fn()) {
-  await act(async () => root.render(<ExploreHeaderMenu active disabled={false} onOpen={onOpen} onPull={onPull} getGraph={getGraph}/>));
+async function show(getGraph=vi.fn(async () => graph),onOpen=vi.fn()) {
+  await act(async () => root.render(<ExploreHeaderMenu active disabled={false} onOpen={onOpen} getGraph={getGraph}/>));
   const header=button("Explore: tap to open the graph, hold for menu");
   act(() => header.click()); expect(onOpen).toHaveBeenCalledOnce();
   expect(document.querySelector('[aria-label="Explore menu"]')).toBeNull();
   act(() => header.dispatchEvent(new MouseEvent("contextmenu",{bubbles:true})));
 }
-it("shows partial Pull results in the menu and prevents closing a pending operation", async () => {
-  let finish!:(value:any)=>void;
-  const pull=vi.fn(() => new Promise<any>(resolve => {finish=resolve;}));
-  await show(pull);
-  await act(async () => button("Pull").click());
+it("offers no Pull (Sync all and the tab's Sync cover it) and prevents closing a pending export", async () => {
+  let finish!:(value:string)=>void;
+  vi.mocked(saveDocumentExport).mockImplementationOnce(() => new Promise<string>(resolve => {finish=resolve;}));
+  await show();
+  expect(button("Pull")).toBeNull();
+  expect(document.querySelector('[aria-label="Explore menu"] .lc-dialog-foot')?.textContent).toBe("Cancel");
+  await act(async () => button("Export graph").click());
   act(() => window.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape"})));
   expect(document.querySelector('[aria-label="Explore menu"]')).not.toBeNull();
   expect(button("Export graph").disabled).toBe(true);
-  await act(async () => finish({added:["Notes"],repaired:[],failures:[{name:"PDF",message:"Source missing"}]}));
-  expect(document.querySelector('[aria-label="Explore menu"]')?.textContent).toContain("Source missing");
+  await act(async () => finish("Saved graph"));
   expect(button("Export graph").disabled).toBe(false);
 });
 it("exports JSON through the file saver and can retry after a save failure", async () => {

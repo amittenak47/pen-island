@@ -18,6 +18,7 @@ import { saveHubSyncWindowPill } from "./util/hubSyncWindowPillPref";
 import { savePadHub } from "./util/padHub";
 import { BOOK_PASS_STATUS_EVENT } from "./util/bookSyncPass";
 import { LcApiError } from "./api/client";
+import { HOLD_FILL_MS } from "./util/gesture";
 
 type PaperProps = ComponentProps<typeof import("./modes/AnnotateDocument").AnnotateDocument>;
 type SplitProps = ComponentProps<typeof import("./components/HubConflictSplit").HubConflictSplit>;
@@ -273,6 +274,26 @@ it("shows a book notice under Synced instead of as an index error", async () => 
   expect(mocks.sync!.report).toMatchObject({ stage: "synced", notice: "Links didn't sync." });
   expect(docIndexChrome()?.walkNotice).toBe("Links didn't sync.");
   expect(docIndexChrome()?.status).toBe("indexed");
+});
+
+it("runs the tab's Sync from the Annotate menu's [Sync | Link], and steps the menu aside for a conflict", async () => {
+  mocks.pass.mockImplementation(async (_client, options: BookPassOptions) => {
+    await options.requestChoice!(conflict(), { signal: options.signal!, onMounted: vi.fn(), onUnavailable: vi.fn() });
+    return result();
+  });
+  await mount();
+  const header = [...document.querySelectorAll("button")].find(el => el.getAttribute("aria-label") === "Markdown documents: tap to save now, hold for save / open menu")!;
+  await act(async () => { header.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+  await advance(HOLD_FILL_MS + 50);
+  await act(async () => { header.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+  await advance(400);
+  const sync = document.querySelector<HTMLButtonElement>(".lc-annotate-context .lc-sync-link-sync");
+  expect(sync?.textContent).toBe("Sync");
+  await act(async () => { sync!.click(); });
+  expect(mocks.pass).toHaveBeenCalledWith(mocks.shell.client, expect.objectContaining({ only: true, selected: { kind: "annotate", id: "book" } }));
+  for (let i = 0; i < 4; i++) await advance(250);
+  expect(document.querySelector('[aria-label="Sync conflict"]')).toBeTruthy();
+  expect(document.querySelector(".lc-annotate-context")).toBeNull();
 });
 
 it("holds autosave throughout an asynchronous hub apply and releases it afterwards", async () => {

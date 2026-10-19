@@ -11,10 +11,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { LIBRARY_HOLD_MS } from "../util/gesture";
 import { HoldButton } from "../components/HoldButton";
-import { HubStatusDot } from "../components/HubStatusDot";
+import { DocSyncLinkPair, type DocSyncLinkPairProps } from "../components/DocSyncLinkPair";
 import { ConfirmDialog } from "../components/ConfirmDialog";
 import { DialogFrame } from "../components/DialogFrame";
-import { HubLibraryRefresh, type HubLibraryRefreshAction } from "../components/HubLibraryRefresh";
 import { LibrarySearch } from "./LibrarySearch";
 import { LibraryTimes } from "./LibraryTimes";
 import { useLibraryDeleteArm } from "../util/armedDelete";
@@ -65,7 +64,8 @@ interface LeaveProps extends NotebookContextProps {
 }
 
 interface EntryProps extends NotebookContextProps {
-  onRefreshHub?: HubLibraryRefreshAction;
+  /** [Sync] beside the open notebook's name: the tab's Sync. A notebook has no file to link. */
+  syncPair?: DocSyncLinkPairProps | null;
   mode: "entry";
   pending?: boolean;
   exiting?: boolean;
@@ -182,7 +182,6 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
   const onRename = props.mode === "entry" ? props.onRename : undefined;
   const notebook = notebooks.find(row => row.id === (props.notebookId ?? snapshotKey));
   const contextTitle = isLeave || allowSave ? notebook?.title || defaultName : "";
-  const syncStatus = notebook ? (!props.dirty && notebook.hubAckUpdatedAt === notebook.updatedAt ? "synced" : "not synced") : "";
 
   const matchesQuery = (entry: WhiteboardNotebookMeta) => entry.title.toLocaleLowerCase().includes(libraryQuery.trim().toLocaleLowerCase());
 
@@ -299,7 +298,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
           <div className="lc-whiteboard-context">
             <NotebookIcon />
             <span className="lc-whiteboard-context-title" title={contextTitle}>{contextTitle}</span>
-            {syncStatus && <span className="lc-whiteboard-context-sync"><HubStatusDot />{syncStatus}</span>}
+            {props.mode === "entry" && props.syncPair && <DocSyncLinkPair {...props.syncPair} link={null} disabled={locked || props.syncPair.disabled} />}
           </div>
         </div>}
         <div ref={bodyRef} className="lc-settings-body lc-dialog-body lc-scroll-pane">
@@ -497,8 +496,6 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
         </div>
 
         <div className="lc-settings-foot lc-dialog-foot">
-          {!isLeave && props.mode === "entry" && props.onRefreshHub && <HubLibraryRefresh onRefresh={props.onRefreshHub} disabled={locked}
-            className="lc-library-footer-pull" resultsContainer={bodyRef}><MenuRowLabel label="Pull" /></HubLibraryRefresh>}
           <span className="lc-dialog-foot-spacer" aria-hidden="true" />
           {(section !== "main" || pickingLoad || pickingSnapshots || pickingRecovery || saveTitle !== null) && (
             <button

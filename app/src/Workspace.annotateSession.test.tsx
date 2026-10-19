@@ -39,7 +39,7 @@ vi.mock("./canvas/boardChunk", async () => {
   const BoardView = (props: ComponentProps<typeof Board>) => {
     mocks.boardProps = props;
     useImperativeHandle(props.ref, () => mocks.board, []);
-    return <section data-testid="board" data-height={props.pageContentHeight}>{props.pageContent}{props.sourceRefresh}</section>;
+    return <section data-testid="board" data-height={props.pageContentHeight}>{props.pageContent}</section>;
   };
   return { peekBoardComponent: () => BoardView };
 });
@@ -347,20 +347,34 @@ it("updates only the open document's footnote board timestamps when another scra
   await leave(); expect(leaveDialog()).toBeTruthy();
 });
 
-const sourceRefreshLabel = "Check for a newer version of this file. Hold for more";
+const linkedLabel = "Linked to “First.md”. Tap to check for a newer version, hold for more.";
+const unlinkedLabel = "Not linked. Tap to link the file this came from.";
+/** The Link half of the Annotate menu's [Sync | Link]. The menu opens on a hold of the header icon. */
+async function linkHalf() {
+  if (!document.querySelector(".lc-sync-link-link")) {
+    const menu = button("Markdown documents: tap to save now, hold for save / open menu");
+    await act(async () => { menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
+    await advance(HOLD_FILL_MS + 50);
+    await act(async () => { menu.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
+    await advance(400);
+  }
+  const found = document.querySelector<HTMLButtonElement>(".lc-sync-link-link");
+  expect(found, "Link half").toBeTruthy(); return found!;
+}
+async function clickLink() { const link = await linkHalf(); await act(async () => { link.click(); }); }
 const sourceRef = { kind: "path" as const, location: "/First.md", name: "First.md", size: 7, modified: 1, hash: hashMarkdown("# First"), checkedAt: 1 };
 
 it("checks a source on demand, shows work while checking, and reports same and missing copies", async () => {
   setDocSource("first", sourceRef);
   await mount();
   const checked = deferred<{ status: "same" }>(); mocks.sourceCheck.mockReturnValueOnce(checked.promise);
-  await click(sourceRefreshLabel);
+  await clickLink();
   expect(mocks.sourceCheck).toHaveBeenCalledWith("first");
-  expect(button(sourceRefreshLabel).getAttribute("aria-busy")).toBe("true");
-  expect(button(sourceRefreshLabel).querySelector(".lc-doc-index-ring")).not.toBeNull();
+  expect((await linkHalf()).getAttribute("aria-busy")).toBe("true");
+  expect((await linkHalf()).querySelector(".lc-doc-index-ring")).not.toBeNull();
   await act(async () => { checked.resolve({ status: "same" }); });
   expect(mocks.shell.setNotice).toHaveBeenCalledWith("Up to date");
-  mocks.sourceCheck.mockResolvedValueOnce({ status: "missing" }); await click(sourceRefreshLabel);
+  mocks.sourceCheck.mockResolvedValueOnce({ status: "missing" }); await clickLink();
   expect(document.querySelector('[role="dialog"][aria-label="Linked file not found"]')).not.toBeNull();
   expect(document.body.textContent).toContain("“First.md” isn't where it was. Find it to keep this document up to date.");
   await click("Find the file…");
@@ -368,16 +382,16 @@ it("checks a source on demand, shows work while checking, and reports same and m
   expect(mocks.sourceLink).not.toHaveBeenCalled();
 });
 
-it("links an existing document from the reading button and keeps picker cancellation quiet", async () => {
+it("links an existing document from the menu's Link and keeps picker cancellation quiet", async () => {
   await mount();
-  await click("Link this document to its file");
+  await clickLink();
   expect(mocks.sourceLink).not.toHaveBeenCalled();
   mocks.pickSource.mockResolvedValue(sourceRef);
   mocks.sourceLink.mockImplementation(async (id, pick) => { setDocSource(id, pick); return { status: "linked" }; });
-  await click("Link this document to its file");
+  await clickLink();
   expect(mocks.sourceLink).toHaveBeenCalledWith("first", sourceRef);
   expect(mocks.shell.setNotice).toHaveBeenCalledWith("Linked to “First.md”.");
-  expect(button(sourceRefreshLabel)).toBeTruthy();
+  expect((await linkHalf()).getAttribute("aria-label")).toBe(linkedLabel);
 });
 
 it("offers differing files with Cancel, Just link, and a held update", async () => {
@@ -385,16 +399,16 @@ it("offers differing files with Cancel, Just link, and a held update", async () 
   const content = { status: "newer", text: "# Different", ref: { ...sourceRef, hash: hashMarkdown("# Different") } };
   mocks.pickSource.mockResolvedValue(sourceRef);
   mocks.sourceLink.mockResolvedValue({ status: "differs", content });
-  await click("Link this document to its file");
+  await clickLink();
   expect(document.querySelector('[role="dialog"][aria-label="This file is different"]')).not.toBeNull();
   expect(document.body.textContent).toContain("“First.md” doesn't match the app's copy of “First.md”.");
   await click("Cancel");
   expect(getDocSource("first")).toBeNull();
-  await click("Link this document to its file"); await click("Just link");
+  await clickLink(); await click("Just link");
   expect(mocks.sourceJustLink).toHaveBeenCalledWith("first", content.ref);
   expect(getDocSource("first")?.hash).toBe(mocks.docs.get("first")!.hash);
   expect(mocks.sourceUpdate).not.toHaveBeenCalled();
-  const trigger = button(sourceRefreshLabel);
+  const trigger = await linkHalf();
   await act(async () => { trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   await advance(HOLD_FILL_MS + 50);
   await act(async () => { trigger.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
@@ -408,15 +422,15 @@ it("offers differing files with Cancel, Just link, and a held update", async () 
   expect(mocks.sourceUpdate).toHaveBeenCalledWith("first", content);
 });
 
-it("unlinks immediately from the reading hold menu", async () => {
+it("unlinks immediately from Link's hold menu", async () => {
   setDocSource("first", sourceRef); await mount();
-  const trigger = button(sourceRefreshLabel);
+  const trigger = await linkHalf();
   await act(async () => { trigger.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   await advance(HOLD_FILL_MS + 50);
   await act(async () => { trigger.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
   await click("Unlink");
   expect(getDocSource("first")).toBeNull();
-  expect(button("Link this document to its file")).toBeTruthy();
+  expect((await linkHalf()).getAttribute("aria-label")).toBe(unlinkedLabel);
   expect(mocks.shell.setNotice).toHaveBeenCalledWith("Unlinked. The app's copy stays.");
   expect(mocks.docs.get("first")!.source).toBe("# First");
 });
@@ -425,13 +439,13 @@ it("keeps the newer dot after Not now and updates the same open tab before its s
   setDocSource("first", sourceRef);
   const content = { status: "newer", text: "# Revised", ref: { ...sourceRef, hash: hashMarkdown("# Revised"), size: 9, modified: 2 } };
   mocks.sourceCheck.mockResolvedValue(content);
-  await mount(); await click(sourceRefreshLabel);
+  await mount(); await clickLink();
   expect(document.querySelector('[role="dialog"][aria-label="Newer version available"]')).not.toBeNull();
   expect(document.body.textContent).toContain("“First.md” has changed on this device since you opened it.");
   await click("Not now");
-  expect(button(sourceRefreshLabel).querySelector(".lc-library-sync-dot")).not.toBeNull();
+  expect((await linkHalf()).querySelector(".lc-library-sync-dot")).not.toBeNull();
   expect(mocks.sourceUpdate).not.toHaveBeenCalled();
-  await click(sourceRefreshLabel);
+  await clickLink();
   mocks.sourceUpdate.mockImplementationOnce(async (id: string) => {
     const captures: Promise<DocSourceLiveCapture>[] = [];
     const releases: (() => void)[] = [];
@@ -454,14 +468,14 @@ it("keeps the newer dot after Not now and updates the same open tab before its s
   expect(mocks.paper!.source).toBe("# Revised");
   expect(mocks.shell.patchTab).toHaveBeenCalledWith(tab.id, expect.objectContaining({ docId: "first", hash: content.ref.hash }));
   expect(mocks.shell.setNotice).toHaveBeenCalledWith("Updated to the newer version. 1 annotations couldn't be placed and stay in the previous version (Recents → retained copies).");
-  expect(button(sourceRefreshLabel).querySelector(".lc-library-sync-dot")).toBeNull();
+  expect((await linkHalf()).querySelector(".lc-library-sync-dot")).toBeNull();
 });
 
 it("waits for the matching document to be active before presenting a completed background check", async () => {
   setDocSource("first", sourceRef);
   const checked = deferred<{ status: "newer"; text: string; ref: typeof sourceRef }>();
   mocks.sourceCheck.mockReturnValueOnce(checked.promise);
-  await mount(); await click(sourceRefreshLabel);
+  await mount(); await clickLink();
   await act(async () => { root.render(<Workspace key={tab.id} tab={tab} active={false} showing={false} />); });
   await act(async () => { checked.resolve({ status: "newer", text: "# New", ref: sourceRef }); });
   expect(document.querySelector('[role="dialog"][aria-label="Newer version available"]')).toBeNull();
@@ -501,7 +515,7 @@ it("captures unsaved marks and ink without an authored save when a source backup
       throw new Error("Backup failed");
     } finally { for (const release of releases) release(); }
   });
-  await click(sourceRefreshLabel);
+  await clickLink();
   const update = button("Hold to confirm: Update");
   await act(async () => { update.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   await advance(HOLD_FILL_MS + 50);
@@ -534,7 +548,7 @@ it("keeps autosave suspended when the committed newer copy cannot reload and rej
       return { unplaced: [] };
     } finally { for (const release of releases) release(); }
   });
-  await click(sourceRefreshLabel);
+  await clickLink();
   const update = button("Hold to confirm: Update");
   await act(async () => { update.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   await advance(HOLD_FILL_MS + 50);

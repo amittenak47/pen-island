@@ -11,14 +11,12 @@
 }
 .lc-annotate-context > svg { flex: 0 0 18px; width: 18px; height: 18px; color: var(--lc-dialog-mode); }
 .lc-annotate-context-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 600; }
-.lc-annotate-context-sync { flex-shrink: 0; color: var(--muted); font-size: 12px; text-decoration: underline dashed; text-underline-offset: 3px; }
 .lc-dialog-frame.lc-annotate-dialog .lc-settings-body { padding: 12px 0 0; gap: 0; }
 .lc-dialog-frame.lc-annotate-dialog .lc-settings-body > :is(.lc-library-search, .lc-warning, p) { margin: 8px 24px; }
 .lc-dialog-frame.lc-annotate-dialog .lc-library-search { border-radius: var(--lc-dialog-control-radius); border-width: var(--lc-dialog-edge); }
 .lc-dialog-frame.lc-annotate-dialog .lc-settings-choice { gap: 0; }
 .lc-dialog-frame.lc-annotate-dialog .lc-settings-choice > .lc-hold-choice,
-.lc-dialog-frame.lc-annotate-dialog .lc-document-menu > .lc-hold-choice,
-.lc-dialog-frame.lc-annotate-dialog .lc-library-refresh > .lc-hub-pull-command {
+.lc-dialog-frame.lc-annotate-dialog .lc-document-menu > .lc-hold-choice {
   width: 100%; min-height: 62px; padding: 16px 24px; border: 0;
   border-bottom: var(--lc-dialog-edge) solid var(--lc-dialog-line); border-radius: calc(var(--lc-r-block) - 2px);
   text-align: left; color: var(--ink); background: transparent; box-shadow: none;
@@ -31,14 +29,12 @@
 .lc-dialog-frame.lc-annotate-dialog .lc-hold-reveal > .lc-hold-reveal-label { display: block; width: 100%; }
 .lc-dialog-frame.lc-annotate-dialog .lc-scratch-load-entry { padding: 12px 24px; }
 .lc-dialog-frame.lc-annotate-dialog .lc-md-new-title { margin: 8px 24px; min-width: 0; }
-.lc-dialog-frame.lc-annotate-dialog .lc-hub-pull-catalog { margin: 12px 24px; }
 .lc-dialog-frame.lc-annotate-dialog .lc-settings-foot { padding: 16px 24px 20px; justify-content: flex-end; border-top: 0; }
 .lc-dialog-frame.lc-annotate-dialog .lc-settings-foot .lc-dialog-action {
   min-width: 74px; min-height: 38px; border-color: var(--lc-dialog-line); color: var(--ink);
 }
 @media (max-width: 380px) {
   .lc-annotate-context { gap: 8px; padding: 8px; }
-  .lc-annotate-context-sync { font-size: 10px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .lc-settings-modal.lc-dialog-frame.lc-annotate-dialog { animation: none; transition: none; }

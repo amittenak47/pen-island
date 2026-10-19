@@ -206,17 +206,21 @@ describe("WhiteboardDialog", () => {
   });
   it("uses the PDF's square shell, row subtext and no footer hint, with existing actions at the top level", async () => {
     live.rows[0].hubAckUpdatedAt = 1;
-    const view = mount({ allowSave: true, snapshotKey: "w1", defaultName: "One", onRefreshHub: vi.fn() });
+    const onSync = vi.fn();
+    const view = mount({ allowSave: true, snapshotKey: "w1", defaultName: "One", syncPair: { syncLine: "Synced", syncing: false, onSync } });
     try {
       expect(view.host.querySelector('[role="dialog"]')?.getAttribute("data-dialog-shape")).toBe("blocky");
       expect(view.host.textContent).toContain("Start a blank notebook");
       expect(view.host.textContent).toContain("Pick a notebook from the library");
 
       expect(view.host.querySelector(".lc-whiteboard-context-title")?.textContent).toBe("One");
-      expect(view.host.querySelector(".lc-whiteboard-context-sync")?.textContent).toBe("synced");
-      view.update({ dirty: true });
-      expect(view.host.querySelector(".lc-whiteboard-context-sync")?.textContent).toBe("not synced");
-      expect(view.host.querySelector(".lc-dialog-foot")?.textContent).toBe("PullCancel");
+      // A notebook has no file to link: Sync alone, where "synced" used to sit.
+      expect(view.host.querySelector(".lc-whiteboard-context-sync")).toBeNull();
+      const sync = view.host.querySelectorAll<HTMLButtonElement>(".lc-whiteboard-context .lc-sync-link-pair button");
+      expect([...sync].map(b => b.textContent)).toEqual(["Sync"]);
+      act(() => sync[0].click());
+      expect(onSync).toHaveBeenCalledOnce();
+      expect(view.host.querySelector(".lc-dialog-foot")?.textContent).toBe("Cancel");
       expect(view.host.querySelector('[aria-label="Hold to confirm: More"]')).toBeNull();
       for (const label of ["Save", "Export", "Restore"]) expect(view.host.querySelector(`[aria-label="Hold to confirm: ${label}"]`)).toBeTruthy();
     } finally { view.unmount(); view.host.remove(); }
@@ -289,16 +293,16 @@ describe("WhiteboardDialog", () => {
     } finally { view.unmount(); view.host.remove(); }
   });
 
-  it("blocks header close, footer cancel, Escape, backdrop and Pull while pending", () => {
-    const onRefreshHub = vi.fn();
-    const view = mount({ pending: true, onRefreshHub });
+  it("blocks header close, footer cancel, Escape, backdrop and Sync while pending", () => {
+    const onSync = vi.fn();
+    const view = mount({ pending: true, allowSave: true, snapshotKey: "w1", defaultName: "One", syncPair: { syncLine: null, syncing: false, onSync } });
     try {
       expect([...view.host.querySelectorAll<HTMLButtonElement>("button")].every(b=>b.disabled)).toBe(true);
       act(() => window.dispatchEvent(new KeyboardEvent("keydown", { key:"Escape" })));
       const backdrop=view.host.querySelector<HTMLElement>(".lc-settings-backdrop")!;
       act(()=>{backdrop.dispatchEvent(new PointerEvent("pointerdown",{bubbles:true}));backdrop.click();});
       expect(view.onCancel).not.toHaveBeenCalled();
-      expect(onRefreshHub).not.toHaveBeenCalled();
+      expect(onSync).not.toHaveBeenCalled();
       view.update({ pending:false });
       act(()=>view.host.querySelector<HTMLButtonElement>(".lc-dialog-close")!.click());
       expect(view.onCancel).toHaveBeenCalledTimes(1);

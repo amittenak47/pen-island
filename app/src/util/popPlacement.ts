@@ -23,11 +23,15 @@ export function popPlacement(
   prefer: "below" | "above" = "below",
   /** Keep this side (a notification that is already open must not flip when it resizes). */
   side?: "below" | "above",
+  /** "right": its right edge on the button's right (the right half of a pair). */
+  align: "left" | "right" = "left",
 ): { top: number; left: number; above: boolean; maxHeight: number } {
   const maxLeft = Math.max(margin, viewport.width - pop.width - margin);
   const leftAligned = button.left;
   const rightAligned = button.right - pop.width;
-  const left = Math.min(maxLeft, Math.max(margin, leftAligned + pop.width + margin <= viewport.width ? leftAligned : rightAligned));
+  const left = Math.min(maxLeft, Math.max(margin, align === "right"
+    ? rightAligned >= margin ? rightAligned : leftAligned
+    : leftAligned + pop.width + margin <= viewport.width ? leftAligned : rightAligned));
   const below = button.bottom + gap;
   const fitsBelow = below + pop.height + margin <= viewport.height;
   const above = button.top - gap - pop.height;

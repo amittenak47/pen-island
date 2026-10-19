@@ -108,6 +108,13 @@ function sentence(text: string | null): string | null {
   return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
 }
 
+/** The tab's sync line as a sentence, for the menus' Sync (DocSyncLinkPair). */
+export function docSyncLine(
+  walk: Pick<DocIndexChipProps, "walkStage" | "walkJob" | "walkError" | "walkWaiting" | "walkMessage" | "padSync">,
+): string | null {
+  return sentence(syncLabel(walk));
+}
+
 function withChipSync(node: ReactNode, sync: ReactNode) {
   if (!sync) return node;
   return <span className="lc-doc-index-chip-row">{node}{sync}</span>;
