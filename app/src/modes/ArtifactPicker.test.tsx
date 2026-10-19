@@ -602,7 +602,15 @@ it("hides trash while the compact padlock is on", async () => {
   expect(control("Delete Plan.md — hold to delete")).toBeTruthy();
   act(() => control("Lock Plan.md")!.click());
   expect(control("Unlock Plan.md")).toBeTruthy();
+  // It slides away: unusable at once (inert while it leaves), gone once the slide ends.
+  const raw = () => [...document.querySelectorAll("button")].find(node => node.getAttribute("aria-label") === "Delete Plan.md — hold to delete");
   expect(control("Delete Plan.md — hold to delete")).toBeUndefined();
+  expect(raw()?.closest("[inert]")).toBeTruthy();
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  expect(raw()).toBeUndefined();
+  act(() => control("Unlock Plan.md")!.click());
+  expect(control("Delete Plan.md — hold to delete")).toBeTruthy();
+  expect(control("Delete Plan.md — hold to delete")!.closest("[inert]")).toBeNull();
 });
 
 it("uses only the reference footer close with the existing exit lifecycle", async () => {

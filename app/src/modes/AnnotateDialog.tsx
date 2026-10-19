@@ -40,7 +40,7 @@ import {
   setAnnotateDocLocked,
   type AnnotateDocMeta,
 } from "../util/annotateStore";
-import { LibraryPadlock } from "./LibraryPadlock";
+import { LibraryPadlock, PadlockReveal } from "./LibraryPadlock";
 import { PadNameField } from "./PadNameField";
 import { LibraryMenuRow, LibrarySearch } from "./LibrarySearch";
 import { LibraryTimes } from "./LibraryTimes";
@@ -776,7 +776,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                     onAnnotated={() => entry.onExportVersion?.(doc.id, copy?.id ?? null)}
                     onBackup={() => void backupVersion(doc.id, doc.name, copy)} />
                   {/* One trash for the book or the copy shown: it stays put and changes colour. */}
-                  {!doc.locked && (
+                  <PadlockReveal shown={!doc.locked}>
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
                     label={copy
                       ? copy.trashedAt ? `Delete copy ${copy.number} of ${title} for good` : `Move copy ${copy.number} of ${title} to the trash`
@@ -813,7 +813,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                       <path d="M10 10v7M14 10v7" />
                     </svg>
                   </HoldButton>
-                  )}
+                  </PadlockReveal>
                   </>
                   )}
                 </div>

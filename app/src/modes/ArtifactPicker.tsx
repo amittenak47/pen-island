@@ -19,7 +19,7 @@ import { shouldDismissBackdrop } from "../util/backdropDismiss";
 import { footnoteChipLabel } from "../util/docFootnotes";
 import { footnoteThemeVars } from "../util/footnoteTheme";
 import { ArtifactKindIcon, artifactKindLabel } from "./ArtifactKindIcon";
-import { LibraryPadlock } from "./LibraryPadlock";
+import { LibraryPadlock, PadlockReveal } from "./LibraryPadlock";
 import "./artifacts.css";
 import { NumberWheel } from "../canvas/NumberWheel";
 import { listAnnotateDocs, annotateDocLabel } from "../util/annotateStore";
@@ -645,7 +645,7 @@ export function ArtifactPicker({
                                 setLockTick((n) => n + 1);
                               }}
                             />
-                            {!locked && (
+                            <PadlockReveal shown={!locked}>
                               <HoldButton
                                 label={`Delete ${item.title}`}
                                 className="lc-artifact-picker-trash"
@@ -668,7 +668,7 @@ export function ArtifactPicker({
                               >
                                 <TrashGlyph />
                               </HoldButton>
-                            )}
+                            </PadlockReveal>
                           </>
                         )}
                         {trashed && (

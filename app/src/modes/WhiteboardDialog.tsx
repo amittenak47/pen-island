@@ -29,7 +29,7 @@ import {
   setWhiteboardNotebookLocked,
   type WhiteboardNotebookMeta,
 } from "../util/whiteboardStore";
-import { LibraryPadlock } from "./LibraryPadlock";
+import { LibraryPadlock, PadlockReveal } from "./LibraryPadlock";
 import { PadNameField } from "./PadNameField";
 import { TOMBSTONE_COPY, type DeletePadResult } from "../util/padSync";
 import {
@@ -476,7 +476,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                     onAnnotated={() => { if (props.mode === "entry") props.onExportVersion?.(entry.id, copy?.id ?? null); }}
                     onBackup={() => void backupVersion(entry.id, entry.title, copy)} />
                   {/* One trash for the notebook or the copy shown: it stays put and changes colour. */}
-                  {!entry.locked && (
+                  <PadlockReveal shown={!entry.locked}>
                   <HoldButton holdMs={LIBRARY_HOLD_MS}
                     label={copy
                       ? copy.trashedAt ? `Delete copy ${copy.number} of ${entry.title} for good` : `Move copy ${copy.number} of ${entry.title} to the trash`
@@ -513,7 +513,7 @@ export function WhiteboardDialog(props: WhiteboardDialogProps) {
                       <path d="M10 10v7M14 10v7" />
                     </svg>
                   </HoldButton>
-                  )}
+                  </PadlockReveal>
                   </>
                   )}
                 </div>
