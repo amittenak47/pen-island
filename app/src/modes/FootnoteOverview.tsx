@@ -439,6 +439,22 @@ export function FootnoteOverview({
   const swallowClick = useRef(false);
   /** The next frame's placement while the panel is dragged or resized. */
   const placeFrame = useRef(0);
+  /**
+   * A resize drag holds the page still, the way the agent panel's sash does:
+   * page turns, prefetches and refits wait (`boardResizeDeferred`), and the
+   * panel is laid out and painted on its own. Released on pointer up.
+   */
+  const pageHeld = useRef(false);
+  const holdPage = useCallback((on: boolean) => {
+    const node = panelRef.current;
+    if (on === pageHeld.current) return;
+    pageHeld.current = on;
+    node?.classList.toggle("is-resizing", on);
+    if (on) document.body.dataset.lcPanelMotion = "true";
+    else delete document.body.dataset.lcPanelMotion;
+  }, []);
+  // Closed mid-drag: never leave the page held.
+  useEffect(() => () => { if (pageHeld.current) delete document.body.dataset.lcPanelMotion; }, []);
   // A different mark opens beside its own words, not where the last one was dragged.
   useEffect(() => { userPlace.current = null; }, [footnote.id]);
   const transcriptRef = useRef<HTMLDivElement | null>(null);
@@ -641,6 +657,7 @@ export function FootnoteOverview({
       if (gesture.mode === "move") event.currentTarget.setPointerCapture?.(event.pointerId);
       // Its own compositor layer while it moves: a slide, not a repaint of the page under it.
       if (gesture.mode === "move") node.style.willChange = "transform";
+      else holdPage(true);
     }
     event.preventDefault();
     const view = viewport();
@@ -684,11 +701,12 @@ export function FootnoteOverview({
         }
       });
     }
-  }, []);
+  }, [holdPage]);
   const endPanelGesture = useCallback((event: ReactPointerEvent<HTMLElement>) => {
     const gesture = panelGesture.current;
     if (!gesture || gesture.pointerId !== event.pointerId) return;
     panelGesture.current = null;
+    holdPage(false);
     if (placeFrame.current) {
       cancelAnimationFrame(placeFrame.current);
       placeFrame.current = 0;
@@ -701,7 +719,7 @@ export function FootnoteOverview({
       place();
     }
     if (gesture.moved && gesture.mode === "move") swallowClick.current = true;
-  }, [place]);
+  }, [place, holdPage]);
   const nudgePanelSize = useCallback((dx: number, dy: number) => {
     const node = panelRef.current;
     if (!node) return;

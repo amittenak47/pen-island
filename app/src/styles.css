@@ -20118,6 +20118,11 @@ button.lc-row-selected:hover:not(:disabled) {
   animation: none;
 }
 
+/* Resized by a drag: its layout and paint stay inside it (see holdPage). */
+.lc-footnote-overview.is-resizing {
+  contain: layout paint;
+}
+
 .lc-footnote-overview.is-task {
   width: min(280px, calc(var(--lc-vvw, 100vw) - 32px));
   max-width: min(280px, calc(var(--lc-vvw, 100vw) - 32px));

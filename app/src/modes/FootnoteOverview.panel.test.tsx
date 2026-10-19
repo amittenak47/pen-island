@@ -302,12 +302,17 @@ describe("FootnoteOverview panel", () => {
     // Far past the corner: the size stops 8 px inside the window, the corner where it was.
     expect(panel.style.width).toBe(`${window.innerWidth - 8 - 40}px`);
     expect(panel.style.height).toBe(`${window.innerHeight - 8 - 50}px`);
+    // The page holds still while the panel resizes, as for the agent panel's sash.
+    expect(document.body.dataset.lcPanelMotion).toBe("true");
+    expect(panel.classList.contains("is-resizing")).toBe(true);
     // Every frame's size change reaches the observer; it does not place the panel mid-drag.
     const before = placements();
     act(() => observed!());
     expect(placements()).toBe(before);
     pointer("pointerup", 5000, 5000);
     expect(placements()).toBeGreaterThan(before);
+    expect(document.body.dataset.lcPanelMotion).toBeUndefined();
+    expect(panel.classList.contains("is-resizing")).toBe(false);
     // After the release the observer places it again.
     const released = placements();
     act(() => observed!());
