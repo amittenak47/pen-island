@@ -2,6 +2,7 @@ import { announceSplitResize } from "./splitResize";
 
 /** Same CSS clip/transform transition as the mobile agent sheet. */
 const DURATION = 240;
+const EASING = "cubic-bezier(0.22, 1, 0.36, 1)";
 /**
  * Two phases. Entering: the header's box closes, then the page expands.
  * Leaving: the page shrinks, then the header's box opens into the room left.
@@ -55,51 +56,75 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
   // The portal spans are display:contents, so they have no box to transform.
   // Leave the agent sheet's own transform/clip transition under its control.
   const main = app.querySelector<HTMLElement>(":scope > .lc-main");
-  const before = main?.getBoundingClientRect();
-  const page = main ? pageAtCentre(main) : null;
+  // The page moves: the visible board wrappers (two in a split). The menu
+  // toolbar is screen chrome in its own slot. Riding the page's scale it went
+  // down, back up and down again; now it moves once, straight from its old
+  // place to its new one, in step with the page (or not at all if its place
+  // did not change).
+  const movers = main ? [...main.children].filter((el): el is HTMLElement =>
+    el instanceof HTMLElement && el.classList.contains("lc-canvas-wrap") && getComputedStyle(el).display !== "none") : [];
+  const chrome = main?.querySelector<HTMLElement>(":scope > .lc-board-chrome-slot") ?? null;
+  const chromeMark = chrome?.firstElementChild instanceof HTMLElement ? chrome.firstElementChild : null;
+  const chromeBefore = chromeMark?.getBoundingClientRect();
+  const before = movers.map(el => el.getBoundingClientRect());
+  const page = main && movers.length === 1 ? pageAtCentre(main) : null;
   const pageBefore = page?.getBoundingClientRect();
   const clip = header ? getComputedStyle(header).clipPath : "";
   // Measure the interrupted transition before removing it, and resolve its
   // promise without releasing the hold or fitting the obsolete geometry.
   running?.cancel();
   const reduced = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-  if (!header || !main || !before?.height || reduced) {
+  if (!header || !main || !movers.length || before.some(box => !box.height) || reduced) {
     changeLayout();
     settle();
     return Promise.resolve();
   }
 
-  const original = { clip: header.style.clipPath, transform: main.style.transform, origin: main.style.transformOrigin };
+  const originals = movers.map(el => ({ transform: el.style.transform, origin: el.style.transformOrigin }));
+  const originalClip = header.style.clipPath;
   document.body.dataset.lcPanelMotion = "true";
   app.dataset.fullscreenMotion = "prepare";
   header.style.clipPath = clip && clip !== "none" ? clip : entering ? OPEN : CLOSED;
   if (!entering) header.style.opacity = "0";
-  main.style.transform = "none";
-  main.style.transformOrigin = "50% 0px";
+  for (const el of movers) {
+    el.style.transform = "none";
+    el.style.transformOrigin = "50% 0px";
+  }
+  if (chrome) chrome.style.transform = "none";
   changeLayout();
   // Fit the final geometry now, untransformed, so the motion ends on the
   // fitted page. Fitting after the motion snapped the page once it stopped.
   delete document.body.dataset.lcPanelMotion;
   announceSplitResize("settle");
   document.body.dataset.lcPanelMotion = "true";
-  const after = main.getBoundingClientRect();
+  const after = movers.map(el => el.getBoundingClientRect());
+  const chromeAfter = chromeMark?.getBoundingClientRect();
+  const chromeShift = chromeBefore && chromeAfter
+    ? { x: chromeBefore.left - chromeAfter.left, y: chromeBefore.top - chromeAfter.top } : { x: 0, y: 0 };
+  const chromeMoves = !!chrome && (Math.abs(chromeShift.x) > 0.5 || Math.abs(chromeShift.y) > 0.5);
   const restore = () => {
     app.dataset.fullscreenMotion = "prepare";
-    header.style.clipPath = original.clip;
+    header.style.clipPath = originalClip;
     header.style.removeProperty("transition-delay");
     header.style.removeProperty("opacity");
-    main.style.removeProperty("transition-delay");
-    main.style.removeProperty("transition-duration");
-    main.style.removeProperty("transition-timing-function");
-    main.style.transform = original.transform;
-    main.style.transformOrigin = original.origin;
+    movers.forEach((el, i) => {
+      el.style.removeProperty("transition-delay");
+      el.style.removeProperty("transition-duration");
+      el.style.removeProperty("transition-timing-function");
+      el.style.transform = originals[i]!.transform;
+      el.style.transformOrigin = originals[i]!.origin;
+    });
+    if (chrome) {
+      chrome.style.removeProperty("transform");
+      chrome.style.removeProperty("transition");
+    }
     // As with useAgentSheet's drag cleanup, commit the restored styles while
     // transitions are off, so removing the guard cannot replay an old clip.
     void getComputedStyle(header).clipPath;
-    void getComputedStyle(main).transform;
+    for (const el of movers) void getComputedStyle(el).transform;
     delete app.dataset.fullscreenMotion;
   };
-  if (!after.height) {
+  if (after.some(box => !box.height)) {
     restore();
     settle();
     return Promise.resolve();
@@ -107,7 +132,7 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
   // Map what is on screen back onto where it was. A document page: the board
   // has already refitted it, so translate and scale it uniformly from its new
   // box onto its old one (exact whether the page fits the width or the
-  // height). Anything else: the reading box itself, height only.
+  // height). Anything else: each board box itself, height only.
   const pageAfter = page?.isConnected ? page.getBoundingClientRect() : null;
   let rest = "translateY(0px) scaleY(1)";
   if (pageBefore?.width && pageAfter?.width) {
@@ -115,20 +140,26 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
     const centre = { x: pageAfter.left + pageAfter.width / 2, y: pageAfter.top + pageAfter.height / 2 };
     const dx = pageBefore.left + pageBefore.width / 2 - centre.x;
     const dy = pageBefore.top + pageBefore.height / 2 - centre.y;
-    main.style.transformOrigin = `${centre.x - after.left}px ${centre.y - after.top}px`;
-    main.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
+    const box = after[0]!;
+    movers[0]!.style.transformOrigin = `${centre.x - box.left}px ${centre.y - box.top}px`;
+    movers[0]!.style.transform = `translate(${dx}px, ${dy}px) scale(${scale})`;
     rest = "translate(0px, 0px) scale(1)";
   } else {
-    main.style.transform = `translateY(${before.top - after.top}px) scaleY(${before.height / after.height})`;
+    movers.forEach((el, i) => {
+      el.style.transform = `translateY(${before[i]!.top - after[i]!.top}px) scaleY(${before[i]!.height / after[i]!.height})`;
+    });
   }
+  // The toolbar starts where it was.
+  if (chrome && chromeMoves) chrome.style.transform = `translate(${chromeShift.x}px, ${chromeShift.y}px)`;
   // Establish the CSS before-change style now: the next frame paints the old
   // box, never the final one.
   void getComputedStyle(header).clipPath;
-  void getComputedStyle(main).transform;
+  for (const el of movers) void getComputedStyle(el).transform;
+  if (chrome) void getComputedStyle(chrome).transform;
 
   return new Promise<void>(resolve => {
     let timer = 0, startFrame = 0, startTimer = 0, started = false;
-    const pending = new Set<HTMLElement>([header, main]);
+    const pending = new Set<HTMLElement>([header, ...movers, ...(chrome && chromeMoves ? [chrome] : [])]);
     const finish = (cancelled: boolean) => {
       if (running !== current) return;
       running = null;
@@ -136,20 +167,23 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
       window.cancelAnimationFrame(startFrame);
       window.clearTimeout(startTimer);
       header.removeEventListener("transitionend", onEnd);
-      main.removeEventListener("transitionend", onEnd);
+      for (const el of movers) el.removeEventListener("transitionend", onEnd);
+      chrome?.removeEventListener("transitionend", onEnd);
       restore();
       if (!cancelled) settle();
       resolve();
     };
     const onEnd = (event: TransitionEvent) => {
       if (event.target === header && event.propertyName === "clip-path") pending.delete(header);
-      if (event.target === main && event.propertyName === "transform") pending.delete(main);
+      for (const el of movers) if (event.target === el && event.propertyName === "transform") pending.delete(el);
+      if (chrome && event.target === chrome && event.propertyName === "transform") pending.delete(chrome);
       if (!pending.size) finish(false);
     };
     const current = { cancel: () => finish(true) };
     running = current;
     header.addEventListener("transitionend", onEnd);
-    main.addEventListener("transitionend", onEnd);
+    for (const el of movers) el.addEventListener("transitionend", onEnd);
+    chrome?.addEventListener("transitionend", onEnd);
     // The refit above, and the board's follow-up work (redrawing the page
     // sharp at its new size), cost a few frames. The old picture holds until
     // frames are quick again, then the clock starts, so the motion plays in
@@ -161,14 +195,25 @@ export function animateFullscreenChange(app: HTMLElement, entering: boolean, cha
       window.clearTimeout(startTimer);
       app.dataset.fullscreenMotion = "active";
       header.style.transitionDelay = entering ? "0ms" : `${STAGGER}ms`;
-      main.style.transitionDelay = entering ? `${STAGGER}ms` : "0ms";
-      if (!entering) {
-        main.style.transitionDuration = `${EXIT_SHRINK_MS}ms`;
-        main.style.transitionTimingFunction = EXIT_SHRINK_EASING;
-        header.style.opacity = "1";
+      // The page's phase: second when entering, first when leaving.
+      const pageDelay = entering ? STAGGER : 0;
+      const pageMs = entering ? DURATION : EXIT_SHRINK_MS;
+      const pageEasing = entering ? EASING : EXIT_SHRINK_EASING;
+      for (const el of movers) {
+        el.style.transitionDelay = `${pageDelay}ms`;
+        if (!entering) {
+          el.style.transitionDuration = `${EXIT_SHRINK_MS}ms`;
+          el.style.transitionTimingFunction = EXIT_SHRINK_EASING;
+        }
+        el.style.transform = rest;
       }
+      if (!entering) header.style.opacity = "1";
       header.style.clipPath = entering ? CLOSED : OPEN;
-      main.style.transform = rest;
+      if (chrome && chromeMoves) {
+        // Once, with the page: same delay, duration and curve.
+        chrome.style.transition = `transform ${pageMs}ms ${pageEasing} ${pageDelay}ms`;
+        chrome.style.transform = "translate(0px, 0px)";
+      }
       // WebView can omit transitionend (e.g. a backgrounded window). Also covers
       // a reversal before either property has moved and has nothing to animate.
       const total = entering ? STAGGER + DURATION : Math.max(EXIT_SHRINK_MS, STAGGER + DURATION);

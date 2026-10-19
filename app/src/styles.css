@@ -16099,10 +16099,6 @@ button.lc-row-selected:hover:not(:disabled) {
   }
 }
 
-.lc-icon-svg-filled {
-  fill: currentColor;
-}
-
 .lc-icon.is-active {
   border-color: var(--accent);
   color: var(--accent);
@@ -23857,12 +23853,13 @@ html[data-corners="rounded"] {
   will-change: clip-path;
 }
 
-.lc-app[data-fullscreen-motion] > .lc-main {
+.lc-app[data-fullscreen-motion] > .lc-main > .lc-canvas-wrap {
   will-change: transform;
 }
 
 .lc-app[data-fullscreen-motion="prepare"] > .lc-header,
-.lc-app[data-fullscreen-motion="prepare"] > .lc-main {
+.lc-app[data-fullscreen-motion="prepare"] > .lc-main > .lc-canvas-wrap,
+.lc-app[data-fullscreen-motion="prepare"] > .lc-main > .lc-board-chrome-slot {
   transition: none;
 }
 
@@ -23870,14 +23867,15 @@ html[data-corners="rounded"] {
   transition: clip-path 240ms cubic-bezier(0.22, 1, 0.36, 1), opacity 240ms ease;
 }
 
-.lc-app[data-fullscreen-motion="active"] > .lc-main {
+.lc-app[data-fullscreen-motion="active"] > .lc-main > .lc-canvas-wrap {
   transition: transform 240ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 @media (prefers-reduced-motion: reduce) {
   .lc-app[data-fullscreen-motion] > .lc-header,
-  .lc-app[data-fullscreen-motion] > .lc-main {
-    transition: none;
+  .lc-app[data-fullscreen-motion] > .lc-main > .lc-canvas-wrap,
+  .lc-app[data-fullscreen-motion] > .lc-main > .lc-board-chrome-slot {
+    transition: none !important;
   }
 }
 

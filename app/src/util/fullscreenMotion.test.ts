@@ -11,7 +11,8 @@ const OPEN = "inset(0px 0px 0px 0px)";
 const CLOSED = "inset(0px 0px 100% 0px)";
 const TRANSITION = "240ms cubic-bezier(0.22, 1, 0.36, 1)";
 const css = readFileSync(new FileURL("../styles.css", import.meta.url), "utf8");
-let app: HTMLDivElement, header: HTMLElement, main: HTMLElement, headerSlot: HTMLElement, agentSlot: HTMLElement;
+// `main` is what moves: the visible board wrapper inside `.lc-main`.
+let app: HTMLDivElement, header: HTMLElement, mainEl: HTMLElement, main: HTMLElement, headerSlot: HTMLElement, agentSlot: HTMLElement;
 let style: HTMLStyleElement;
 const originalAnimate = Element.prototype.animate;
 let settles: boolean[];
@@ -42,13 +43,15 @@ beforeEach(() => {
   document.head.append(style);
   app = document.createElement("div"); app.className = "lc-app";
   header = document.createElement("header"); header.className = "lc-header";
-  main = document.createElement("main"); main.className = "lc-main";
+  mainEl = document.createElement("main"); mainEl.className = "lc-main";
+  main = document.createElement("div"); main.className = "lc-canvas-wrap"; mainEl.append(main);
   headerSlot = document.createElement("span"); headerSlot.className = "lc-header-slot"; headerSlot.style.display = "contents";
   agentSlot = document.createElement("span"); agentSlot.className = "lc-agent-slot"; agentSlot.style.display = "contents";
-  app.append(header, headerSlot, main, agentSlot); document.body.append(app);
+  app.append(header, headerSlot, mainEl, agentSlot); document.body.append(app);
   Object.defineProperty(app, "clientHeight", { configurable: true, value: 1000 });
   Object.defineProperty(header, "offsetHeight", { configurable: true, value: 44 });
   vi.spyOn(main, "getBoundingClientRect").mockImplementation(() => app.hasAttribute("data-fullscreen") ? rect(0, 1000) : rect(44, 956));
+  vi.spyOn(mainEl, "getBoundingClientRect").mockImplementation(() => app.hasAttribute("data-fullscreen") ? rect(0, 1000) : rect(44, 956));
   const computed = window.getComputedStyle.bind(window);
   vi.spyOn(window, "getComputedStyle").mockImplementation((el, pseudo) => {
     const value = computed(el, pseudo);
@@ -183,7 +186,7 @@ it("a document page is mapped from its refitted box back onto its old one, unifo
   const page = document.createElement("div"); page.className = "lc-pdf-page"; main.append(page);
   vi.spyOn(page, "getBoundingClientRect").mockImplementation(() => app.hasAttribute("data-fullscreen")
     ? { ...rect(30, 1060), left: 10, width: 780, right: 790 } : { ...rect(80, 1000), left: 50, width: 700, right: 750 });
-  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [page, main, app] });
+  Object.defineProperty(document, "elementsFromPoint", { configurable: true, value: () => [page, main, mainEl, app] });
   const done = toggle(true);
   const scale = 700 / 780;
   // Old centre (400, 580); new centre (400, 560). Origin at the new centre inside the box.
@@ -217,4 +220,58 @@ it("leaving starts the header hidden, fades it in, and shrinks the page on a gen
   expect(main.style.transitionTimingFunction).toBe("cubic-bezier(0.4, 0, 0.2, 1)");
   transitionEnd(header, "clip-path"); transitionEnd(main, "transform"); await done;
   expect(header.style.opacity).toBe(""); expect(main.style.transitionDuration).toBe(""); expect(main.style.transitionTimingFunction).toBe("");
+});
+
+/** The menu toolbar's slot: screen chrome over the page, not part of it. */
+function chromeSlot(top: (full: boolean) => number) {
+  const slot = document.createElement("span"); slot.className = "lc-board-chrome-slot";
+  const controls = document.createElement("div"); slot.append(controls); mainEl.append(slot);
+  vi.spyOn(controls, "getBoundingClientRect").mockImplementation(() => ({ ...rect(top(app.hasAttribute("data-fullscreen")), 300), left: 740, width: 48, right: 788 }));
+  return slot;
+}
+
+it.each([true, false])("the menu toolbar moves once, with the page, entering=%s", async entering => {
+  if (!entering) app.dataset.fullscreen = "true";
+  // Pinned to the reading area's top: 44px lower with the header showing.
+  const slot = chromeSlot(full => full ? 12 : 56);
+  const done = toggle(entering);
+  // It starts where it was, not scaled with the page.
+  expect(slot.style.transform).toBe(entering ? "translate(0px, 44px)" : "translate(0px, -44px)");
+  expect(slot.style.transform).not.toContain("scale");
+  await vi.advanceTimersByTimeAsync(48);
+  // One move, in the page's phase: same delay, duration and curve.
+  expect(slot.style.transform).toBe("translate(0px, 0px)");
+  expect(slot.style.transition).toBe(entering
+    ? "transform 240ms cubic-bezier(0.22, 1, 0.36, 1) 200ms"
+    : "transform 280ms cubic-bezier(0.4, 0, 0.2, 1) 0ms");
+  transitionEnd(header, "clip-path"); transitionEnd(main, "transform");
+  expect(boardResizeDeferred()).toBe(true); // still waiting on the toolbar
+  transitionEnd(slot, "transform"); await done;
+  expect(slot.style.transform).toBe(""); expect(slot.style.transition).toBe("");
+  expect(boardResizeDeferred()).toBe(false);
+});
+
+it("a toolbar whose place does not change stays still", async () => {
+  const slot = chromeSlot(() => 56);
+  const done = toggle(true);
+  expect(slot.style.transform).toBe("none");
+  await vi.advanceTimersByTimeAsync(48);
+  expect(slot.style.transition).toBe("");
+  // Nothing to wait for from it: header and page finish the motion.
+  transitionEnd(header, "clip-path"); transitionEnd(main, "transform"); await done;
+  expect(slot.style.transform).toBe(""); expect(boardResizeDeferred()).toBe(false);
+});
+
+it("a split moves both boards, each from its own box", async () => {
+  const second = document.createElement("div"); second.className = "lc-canvas-wrap"; mainEl.append(second);
+  vi.spyOn(second, "getBoundingClientRect").mockImplementation(() => app.hasAttribute("data-fullscreen") ? rect(0, 1000) : rect(44, 956));
+  const parked = document.createElement("div"); parked.className = "lc-canvas-wrap"; parked.style.display = "none"; mainEl.append(parked);
+  const done = toggle(true);
+  expect(second.style.transform).toBe(`translateY(44px) scaleY(${956 / 1000})`);
+  expect(parked.style.transform).toBe("");
+  await vi.advanceTimersByTimeAsync(48);
+  transitionEnd(header, "clip-path"); transitionEnd(main, "transform");
+  expect(boardResizeDeferred()).toBe(true);
+  transitionEnd(second, "transform"); await done;
+  expect(second.style.transform).toBe(""); expect(boardResizeDeferred()).toBe(false);
 });
