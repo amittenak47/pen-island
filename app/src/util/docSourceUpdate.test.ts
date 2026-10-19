@@ -51,6 +51,14 @@ describe("checking a document source", () => {
     await textBook(); vi.mocked(native.statDocumentSource).mockResolvedValue({ size: 3, modified: 1 });
     expect(await checkDocSource("book")).toMatchObject({ status: "same" }); expect(native.readDocumentSource).not.toHaveBeenCalled();
   });
+  it("reads an Android document even when its provider reports the old size and date", async () => {
+    // The Downloads provider kept a file's old size and date after it was rewritten in place.
+    await textBook(); setDocSource("book", { ...getDocSource("book")!, kind: "uri", location: "content://downloads/document/1" });
+    vi.mocked(native.statDocumentSource).mockResolvedValue({ size: 3, modified: 1 });
+    vi.mocked(native.readDocumentSource).mockResolvedValue(bytes("rewritten words"));
+    expect(await checkDocSource("book")).toMatchObject({ status: "newer", text: "rewritten words" });
+    expect(native.readDocumentSource).toHaveBeenCalledOnce();
+  });
   it("compares the bytes with the set's current hash and refreshes metadata", async () => {
     const hash = await textBook(); setDocSource("book", { ...source("stale ref hash") });
     vi.mocked(native.statDocumentSource).mockResolvedValue({ size: 9, modified: 2 });
