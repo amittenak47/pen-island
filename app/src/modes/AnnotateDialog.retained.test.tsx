@@ -117,7 +117,8 @@ describe("retained copies in Recents", () => {
   it("shows the current version with its size, and a numbered list between the padlock and the trash", async () => {
     await mount(); await recents();
     expect(row().querySelector(".lc-library-size")?.textContent).toBe("3.0 MB");
-    const at = (name: string) => [...row().children].findIndex(child => child.classList.contains(name));
+    // The trash sits in the padlock's slide-out wrapper.
+    const at = (name: string) => [...row().children].findIndex(child => child.classList.contains(name) || child.querySelector(`:scope > .${name}`));
     expect(at("lc-scratch-load-lock")).toBeGreaterThan(-1);
     expect(at("lc-scratch-load-lock")).toBeLessThan(at("lc-version-pick"));
     expect(at("lc-version-pick")).toBeLessThan(at("lc-version-share"));
@@ -138,7 +139,8 @@ describe("retained copies in Recents", () => {
     expect(pick.getAttribute("aria-label")).toContain("no retained copies");
     // Same controls, same order, on a row with copies and a row without.
     const order = (row: HTMLElement) => [...row.children].map(child =>
-      ["lc-scratch-load-lock", "lc-version-pick", "lc-version-share", "lc-scratch-load-trash"].find(name => child.classList.contains(name))).filter(Boolean);
+      ["lc-scratch-load-lock", "lc-version-pick", "lc-version-share", "lc-scratch-load-trash"].find(name =>
+        child.classList.contains(name) || child.querySelector(`:scope > .${name}`))).filter(Boolean);
     expect(order(plain)).toEqual(order(rows.find(node => node.textContent?.includes("Book.pdf"))!));
   });
 

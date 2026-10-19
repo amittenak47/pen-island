@@ -1,0 +1,2 @@
+/* The padlock's guarded control: clipped while it folds, so it slides out of its own space. */
+.lc-padlock-reveal { display: inline-flex; flex-shrink: 0; align-self: center; overflow: hidden; }

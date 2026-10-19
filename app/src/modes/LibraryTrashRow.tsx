@@ -1,6 +1,6 @@
 import {useState} from "react";
 import {HoldButton} from "../components/HoldButton";
-import {LibraryPadlock} from "./LibraryPadlock";
+import {LibraryPadlock, PadlockReveal} from "./LibraryPadlock";
 import {LIBRARY_HOLD_MS} from "../util/gesture";
 
 /** A local safety latch, followed by the same hold-to-trash control as live rows. */
@@ -14,9 +14,9 @@ export function LibraryTrashRow({name,updatedAt,detail,disabled,onRestore,onDele
     <strong title={name}>Restore {"\u00b7"} {name}</strong><span className="lc-muted">{updatedAt ? new Date(updatedAt).toLocaleString() : "Date unknown"}</span>{detail && <span className="lc-muted lc-library-size">{detail}</span>}
    </HoldButton>
    <LibraryPadlock name={name} locked={locked} disabled={disabled||pending} onToggle={()=>setLocked(value=>!value)}/>
-   {!locked && <HoldButton label={`Permanently delete ${name}`} ariaLabel={`Permanently delete ${name}`} dataTip="Permanently delete" holdMs={LIBRARY_HOLD_MS} className="lc-scratch-load-trash lc-hold-danger" disabled={disabled||pending} onConfirm={()=>void run(onDelete)}>
+   <PadlockReveal shown={!locked}><HoldButton label={`Permanently delete ${name}`} ariaLabel={`Permanently delete ${name}`} dataTip="Permanently delete" holdMs={LIBRARY_HOLD_MS} className="lc-scratch-load-trash lc-hold-danger" disabled={disabled||pending} onConfirm={()=>void run(onDelete)}>
     <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="M4 6h16M9 6V4h6v2M6 6l1 14h10l1-14M10 10v7M14 10v7"/></svg>
-   </HoldButton>}
+   </HoldButton></PadlockReveal>
   </div>
   {error && <p role="alert" className="lc-warning">{error}</p>}
  </div>;
