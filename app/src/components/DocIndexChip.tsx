@@ -91,6 +91,14 @@ function syncLabel(
   return null;
 }
 
+/**
+ * The notification's lines read as sentences ("Synced", "Indexing…"); the
+ * pill keeps its lowercase status words.
+ */
+function sentence(text: string | null): string | null {
+  return text ? text.charAt(0).toUpperCase() + text.slice(1) : text;
+}
+
 function withChipSync(node: ReactNode, sync: ReactNode) {
   if (!sync) return node;
   return <span className="lc-doc-index-chip-row">{node}{sync}</span>;
@@ -509,7 +517,7 @@ export function DocIndexChip({
             syncLeaveRef.current = window.setTimeout(() => setSyncHover(false), 220);
           }}
         >
-          <div className="lc-doc-sync-line">{syncText}</div>
+          <div className="lc-doc-sync-line">{sentence(syncText)}</div>
           {indexText && (
             <IndexRow
               className="lc-doc-sync-index"
@@ -521,7 +529,7 @@ export function DocIndexChip({
               } : undefined}
             >
               {indexRing && <WorkRing progress={(status === "indexing" ? indexProgress : embedProgress) ?? null} />}
-              {indexText}
+              {sentence(indexText)}
             </IndexRow>
           )}
         </div>,

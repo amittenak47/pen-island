@@ -240,7 +240,7 @@ describe("the in-tab Sync overlay", () => {
     act(() => syncButton(host).click());
     expect(onSync).toHaveBeenCalledTimes(1);
     rerender({ walkStage: "index", walkJob: "embed" });
-    expect(syncPopover()?.querySelector(".lc-doc-sync-line")?.textContent).toBe("embedding…");
+    expect(syncPopover()?.querySelector(".lc-doc-sync-line")?.textContent).toBe("Embedding…");
     expect(syncPopover()?.getAttribute("role")).toBe("status");
     expect(syncPopover()?.getAttribute("aria-live")).toBe("polite");
     expect(syncButton(host).getAttribute("aria-expanded")).toBe("true");
@@ -256,7 +256,7 @@ describe("the in-tab Sync overlay", () => {
     const { host, rerender } = mount({ walkStage: "pull", onSync });
     act(() => syncButton(host).click());
     expect(onSync).not.toHaveBeenCalled();
-    expect(syncPopover()?.querySelector(".lc-doc-sync-line")?.textContent).toBe("pull…");
+    expect(syncPopover()?.querySelector(".lc-doc-sync-line")?.textContent).toBe("Pull…");
     rerender({ walkStage: "synced" });
     act(() => vi.advanceTimersByTime(5_000));
     expect(syncPopover()).not.toBeNull();
@@ -276,9 +276,9 @@ describe("the in-tab Sync overlay", () => {
   });
 
   it.each([
-    [{ status: "indexed" }, "indexed"],
-    [{ status: "indexed", meta: { embedded: false } }, "indexed · words"],
-    [{ status: "idle", onIndex: vi.fn() }, "not indexed"],
+    [{ status: "indexed" }, "Indexed"],
+    [{ status: "indexed", meta: { embedded: false } }, "Indexed · words"],
+    [{ status: "idle", onIndex: vi.fn() }, "Not indexed"],
   ] as const)("opens the index card from the index row: %j", (state, text) => {
     const props = state as Partial<DocIndexChipProps>;
     const { host } = mount({ ...props, onSync: vi.fn() });
@@ -298,9 +298,9 @@ describe("the in-tab Sync overlay", () => {
   });
 
   it.each([
-    [{ status: "indexing", indexProgress: { done: 1, total: 4 } }, "25indexing…"],
-    [{ status: "idle", embedding: true, embedProgress: { done: 2, total: 4 } }, "50embedding…"],
-    [{ status: "error", error: "extract failed" }, "index error"],
+    [{ status: "indexing", indexProgress: { done: 1, total: 4 } }, "25Indexing…"],
+    [{ status: "idle", embedding: true, embedProgress: { done: 2, total: 4 } }, "50Embedding…"],
+    [{ status: "error", error: "extract failed" }, "Index error"],
   ] as const)("uses a non-button index row when canOpen is false: %j", (state, text) => {
     const { host } = mount({ ...state, onSync: vi.fn() });
     act(() => syncButton(host).click());
@@ -324,7 +324,7 @@ describe("the in-tab Sync overlay", () => {
     act(() => vi.advanceTimersByTime(10_000));
     expect(syncPopover()).not.toBeNull();
     rerender(landing === "walk" ? { walkStage: "synced" } : { walkStage: "idle", padSync: "synced" });
-    expect(syncPopover()?.querySelector(".lc-doc-sync-line")?.textContent).toBe("synced");
+    expect(syncPopover()?.querySelector(".lc-doc-sync-line")?.textContent).toBe("Synced");
     act(() => vi.advanceTimersByTime(2_499));
     expect(syncPopover()).not.toBeNull();
     act(() => vi.advanceTimersByTime(1));
@@ -344,8 +344,8 @@ describe("the in-tab Sync overlay", () => {
   });
 
   it.each([
-    [{ walkError: "hub unreachable", walkStage: "synced" }, "hub unreachable"],
-    [{ walkStage: "idle", padSync: "not-synced" }, "not synced"],
+    [{ walkError: "hub unreachable", walkStage: "synced" }, "Hub unreachable"],
+    [{ walkStage: "idle", padSync: "not-synced" }, "Not synced"],
   ] as const)("keeps the overlay open on a parked walk: %j", (state, text) => {
     vi.useFakeTimers();
     const { host, rerender } = mount({ onSync: vi.fn() });
@@ -364,7 +364,7 @@ describe("the in-tab Sync overlay", () => {
     act(() => vi.advanceTimersByTime(1_000));
     rerender({ walkStage: "synced", walkError: "upload failed" });
     act(() => vi.advanceTimersByTime(10_000));
-    expect(syncPopover()?.textContent).toContain("upload failed");
+    expect(syncPopover()?.textContent).toContain("Upload failed");
   });
 
   it.each([
