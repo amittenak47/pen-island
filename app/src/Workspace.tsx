@@ -9580,8 +9580,9 @@ export const Workspace = memo(function Workspace({
       </>, headerSlots.center) : null}
       {active && headerSlots.right ? createPortal(<>
           {/*
-            Globe, then the file icon, then paper. Tap opens google.com as a
-            snapshot pad; hold is the same annotate library.
+            File icon, globe, paper, explore, practice, then settings. The
+            globe's tap opens google.com as a snapshot pad; hold is the same
+            annotate library.
 
             With a workspace already open these no longer disappear — they
             spawn a tab beside it. The one icon matching what is on screen
@@ -9590,6 +9591,80 @@ export const Workspace = memo(function Workspace({
             A footnote scratch board is not a library notebook: leave it with
             Back to document, not by opening another pad from this header.
           */}
+          {/*
+            Document icon, first: tap picks a file to annotate, hold opens
+            the library. The globe beside it splits the same way.
+          */}
+          {!hidePadMenu && headerModes.annotate && !docPadLive && (
+            <HoldButton
+              label="Document"
+              ariaLabel="Document pad: tap to open a file, hold for recent documents"
+              className="lc-icon lc-hold-icon lc-head-mode-annotate"
+              disabled={busy !== null || canvasLoading}
+              onTap={() => void pickAndOpenAnnotate()}
+              onConfirm={() => {
+                setEntryKind("document");
+                setAnnotateEntryOpen(true);
+              }}
+            >
+              <svg
+                className="lc-icon-svg"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+                {/* An "M" and a down-arrow — the markdown mark, at icon scale. */}
+                <path d="M7 18v-5l2.2 2.6L11.4 13v5" />
+                <path d="M14.6 13v5M12.9 16.4l1.7 1.6 1.7-1.6" />
+              </svg>
+            </HoldButton>
+          )}
+          {!hidePadMenu && headerModes.annotate && docPadLive && (
+            /* Tap to save now, hold for the sheet. */
+            <HoldButton
+              label="Markdown"
+              ariaLabel="Markdown documents: tap to save now, hold for save / open menu"
+              className="lc-icon lc-hold-icon lc-head-mode-annotate is-active"
+              pressed
+              disabled={busy !== null || canvasLoading}
+              onTap={() => {
+                void saveAnnotateSession().then((saved) => {
+                  if (saved) setNotice(`Annotations saved for “${annotateDocLabel(saved)}”.`);
+                });
+              }}
+              onConfirm={() => {
+                setEntryKind("document");
+                setAnnotateEntryOpen(true);
+              }}
+            >
+              {/* Open: the same lines as the idle icon, drawn in the tab's colour. */}
+              <svg
+                className="lc-icon-svg"
+                viewBox="0 0 24 24"
+                width="16"
+                height="16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.75"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                <path d="M14 2v6h6" />
+                <path d="M7 18v-5l2.2 2.6L11.4 13v5" />
+                <path d="M14.6 13v5M12.9 16.4l1.7 1.6 1.7-1.6" />
+              </svg>
+            </HoldButton>
+          )}
           {!hidePadMenu && headerModes.web && !webPadLive && (
             <HoldButton
               label="Web"
@@ -9621,42 +9696,6 @@ export const Workspace = memo(function Workspace({
                 <circle cx="12" cy="12" r="10" />
                 <path d="M2 12h20" />
                 <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-              </svg>
-            </HoldButton>
-          )}
-          {/*
-            Document icon, left of the scratchpad's paper: tap picks a file to
-            annotate, hold opens the library. Same split as its neighbour.
-          */}
-          {!hidePadMenu && headerModes.annotate && !docPadLive && (
-            <HoldButton
-              label="Document"
-              ariaLabel="Document pad: tap to open a file, hold for recent documents"
-              className="lc-icon lc-hold-icon lc-head-mode-annotate"
-              disabled={busy !== null || canvasLoading}
-              onTap={() => void pickAndOpenAnnotate()}
-              onConfirm={() => {
-                setEntryKind("document");
-                setAnnotateEntryOpen(true);
-              }}
-            >
-              <svg
-                className="lc-icon-svg"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="1.75"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <path d="M14 2v6h6" />
-                {/* An "M" and a down-arrow — the markdown mark, at icon scale. */}
-                <path d="M7 18v-5l2.2 2.6L11.4 13v5" />
-                <path d="M14.6 13v5M12.9 16.4l1.7 1.6 1.7-1.6" />
               </svg>
             </HoldButton>
           )}
@@ -9692,41 +9731,6 @@ export const Workspace = memo(function Workspace({
                 <circle cx="12" cy="12" r="10" />
                 <path d="M2 12h20" />
                 <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
-              </svg>
-            </HoldButton>
-          )}
-          {!hidePadMenu && headerModes.annotate && docPadLive && (
-            /* Tap to save now, hold for the sheet. */
-            <HoldButton
-              label="Markdown"
-              ariaLabel="Markdown documents: tap to save now, hold for save / open menu"
-              className="lc-icon lc-hold-icon lc-head-mode-annotate is-active"
-              pressed
-              disabled={busy !== null || canvasLoading}
-              onTap={() => {
-                void saveAnnotateSession().then((saved) => {
-                  if (saved) setNotice(`Annotations saved for “${annotateDocLabel(saved)}”.`);
-                });
-              }}
-              onConfirm={() => {
-                setEntryKind("document");
-                setAnnotateEntryOpen(true);
-              }}
-            >
-              <svg
-                className="lc-icon-svg lc-icon-svg-filled"
-                viewBox="0 0 24 24"
-                width="16"
-                height="16"
-                fill="currentColor"
-                stroke="currentColor"
-                strokeWidth="1.25"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                aria-hidden="true"
-              >
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <path d="M14 2v6h6" fill="none" />
               </svg>
             </HoldButton>
           )}
@@ -9782,34 +9786,37 @@ export const Workspace = memo(function Workspace({
                 if (!isFootnoteBoardTab(tab)) setWhiteboardEntryOpen(true);
               }}
             >
+              {/* Open: the same lines as the idle icon, drawn in the tab's colour. */}
               <svg
-                className="lc-icon-svg lc-icon-svg-filled"
+                className="lc-icon-svg"
                 viewBox="0 0 24 24"
                 width="16"
                 height="16"
-                fill="currentColor"
+                fill="none"
                 stroke="currentColor"
-                strokeWidth="1.25"
+                strokeWidth="1.75"
                 strokeLinecap="round"
                 strokeLinejoin="round"
                 aria-hidden="true"
               >
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <path d="M14 2v6h6" fill="none" />
+                <path d="M14 2v6h6" />
+                <path d="M8 13h8" />
+                <path d="M8 17h5" />
               </svg>
             </HoldButton>
           )}
+          {!hidePadMenu && headerModes.explore && <ExploreHeaderMenu active={tab.kind === "explore"} disabled={busy !== null || canvasLoading}
+            onOpen={openExplore} onPull={async () => {
+              try { return await pullMissingHubFiles(client); }
+              finally { window.dispatchEvent(new Event("lc-explore-graph")); }
+            }} getGraph={() => collectExploreGraph(tabsRef.current.tabs)} />}
           {!hidePadMenu && headerModes.practice && FEATURE_LEETCODE && <button type="button" className="lc-icon lc-head-mode-practice"
             aria-label="Practice: open the problem library" disabled={busy !== null || canvasLoading} onClick={() => openPracticePicker?.()}>
             <svg className="lc-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true">
               <path d="m8 6-6 6 6 6m8-12 6 6-6 6M14 3l-4 18" />
             </svg>
           </button>}
-          {!hidePadMenu && headerModes.explore && <ExploreHeaderMenu active={tab.kind === "explore"} disabled={busy !== null || canvasLoading}
-            onOpen={openExplore} onPull={async () => {
-              try { return await pullMissingHubFiles(client); }
-              finally { window.dispatchEvent(new Event("lc-explore-graph")); }
-            }} getGraph={() => collectExploreGraph(tabsRef.current.tabs)} />}
           <button
             type="button"
             className="lc-icon"
