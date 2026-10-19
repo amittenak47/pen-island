@@ -913,10 +913,16 @@ a,
 
 .lc-header .lc-tab-close {
   flex-shrink: 0;
+  /* The × centred in its box, so it sits on the tab's middle row with the
+     Sync pair; a gap on its left keeps the two apart. */
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 20px;
   min-width: 20px;
   height: 20px;
   min-height: 20px;
+  margin-left: 6px;
   margin-right: 2px;
   padding: 0;
   border: 0;

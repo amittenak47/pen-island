@@ -17,7 +17,7 @@ import { useEffect, useId, useRef, useState } from "react";
 
 import { LIBRARY_HOLD_MS } from "../util/gesture";
 import { HoldButton } from "../components/HoldButton";
-import { DocSyncLinkPair, type DocSyncLinkPairProps } from "../components/DocSyncLinkPair";
+import { DocSyncLinkPair, LinkIcon, type DocSyncLinkPairProps } from "../components/DocSyncLinkPair";
 import { DialogFrame } from "../components/DialogFrame";
 import "./annotateDialog.css";
 import { ConfirmDialog } from "../components/ConfirmDialog";
@@ -814,8 +814,10 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
           </motion.button>}</DialogPresence>
           <DialogPresence>{pickingRecent && nativeSourcePickerAvailable() && <motion.button key="link-folder" type="button"
             className="lc-secondary lc-dialog-action lc-doc-source-bulk lc-doc-source-folder" disabled={locked} onClick={() => void pickFolderSources()}
+            // The chain, as on Link: the words are its label and tooltip.
+            aria-label="Link files from a folder…" title="Link files from a folder: match unlinked documents by file name"
             initial={reducedMotion ? false : { opacity: 0, y: 4 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18 }}>
-            Link files from a folder…
+            <LinkIcon />
           </motion.button>}</DialogPresence>
           <span className="lc-dialog-foot-spacer" aria-hidden="true" />
           {(section !== "main" || pickingRecent || pickingSnapshots || pickingRecovery || newTitle !== null || saveTitle !== null) && (
