@@ -288,7 +288,7 @@ it("runs the tab's Sync from the Annotate menu's [Sync | Link], and steps the me
   await act(async () => { header.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
   await advance(400);
   const sync = document.querySelector<HTMLButtonElement>(".lc-annotate-context .lc-sync-link-sync");
-  expect(sync?.textContent).toBe("Sync");
+  expect(sync?.getAttribute("aria-label")).toMatch(/^Sync\. /);
   await act(async () => { sync!.click(); });
   expect(mocks.pass).toHaveBeenCalledWith(mocks.shell.client, expect.objectContaining({ only: true, selected: { kind: "annotate", id: "book" } }));
   for (let i = 0; i < 4; i++) await advance(250);

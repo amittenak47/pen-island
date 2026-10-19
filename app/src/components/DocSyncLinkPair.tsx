@@ -3,8 +3,6 @@ import { createPortal } from "react-dom";
 import { usePadHubStatus } from "../util/padHubStatus";
 import { HOLD_FILL_MS } from "../util/gesture";
 import { HoldButton } from "./HoldButton";
-import { HubStatusDot } from "./HubStatusDot";
-import { WorkRing } from "./DocIndexChip";
 import { usePopPlacement } from "./usePopPlacement";
 import { usePresence } from "./usePresence";
 import "./docSyncLinkPair.css";
@@ -13,6 +11,8 @@ export interface DocSyncLinkPairProps {
   /** The tab's sync line, as the tab's own Sync says it ("Synced", "Pad…"). */
   syncLine: string | null;
   syncing: boolean;
+  /** The tab's book is synced (the walk landed, or nothing changed since). */
+  synced?: boolean;
   syncFailed?: boolean;
   onSync: () => void;
   /** The file this document came from. Absent for kinds with no file (whiteboards, web pages). */
@@ -29,14 +29,15 @@ export interface DocSyncLinkPairProps {
 }
 
 /**
- * [⊙ Sync | Link] in a menu's context row, where "not synced" used to sit.
+ * [● | 🔗] in a menu's context row, where "not synced" used to sit: two
+ * equal icon squares, the words in their labels and notifications.
  *
  * Sync is the tab's Sync, the same walk. Link is what the page's refresh
  * button was: tap checks the linked file for a newer version (or links one),
  * hold offers the rest. Each half says its status in a notification directly
  * under it, on hover, or on a tap for touch, which has no hover.
  */
-export function DocSyncLinkPair({ syncLine, syncing, syncFailed = false, onSync, link = null, disabled = false }: DocSyncLinkPairProps) {
+export function DocSyncLinkPair({ syncLine, syncing, synced = false, syncFailed = false, onSync, link = null, disabled = false }: DocSyncLinkPairProps) {
   const syncRef = useRef<HTMLButtonElement | null>(null);
   const linkRef = useRef<HTMLButtonElement | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -53,6 +54,14 @@ export function DocSyncLinkPair({ syncLine, syncing, syncFailed = false, onSync,
   const syncText = hubStatus === "offline" && !syncing
     ? "Desktop app is offline. Try again when it's back."
     : syncLine ?? "Sync this document";
+
+  /*
+   * One colour each. Sync: green synced, yellow syncing, red not synced or
+   * failed (the hub offline included: nothing can sync). Link: green linked,
+   * yellow a newer version waiting or being checked, red not linked.
+   */
+  const syncState = syncing ? "syncing" : syncFailed || hubStatus === "offline" || !synced ? "unsynced" : "synced";
+  const linkState = !link ? null : !linked ? "unlinked" : link.checking || link.newer ? "attention" : "linked";
 
   useEffect(() => { if (!linked) setMenuOpen(false); }, [linked]);
   useEffect(() => {
@@ -88,20 +97,17 @@ export function DocSyncLinkPair({ syncLine, syncing, syncFailed = false, onSync,
       <button ref={syncRef} type="button" className={`lc-sync-link-sync${syncFailed ? " is-bad" : ""}`} disabled={disabled}
         aria-label={`Sync. ${syncText}`} aria-busy={syncing}
         onClick={() => { enter("sync"); if (!syncing) onSync(); }}>
-        {syncing ? <WorkRing progress={null} /> : <HubStatusDot />}
-        <span>Sync</span>
+        <span className="lc-sync-link-dot" data-state={syncState} aria-hidden="true" />
       </button>
     </span>
     {link && <span className="lc-sync-link-half" onPointerEnter={() => enter("link")} onPointerLeave={exit}>
       <HoldButton label="Link" holdMs={HOLD_FILL_MS} onMeasure={node => { linkRef.current = node; }}
-        className={`lc-sync-link-link${linked ? "" : " is-unlinked"}${link.checking ? " is-working" : ""}`}
+        className={`lc-sync-link-link is-${linkState}${link.checking ? " is-working" : ""}`}
         ariaLabel={linkLine ?? "Link"} disabled={disabled || link.checking} fillIndeterminate={link.checking}
         onTap={() => { enter("link"); if (linked) link.onCheck(); else link.onLink(); }}
         onConfirm={() => { if (linked) setMenuOpen(open => !open); else link.onLink(); }}>
         <span className="lc-sync-link-face">
-          <span>Link</span>
-          {link.checking ? <WorkRing progress={null} /> : <LinkIcon />}
-          {linked && link.newer && !link.checking && <span className="lc-library-sync-dot" aria-hidden="true" />}
+          <LinkIcon />
         </span>
       </HoldButton>
     </span>}

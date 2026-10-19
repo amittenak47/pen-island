@@ -9251,17 +9251,18 @@ export const Workspace = memo(function Workspace({
     const offered = tabOffersHubSync(tab.kind) && (tab.kind !== "practice" || !!problem && !isLocalPad(problem)) && !isFootnoteBoardTab(tab);
     if (!offered) return null;
     const stage = walkReport?.stage ?? null;
+    const padSync = padTabSync({
+      walkStage: stage, padEditSeq, hubHint,
+      hasDocument: Boolean(indexInputsRef.current),
+      hasPad: Boolean(annotateDocId || whiteboardNotebookId),
+    }) ?? "not-synced";
     return {
       syncLine: docSyncLine({
         walkStage: stage, walkJob: walkReport?.job ?? null, walkError: walkReport?.error ?? null,
-        walkWaiting: walkReport?.waiting ?? null, walkMessage: walkReport?.message ?? null,
-        padSync: padTabSync({
-          walkStage: stage, padEditSeq, hubHint,
-          hasDocument: Boolean(indexInputsRef.current),
-          hasPad: Boolean(annotateDocId || whiteboardNotebookId),
-        }) ?? "not-synced",
+        walkWaiting: walkReport?.waiting ?? null, walkMessage: walkReport?.message ?? null, padSync,
       }),
       syncing: stage != null && stage !== "idle" && stage !== "synced" && !walkReport?.error,
+      synced: !walkReport?.error && (stage === "synced" || padSync === "synced"),
       syncFailed: Boolean(walkReport?.error),
       onSync: onHubSync,
       link,
