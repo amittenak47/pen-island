@@ -281,4 +281,37 @@ describe("FootnoteOverview panel", () => {
     }
     expect(document.querySelector(".lc-footnote-mini-note")).toBeNull();
   });
+  // Last: the dragged size is remembered for the session (a module value).
+  it("a resize drag stops at the screen's edge and leaves the full placement for the release", () => {
+    let observed: (() => void) | null = null;
+    vi.stubGlobal("ResizeObserver", class { constructor(callback: () => void) { observed = callback; } observe() {} disconnect() {} });
+    vi.stubGlobal("requestAnimationFrame", (callback: FrameRequestCallback) => { callback(0); return 0; });
+    mount(MARK);
+    const panel = document.querySelector<HTMLElement>(".lc-footnote-overview")!;
+    const resize = panel.querySelector<HTMLButtonElement>('[aria-label="Resize footnote panel"]')!;
+    vi.spyOn(panel, "getBoundingClientRect").mockReturnValue(new DOMRect(40, 50, 260, 300));
+    const pointer = (type: string, x: number, y: number) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 });
+      Object.defineProperty(event, "pointerId", { value: 7 });
+      act(() => { resize.dispatchEvent(event); });
+    };
+    const findsMark = vi.spyOn(document, "querySelectorAll");
+    const placements = () => findsMark.mock.calls.filter(([selector]) => String(selector).includes("lc-doc-footnote-pack")).length;
+    pointer("pointerdown", 300, 350);
+    pointer("pointermove", 5000, 5000);
+    // Far past the corner: the size stops 8 px inside the window, the corner where it was.
+    expect(panel.style.width).toBe(`${window.innerWidth - 8 - 40}px`);
+    expect(panel.style.height).toBe(`${window.innerHeight - 8 - 50}px`);
+    // Every frame's size change reaches the observer; it does not place the panel mid-drag.
+    const before = placements();
+    act(() => observed!());
+    expect(placements()).toBe(before);
+    pointer("pointerup", 5000, 5000);
+    expect(placements()).toBeGreaterThan(before);
+    // After the release the observer places it again.
+    const released = placements();
+    act(() => observed!());
+    expect(placements()).toBeGreaterThan(released);
+    vi.unstubAllGlobals();
+  });
 });

@@ -647,9 +647,14 @@ export function FootnoteOverview({
     if (gesture.mode === "move") {
       userPlace.current = { left: gesture.left + dx, top: gesture.top + dy };
     } else {
+      // The top-left corner stays put and the size stops at the screen's
+      // edge, so the corner stays under the finger. (The full placement used
+      // to slide the panel back on screen each frame; it no longer runs.)
+      const roomRight = view.originX + view.width - 8 - gesture.left;
+      const roomDown = view.originY + view.height - 8 - gesture.top;
       preferredPanelSize = {
-        width: Math.max(PANEL_MIN.width, Math.min(gesture.width + dx, view.width - 16)),
-        height: Math.max(PANEL_MIN.height, Math.min(gesture.height + dy, view.height - 16)),
+        width: Math.max(PANEL_MIN.width, Math.min(gesture.width + dx, view.width - 16, roomRight)),
+        height: Math.max(PANEL_MIN.height, Math.min(gesture.height + dy, view.height - 16, roomDown)),
       };
       userPlace.current = { left: gesture.left, top: gesture.top };
     }
@@ -713,9 +718,16 @@ export function FootnoteOverview({
     place();
     const node = panelRef.current;
     const stopSurface = subscribePageSurfaceMove(place);
+    /*
+     * Its size changing re-places it (content growing, a list opening), but
+     * not while it is dragged: a resize changes the size every frame, and the
+     * full placement measures the page to find the mark and lays the panel's
+     * contents out twice (at their natural size, then at the dragged one).
+     * Release places it once.
+     */
     const observer =
       node && typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(() => place())
+        ? new ResizeObserver(() => { if (!panelGesture.current) place(); })
         : null;
     if (node && observer) observer.observe(node);
     return () => {
