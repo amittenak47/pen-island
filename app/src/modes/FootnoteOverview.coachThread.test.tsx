@@ -48,12 +48,16 @@ describe("FootnoteOverview threads", () => {
   it("allows linking an existing conversation without altering its messages", () => {
     const change = vi.fn();
     const {root} = mount(undefined, {onChange: change, availableThreads: [{rootId: "other", title: "Other thread"}]});
-    const trigger = document.querySelector<HTMLButtonElement>(".lc-footnote-thread-trigger")!;
-    act(() => trigger.click());
-    const option = Array.from(document.querySelectorAll<HTMLButtonElement>('[aria-label="Link an existing thread"] button'))
+    // The Threads section's own +, like every other section's.
+    const add = document.querySelector<HTMLButtonElement>('[aria-label="Threads"] .lc-footnote-overview-add')!;
+    expect(add.getAttribute("aria-label")).toBe("Link a saved thread");
+    act(() => add.click());
+    const option = Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menu"][aria-label="Link an existing thread"] button'))
       .find(button => button.textContent?.includes("Other thread"))!;
     act(() => option.click());
-    expect(document.querySelector('[aria-label="Link an existing thread"]')).toBeNull();
+    expect(document.querySelector('[role="menu"][aria-label="Link an existing thread"]')).toBeNull();
+    // + unfolded the section, so the linked thread is in view.
+    expect(document.querySelector('[aria-label="Threads"] .lc-footnote-overview-section-fold')?.hasAttribute("data-open")).toBe(true);
     expect(change).toHaveBeenCalledWith(expect.objectContaining({threads: [MARK.threads![0], expect.objectContaining({rootId: "other"})]}));
     expect(document.querySelector('[aria-label="Forget thread"]')).toBeNull();
     const unlink = document.querySelector<HTMLButtonElement>('[aria-label*="Tap to open, hold to unlink"]')!;

@@ -94,6 +94,28 @@ export function readableInk(...candidates: string[]): string {
   return readableInkOn(SURFACE_FALLBACK, candidates);
 }
 
+/** Document pages are drawn on white in every theme. */
+const PAPER = "#ffffff";
+
+/**
+ * For small text (a 9 px caption): the palette colour with the most contrast,
+ * if it reaches 4.5:1, else the dark or light fallback. Pastels do not.
+ */
+export function smallTextInkOn(background: string, candidates: readonly string[]): string {
+  let best: string | null = null;
+  let bestRatio = 0;
+  for (const color of candidates) {
+    if (!color?.trim()) continue;
+    const ratio = contrastRatio(color.trim(), background);
+    if (ratio > bestRatio) {
+      bestRatio = ratio;
+      best = color.trim();
+    }
+  }
+  if (best && bestRatio >= 4.5) return best;
+  return relativeLuminance(background) > 0.45 ? INK_DARK : INK_LIGHT;
+}
+
 /** Best contrast against `background` from candidates, else dark/light fallback. */
 export function readableInkOn(background: string, candidates: readonly string[]): string {
   const fallback = relativeLuminance(background) > 0.45 ? INK_DARK : INK_LIGHT;
@@ -117,6 +139,9 @@ export function readableInkOn(background: string, candidates: readonly string[])
  * `--lc-fn-color` = selected primary (accents / borders — not body labels).
  * `--lc-fn-wash` / `--lc-fn-chip` = palette mixed into the theme panel.
  * `--lc-fn-ink` = readable label/body color on that wash.
+ * `--lc-fn-paper-ink` = readable on the page's paper (a caption beside a
+ *   mark), which is white whatever the theme: a light palette on a dark theme
+ *   gives a light `--lc-fn-ink` that vanishes there.
  * `--lc-fn-p0`…`p3` = palette rotated so primary leads, then the rest.
  * `--lc-fn-light` / `--lc-fn-mid` / `--lc-fn-deep` = non-primary roles by luminance.
  *
@@ -150,6 +175,7 @@ export function footnoteThemeVars(
   const wash = mixHex(light, paper, WASH_MIX);
   const chip = mixHex(light, paper, CHIP_MIX);
   const ink = readableInkOn(wash, [deep, ...rest, pick]);
+  const paperInk = smallTextInkOn(PAPER, [deep, ...rest, pick]);
   const muted = mixHex(ink, wash, 0.62);
   // Number badges use the selected swatch itself, not the card's pale wash.
   const badgeInk = contrastRatio(pick, "#000000") >= contrastRatio(pick, "#ffffff")
@@ -164,6 +190,7 @@ export function footnoteThemeVars(
     ["--lc-fn-badge-fill" as string]: pick,
     ["--lc-fn-badge-ink" as string]: badgeInk,
     ["--lc-fn-ink" as string]: ink,
+    ["--lc-fn-paper-ink" as string]: paperInk,
     ["--lc-fn-muted" as string]: muted,
     ["--lc-fn-wash" as string]: wash,
     ["--lc-fn-chip" as string]: chip,

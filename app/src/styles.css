@@ -20178,6 +20178,46 @@ button.lc-row-selected:hover:not(:disabled) {
   gap: 4px;
 }
 
+/*
+ * In the panel the tools and Undo | Reset | Redo share one row at every
+ * width: the tools keep their size and Reset gives up width first.
+ */
+.lc-footnote-overview .lc-footnote-overview-toolbar {
+  flex-wrap: nowrap;
+}
+
+.lc-footnote-overview .lc-footnote-overview-toolbar > .lc-footnote-submark-modes {
+  flex: none;
+}
+
+.lc-footnote-overview .lc-footnote-overview-toolbar > .lc-footnote-panel-history {
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+.lc-footnote-overview .lc-footnote-panel-history .lc-footnote-panel-reset {
+  flex: 0 1 auto;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+/* Title, then the colour dot at its right; a long title wraps, never under the dot. */
+.lc-footnote-overview-title-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.lc-footnote-overview-title-row > .lc-footnote-overview-title-display,
+.lc-footnote-overview-title-row > .lc-footnote-overview-title {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.lc-footnote-overview-title-row > .lc-footnote-overview-color {
+  flex: none;
+}
+
 .lc-footnote-overview-title-display {
   display: block;
   width: 100%;
@@ -20261,7 +20301,7 @@ button.lc-row-selected:hover:not(:disabled) {
   }
 }
 
-.lc-footnote-overview-toolbar .lc-color-radial-compact .lc-color-dot {
+.lc-footnote-overview-color .lc-color-radial-compact .lc-color-dot {
   width: 28px;
   min-width: 28px;
   height: 28px;
@@ -20272,7 +20312,7 @@ button.lc-row-selected:hover:not(:disabled) {
   box-sizing: border-box;
 }
 
-.lc-footnote-overview-toolbar .lc-color-radial-compact .lc-color-dot-fill {
+.lc-footnote-overview-color .lc-color-radial-compact .lc-color-dot-fill {
   width: 16px;
   height: 16px;
 }
@@ -20558,8 +20598,77 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-footnote-overview-section {
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+/* Folds by sliding (grid rows 0fr <-> 1fr), not by popping. */
+.lc-footnote-overview-section-fold {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lc-footnote-overview-section-fold[data-open] {
+  grid-template-rows: 1fr;
+}
+
+.lc-footnote-overview-section-body {
+  display: flex;
+  flex-direction: column;
   gap: 3px;
   min-height: 0;
+  overflow: hidden;
+}
+
+/* The gap under the title belongs to the folding part, so a folded section is just its title. */
+.lc-footnote-overview-section-body > :first-child {
+  margin-top: 3px;
+}
+
+/* The title is the fold's button: caret, name, count. */
+.lc-footnote-overview-section-toggle {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 0 !important;
+  margin: 0;
+  padding: 2px 0;
+  border: 0;
+  background: transparent !important;
+  color: inherit !important;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+
+.lc-footnote-overview-section-caret {
+  display: inline-block;
+  font-size: 0.85em;
+  transition: transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.lc-footnote-overview-section-toggle[aria-expanded="true"] .lc-footnote-overview-section-caret {
+  transform: rotate(90deg);
+}
+
+.lc-footnote-overview-section-count {
+  min-width: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: color-mix(in srgb, currentColor 16%, transparent);
+  font-size: 0.9em;
+  font-weight: 600;
+  line-height: 1.4;
+  text-align: center;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-footnote-overview-section-fold,
+  .lc-footnote-overview-section-caret {
+    transition: none;
+  }
 }
 
 /*
@@ -20881,6 +20990,8 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-task-field,
 .lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-add-link input,
 .lc-footnote-overview[style*="--lc-fn-color"] .lc-color-dot,
+.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-panel-reset,
+.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-panel-mini,
 .lc-footnote-overview[style*="--lc-fn-color"] .lc-secondary {
   background: var(--lc-fn-chip, var(--lc-fn-wash)) !important;
   color: var(--lc-fn-ink, var(--ink)) !important;
@@ -22040,14 +22151,12 @@ button.lc-row-selected:hover:not(:disabled) {
   font-size: 9px;
   font-weight: 600;
   line-height: 1.15;
-  color: var(--lc-fn-ink, var(--lc-fn-deep, var(--lc-fn-text, var(--ink))));
+  /* On the page's paper, not the panel's wash: see --lc-fn-paper-ink. */
+  color: var(--lc-fn-paper-ink, var(--lc-fn-deep, var(--lc-fn-text, var(--ink))));
   pointer-events: none;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  text-shadow:
-    0 0 3px color-mix(in srgb, var(--surface, #fff) 90%, transparent),
-    0 1px 2px color-mix(in srgb, var(--surface, #fff) 80%, transparent);
 }
 
 .lc-doc-footnote-band {
@@ -23220,31 +23329,35 @@ html[data-corners="rounded"] {
 }
 
 /*
- * Undo | Reset | Redo on one row, the three the same height. Reset is
- * narrower than on its own, so the row takes about the room Reset alone did
- * and never wraps onto a second line at the panel's minimum width.
+ * Undo | Reset | Redo at the end of the tools row, as tall as the tools and
+ * dressed like them. Narrow enough that the row fits at the panel's minimum
+ * width (four 28 px tools, then these three).
  */
 .lc-footnote-panel-history {
   margin-left: auto;
   display: flex;
   align-items: stretch;
-  gap: 3px;
+  gap: 2px;
   flex: none;
 }
 
 .lc-footnote-panel-history .lc-footnote-panel-reset {
   margin-left: 0;
-  min-height: 24px;
-  padding: 0 6px;
+  min-width: 0;
+  height: 28px;
+  min-height: 0;
+  padding: 0 4px;
+  font-size: 11px;
 }
 
 .lc-footnote-panel-history .lc-footnote-panel-mini {
   display: inline-grid;
   place-items: center;
-  width: 20px;
+  width: 18px;
   min-width: 0;
-  height: 24px;
+  height: 28px;
   min-height: 0;
+  flex: none;
   padding: 0;
   border: 1px solid var(--chrome-edge, var(--border, rgb(127 127 127 / 30%)));
   border-radius: var(--lc-r-block);
@@ -23520,6 +23633,15 @@ html[data-corners="rounded"] {
 .lc-footnote-overview .lc-footnote-overview-hub > .lc-footnote-overview-section,
 .lc-footnote-overview .lc-footnote-overview-hub > .lc-footnote-type-key {
   flex-shrink: 0;
+}
+
+/* The key stays in view at the foot of the panel, at any size; the sections scroll above it. */
+.lc-footnote-overview .lc-footnote-overview-hub > .lc-footnote-type-key {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  margin-top: auto;
+  background: var(--lc-fn-wash, var(--overlay-bg, var(--panel)));
 }
 
 /* ------------------------------------------------ header rail (1 + 4) --- */

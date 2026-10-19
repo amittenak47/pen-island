@@ -281,6 +281,36 @@ describe("FootnoteOverview panel", () => {
     }
     expect(document.querySelector(".lc-footnote-mini-note")).toBeNull();
   });
+  it("sections fold under their title, with a count, and remember it for the session", () => {
+    const notes = Array.from({ length: 3 }, (_, index) => ({ id: `f${index}`, text: `note ${index}`, createdAt: 1, updatedAt: 1 }));
+    mount({ ...MARK, notes });
+    const section = () => document.querySelector<HTMLElement>('section[aria-label="Notes"]')!;
+    const toggle = () => section().querySelector<HTMLButtonElement>(".lc-footnote-overview-section-toggle")!;
+    const fold = () => section().querySelector<HTMLElement>(".lc-footnote-overview-section-fold")!;
+    const body = () => section().querySelector<HTMLElement>(".lc-footnote-overview-section-body")!;
+    // Earlier tests here may have unfolded Notes (it is remembered): start folded.
+    if (toggle().getAttribute("aria-expanded") === "true") act(() => toggle().click());
+    // Folded: the title and how many, and nothing under it can take a tap.
+    expect(toggle().textContent).toBe("▸Notes3");
+    expect(toggle().getAttribute("aria-expanded")).toBe("false");
+    expect(fold().hasAttribute("data-open")).toBe(false);
+    expect(body().hasAttribute("inert")).toBe(true);
+    act(() => toggle().click());
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    expect(fold().hasAttribute("data-open")).toBe(true);
+    expect(body().hasAttribute("inert")).toBe(false);
+    // The next panel opens it the same way.
+    act(() => mountedRoot!.unmount());
+    mount({ ...MARK, notes });
+    expect(toggle().getAttribute("aria-expanded")).toBe("true");
+    act(() => toggle().click());
+    expect(fold().hasAttribute("data-open")).toBe(false);
+    // An empty section has nothing to fold: just its title.
+    const links = document.querySelector<HTMLElement>('section[aria-label="Links"]')!;
+    expect(links.querySelector(".lc-footnote-overview-section-toggle")).toBeNull();
+    expect(links.querySelector(".lc-footnote-overview-section-fold")!.hasAttribute("data-open")).toBe(true);
+  });
+
   // Last: the dragged size is remembered for the session (a module value).
   it("a resize drag stops at the screen's edge and leaves the full placement for the release", () => {
     let observed: (() => void) | null = null;

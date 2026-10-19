@@ -54,6 +54,19 @@ describe("footnoteThemeVars", () => {
     expect(relativeLuminance(ink)).toBeGreaterThan(0.5);
   });
 
+  it("captions on the page stay readable with a light palette on a dark theme", () => {
+    // The panel's label ink is light here (it sits on a dark wash); the caption sits on white paper.
+    const palette = ["#ffd6e0", "#ffe5b4", "#c1f0dc", "#d6e4ff"];
+    const style = footnoteThemeVars("#ffd6e0", palette, "#141416");
+    const panelInk = String(style["--lc-fn-ink" as keyof typeof style]);
+    const paperInk = String(style["--lc-fn-paper-ink" as keyof typeof style]);
+    expect(contrastRatio(panelInk, "#ffffff")).toBeLessThan(3);
+    expect(contrastRatio(paperInk, "#ffffff")).toBeGreaterThanOrEqual(4.5);
+    // A palette with a dark enough colour of its own uses it.
+    const own = footnoteThemeVars("#ff0000", ["#111111", "#888888", "#eeeeee", "#ff0000"], "#141416");
+    expect(own["--lc-fn-paper-ink" as keyof typeof own]).toBe("#111111");
+  });
+
   it("tints nested chips from the palette, not the raw panel", () => {
     const palette = ["#90b77d", "#b6d7a8", "#d9ead3", "#eef6eb"];
     const style = footnoteThemeVars("#b6d7a8", palette, "#141416");

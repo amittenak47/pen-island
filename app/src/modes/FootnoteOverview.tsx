@@ -22,6 +22,7 @@ import {
 } from "../util/docFootnotes";
 import { ColorRadial } from "../canvas/ColorRadial";
 import { HoldButton } from "../components/HoldButton";
+import { useLatest } from "../canvas/useLatest";
 import { HighlighterIcon, PenToolIcon, UnderlineIcon } from "../components/MarkToolIcons";
 import { ExpandNoteIcon, PictureInPictureIcon } from "../components/NoteWindowIcons";
 import { FootnoteMiniNotes, MINI_NOTE_LIMIT, openMiniNote, type MiniNoteRef } from "./FootnoteMiniNotes";
@@ -470,6 +471,9 @@ export function FootnoteOverview({
   const notes = footnote.notes ?? [];
   const whiteboards = footnote.whiteboards ?? [];
   const threads = footnote.threads ?? [];
+  /** Saved conversations not linked here yet: what the Threads `+` offers. */
+  const linkableThreads = availableThreads.filter(thread => !threads.some(link => link.rootId === thread.rootId));
+  const [threadMenuOpen, setThreadMenuOpen] = useState(false);
   const subMarks = footnote.subMarks ?? [];
   // Completed ChatBot marks accept the same manual notes as other marks.
   const isAiTab = footnote.kind === "ai";
@@ -1041,11 +1045,34 @@ export function FootnoteOverview({
               className="lc-footnote-overview-hub"
               {...taskMotion}
             >
-              <MarkTitle
-                value={footnote.title}
-                readOnly={readOnly}
-                onCommit={(title) => onChange({ ...footnoteRef.current, title })}
-              />
+              {/* The title, and the mark's colour at its right: the colour is about the mark, not a tool. */}
+              <div className="lc-footnote-overview-title-row">
+                <MarkTitle
+                  value={footnote.title}
+                  readOnly={readOnly}
+                  onCommit={(title) => onChange({ ...footnoteRef.current, title })}
+                />
+                {/* The wheel retints the mark on this device. Not from here. */}
+                <div className="lc-footnote-overview-color" hidden={readOnly}>
+                  <ColorRadial
+                    colors={wheelPalette}
+                    value={wheelColor}
+                    onPick={(color) => persistWheel(wheelPalette, color)}
+                    onCycleNext={() => cycleMarkPalette(1)}
+                    onCyclePrev={() => cycleMarkPalette(-1)}
+                    onEditColor={(index, color) => {
+                      const next = wheelPalette.map((swatch, i) => (i === index ? color : swatch));
+                      const selected =
+                        wheelPalette[index]?.trim().toLowerCase() ===
+                        wheelColor.trim().toLowerCase();
+                      persistWheel(next, selected ? color : wheelColor);
+                    }}
+                    handedness={handedness}
+                    compact
+                    wheelZIndex={240}
+                  />
+                </div>
+              </div>
               <header className="lc-footnote-overview-toolbar" aria-label="Mark style">
                 <div className="lc-footnote-submark-modes" role="group" aria-label="Mark actions">
                   {/* Underline and highlight draw on the mark, so they are writes. Copy is not. */}
@@ -1100,26 +1127,6 @@ export function FootnoteOverview({
                     </button>
                   )}
                 </div>
-                {/* The wheel retints the mark on this device. Not from here. */}
-                <div className="lc-footnote-overview-color" hidden={readOnly}>
-                  <ColorRadial
-                    colors={wheelPalette}
-                    value={wheelColor}
-                    onPick={(color) => persistWheel(wheelPalette, color)}
-                    onCycleNext={() => cycleMarkPalette(1)}
-                    onCyclePrev={() => cycleMarkPalette(-1)}
-                    onEditColor={(index, color) => {
-                      const next = wheelPalette.map((swatch, i) => (i === index ? color : swatch));
-                      const selected =
-                        wheelPalette[index]?.trim().toLowerCase() ===
-                        wheelColor.trim().toLowerCase();
-                      persistWheel(next, selected ? color : wheelColor);
-                    }}
-                    handedness={handedness}
-                    compact
-                    wheelZIndex={240}
-                  />
-                </div>
                 {!readOnly && (
                   /* One row: Undo | Reset | Redo. */
                   <div className="lc-footnote-panel-history">
@@ -1146,7 +1153,7 @@ export function FootnoteOverview({
                 )}
               </header>
               {subMarks.length > 0 && (
-              <HubSection title="Annotations">
+              <HubSection title="Annotations" count={subMarks.length}>
                 <ul
                   className={listClass(subMarks.length)}
                   aria-label="Sub-marks"
@@ -1196,7 +1203,7 @@ export function FootnoteOverview({
               </HubSection>
               )}
               {(!rowsAreReadOnly || notes.length > 0 || footnote.pending) && (
-              <HubSection title="Notes" onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}
+              <HubSection title="Notes" count={notes.length} onAdd={rowsAreReadOnly ? undefined : () => openTask({ kind: "note", id: null })}
                 extra={notes.length > 1 ? (
                   <button type="button" role="switch" aria-checked={notesCombined} aria-label="Show the notes as one"
                     title={notesCombined ? "Show each note on its own" : "Show the notes as one"}
@@ -1231,7 +1238,7 @@ export function FootnoteOverview({
               )}
               {rowsAreReadOnly ? (
                 whiteboards.length > 0 ? (
-                  <HubSection title="Whiteboards">
+                  <HubSection title="Whiteboards" count={whiteboards.length}>
                     <ul className={listClass(whiteboards.length)}>
                       {whiteboards.map((board) => (
                         <li key={board.id}>
@@ -1244,7 +1251,7 @@ export function FootnoteOverview({
                   </HubSection>
                 ) : null
               ) : (
-              <HubSection title="Whiteboards" onAdd={onCreateWhiteboard}>
+              <HubSection title="Whiteboards" count={whiteboards.length} onAdd={onCreateWhiteboard}>
                 {whiteboards.length > 0 && (
                   <ul className={listClass(whiteboards.length)}>
                     {whiteboards.map((board) => (
@@ -1266,11 +1273,17 @@ export function FootnoteOverview({
                 )}
               </HubSection>
               )}
-              <HubSection title="Threads">
-                {!readOnly && availableThreads.some(thread => !threads.some(link => link.rootId === thread.rootId)) &&
-                  <ThreadLinkPicker
-                    threads={availableThreads.filter(thread => !threads.some(link => link.rootId === thread.rootId))}
-                    onPick={thread => onChange({...footnote,threads:[...threads,{...thread,createdAt:Date.now()}]})}
+              <HubSection title="Threads" count={threads.length} className="lc-footnote-thread-section"
+                addLabel="Link a saved thread"
+                onAdd={!readOnly && linkableThreads.length > 0 ? () => setThreadMenuOpen(value => !value) : undefined}>
+                {threadMenuOpen && !readOnly && linkableThreads.length > 0 &&
+                  <ThreadLinkMenu
+                    threads={linkableThreads}
+                    onPick={thread => {
+                      onChange({...footnote,threads:[...threads,{...thread,createdAt:Date.now()}]});
+                      setThreadMenuOpen(false);
+                    }}
+                    onClose={() => setThreadMenuOpen(false)}
                   />}
                 {threads.length > 0 && (
                   <ul className={listClass(threads.length)}>
@@ -1299,12 +1312,13 @@ export function FootnoteOverview({
                 )}
               </HubSection>
               {!rowsAreReadOnly && (
-              <HubSection title="Attachments" onAdd={onManageArtifacts}>
+              <HubSection title="Attachments" count={footnote.artifacts?.length ?? 0} onAdd={onManageArtifacts}>
                 {onOpenArtifact && <ArtifactCards references={footnote.artifacts} onOpen={onOpenArtifact} />}
               </HubSection>
               )}
               <HubSection
                 title="Links"
+                count={userLinks.length + (searchLink ? 1 : 0)}
                 onAdd={readOnly ? undefined : () => openTask({ kind: "link", index: null })}
               >
                 {(searchLink || userLinks.length > 0) && (
@@ -1343,6 +1357,7 @@ export function FootnoteOverview({
               {(onAddWorkspaceLink || (readOnly && workspaceLinks.length > 0)) && (
                 <HubSection
                   title="Workspace links"
+                  count={workspaceLinks.length}
                   onAdd={readOnly ? undefined : onAddWorkspaceLink}
                 >
                   {workspaceLinks.length > 0 && (
@@ -1414,46 +1429,41 @@ export function FootnoteOverview({
   );
 }
 /**
- * "Link existing thread": a chip that opens the saved conversations as chips,
- * the same look as the agent panel's footnote picker.
+ * Saved conversations to link, as chips (the agent panel's footnote picker's
+ * look). Opened by the Threads section's `+`; a press anywhere outside the
+ * section, or Escape, closes it.
  */
-function ThreadLinkPicker({ threads, onPick }: {
+function ThreadLinkMenu({ threads, onPick, onClose }: {
   threads: readonly { rootId: string; title: string }[];
   onPick: (thread: { rootId: string; title: string }) => void;
+  onClose: () => void;
 }) {
-  const [open, setOpen] = useState(false);
-  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+  const close = useLatest(onClose);
   useEffect(() => {
-    if (!open) return;
+    const section = menuRef.current?.closest(".lc-footnote-thread-section");
     const outside = (event: PointerEvent) => {
-      if (!(event.target instanceof Node) || !wrapRef.current?.contains(event.target)) setOpen(false);
+      if (!(event.target instanceof Node) || !section?.contains(event.target)) close.current();
     };
-    const key = (event: KeyboardEvent) => { if (event.key === "Escape") setOpen(false); };
+    const key = (event: KeyboardEvent) => { if (event.key === "Escape") close.current(); };
     window.addEventListener("pointerdown", outside, true);
     window.addEventListener("keydown", key);
     return () => {
       window.removeEventListener("pointerdown", outside, true);
       window.removeEventListener("keydown", key);
     };
-  }, [open]);
+  }, [close]);
   return (
-    <div className="lc-footnote-thread-picker" ref={wrapRef}>
-      <button type="button" className={`lc-footnote-chip lc-footnote-thread-trigger${open ? " is-active" : ""}`}
-        aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(value => !value)}>
-        <ThreadBubble />
-        <span className="lc-footnote-chip-label">Link existing thread</span>
-      </button>
-      {open && (
-        <div className="lc-footnote-thread-menu" role="menu" aria-label="Link an existing thread">
-          {threads.map(thread => (
-            <button key={thread.rootId} type="button" role="menuitem" className="lc-footnote-chip"
-              onClick={() => { onPick(thread); setOpen(false); }}>
-              <ThreadBubble />
-              <span className="lc-footnote-chip-label">{thread.title}</span>
-            </button>
-          ))}
-        </div>
-      )}
+    <div className="lc-footnote-thread-picker" ref={menuRef}>
+      <div className="lc-footnote-thread-menu" role="menu" aria-label="Link an existing thread">
+        {threads.map(thread => (
+          <button key={thread.rootId} type="button" role="menuitem" className="lc-footnote-chip"
+            onClick={() => onPick(thread)}>
+            <ThreadBubble />
+            <span className="lc-footnote-chip-label">{thread.title}</span>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -1621,35 +1631,72 @@ function listClass(count: number): string {
     : "lc-footnote-overview-link-list";
 }
 
+/** Which sections are unfolded, by title, for the session: the next panel opens the same way. */
+const sectionsOpen = new Map<string, boolean>();
+
+/**
+ * A titled group in the panel: "NOTES 3", folded until tapped.
+ *
+ * Folded, a tap meant for the section cannot land on its first item. With
+ * nothing in it there is nothing to fold, so it just shows its title (and
+ * anything transient, like "ChatBot is writing..."). `+` unfolds it too.
+ */
 function HubSection({
   title,
+  count = 0,
   onAdd,
+  addLabel,
   extra,
+  className,
   children,
 }: {
   title: string;
+  /** Items in it, shown beside the title. */
+  count?: number;
   onAdd?: () => void;
+  addLabel?: string;
   /** A small control beside the add button. */
   extra?: ReactNode;
+  className?: string;
   children?: ReactNode;
 }) {
+  const [open, setOpen] = useState(() => sectionsOpen.get(title) ?? false);
+  const unfold = (next: boolean) => {
+    sectionsOpen.set(title, next);
+    setOpen(next);
+  };
+  const shown = open || count === 0;
   return (
-    <section className="lc-footnote-overview-section" aria-label={title}>
+    <section className={`lc-footnote-overview-section${className ? ` ${className}` : ""}`} aria-label={title}>
       <div className="lc-footnote-overview-section-head">
-        <h3 className="lc-agent-turn-role">{title}</h3>
+        <h3 className="lc-agent-turn-role">
+          {count > 0 ? (
+            <button type="button" className="lc-footnote-overview-section-toggle" aria-expanded={shown}
+              onClick={() => unfold(!open)}>
+              <span className="lc-footnote-overview-section-caret" aria-hidden>▸</span>
+              <span>{title}</span>
+              <span className="lc-footnote-overview-section-count" aria-label={`${count} ${count === 1 ? "item" : "items"}`}>{count}</span>
+            </button>
+          ) : title}
+        </h3>
         {extra}
         {onAdd ? (
           <button
             type="button"
             className="lc-footnote-overview-add"
-            aria-label={`Add ${title}`}
-            onClick={onAdd}
+            aria-label={addLabel ?? `Add ${title}`}
+            onClick={() => {
+              unfold(true);
+              onAdd();
+            }}
           >
             +
           </button>
         ) : null}
       </div>
-      {children}
+      <div className="lc-footnote-overview-section-fold" data-open={shown || undefined}>
+        <div className="lc-footnote-overview-section-body" inert={!shown}>{children}</div>
+      </div>
     </section>
   );
 }
