@@ -102,6 +102,18 @@ function drawUnderEdge(ctx: CanvasRenderingContext2D, frame: TurnFrame, progress
   ctx.globalAlpha = alpha;
 }
 
+/**
+ * A single sheet is bound along its left edge: nothing of it, folded over
+ * or not, passes left of that. The fold can swing the sheet's free edge a
+ * little past it, which the canvas used to cut off at its own edge; the
+ * canvas now keeps room around the page for booktabs, so cut it here.
+ */
+function clipToBinding(ctx: CanvasRenderingContext2D, H: number): void {
+  ctx.beginPath();
+  ctx.rect(0, -H, 1e5, 3 * H);
+  ctx.clip();
+}
+
 /** Everything on one side of a line through `p` with normal `n` (`side` +1 or -1), as a big quad. */
 function halfPlane(p: Point, n: Point, side: number, reach: number): Point[] {
   const t = { x: -n.y * reach, y: n.x * reach };
@@ -122,6 +134,8 @@ export function underBlur(progress: number): number {
 
 /** Rows a sheet held by its side is drawn in: its fold is a curve, sampled this finely. */
 const SIDE_ROWS = 48;
+/** The print showing through its back is mirrored in finer rows than that. */
+const THROUGH_ROWS_PER_ROW = 2;
 
 /** A single sheet held somewhere along its side, not at a corner: see `sideFold`. */
 function heldBySide(frame: Pick<TurnFrame, "layout" | "height" | "restY">): boolean {
@@ -226,20 +240,31 @@ function paintSideFold(ctx: CanvasRenderingContext2D, frame: TurnFrame): number 
   // The flap: the back of the sheet, folded over.
   if (f.progress > 0) {
     ctx.save();
+    clipToBinding(ctx, H);
     tracePolygon(ctx, f.flap);
     ctx.clip();
     ctx.fillStyle = frame.paper;
     ctx.fillRect(0, 0, W, H);
     if (frame.from) {
       // Print showing through from the front, mirrored about the fold row by row.
+      // In finer rows than the shading, each mirrored about the fold at its
+      // middle: at the print's strength, coarse rows showed as jagged text.
+      const rows = SIDE_ROWS * THROUGH_ROWS_PER_ROW;
+      const foldAt = (y: number) => {
+        const at = Math.min(SIDE_ROWS, Math.max(0, (y / H) * SIDE_ROWS));
+        const i = Math.min(SIDE_ROWS - 1, Math.floor(at));
+        return f.fold[i]!.x + (f.fold[i + 1]!.x - f.fold[i]!.x) * (at - i);
+      };
       for (const [image, alpha] of [[frame.from, PRINT_THROUGH], [frame.fromMarks ?? null, MARKS_THROUGH]] as const) {
         if (!image) continue;
         ctx.globalAlpha = alpha;
-        for (let i = 0; i < SIDE_ROWS; i += 1) {
-          const x = f.fold[i]!.x;
+        for (let j = 0; j < rows; j += 1) {
+          const y0 = snap((H * j) / rows);
+          const y1 = snap((H * (j + 1)) / rows);
+          const x = foldAt((y0 + y1) / 2);
           ctx.save();
           ctx.beginPath();
-          ctx.rect(-W, top(i), 3 * W, rowH(i));
+          ctx.rect(-W, y0, 3 * W, y1 - y0);
           ctx.clip();
           ctx.translate(2 * x, 0);
           ctx.scale(-1, 1);
@@ -290,6 +315,7 @@ function paintSideFold(ctx: CanvasRenderingContext2D, frame: TurnFrame): number 
       drawEdge(ctx, edge, W, H);
       ctx.restore();
       ctx.save();
+      clipToBinding(ctx, H);
       ctx.translate(2 * x, 0);
       ctx.scale(-1, 1);
       ctx.beginPath();
@@ -449,6 +475,7 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
   // The flap: the sheet folded back over, showing its other side.
   if (flap.length >= 3) {
     ctx.save();
+    if (!book) clipToBinding(ctx, H);
     const [a, b, c, d, e, f] = foldReflection(g);
     ctx.transform(a, b, c, d, e, f);
     tracePolygon(ctx, flap);
@@ -511,6 +538,7 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     }
     if (flap.length >= 3) {
       ctx.save();
+      clipToBinding(ctx, H);
       const [a, b, c, d, e, f] = foldReflection(g);
       ctx.transform(a, b, c, d, e, f);
       tracePolygon(ctx, halfPlane(fp, n, -flatSide, reach));
