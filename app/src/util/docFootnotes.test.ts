@@ -32,6 +32,19 @@ function footnote(patch: Partial<DocFootnote> = {}): DocFootnote {
   };
 }
 
+it("sanitizes empty titles and fields and assigns the fallback excerpt", () => {
+  const [row] = sanitizeFootnotes([{ ...footnote(), excerpt: 42, title: "  ",
+    userLinks: [{ url: "https://example.com", title: " " }], whiteboards: [{ id: "w", title: " " }],
+    notes: [{ id: "n", text: "note", field: " " }],
+  }]);
+  expect(row).toMatchObject({ excerpt: "", title: "", anchor: { prefix: "", suffix: "" },
+    userLinks: [{ title: "" }], whiteboards: [{ title: "" }], notes: [{ field: "" }] });
+  const [legacy] = sanitizeFootnotes([{ ...footnote(), excerpt: undefined, userNotes: "old note" }]);
+  expect(legacy.excerpt).toBe("");
+  expect(legacy.notes![0].field).toBe("");
+  expect(sanitizeFootnotes([footnote({ excerpt: "kept" })])[0].excerpt).toBe("kept");
+});
+
 it("retains explicitly empty lists and images on read without filling legacy omissions", () => {
   const [saved] = sanitizeFootnotes([footnote({ notes: [{ id: "n", text: "words", images: [], createdAt: 1, updatedAt: 1 }],
     threads: [], bands: [], subMarks: [{ id: "s", kind: "underline", excerpt: "hash", start: 0, end: 4, bands: [] }],
@@ -196,7 +209,7 @@ describe("sanitizeFootnotes", () => {
             excerpt: "band",
             start: 25,
             end: 29,
-            anchor: { kind: "text", start: 30, end: 34, scope: "ch-1" },
+            anchor: { kind: "text", start: 30, end: 34, scope: "ch-1", prefix: "", suffix: "" },
             color: "#3ec8ac",
             palette: ["#83e4b5", "#3ec8ac", "#4e90a4", "#6e60a0"],
           },
@@ -233,7 +246,7 @@ describe("sanitizeFootnotes", () => {
         excerpt: "band",
         start: 25,
         end: 29,
-        anchor: { kind: "text", start: 30, end: 34, scope: "ch-1" },
+        anchor: { kind: "text", start: 30, end: 34, scope: "ch-1", prefix: "", suffix: "" },
         color: "#3ec8ac",
         palette: ["#83e4b5", "#3ec8ac", "#4e90a4", "#6e60a0"],
       },
@@ -346,7 +359,7 @@ describe("sanitizeFootnotes migration", () => {
       { id: "old", kind: "search", anchor: { start: 4, end: 9 }, excerpt: "x", createdAt: 1 },
     ]);
     expect(kept).toHaveLength(1);
-    expect(kept[0].anchor).toEqual({ kind: "text", start: 4, end: 9 });
+    expect(kept[0].anchor).toEqual({ kind: "text", start: 4, end: 9, prefix: "", suffix: "" });
   });
 
   it("keeps a region anchor", () => {
@@ -497,7 +510,7 @@ describe("note entries", () => {
           { id: "n2" },
         ] },
     ]);
-    expect(kept.notes).toEqual([{ id: "n1", text: "kept", createdAt: 5, updatedAt: 6 }]);
+    expect(kept.notes).toEqual([{ id: "n1", text: "kept", field: "", createdAt: 5, updatedAt: 6 }]);
   });
 
   it("prefers entries over a legacy box when both are present", () => {
@@ -608,11 +621,11 @@ describe("sanitizeFootnotes title and palette", () => {
     expect(kept.palette).toEqual(["#83e4b5", "#3ec8ac", "#4e90a4", "#6e60a0"]);
   });
 
-  it("drops a blank title and a short palette", () => {
+  it("writes a blank title and drops a short palette", () => {
     const [kept] = sanitizeFootnotes([
       footnote({ title: "   ", palette: ["#fff"] }),
     ]);
-    expect(kept.title).toBeUndefined();
+    expect(kept.title).toBe("");
     expect(kept.palette).toBeUndefined();
   });
 });

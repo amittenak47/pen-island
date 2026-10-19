@@ -7,7 +7,7 @@ import { editArtifactCatalog, type ArtifactCatalogEdit } from "./artifactCatalog
 import type { ArtifactCatalog, ArtifactParent } from "./padArtifacts";
 import type { BoardBlob } from "../canvas/BoardHandle";
 /** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
-const FLAGS_OFF = { pending: false, queued: false, bridgePending: false,
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false, requestNote: "", reasoning: "", bridgeError: "",
   attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
 
 const state = vi.hoisted(() => ({

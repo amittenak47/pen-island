@@ -201,7 +201,7 @@ function restore<T extends PageableElement>(element: T, parked: ParkedState): T 
     ...element,
     opacity: parked.opacity,
     locked: parked.locked,
-    customData: Object.keys(rest).length > 0 ? rest : null,
+    customData: rest,
   };
 }
 

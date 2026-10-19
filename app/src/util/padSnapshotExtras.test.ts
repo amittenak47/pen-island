@@ -43,15 +43,17 @@ vi.mock("./annotateStore", () => ({
   getAnnotateDoc: (id: string) => getAnnotateDoc(id),
   saveAnnotateDoc: (entry: unknown) => saveAnnotateDoc(entry),
 }));
+vi.mock("./whiteboardStore", () => ({ getWhiteboardNotebook: async () => null }));
 
 vi.mock("./gzip", () => ({ gzipBytes: async (bytes: Uint8Array) => bytes }));
 vi.mock("../canvas/inkCodec", () => ({ packEncodedInk: (ink: unknown) => ink }));
 vi.mock("./footnoteWhiteboardStore", () => ({
   collectFootnoteBoards: async () => ({}),
+  whiteboardIdsOn: () => [],
   applyFootnoteBoards: (docId: string, boards: unknown) => applyFootnoteBoards(docId, boards),
 }));
 
-const { applyPadSnapshotExtras } = await import("./padSnapshotExtras");
+const { applyPadSnapshotExtras, gatherPadSnapshotExtras } = await import("./padSnapshotExtras");
 
 const board = {
   v: 1 as const,
@@ -61,6 +63,15 @@ const board = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+});
+
+it("gathers explicit empty edges, child boards and top-level child ink", async () => {
+  for (const kind of ["annotate", "whiteboard"] as const) {
+    const extra = await gatherPadSnapshotExtras(kind, "empty");
+    expect(extra).toMatchObject({ edges: [], footnoteBoards: {}, footnoteInk: {} });
+    expect(extra).not.toHaveProperty("ink");
+    expect(extra).not.toHaveProperty("source");
+  }
 });
 
 describe("applyPadSnapshotExtras", () => {

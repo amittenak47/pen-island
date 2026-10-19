@@ -46,11 +46,14 @@ describe("cross-language content contract", () => {
       const visit = async (row: Record<string, unknown>, path: (string | number)[] = []) => {
         for (const [key, value] of Object.entries(row)) {
           const here = [...path, key];
-          if (value === false || Array.isArray(value) && !value.length || key === "footnote_boards") {
+          if (key === "inkPages") continue; // Live fingerprints exclude the whole inventory.
+          if (value === false || value === "" || value === null || Array.isArray(value) && !value.length
+            || value && typeof value === "object" && !Array.isArray(value) && !Object.keys(value).length || key === "footnote_boards") {
             const changed = structuredClone(input);
             let target = changed;
             for (const part of here.slice(0, -1)) target = target[part];
-            target[key] = value === false ? true : key === "footnote_boards" ? { child: { board: {} } } : ["content"];
+            target[key] = value === false ? true : value === "" ? "content" : key === "footnote_boards"
+              ? { child: { board: {} } } : Array.isArray(value) ? ["content"] : { future: true };
             expect(await recordHash(changed), here.join(".")).not.toBe(fixture.hash);
           } else if (value && typeof value === "object") {
             if (Array.isArray(value)) for (let i = 0; i < value.length; i++) await visit(value[i], [...here, i]);
@@ -65,7 +68,7 @@ describe("cross-language content contract", () => {
       expect(await recordHash({ agent: [{ [field]: [] }] })).not.toBe(await recordHash({ agent: [{}] }));
     }
     expect(await recordHash({ footnotes: [] })).not.toBe(await recordHash({}));
-    for (const value of [{ title: "" }, { palette: [] }, { updatedAt: 0 }, { pending: "" }]) {
+    for (const value of [{ title: "Named" }, { palette: [] }, { updatedAt: 0 }, { pending: "" }]) {
       expect(await recordHash({ footnotes: [value] })).not.toBe(await recordHash({ footnotes: [{}] }));
     }
     expect(await recordHash({ agent: [{ attachments: [{ sendToModel: false }] }] }))
@@ -75,6 +78,27 @@ describe("cross-language content contract", () => {
   for (const fixture of snapshots.cases) it(`snapshot ${fixture.name}`, async () => {
     expect(await normalizeSnapshotCopy(fixture.input)).toEqual(fixture.normalized);
     expect(await snapshotCopyHash(fixture.input)).toBe(fixture.hash);
+  });
+  for (const fixture of golden.snapshotDefaults) it(`snapshot ${fixture.name}`, async () => {
+    const input = JSON.parse(fixture.input);
+    expect(canonicalJson(await normalizeSnapshotCopy(input))).toBe(fixture.canonical);
+    expect(await snapshotCopyHash(input)).toBe(fixture.hash);
+  });
+  it("keeps populated safe defaults, unknown paths and presence-sensitive snapshot values", async () => {
+    for (const payload of [
+      { edges: [{}] }, { footnoteBoards: { child: { board: {} } } }, { footnoteInk: { child: [] } },
+      { board: { files: { image: {} } } }, { board: { elements: [{ customData: { future: true } }] } },
+      { board: { inkPages: { v: 1, pageIds: [1] } } },
+      { board: { inkPages: { v: 1, pageIds: [], future: true } } },
+      { agent: [{ reasoning: "thought" }] }, { footnotes: [{ title: "title" }] },
+      { ink: [] }, { source: "" }, { agent: [] }, { footnotes: [] }, { future: {} },
+    ]) {
+      expect((await normalizeSnapshotCopy({ tier: "24h", payload })).payload).toEqual(payload);
+    }
+    expect(normalizeRecord({ future: { title: "", prefix: "", files: {}, customData: {} },
+      footnotes: [{ anchor: { kind: "region", prefix: "", suffix: "" }, by: "", color: "", palette: [] }] }))
+      .toEqual({ future: { title: "", prefix: "", files: {}, customData: {} },
+        footnotes: [{ anchor: { kind: "region", prefix: "", suffix: "" }, by: "", color: "", palette: [] }] });
   });
   it("snapshot identity keeps camera, authored source, unknown fields and erasures", async () => {
     const input = structuredClone(snapshots.cases[0].input);

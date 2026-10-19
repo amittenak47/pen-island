@@ -827,7 +827,7 @@ export interface FootnoteExtrasDto {
   palette?: string[];
   mark_text?: string;
   workspace_items?: FootnoteWorkspaceItemDto[];
-  doc_kind?: "annotate" | "web";
+  doc_kind?: "annotate" | "web" | "";
   focus?: string;
   per_page?: number;
   references?: AnnotationJobReferenceDto[];
@@ -836,10 +836,10 @@ export interface FootnoteExtrasDto {
 
 /** What the reader is reading and how they want notes shaped (see readingStyles). */
 export interface ReadingStyleDto {
-  kind: "textbook" | "story" | "article" | "paper" | "notes" | "code" | "other";
-  /** A preset's field labels in order; absent for free-form notes. */
+  kind: "textbook" | "story" | "article" | "paper" | "notes" | "code" | "other" | "";
+  /** A preset's field labels in order; empty for free-form notes. */
   fields?: string[];
-  fill?: "best" | "all";
+  fill?: "best" | "all" | "";
   preset?: string;
 }
 

@@ -3,6 +3,11 @@ import { describe, expect, it } from "vitest";
 import { convertToExcalidrawElements } from "./convertSkeletons";
 
 describe("convertToExcalidrawElements", () => {
+  it("writes an empty metadata map on untagged elements and bound labels", () => {
+    const out = convertToExcalidrawElements([{ id: "box", type: "rectangle", x: 0, y: 0, label: { text: "label" } }]);
+    expect(out).toHaveLength(2);
+    for (const element of out) expect(element).toHaveProperty("customData", {});
+  });
   it("reuses locked label ids when a diagram advances", () => {
     const make = (text: string) => convertToExcalidrawElements([{
       id: "viz-cell-0", type: "rectangle", x: 0, y: 0, width: 52, height: 52,

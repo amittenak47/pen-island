@@ -245,7 +245,7 @@ describe("updating from a source", () => {
     const result = await updateDocFromSource("book", { status: "newer", bytes: next });
     expect(result.unplaced).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "ink", page: 2 }), expect.objectContaining({ kind: "footnote", page: 2 }), expect.objectContaining({ kind: "highlight", page: 2 })]));
     expect(await getInkPageRecords("md:book")).toEqual(beforeInk);
-    expect((await getAnnotateDoc("book"))?.footnotes?.[0]?.anchor).toEqual(note.anchor);
+    expect((await getAnnotateDoc("book"))?.footnotes?.[0]?.anchor).toEqual({ ...note.anchor, prefix: "", suffix: "" });
   });
   it("reports a missing text quote and its underline without deleting them", async () => {
     const hash = await textBook();
@@ -254,7 +254,7 @@ describe("updating from a source", () => {
     await saveAnnotateDoc({ id: "book", name: "notes.txt", hash, docType: "code", source: "old words", board, footnotes: [note] });
     const result = await updateDocFromSource("book", { status: "newer", text: "different words" });
     expect(result.unplaced.map(row => row.kind)).toEqual(["footnote", "underline"]);
-    expect((await getAnnotateDoc("book"))?.footnotes?.[0]?.anchor).toEqual(note.anchor);
+    expect((await getAnnotateDoc("book"))?.footnotes?.[0]?.anchor).toEqual({ ...note.anchor, prefix: "", suffix: "" });
   });
   it("keeps complete artifact revisions in the retained book", async () => {
     const hash = await textBook();

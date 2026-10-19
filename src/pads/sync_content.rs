@@ -7,6 +7,13 @@
 //! agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
 //! footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
 //! footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
+//! Also empty strings at agent[].requestNote/reasoning/bridgeError,
+//! footnotes[].title, .notes[].field, .userLinks[]/.whiteboards[].title and
+//! .anchor/.subMarks[].anchor.prefix/suffix; board.files={} and
+//! board.elements[].customData=null/{} (including footnote boards).
+//! Snapshots use these same defaults without view exclusions, plus empty
+//! edges/footnoteBoards/footnoteInk and known-empty board.inkPages manifests.
+//! Snapshot artifact payload JSON and retained bookRecord use the same record defaults.
 use anyhow::{ensure, Context, Result};
 use flate2::bufread::GzDecoder;
 use serde_json::Value;
@@ -78,11 +85,76 @@ pub const PAGE_FRAME_LOCAL_KEYS: &[&str] = &["width", "height", "version", "vers
 /// Agent message flags whose `false` is the same as leaving them out.
 pub const MESSAGE_FALSE_DEFAULT_KEYS: &[&str] = &["pending", "queued", "bridgePending"];
 pub const MESSAGE_EMPTY_LIST_KEYS: &[&str] = &["attachments", "artifacts", "artifactProposals", "flags", "processEvents"];
+pub const MESSAGE_EMPTY_STRING_KEYS: &[&str] = &["requestNote", "reasoning", "bridgeError"];
 pub const FOOTNOTE_EMPTY_LIST_KEYS: &[&str] = &["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"];
 
 fn omit_empty_lists(object: &mut serde_json::Map<String, Value>, keys: &[&str]) {
     for key in keys {
         if object.get(*key).and_then(Value::as_array).is_some_and(Vec::is_empty) { object.remove(*key); }
+    }
+}
+
+fn omit_empty_strings(object: &mut serde_json::Map<String, Value>, keys: &[&str]) {
+    for key in keys {
+        if object.get(*key).and_then(Value::as_str) == Some("") { object.remove(*key); }
+    }
+}
+
+fn omit_empty_map(object: &mut serde_json::Map<String, Value>, key: &str) {
+    if object.get(key).and_then(Value::as_object).is_some_and(serde_json::Map::is_empty) { object.remove(key); }
+}
+
+/// Only the safe empty defaults; snapshots retain view state and populated manifests.
+pub fn normalize_empty_defaults(record: &mut serde_json::Map<String, Value>, snapshot: bool, snapshot_payload: bool) {
+    fn board(value: &mut Value, snapshot: bool) {
+        let Some(object) = value.as_object_mut() else { return };
+        omit_empty_map(object, "files");
+        if let Some(elements) = object.get_mut("elements").and_then(Value::as_array_mut) {
+            for element in elements.iter_mut().filter_map(Value::as_object_mut) {
+                if element.get("customData") == Some(&Value::Null) { element.remove("customData"); }
+                omit_empty_map(element, "customData");
+            }
+        }
+        if snapshot && object.get("inkPages").and_then(Value::as_object).is_some_and(|manifest| {
+            manifest.get("v").and_then(Value::as_f64) == Some(1.0)
+                && manifest.get("pageIds").and_then(Value::as_array).is_some_and(Vec::is_empty)
+                && manifest.keys().all(|key| key == "v" || key == "pageIds")
+        }) { object.remove("inkPages"); }
+    }
+    fn anchor(value: Option<&mut Value>) {
+        if let Some(object) = value.and_then(Value::as_object_mut) {
+            if object.get("kind").and_then(Value::as_str) != Some("region") { omit_empty_strings(object, &["prefix", "suffix"]); }
+        }
+    }
+    if let Some(value) = record.get_mut("board") { board(value, snapshot); }
+    for key in if snapshot_payload { &["footnote_boards", "footnoteBoards"][..] } else { &["footnote_boards"][..] } {
+        if let Some(children) = record.get_mut(*key).and_then(Value::as_object_mut) {
+            for child in children.values_mut() {
+                if let Some(value) = child.get_mut("board") { board(value, snapshot); }
+            }
+        }
+        omit_empty_map(record, key);
+    }
+    if let Some(messages) = record.get_mut("agent").and_then(Value::as_array_mut) {
+        for message in messages.iter_mut().filter_map(Value::as_object_mut) { omit_empty_strings(message, MESSAGE_EMPTY_STRING_KEYS); }
+    }
+    if let Some(notes) = record.get_mut("footnotes").and_then(Value::as_array_mut) {
+        for note in notes.iter_mut().filter_map(Value::as_object_mut) {
+            omit_empty_strings(note, &["title"]);
+            anchor(note.get_mut("anchor"));
+            for key in ["userLinks", "whiteboards", "notes", "subMarks"] {
+                if let Some(entries) = note.get_mut(key).and_then(Value::as_array_mut) {
+                    for entry in entries.iter_mut().filter_map(Value::as_object_mut) {
+                        if key == "subMarks" { anchor(entry.get_mut("anchor")); }
+                        else { omit_empty_strings(entry, &[if key == "notes" { "field" } else { "title" }]); }
+                    }
+                }
+            }
+        }
+    }
+    if snapshot_payload {
+        omit_empty_lists(record, &["edges"]);
+        omit_empty_map(record, "footnoteInk");
     }
 }
 
@@ -116,13 +188,14 @@ pub fn normalize_record(value: &Value) -> Result<Value> {
     canonical_json(value)?;
     let mut value = value.clone();
     let object = value.as_object_mut().unwrap();
+    normalize_empty_defaults(object, false, false);
     for key in RECORD_TRANSPORT_KEYS { object.remove(*key); }
     if let Some(board) = object.get_mut("board") { normalize_board(board); }
     if let Some(boards) = object.get_mut("footnote_boards").and_then(Value::as_object_mut) {
         for content in boards.values_mut() {
             if let Some(board) = content.get_mut("board") { normalize_board(board); }
         }
-        // The book format defaults an absent map to empty and omits it when empty.
+        // The book format defaults an absent map to empty.
         if boards.is_empty() { object.remove("footnote_boards"); }
     }
     if let Some(messages) = object.get_mut("agent").and_then(Value::as_array_mut) {
@@ -307,6 +380,13 @@ mod tests {
             assert_eq!(canonical_json(&normalize_record(&value).unwrap()).unwrap(), item["canonical"].as_str().unwrap());
             assert_eq!(record_hash(&value).unwrap(), item["hash"].as_str().unwrap());
         }
+        for item in fixture["snapshotDefaults"].as_array().unwrap() {
+            let mut value: Value = serde_json::from_str(item["input"].as_str().unwrap()).unwrap();
+            value["payload"] = crate::pads::snapshot_copies::normalized_payload(&value["payload"]).unwrap();
+            let text = canonical_json(&value).unwrap();
+            assert_eq!(text, item["canonical"].as_str().unwrap(), "{}", item["name"]);
+            assert_eq!(hash_bytes(text.as_bytes()), item["hash"].as_str().unwrap());
+        }
     }
 
     #[test]
@@ -327,7 +407,7 @@ mod tests {
             json!({"attachments":[{}]}), json!({"processEvents":[{}]})] {
             assert_ne!(record_hash(&json!({"agent":[extra]})).unwrap(), record_hash(&json!({"agent":[{}]})).unwrap());
         }
-        for extra in [json!({"title":""}), json!({"palette":[]}), json!({"updatedAt":0}), json!({"pending":""})] {
+        for extra in [json!({"title":"Named"}), json!({"palette":[]}), json!({"updatedAt":0}), json!({"pending":""})] {
             assert_ne!(record_hash(&json!({"footnotes":[extra]})).unwrap(), record_hash(&json!({"footnotes":[{}]})).unwrap());
         }
         assert_ne!(record_hash(&json!({"agent":[{"attachments":[{"sendToModel":false}]}]})).unwrap(),

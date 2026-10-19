@@ -5,6 +5,7 @@
 import { retainRecoveryCopy } from "./syncRecovery";
 import { hashBytes } from "./syncContent";
 import type { BoardBlob } from "../canvas/BoardHandle";
+import { canonicalAgentMessages } from "./agentMessageFormat";
 import { getContent, putParentRecord, editParentContentArtifacts } from "./contentStore";
 import type { ArtifactCatalogEdit } from "./artifactCatalogEdits";
 import { artifactCatalogFields, type ArtifactCatalog } from "./padArtifacts";
@@ -274,15 +275,16 @@ export async function saveWhiteboardNotebook(input: {
     title,
     updatedAt: now,
     pageCount: Math.min(WHITEBOARD_PAGE_LIMIT, Math.max(1, input.pageCount)),
-    ...(existing?.locked ? { locked: true } : {}),
-    ...(named ? { named: true } : {}),
+    locked: Boolean(existing?.locked),
+    named,
+    authoredExtras: existing?.authoredExtras ?? {},
     syncSeq: existing?.syncSeq ?? 0,
     lastTouch: now,
     lastSyncedAt: existing?.lastSyncedAt,
     ...(existing?.hubAckUpdatedAt != null ? { hubAckUpdatedAt: existing.hubAckUpdatedAt } : {}),
   };
   const accepted = await putParentRecord<WhiteboardContent, WhiteboardNotebookMeta>({ kind: "whiteboard", id }, {
-    board: input.board, ...(Array.isArray(input.agent) ? { agent: input.agent } : {}), artifacts: input.artifacts,
+    board: input.board, ...(Array.isArray(input.agent) ? { agent: canonicalAgentMessages(input.agent) } : {}), artifacts: input.artifacts,
   } as WhiteboardContent, { metadata: (current, saved) => {
     if (existing && (!current || current.deletedAt !== undefined)) throw new Error("Notebook was removed during save; it was not restored.");
     const next: WhiteboardNotebookMeta = { ...current, ...meta,
@@ -291,7 +293,8 @@ export async function saveWhiteboardNotebook(input: {
       syncSeq: current?.syncSeq ?? 0, lastSyncedAt: current?.lastSyncedAt,
       hubAckUpdatedAt: current?.hubAckUpdatedAt,
     };
-    if (current?.locked) next.locked = true; else delete next.locked;
+    next.locked = Boolean(current?.locked);
+    next.authoredExtras = current?.authoredExtras ?? {};
     if (current?.named || named) next.named = true;
     if (saved.artifacts) next.artifactRevision = saved.artifacts.revision;
     return next;
@@ -318,9 +321,9 @@ export async function markWhiteboardHubAck(id: string, updatedAt: number): Promi
 
 export async function setWhiteboardNotebookLocked(id: string, locked: boolean): Promise<void> {
   await editMetadata(id, (meta, ctx) => {
-    if (!meta || Boolean(meta.locked) === locked) return;
+    if (!meta || meta.locked === locked) return;
     const next = { ...meta, kind: "whiteboard" as const };
-    if (locked) next.locked = true; else delete next.locked;
+    next.locked = locked;
     ctx.setMetadata(next);
   });
 }
@@ -410,7 +413,7 @@ export async function restoreWhiteboardNotebook(entry: WhiteboardNotebook): Prom
   const { board, agent, artifacts, ...meta } = entry;
   const captured = readIndex().find(row => row.id === entry.id) ?? null;
   await putParentRecord<WhiteboardContent, WhiteboardNotebookMeta>({ kind: "whiteboard", id: entry.id }, {
-    board, agent: agent ?? [], artifacts,
+    board, agent: canonicalAgentMessages(agent ?? []), artifacts,
   }, { allowCatalogReplacement: true, metadata: (current, saved) => {
     if (JSON.stringify(current) !== JSON.stringify(captured)) throw new Error("Notebook changed during restore; current work was kept.");
     const next = { ...current, ...meta };

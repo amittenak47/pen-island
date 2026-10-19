@@ -44,6 +44,12 @@ function ensureCacheScope(): void {
   if (cacheStorage !== current) { cacheStorage = current; metadataReady = false; cache.clear(); cachedStates.clear(); }
 }
 function plain(value: unknown): value is Record<string, unknown> { return Boolean(value && typeof value === "object" && !Array.isArray(value)); }
+export function canonicalBookMetadata<T extends BookMeta>(meta: T): T {
+  return { ...meta, authoredExtras: meta.authoredExtras ?? {},
+    ...(meta.kind === "annotate" ? { locked: Boolean(meta.locked), owned: Boolean(meta.owned) } : {}),
+    ...(meta.kind === "whiteboard" ? { locked: Boolean(meta.locked), named: Boolean(meta.named) } : {}),
+  };
+}
 function validOwner(value: unknown): value is BookIdentity {
   return plain(value) && ["annotate", "whiteboard", "problem"].includes(String(value.kind)) && typeof value.id === "string" && value.id.length > 0;
 }
@@ -235,7 +241,10 @@ export function mutateLocalBook<T>(owner: BookIdentity, options: LocalBookEditOp
       let metadataChanged = false, contentChanged = false, stateChanged = false;
       const ctx: LocalBookEdit = {
         metadata, content: content ?? null, state, tx, seq,
-        setMetadata(next) { ctx.metadata = next ? { ...next, ...owner } : null; metadataChanged = true; },
+        setMetadata(next) {
+          ctx.metadata = next ? canonicalBookMetadata({ ...next, ...owner }) : null;
+          metadataChanged = true;
+        },
         setContent(next) { ctx.content = next; contentChanged = true; },
         setState(next) { ctx.state = { ...next, ...owner }; stateChanged = true; },
         markLifecycle(action, lifecycleSeq, baseBookRev, goneSeq) {

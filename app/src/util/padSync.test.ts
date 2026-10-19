@@ -39,7 +39,7 @@ import { memoryBookTransaction } from "./testBookTransaction";
 import { mutateLocalBook, resetLocalBookStoreForTests } from "./localBookStore";
 import { getBookSyncState } from "./syncState";
 /** Stored agent messages always carry their on/off flags and lists, empty or not (see agentMessageFormat). */
-const FLAGS_OFF = { pending: false, queued: false, bridgePending: false,
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false, requestNote: "", reasoning: "", bridgeError: "",
   attachments: [], artifacts: [], artifactProposals: [], flags: [], processEvents: [] };
 const durable = vi.hoisted(() => new Map<string, Map<IDBValidKey, unknown>>());
 vi.mock("./idb", async original => ({

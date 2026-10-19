@@ -92,7 +92,7 @@ export async function gatherPadSnapshotExtras(
   const footnoteBoards =
     kind === "annotate"
       ? await collectFootnoteBoards(key, annotate?.footnotes ?? [], { slim: false })
-      : undefined;
+      : {};
   const footnoteInk: Record<string, SnapshotInkPage[]> = {};
   if (kind === "annotate") {
     for (const wbId of whiteboardIdsOn(annotate?.footnotes ?? [])) {
@@ -103,10 +103,10 @@ export async function gatherPadSnapshotExtras(
   return {
     ...(artifactBundle ? { artifactBundle } : {}),
     ...(ink.length > 0 ? { ink } : {}),
-    ...(edges.length > 0 ? { edges } : {}),
+    edges,
     ...(typeof source === "string" && source.length > 0 ? { source } : {}),
-    ...(footnoteBoards && Object.keys(footnoteBoards).length > 0 ? { footnoteBoards } : {}),
-    ...(Object.keys(footnoteInk).length > 0 ? { footnoteInk } : {}),
+    footnoteBoards,
+    footnoteInk,
   };
 }
 

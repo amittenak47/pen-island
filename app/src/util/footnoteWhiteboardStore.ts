@@ -54,7 +54,7 @@ export async function createFootnoteWhiteboard(docId: string): Promise<string> {
   const wbId = `fnwb-${crypto.randomUUID()}`;
   await putFootnoteWhiteboard(docId, wbId, {
     board: {
-      v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 },
+      v: 1, elements: [], files: {}, appState: { scrollX: 0, scrollY: 0, zoom: 1 },
       inkPages: { v: 1, pageIds: [] },
     },
     pageCount: 1,

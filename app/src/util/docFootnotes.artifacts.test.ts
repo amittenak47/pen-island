@@ -15,7 +15,7 @@ describe("artifact links on footnotes", () => {
   it("round-trips new references beside old scratch-board pointers", () => {
     const [restored] = sanitizeFootnotes([{ ...mark, artifacts: [artifact] }]);
     expect(restored!.artifacts).toEqual([artifact]);
-    expect(restored!.whiteboards).toEqual(mark.whiteboards);
+    expect(restored!.whiteboards).toEqual(mark.whiteboards!.map(board => ({ ...board, title: "" })));
   });
 
   it("includes linking and unlinking in the autosave signature", () => {

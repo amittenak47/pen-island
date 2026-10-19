@@ -161,7 +161,7 @@ export async function recordRollingSnapshots(input: {
     ? await input.extras()
     : {
         ...(input.ink && input.ink.length > 0 ? { ink: input.ink } : {}),
-        ...(input.edges && input.edges.length > 0 ? { edges: input.edges } : {}),
+        ...(input.edges !== undefined ? { edges: input.edges } : {}),
         ...(typeof input.source === "string" ? { source: input.source } : {}),
       };
   const board = boardWithoutInk(input.board);
@@ -181,12 +181,12 @@ export async function recordRollingSnapshots(input: {
       ...(input.agent ? { agent: input.agent } : {}),
       ...(input.pageCount != null ? { pageCount: input.pageCount } : {}),
       ...(extra.ink && extra.ink.length > 0 ? { ink: extra.ink } : {}),
-      ...(extra.edges && extra.edges.length > 0 ? { edges: extra.edges } : {}),
+      ...(extra.edges !== undefined ? { edges: extra.edges } : {}),
         ...(typeof extra.source === "string" ? { source: extra.source } : {}),
-        ...(extra.footnoteBoards && Object.keys(extra.footnoteBoards).length > 0
+        ...(extra.footnoteBoards !== undefined
           ? { footnoteBoards: extra.footnoteBoards }
           : {}),
-        ...(extra.footnoteInk && Object.keys(extra.footnoteInk).length > 0
+        ...(extra.footnoteInk !== undefined
           ? { footnoteInk: extra.footnoteInk }
           : {}),
     };

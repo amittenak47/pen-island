@@ -41,16 +41,16 @@ fn is_helps_with(label: &str) -> bool {
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct ReadingStyle {
     /// One of [`KINDS`]; empty on requests made before reading styles.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub kind: String,
     /// The preset's field labels, in order. Empty means free-form notes.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[serde(default)]
     pub fields: Vec<String>,
     /// "best" (only the fields that fit) or "all" (every field). Fields only.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub fill: String,
     /// The preset's name, for the reader's history; not used to answer.
-    #[serde(default, skip_serializing_if = "String::is_empty")]
+    #[serde(default)]
     pub preset: String,
 }
 
@@ -223,6 +223,12 @@ impl ReadingStyle {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn empty_reading_style_serializes_every_default() {
+        let style = super::ReadingStyle::default();
+        assert_eq!(serde_json::to_value(&style).unwrap(), serde_json::json!({"kind":"", "fields":[], "fill":"", "preset":""}));
+        assert_eq!(serde_json::from_value::<super::ReadingStyle>(serde_json::json!({})).unwrap(), style);
+    }
     use super::*;
 
     fn story(fill: &str) -> ReadingStyle {

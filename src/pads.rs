@@ -341,7 +341,7 @@ pub struct AnnotatePad {
     pub board: serde_json::Value,
     #[serde(default)]
     pub agent: serde_json::Value,
-    #[serde(default = "empty_json_object", skip_serializing_if = "is_empty_json_object")]
+    #[serde(default = "empty_json_object")]
     pub footnote_boards: serde_json::Value,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub artifacts: Option<serde_json::Value>,
@@ -393,10 +393,6 @@ fn is_zero_seq(seq: &i64) -> bool {
 
 fn empty_json_object() -> serde_json::Value {
     serde_json::json!({})
-}
-
-fn is_empty_json_object(value: &serde_json::Value) -> bool {
-    value.as_object().map(|o| o.is_empty()).unwrap_or(true)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1914,6 +1910,13 @@ pub fn clone_device(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn annotate_serializes_empty_footnote_boards() {
+        let pad: super::AnnotatePad = serde_json::from_value(serde_json::json!({
+            "id":"a", "name":"a.md", "hash":"h", "updated_at":1, "board":{}, "agent":[]
+        })).unwrap();
+        assert_eq!(serde_json::to_value(pad).unwrap()["footnote_boards"], serde_json::json!({}));
+    }
     use super::*;
     use serde_json::json;
 

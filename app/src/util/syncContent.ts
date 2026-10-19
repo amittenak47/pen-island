@@ -7,6 +7,13 @@
  * agent[].drawing.redacted=false, agent[].artifactProposals[].programs/messages;
  * footnotes[].notes/threads/bands/subMarks/userLinks/whiteboards/artifacts,
  * footnotes[].notes[].images and footnotes[].subMarks[].bands (lists use []).
+ * Also empty strings at agent[].requestNote/reasoning/bridgeError,
+ * footnotes[].title, .notes[].field, .userLinks[]/.whiteboards[].title and
+ * .anchor/.subMarks[].anchor.prefix/suffix; board.files={} and
+ * board.elements[].customData=null/{} (including footnote boards).
+ * Snapshots use these same defaults without view exclusions, plus empty
+ * edges/footnoteBoards/footnoteInk and known-empty board.inkPages manifests.
+ * Snapshot artifact payload JSON and retained bookRecord use the same record defaults.
  * Values are actual IEEE-754 JSON Numbers, not original decimal spellings.
  * A previously rounded JSON literal cannot be reconstructed by this helper.
  */
@@ -79,6 +86,7 @@ export const PAGE_FRAME_LOCAL_KEYS = ["width", "height", "version", "versionNonc
 /** Agent message flags whose `false` is the same as leaving them out. */
 export const MESSAGE_FALSE_DEFAULT_KEYS = ["pending", "queued", "bridgePending"] as const;
 export const MESSAGE_EMPTY_LIST_KEYS = ["attachments", "artifacts", "artifactProposals", "flags", "processEvents"] as const;
+export const MESSAGE_EMPTY_STRING_KEYS = ["requestNote", "reasoning", "bridgeError"] as const;
 export const FOOTNOTE_EMPTY_LIST_KEYS = ["notes", "threads", "bands", "subMarks", "userLinks", "whiteboards", "artifacts"] as const;
 
 const plainObject = (value: unknown): value is Record<string, unknown> =>
@@ -91,9 +99,65 @@ function isPageFrame(element: Record<string, unknown>): boolean {
   return meta.lcMdInkFrame === true || meta.lcDocumentPage === true || (meta.lcRegionFrame === true && meta.lcRegion === "mdink-0");
 }
 
+function emptyStrings(row: Record<string, unknown>, keys: readonly string[]): void {
+  for (const key of keys) if (row[key] === "") delete row[key];
+}
+
+function emptyMap(row: Record<string, unknown>, key: string): void {
+  if (plainObject(row[key]) && Object.keys(row[key]).length === 0) delete row[key];
+}
+
+/** Only the safe empty defaults; snapshots retain view state and populated manifests. */
+function normalizeEmptyDefaults(record: Record<string, unknown>, snapshot = false, snapshotPayload = snapshot): void {
+  const board = (value: unknown) => {
+    if (!plainObject(value)) return;
+    emptyMap(value, "files");
+    if (Array.isArray(value.elements)) for (const element of value.elements) {
+      if (!plainObject(element)) continue;
+      if (element.customData === null) delete element.customData;
+      emptyMap(element, "customData");
+    }
+    const manifest = value.inkPages;
+    if (snapshot && plainObject(manifest) && manifest.v === 1 && Array.isArray(manifest.pageIds)
+      && manifest.pageIds.length === 0 && Object.keys(manifest).every(key => key === "v" || key === "pageIds")) delete value.inkPages;
+  };
+  board(record.board);
+  for (const key of ["footnote_boards", ...(snapshotPayload ? ["footnoteBoards"] : [])]) {
+    const children = record[key];
+    if (plainObject(children)) for (const child of Object.values(children)) {
+      if (plainObject(child)) board(child.board);
+    }
+    emptyMap(record, key);
+  }
+  if (Array.isArray(record.agent)) for (const message of record.agent) {
+    if (plainObject(message)) emptyStrings(message, MESSAGE_EMPTY_STRING_KEYS);
+  }
+  const anchor = (value: unknown) => {
+    if (plainObject(value) && value.kind !== "region") emptyStrings(value, ["prefix", "suffix"]);
+  };
+  if (Array.isArray(record.footnotes)) for (const note of record.footnotes) {
+    if (!plainObject(note)) continue;
+    emptyStrings(note, ["title"]);
+    anchor(note.anchor);
+    for (const key of ["userLinks", "whiteboards", "notes", "subMarks"]) {
+      const entries = note[key];
+      if (Array.isArray(entries)) for (const entry of entries) {
+        if (!plainObject(entry)) continue;
+        if (key === "subMarks") anchor(entry.anchor);
+        else emptyStrings(entry, [key === "notes" ? "field" : "title"]);
+      }
+    }
+  }
+  if (snapshotPayload) {
+    if (Array.isArray(record.edges) && record.edges.length === 0) delete record.edges;
+    emptyMap(record, "footnoteInk");
+  }
+}
+
 export function normalizeRecord(value: unknown): Record<string, unknown> {
   check(value != null && typeof value === "object" && !Array.isArray(value), "book record must be an object");
   const record = JSON.parse(canonicalJson(value)) as Record<string, unknown>;
+  normalizeEmptyDefaults(record);
   for (const key of RECORD_TRANSPORT_KEYS) delete record[key];
   const emptyLists = (row: Record<string, unknown>, keys: readonly string[]) => {
     for (const key of keys) if (Array.isArray(row[key]) && row[key].length === 0) delete row[key];
@@ -116,7 +180,7 @@ export function normalizeRecord(value: unknown): Record<string, unknown> {
     for (const value of Object.values(record.footnote_boards)) {
       if (plainObject(value)) board(value.board);
     }
-    // The hub's book format defaults an absent map to empty and omits it when empty.
+    // The book format defaults an absent map to empty.
     if (Object.keys(record.footnote_boards).length === 0) delete record.footnote_boards;
   }
   if (Array.isArray(record.agent)) for (const message of record.agent) {
@@ -153,9 +217,9 @@ export async function recordHash(value: unknown): Promise<string> {
   return hashBytes(new TextEncoder().encode(canonicalJson(normalizeRecord(value))));
 }
 
-/** Immutable backup identity preserves every payload field, including view state.
- * Only known ink encodings and artifact JSON strings have representational
- * normalization; authored source strings and unknown fields remain untouched.
+/** Immutable backup identity preserves view state, authored source and unknown
+ * fields. Safe empty defaults, known ink encodings and artifact JSON strings
+ * have representational normalization.
  */
 export async function normalizeSnapshotCopy(value: { tier: string; payload: unknown }): Promise<{ tier: string; payload: unknown }> {
   check(typeof value.tier === "string", "snapshot tier must be a string");
@@ -163,6 +227,8 @@ export async function normalizeSnapshotCopy(value: { tier: string; payload: unkn
   check(payload === null || typeof payload === "object" && !Array.isArray(payload), "snapshot payload must be an object");
   if (payload !== null && typeof payload === "object" && !Array.isArray(payload)) {
     const row = payload as Record<string, unknown>;
+    normalizeEmptyDefaults(row, true);
+    if (plainObject(row.bookRecord)) normalizeEmptyDefaults(row.bookRecord, true, false);
     const ink = async (value: unknown) => {
       check(Array.isArray(value), "snapshot ink must be an array");
       for (const item of value) {
@@ -185,7 +251,9 @@ export async function normalizeSnapshotCopy(value: { tier: string; payload: unkn
       for (const value of assets) {
         const asset = object(value, "invalid backup asset");
         check(typeof asset.payload === "string", "invalid backup asset payload");
-        asset.payload = canonicalJson(JSON.parse(asset.payload));
+        const parsed: unknown = JSON.parse(asset.payload);
+        if (plainObject(parsed)) normalizeEmptyDefaults(parsed, true, false);
+        asset.payload = canonicalJson(parsed);
       }
     }
   }

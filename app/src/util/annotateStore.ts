@@ -720,9 +720,10 @@ export async function saveAnnotateDoc(input: {
     docType: input.docType ?? existing?.docType ?? "markdown",
     updatedAt: now,
     ...(label ? { label } : {}),
-    ...(owned ? { owned: true } : {}),
+    owned: Boolean(owned),
+    authoredExtras: existing?.authoredExtras ?? {},
     ...((input.localFileHash ?? existing?.localFileHash) ? { localFileHash: input.localFileHash ?? existing?.localFileHash } : {}),
-    ...(existing?.locked ? { locked: true } : {}),
+    locked: Boolean(existing?.locked),
     syncSeq: existing?.syncSeq ?? 0,
     lastTouch: now,
     lastSyncedAt: existing?.lastSyncedAt,
@@ -745,7 +746,8 @@ export async function saveAnnotateDoc(input: {
     if (current && input.metadataIntent !== "rename") {
       if (current.label) next.label = current.label; else delete next.label;
     }
-    if (current?.locked) next.locked = true; else delete next.locked;
+    next.locked = Boolean(current?.locked);
+    next.authoredExtras = current?.authoredExtras ?? {};
     if (input.owned === undefined && current?.owned) next.owned = true;
     if (saved.artifacts) next.artifactRevision = saved.artifacts.revision;
     return next;
@@ -800,9 +802,9 @@ export async function markAnnotateHubAck(id: string, updatedAt: number): Promise
 
 export async function setAnnotateDocLocked(id: string, locked: boolean): Promise<void> {
   await editMetadata(id, (meta, ctx) => {
-    if (!meta || Boolean(meta.locked) === locked) return;
+    if (!meta || meta.locked === locked) return;
     const next = { ...meta, kind: "annotate" as const };
-    if (locked) next.locked = true; else delete next.locked;
+    next.locked = locked;
     ctx.setMetadata(next);
   });
 }

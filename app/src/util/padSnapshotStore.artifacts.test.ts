@@ -16,6 +16,26 @@ const input = { kind: "annotate" as const, key: "a1", name: "Note.md", now: 10,
   extras: async () => ({ artifactBundle: bundle }),
 };
 beforeEach(() => rows.clear());
+it("retains known-empty snapshot collections in every complete saved tier", async () => {
+  const snapshots = await recordRollingSnapshots({ ...input,
+    extras: async () => ({ edges: [], footnoteBoards: {}, footnoteInk: {} }),
+  });
+  expect(snapshots).toHaveLength(3);
+  for (const row of snapshots) {
+    expect(row).toMatchObject({ edges: [], footnoteBoards: {}, footnoteInk: {} });
+    expect(await getPadSnapshot(row.kind, row.key, row.tier)).toMatchObject({ edges: [], footnoteBoards: {}, footnoteInk: {} });
+    for (const key of ["ink", "agent", "footnotes", "source"]) expect(row).not.toHaveProperty(key);
+  }
+});
+it("keeps unknown snapshot collections absent and explicit direct edges empty", async () => {
+  const { extras: _extras, ...base } = input;
+  const snapshots = await recordRollingSnapshots({ ...base, edges: [] });
+  for (const row of snapshots) {
+    expect(row.edges).toEqual([]);
+    expect(row).not.toHaveProperty("footnoteBoards");
+    expect(row).not.toHaveProperty("footnoteInk");
+  }
+});
 it("keeps the exact backup bundle in all due tiers", async () => {
   expect(await recordRollingSnapshots(input)).toHaveLength(3);
   for (const tier of ["2h", "24h", "7d"] as const) {

@@ -5,7 +5,7 @@ import { abortTransaction, withTransaction, STORE_BOOK_META, STORE_CONTENT, STOR
   STORE_INK_PAGES, STORE_SYNC_STATE, STORE_SYNC_RECOVERY } from "./idb";
 import { allocateChangeSeqRange, seedSyncState, syncStateKey, type BookIdentity, type BookMeta, type SyncState } from "./syncState";
 import { inkPageKey, inkPageKeyRange, type InkPageRecord } from "./inkPageStore";
-import { notifyBookMetadataChanged, LocalBookConflictError } from "./localBookStore";
+import { canonicalBookMetadata, notifyBookMetadataChanged, LocalBookConflictError } from "./localBookStore";
 import { LOCAL_VIEW_KEYS, recordHash, hashBytes } from "./syncContent";
 import { recordAuthoredExtras } from "./recordAuthoredExtras";
 import { mergeAgentMessages } from "../modes/coachSessions";
@@ -190,19 +190,21 @@ export function preserveRecordView(remote: Record<string, unknown>, local: Recor
   return record;
 }
 function localRecordParts(owner: BookIdentity, record: Record<string, unknown>, capture: BookCapture) {
-  const metadata: BookMeta = { ...capture.metadata, kind: owner.kind, id: owner.id, authoredExtras: recordAuthoredExtras(record),
+  const metadata: BookMeta = canonicalBookMetadata({ ...capture.metadata, kind: owner.kind, id: owner.id, authoredExtras: recordAuthoredExtras(record),
     updatedAt: record.updated_at ?? capture.metadata?.updatedAt ?? 0, syncSeq: record.sync_seq ?? capture.metadata?.syncSeq ?? 0,
-    hubAckUpdatedAt: record.updated_at ?? 0, lastSyncedAt: Date.now() };
+    hubAckUpdatedAt: record.updated_at ?? 0, lastSyncedAt: Date.now() });
   if (owner.kind === "annotate") Object.assign(metadata, { name: record.name, hash: record.hash, docType: record.doc_type,
     localFileHash: typeof record.local_file_hash === "string" ? record.local_file_hash : undefined,
     ...(record.label !== undefined ? { label: record.label } : { label: undefined }) });
   else if (owner.kind === "whiteboard") Object.assign(metadata, { title: record.title, pageCount: record.page_count });
   else Object.assign(metadata, { dataset: record.dataset, taskId: record.task_id });
-  const payload = { ...(capture.payload ?? {}), board: record.board,
+  const payload: Record<string, unknown> = { ...(capture.payload ?? {}), board: record.board,
     agent: mergeAgentMessages(Array.isArray(capture.payload?.agent) ? capture.payload.agent : [], Array.isArray(record.agent) ? record.agent : []),
     ...(record.source !== undefined ? { source: record.source } : {}),
     ...(record.footnotes !== undefined ? { footnotes: record.footnotes } : {}),
     ...(record.artifacts !== undefined ? { artifacts: record.artifacts } : {}) };
+  if (Array.isArray(payload.footnotes)) payload.footnotes = canonicalFootnotes(payload.footnotes);
+  if (owner.kind === "annotate" && metadata.docType === "web") payload.captures ??= [];
   return { metadata, payload };
 }
 
@@ -235,7 +237,7 @@ export async function acknowledgeBook(capture: BookCapture, attempt: NonNullable
             // acknowledge edits made after that deletion was submitted.
             next.bootstrap = false;
             const meta = tx.objectStore(STORE_BOOK_META).get(syncStateKey(capture.kind, capture.id));
-            meta.onsuccess = () => { if (meta.result) tx.objectStore(STORE_BOOK_META).put({ ...meta.result, deleteAcked: true }, syncStateKey(capture.kind, capture.id)); };
+            meta.onsuccess = () => { if (meta.result) tx.objectStore(STORE_BOOK_META).put(canonicalBookMetadata({ ...meta.result, deleteAcked: true }), syncStateKey(capture.kind, capture.id)); };
           }
         }
         if (current.lastAttempt?.uploadId === attempt.uploadId) next.lastAttempt = null;
@@ -326,12 +328,12 @@ export async function publishBook(capture: BookCapture, prepared: BookPublicatio
                 }
               }
               if (prepared.settleDelete && capture.metadata) {
-                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deleteAcked: true }, syncStateKey(capture.kind, capture.id));
+                tx.objectStore(STORE_BOOK_META).put(canonicalBookMetadata({ ...capture.metadata, deleteAcked: true }), syncStateKey(capture.kind, capture.id));
               }
               if (prepared.trashFromHub && capture.metadata) {
                 const now = Date.now();
-                tx.objectStore(STORE_BOOK_META).put({ ...capture.metadata, deletedAt: now, deleteAcked: true,
-                  deleteFollowed: prepared.trashFromHub.followed, lastTouch: now }, syncStateKey(capture.kind, capture.id));
+                tx.objectStore(STORE_BOOK_META).put(canonicalBookMetadata({ ...capture.metadata, deletedAt: now, deleteAcked: true,
+                  deleteFollowed: prepared.trashFromHub.followed, lastTouch: now }), syncStateKey(capture.kind, capture.id));
               }
               if (prepared.replacePages) for (const row of capture.pages) {
                 if (!prepared.pages.some(page => page.row.docKey === row.docKey && page.row.pageId === row.pageId)) {

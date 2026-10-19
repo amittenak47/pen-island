@@ -1982,7 +1982,7 @@ export const Workspace = memo(function Workspace({
     },
     ticket => setAgentMessages(current => current.map(m => m.id === ticket.id ? {
       ...m, requestState: ticket.state,
-      requestNote: ticket.state === "failed" || ticket.state === "cancelled" ? ticket.error : undefined,
+      requestNote: ticket.state === "failed" || ticket.state === "cancelled" ? ticket.error ?? "" : "",
       queued: ticket.state === "queued" || ticket.state === "preparing",
     } : m)),
   );
@@ -5476,7 +5476,7 @@ export const Workspace = memo(function Workspace({
             ? {
                 processEvents: placeholder.processEvents,
                 ...(placeholder.pendingAck?.flags?.length ? { flags: placeholder.pendingAck.flags } : {}),
-                ...(placeholder.reasoning ? { reasoning: placeholder.reasoning } : {}),
+                reasoning: placeholder.reasoning ?? "",
               }
             : {}),
           ...part,
@@ -6217,7 +6217,7 @@ export const Workspace = memo(function Workspace({
               (firstDrawing
                 ? "Drew a diagram on the board."
                 : "The model returned an empty reply."),
-            ...(result.reasoning?.trim() ? { reasoning: result.reasoning.trim() } : {}),
+            reasoning: result.reasoning?.trim() ?? "",
             ...(firstDrawing ? { drawing: withNewDrawing(firstDrawing, drawingPage) } : {}),
             artifactProposals: (sanitizeArtifactProposals(result.artifacts) ?? []).map(proposal => ({
               ...proposal, programs: proposal.programs ?? [], messages: proposal.messages ?? [],
@@ -7272,7 +7272,7 @@ export const Workspace = memo(function Workspace({
       if (!attachTo) return current;
       return current.map((message) =>
         message.id === attachTo.id
-          ? { ...message, bridgePending: true, bridgeError: null }
+          ? { ...message, bridgePending: true, bridgeError: "" }
           : message,
       );
     });
@@ -7302,7 +7302,7 @@ export const Workspace = memo(function Workspace({
         if (!attachTo) return current;
         return current.map((message) =>
           message.id === attachTo.id
-            ? { ...message, bridge: result, bridgePending: false, bridgeError: null }
+            ? { ...message, bridge: result, bridgePending: false, bridgeError: "" }
             : message,
         );
       });

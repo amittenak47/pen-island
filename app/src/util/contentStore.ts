@@ -308,11 +308,17 @@ export async function putParentRecord<T extends { artifacts?: ArtifactCatalog },
       throw new Error("The parent was removed; content was not published.");
     }
     const saved = merge(ctx.content as T | undefined ?? undefined);
-    ctx.setContent(saved);
     let metadata = ctx.metadata as M | null;
     if (opts.metadata) metadata = opts.metadata(metadata, saved);
     else if (metadata && saved.artifacts) metadata = { ...metadata, artifactRevision: saved.artifacts.revision,
       ...(opts.catalogOnly ? { updatedAt: Math.max(Date.now(), Number(ctx.metadata?.updatedAt ?? 0) + 1) } : {}) };
+    // Captures are a complete-record default, after an omitted partial input
+    // has preserved the history already stored by another save.
+    if (parent.kind === "annotate" && (metadata as Record<string, unknown> | null)?.docType === "web") {
+      const record = saved as Record<string, unknown>;
+      record.captures ??= [];
+    }
+    ctx.setContent(saved);
     if (opts.metadata || metadata !== ctx.metadata) ctx.setMetadata(metadata ? { ...metadata, kind: parent.kind } : null);
     opts.editState?.(ctx);
     return { content: saved, metadata };

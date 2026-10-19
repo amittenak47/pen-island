@@ -149,15 +149,16 @@ export function buildFootnoteRequest(input: {
   const focus = (input.focus ?? "").trim().slice(0, 1000);
   const perPage = input.perPage;
   const references = (input.references ?? []).map((reference) => ({ ...reference }));
-  const extras = {
-    ...(palette.length ? { palette } : {}),
-    ...(markText ? { mark_text: markText } : {}),
-    ...(workspaceItems.length ? { workspace_items: workspaceItems } : {}),
-    ...(input.docKind ? { doc_kind: input.docKind } : {}),
-    ...(focus ? { focus } : {}),
+  const extras: NonNullable<FootnoteRequestDto["extras"]> = {
+    palette,
+    mark_text: markText,
+    workspace_items: workspaceItems,
+    doc_kind: input.docKind ?? "",
+    focus,
     ...(typeof perPage === "number" && Number.isInteger(perPage) && perPage >= 1 && perPage <= 8 ? { per_page: perPage } : {}),
-    ...(references.length ? { references } : {}),
-    ...(input.reading?.kind ? { reading: { ...input.reading } } : {}),
+    references,
+    reading: { kind: input.reading?.kind ?? "", fields: input.reading?.fields ?? [],
+      fill: input.reading?.fill ?? "", preset: input.reading?.preset ?? "" },
   };
   const pageText = input.pageText ?? "";
   const scope = input.anchor.scope;
@@ -174,7 +175,7 @@ export function buildFootnoteRequest(input: {
     wide_context: sliceAround(pageText, excerpt, WIDE_RADIUS).slice(0, 24000),
     page_footnotes: pageFootnotesFor(input.footnotes, scope, input.exceptId),
     prompt: null,
-    ...(Object.keys(extras).length ? { extras } : {}),
+    extras,
   };
 }
 

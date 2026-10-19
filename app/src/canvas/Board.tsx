@@ -10338,7 +10338,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         const inkC = assemble
           ? (rasterInkRef.current?.assembleEncoded() ?? encodeInkOps([]))
           : { v: 2 as const, ops: [] };
-        const pageIds = rasterInkRef.current?.inkPageIds() ?? [];
+        const pageIds = rasterInkRef.current?.inkPageIds();
         const rawFiles = (api?.getFiles() ?? {}) as Record<string, BoardBinaryFile>;
         const files: Record<string, BoardBinaryFile> = {};
         for (const [id, file] of Object.entries(rawFiles)) {
@@ -10391,12 +10391,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           // Encoded, not raw — `ink` stays readable forever but is never
           // written again. See `inkCodec`; read it back with `inkOpsFrom`.
           inkC,
-          ...(pageIds.length > 0 ? { inkPages: { v: 1 as const, pageIds } } : {}),
+          ...(pageIds !== undefined ? { inkPages: { v: 1 as const, pageIds } } : {}),
           inkPalettes: {
             items: inkPaletteHistoryRef.current.items,
             index: inkPaletteHistoryRef.current.index,
           },
-          ...(Object.keys(files).length > 0 ? { files } : {}),
+          files,
         };
       },
       restoreBoard: (nextElements, appState, options) => {

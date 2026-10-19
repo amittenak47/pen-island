@@ -19,6 +19,13 @@ import type { BoardBlob } from "../canvas/BoardHandle";
 import { encodeInkOps, inkOpsFrom } from "../canvas/inkCodec";
 import type { InkDrawOp } from "../canvas/rasterInk";
 
+it("writes empty root footnotes in annotation sidecars", () => {
+  const input = { sourceName: "Note.md", contentHash: "h",
+    board: { v: 1 as const, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } } };
+  expect(buildAnnotateSidecar(input)).toHaveProperty("footnotes", []);
+  expect(buildAnnotateSidecar({ ...input, footnotes: [] })).toHaveProperty("footnotes", []);
+});
+
 describe("docTypeForName", () => {
   it("classifies markdown by extension", () => {
     expect(docTypeForName("notes.md")).toBe("markdown");

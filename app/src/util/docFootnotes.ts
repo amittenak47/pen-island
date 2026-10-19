@@ -706,7 +706,7 @@ function sanitizeUserLinks(value: unknown): DocFootnoteUserLink[] | undefined {
       typeof candidate.title === "string" && candidate.title.trim()
         ? candidate.title.trim()
         : undefined;
-    return [{ url: candidate.url.trim(), ...(title ? { title } : {}) }];
+    return [{ url: candidate.url.trim(), title: title ?? "" }];
   });
   return links.length > 0 ? links : undefined;
 }
@@ -737,7 +737,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
             text: candidate.text,
             ...(Array.isArray(candidate.images) ? { images } : {}),
             ...(candidate.by === "ai" || candidate.by === "reader" ? { by: candidate.by } : {}),
-            ...(typeof candidate.field === "string" && candidate.field.trim() && candidate.field.length <= 40 ? { field: candidate.field.trim() } : {}),
+            field: typeof candidate.field === "string" && candidate.field.length <= 40 ? candidate.field.trim() : "",
             ...(typeof candidate.jobId === "string" && candidate.jobId ? { jobId: candidate.jobId } : {}),
             createdAt,
             updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : createdAt,
@@ -746,7 +746,7 @@ function sanitizeNotes(value: unknown, legacy: unknown, now: number): DocFootnot
       })
     : [];
   if (entries.length === 0 && typeof legacy === "string" && legacy.trim()) {
-    entries.push({ id: "nt-legacy", text: legacy, images: [], createdAt: now, updatedAt: now });
+    entries.push({ id: "nt-legacy", text: legacy, images: [], field: "", createdAt: now, updatedAt: now });
   }
   return entries.length > 0 ? entries : undefined;
 }
@@ -798,7 +798,7 @@ function sanitizeWhiteboards(value: unknown, now: number): DocFootnoteWhiteboard
         : undefined;
     entries.push({
       id: candidate.id,
-      ...(title ? { title } : {}),
+      title: title ?? "",
       createdAt,
       updatedAt: typeof candidate.updatedAt === "number" ? candidate.updatedAt : createdAt,
     });
@@ -867,6 +867,7 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
       return [
         {
           ...(rest as DocFootnote),
+          excerpt,
           anchor,
           notes: notes ?? (Array.isArray(candidate.notes) ? [] : undefined),
           whiteboards: whiteboards ?? (Array.isArray(rawWhiteboards) ? [] : undefined),
@@ -875,7 +876,7 @@ export function sanitizeFootnotes(value: unknown): DocFootnote[] {
           ...(userLinks || Array.isArray(candidate.userLinks) ? { userLinks: userLinks ?? [] } : {}),
           ...(color ? { color } : {}),
           ...(palette ? { palette } : {}),
-          ...(title ? { title } : {}),
+          title: title ?? "",
           ...(bands || Array.isArray(candidate.bands) ? { bands: bands ?? [] } : {}),
           ...(blockText ? { blockText } : {}),
           ...(subMarks || Array.isArray(candidate.subMarks) ? { subMarks: subMarks ?? [] } : {}),
