@@ -7,6 +7,7 @@ import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
 import android.provider.DocumentsContract
+import android.provider.OpenableColumns
 import android.net.Uri
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
@@ -19,7 +20,9 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import java.io.File
+import java.io.FileNotFoundException
 import java.io.IOException
+import org.json.JSONObject
 
 /**
  * Insert a PNG into the device Photos / Pictures library via MediaStore so it
@@ -140,6 +143,91 @@ class GallerySavePlugin(private val activity: Activity) : Plugin(activity) {
             activity.contentResolver.takePersistableUriPermission(uri, flags)
             invoke.resolve(JSObject().apply { put("uri", uri.toString()) })
         } catch (error: Exception) { invoke.reject(error.message ?: "Folder permission failed") }
+    }
+
+    @InvokeArg
+    class DocumentSourceArgs {
+        var uri: String = ""
+    }
+
+    @Command
+    fun pick_document(invoke: Invoke) {
+        try {
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                addCategory(Intent.CATEGORY_OPENABLE)
+                // Match documentPickerAccept on Android: source files have too
+                // many provider MIME aliases for a restricted list to work.
+                type = "*/*"
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            }
+            startActivityForResult(invoke, intent, "sourceDocumentResult")
+        } catch (error: Exception) { invoke.reject(error.message ?: "Document picker unavailable") }
+    }
+
+    @ActivityCallback
+    fun sourceDocumentResult(invoke: Invoke, result: ActivityResult) {
+        if (result.resultCode == Activity.RESULT_CANCELED) {
+            invoke.resolve(JSObject().apply { put("uri", "") }); return
+        }
+        try {
+            val uri = result.data?.data ?: throw IOException("No document returned")
+            activity.contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            val info = queryDocument(uri) ?: throw FileNotFoundException("Document is unavailable")
+            info.put("uri", uri.toString())
+            invoke.resolve(info)
+        } catch (error: Exception) { invoke.reject(error.message ?: "Document permission failed") }
+    }
+
+    private fun queryDocument(uri: Uri): JSObject? {
+        // A null projection lets providers omit unsupported columns, especially
+        // last-modified, without failing the name and size query too.
+        activity.contentResolver.query(uri, null, null, null, null).use { cursor ->
+            if (cursor == null || !cursor.moveToFirst()) return null
+            val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+            val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+            val modifiedIndex = cursor.getColumnIndex(DocumentsContract.Document.COLUMN_LAST_MODIFIED)
+            val name = if (nameIndex >= 0 && !cursor.isNull(nameIndex)) cursor.getString(nameIndex) else null
+            val size = if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) cursor.getLong(sizeIndex).takeIf { it >= 0 } else null
+            val modified = if (modifiedIndex >= 0 && !cursor.isNull(modifiedIndex)) cursor.getLong(modifiedIndex).takeIf { it >= 0 } else null
+            return JSObject().apply {
+                put("name", name ?: "document")
+                put("size", size ?: JSONObject.NULL)
+                put("modified", modified ?: JSONObject.NULL)
+            }
+        }
+    }
+
+    @Command
+    fun stat_document(invoke: Invoke) {
+        try {
+            val args = invoke.parseArgs(DocumentSourceArgs::class.java)
+            val info = queryDocument(Uri.parse(args.uri))
+            if (info == null) {
+                invoke.resolve(JSObject().apply { put("exists", false) })
+            } else {
+                info.put("exists", true)
+                invoke.resolve(info)
+            }
+        } catch (error: SecurityException) {
+            invoke.resolve(JSObject().apply { put("exists", false) })
+        } catch (error: FileNotFoundException) {
+            invoke.resolve(JSObject().apply { put("exists", false) })
+        } catch (error: IllegalArgumentException) {
+            invoke.resolve(JSObject().apply { put("exists", false) })
+        } catch (error: Exception) { invoke.reject(error.message ?: "Cannot check document") }
+    }
+
+    @Command
+    fun read_document(invoke: Invoke) {
+        val args = invoke.parseArgs(DocumentSourceArgs::class.java)
+        Thread {
+            try {
+                val bytes = activity.contentResolver.openInputStream(Uri.parse(args.uri)).use { input ->
+                    input?.readBytes() ?: throw FileNotFoundException("Document is unavailable")
+                }
+                invoke.resolve(JSObject().apply { put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)) })
+            } catch (error: Exception) { invoke.reject(error.message ?: "Cannot read document") }
+        }.start()
     }
 
     private fun insertDocument(bytes: ByteArray, name: String, directory: String?): String {

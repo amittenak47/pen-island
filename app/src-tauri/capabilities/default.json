@@ -10,6 +10,7 @@
     "opener:allow-default-urls",
     "allow-fetch-html",
     "allow-capture-export",
+    "allow-doc-source",
     "allow-lc-harness",
     "allow-webview-eval-json",
     "allow-webview-capture-png",

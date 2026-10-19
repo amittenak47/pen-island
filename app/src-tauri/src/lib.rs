@@ -2,6 +2,7 @@
 //! app; the harness router runs in-process — no loopback TCP server.
 
 pub mod capture_save;
+pub mod doc_source;
 pub mod document_export;
 pub mod colorhunt;
 pub mod dlc;
@@ -196,6 +197,9 @@ pub fn run() {
         capture_save::save_png_bytes,
         capture_save::pick_capture_folder,
         capture_save::share_png_bytes,
+        doc_source::pick_document_source,
+        doc_source::stat_document_source,
+        doc_source::read_document_source,
         document_export::begin_document_export,
         document_export::append_document_export,
         document_export::cancel_document_export,
@@ -221,6 +225,9 @@ pub fn run() {
         live_webview_close,
         live_webview_exists,
     ]);
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    let builder = builder.plugin(tauri_plugin_dialog::init());
 
     // ML Kit, the MediaStore gallery, the system gesture strips, the speech
     // recognizer and the child web view wry declines to make only exist on Android.

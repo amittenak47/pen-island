@@ -25,11 +25,20 @@ vi.mock("./idb", () => ({
   },
   // Retained byte copies are read by key, one `get` each.
   withTransaction: async (_stores: string[], _mode: string, work: (tx: unknown, done: (value: unknown) => void) => void) =>
-    new Promise(done => work({ objectStore: () => ({ get: (key: string) => {
-      const request: { result: unknown; onsuccess: null | (() => void) } = { result: recovery.get(key), onsuccess: null };
-      queueMicrotask(() => request.onsuccess?.());
-      return request;
-    } }) }, done)),
+    new Promise(done => {
+      const request = (result: unknown) => {
+        const pending: { result: unknown; onsuccess: null | (() => void) } = { result, onsuccess: null };
+        queueMicrotask(() => pending.onsuccess?.());
+        return pending;
+      };
+      work({ objectStore: (name: string) => name === "sync_recovery" ? {
+        get: (key: string) => request(recovery.get(key)),
+        getAll: () => request([...recovery.values()]),
+      } : {
+        getKey: (key: string) => request(store.has(key) ? key : undefined),
+        delete: (key: string) => { store.delete(key); return request(undefined); },
+      } }, done);
+    }),
 }));
 
 const { hashBytes, loadBinaryDocBytes } = await import("./docBytes");

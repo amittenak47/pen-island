@@ -18,8 +18,8 @@
  * number, or two opens at different versions deadlock against each other.
  */
 
-import { openDb, run, STORE_BYTES } from "./idb";
-import { assertBytesUnambiguous } from "./syncRecovery";
+import { openDb, run, STORE_BYTES, STORE_SYNC_RECOVERY, withTransaction } from "./idb";
+import { assertBytesUnambiguous, readRetainedDocByteHashes } from "./syncRecovery";
 import { MigrationError } from "./queueMigration";
 import { isCameraBusy } from "./cameraBusy";
 import { hashBytesDigest } from "./hashBytesDigest";
@@ -317,7 +317,21 @@ export async function loadBinaryDocBytesWithRetry(
 }
 
 export async function deleteDocBytes(hash: string): Promise<void> {
-  await run(STORE, "readwrite", (store) => store.delete(hash));
+  await removeUnretainedDocBytes(hash);
+}
+
+async function removeUnretainedDocBytes(hash: string): Promise<boolean> {
+  return withTransaction<boolean>([STORE, STORE_SYNC_RECOVERY], "readwrite", (tx, done) => {
+    readRetainedDocByteHashes(tx, pinned => {
+      if (pinned.has(hash)) { done(false); return; }
+      const store = tx.objectStore(STORE), request = store.getKey(hash);
+      request.onsuccess = () => {
+        if (request.result === undefined) { done(false); return; }
+        store.delete(hash);
+        done(true);
+      };
+    });
+  });
 }
 
 /** What a sweep of the byte store found, and what it did about it. */
@@ -326,7 +340,7 @@ export interface DocBytesAudit {
   rows: number;
   /** Rows whose bytes are not the document their key names. */
   bad: number;
-  /** Rows removed — equal to `bad` for a repair, `rows` for a clear. */
+  /** Rows removed; retained books can pin rows even during repair or clear. */
   removed: number;
   /** Total bytes the store held when the sweep started. */
   bytes: number;
@@ -374,7 +388,7 @@ export async function auditDocBytes(opts?: { repair?: boolean }): Promise<DocByt
     audit.bad += 1;
     if (!opts?.repair) continue;
     try {
-      await deleteDocBytes(key);
+      if (!await removeUnretainedDocBytes(key)) continue;
       audit.removed += 1;
       audit.freed += size ?? 0;
     } catch {
@@ -385,17 +399,33 @@ export async function auditDocBytes(opts?: { repair?: boolean }): Promise<DocByt
 }
 
 /**
- * Drop every stored document copy.
+ * Drop stored document copies except those needed by retained books.
  *
  * The blunt instrument, and it throws nothing away that cannot come back: the
  * annotations live in the library keyed by content hash, and re-picking the
  * same file restores them. Use {@link auditDocBytes} with `repair` first — it
- * keeps the copies that are fine.
+ * keeps the copies that are fine. Retained versions always pin their files.
  */
 export async function clearDocBytes(): Promise<DocBytesAudit> {
   const before = await auditDocBytes();
-  await run(STORE, "readwrite", (store) => store.clear());
-  return { ...before, removed: before.rows, freed: before.bytes };
+  const removed = await withTransaction<{ removed: number; freed: number }>([STORE, STORE_SYNC_RECOVERY], "readwrite", (tx, done) => {
+    readRetainedDocByteHashes(tx, pinned => {
+      const result = { removed: 0, freed: 0 }, request = tx.objectStore(STORE).openCursor();
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) { done(result); return; }
+        if (typeof cursor.key !== "string" || !pinned.has(cursor.key)) {
+          const value: unknown = cursor.value;
+          result.removed += 1;
+          if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) result.freed += value.byteLength;
+          else if (typeof Blob !== "undefined" && value instanceof Blob) result.freed += value.size;
+          cursor.delete();
+        }
+        cursor.continue();
+      };
+    });
+  });
+  return { ...before, ...removed };
 }
 
 /** What the document store actually is on this device, and whether it works. */

@@ -17,6 +17,33 @@ export async function exportRecoveryCopy(id:string):Promise<RecoveryCopy> {
   if(!copy)throw new Error("This retained copy could not be found.");
   return copy;
 }
+
+function docByteHashes(copies: readonly RecoveryCopy[]): Set<string> {
+  const hashes = new Set<string>();
+  const visited = new Set<object>();
+  const visit = (value: unknown) => {
+    if (!value || typeof value !== "object" || visited.has(value) || value instanceof ArrayBuffer || ArrayBuffer.isView(value)
+      || (typeof Blob !== "undefined" && value instanceof Blob)) return;
+    visited.add(value);
+    for (const [key, child] of Object.entries(value)) {
+      if ((key === "hash" || key === "claimedHash") && typeof child === "string") hashes.add(child);
+      else if (child && typeof child === "object") visit(child);
+    }
+  };
+  for (const copy of copies) visit(copy);
+  return hashes;
+}
+
+/** Complete retained books pin their source bytes, including legacy alternatives. */
+export async function retainedDocByteHashes(): Promise<Set<string>> {
+  return docByteHashes(await listRecoveryCopies());
+}
+
+/** Read pins inside the same transaction that removes document bytes. */
+export function readRetainedDocByteHashes(tx: IDBTransaction, done: (hashes: Set<string>) => void): void {
+  const request = tx.objectStore(STORE_SYNC_RECOVERY).getAll();
+  request.onsuccess = () => done(docByteHashes(request.result));
+}
 /** An explicit library choice supplies the authored local restore implementation. */
 export async function restoreRecoveryRecord(id:string,restore:(record:NonNullable<RecoveryCopy["record"]>)=>Promise<void>):Promise<void> {
   const copy=await exportRecoveryCopy(id);
@@ -42,14 +69,22 @@ export async function assertBytesUnambiguous(hash:string):Promise<void> {
 }
 
 /** Immutable insertion is useful to guarded conflict publication as well. */
-export async function retainRecoveryCopy(copy:RecoveryCopy):Promise<void> {
-  await withTransaction<void>([STORE_SYNC_RECOVERY],"readwrite",(tx,setResult)=>{
+export async function retainRecoveryCopy(copy:RecoveryCopy, requiredByteHash?:string):Promise<void> {
+  await withTransaction<void>(requiredByteHash ? [STORE_SYNC_RECOVERY,STORE_BYTES] : [STORE_SYNC_RECOVERY],"readwrite",(tx,setResult)=>{
     const store=tx.objectStore(STORE_SYNC_RECOVERY),request=store.get(copy.id);
-    request.onsuccess=()=>{
+    const bytes=requiredByteHash ? tx.objectStore(STORE_BYTES).getKey(requiredByteHash) : null;
+    let pending=bytes ? 2 : 1;
+    const ready=()=>{
+      if(--pending)return;
+      if(bytes && bytes.result===undefined) {
+        abortTransaction(tx,new MigrationError("The current document's file is missing; a complete backup cannot be kept.")); return;
+      }
       if(request.result===undefined)store.add(copy,copy.id);
       else if(!equalStored(request.result,copy))abortTransaction(tx,new MigrationError("A retained recovery copy changed identity; the original copy was kept."));
       setResult(undefined);
     };
+    request.onsuccess=ready;
+    if(bytes)bytes.onsuccess=ready;
   });
 }
 
