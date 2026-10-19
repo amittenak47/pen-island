@@ -53,7 +53,11 @@ export async function checkDocSource(id: string): Promise<DocSourceCheck> {
   const stat = await statDocumentSource(ref.kind, ref.location);
   if (!sameSource(getDocSource(id), ref)) throw new Error("The document's source changed while it was being checked. Check again.");
   if (!stat) return { status: "missing", ref };
-  if (stat.size === ref.size && stat.modified === ref.modified) return { status: "same", ref };
+  // A desktop file system's size and date are the file's own: equal, it has not
+  // changed. An Android document provider's can lag behind its content (the
+  // Downloads index kept the old size and date of a file written in place), so
+  // there the content itself is read and hashed every time.
+  if (ref.kind === "path" && stat.size === ref.size && stat.modified === ref.modified) return { status: "same", ref };
   const meta = getAnnotateDocMeta(id);
   if (!meta) return { status: "none" };
   const bytes = await readDocumentSource(ref.kind, ref.location);

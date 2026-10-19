@@ -354,7 +354,13 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
       setSourceCandidates(null);
       setSourceFailures([...sourceFailures, ...failures]);
       refreshList();
-      announceSource(`Updated ${updated} ${updated === 1 ? "document" : "documents"}. ${unplaced} ${unplaced === 1 ? "annotation couldn't" : "annotations couldn't"} be placed. ${failures.length} ${failures.length === 1 ? "update failed" : "updates failed"}.${sourceFailures.length ? ` ${sourceFailures.length} files couldn't be checked.` : ""}${unplaced ? " Unplaced annotations stay in the previous version (Recents → retained copies)." : ""}`);
+      // Only what happened: "0 updates failed" reads like a problem.
+      announceSource([
+        `Updated ${updated} ${updated === 1 ? "document" : "documents"}.`,
+        unplaced ? `${unplaced} ${unplaced === 1 ? "annotation couldn't" : "annotations couldn't"} be placed and ${unplaced === 1 ? "stays" : "stay"} in the previous version (Recents → retained copies).` : "",
+        failures.length ? `${failures.length} ${failures.length === 1 ? "update failed" : "updates failed"}.` : "",
+        sourceFailures.length ? `${sourceFailures.length} ${sourceFailures.length === 1 ? "file couldn't" : "files couldn't"} be checked.` : "",
+      ].filter(Boolean).join(" "));
     } finally {
       sourceRunning.current = false;
       setSourceUpdating(false);
