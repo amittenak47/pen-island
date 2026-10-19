@@ -514,7 +514,7 @@ function insetRule(shadow: string): { color: string; size: number } | null {
  * highlight (a wash, multiplied into the paper like on screen), an underline
  * (its rule) or a caption (its words).
  */
-function paintMark(ctx: CanvasRenderingContext2D, element: HTMLElement, box: DOMRect): void {
+function paintMark(ctx: CanvasRenderingContext2D, element: HTMLElement, box: DOMRect, blend = true): void {
   const style = getComputedStyle(element);
   if (element.classList.contains("lc-doc-footnote-caption")) {
     const text = element.textContent?.trim();
@@ -533,7 +533,7 @@ function paintMark(ctx: CanvasRenderingContext2D, element: HTMLElement, box: DOM
   }
   const radius = Math.min(parseFloat(style.borderTopLeftRadius) || 0, box.width / 2, box.height / 2);
   ctx.save();
-  if (style.mixBlendMode === "multiply") ctx.globalCompositeOperation = "multiply";
+  if (blend && style.mixBlendMode === "multiply") ctx.globalCompositeOperation = "multiply";
   const rule = insetRule(style.boxShadow);
   if (rule) {
     ctx.fillStyle = rule.color;
@@ -909,6 +909,16 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const k = picture.width / (br.x - tl.x);
       ctx.setTransform(k, 0, 0, k, -tl.x * k, -tl.y * k);
       for (const { element, box } of marks) paintMark(ctx, element, box);
+      // The marks alone, for the back of the sheet (see MARKS_THROUGH).
+      const alone = document.createElement("canvas");
+      alone.width = copy.width;
+      alone.height = copy.height;
+      const actx = alone.getContext("2d");
+      if (actx) {
+        actx.setTransform(k, 0, 0, k, -tl.x * k, -tl.y * k);
+        for (const { element, box } of marks) paintMark(actx, element, box, false);
+        marksAlone.set(copy, alone);
+      }
       // Booktabs sticking out past the page: their own picture, a margin wider.
       const tabs = marks.filter(({ element }) => !element.closest(".lc-page-marks-slot:not(.lc-page-booktabs-slot)"));
       const out = Math.max(0, ...tabs.map(({ box }) => Math.max(tl.x - box.left, box.right - br.x, tl.y - box.top, box.bottom - br.y)));
@@ -928,6 +938,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
     /** A marked picture's booktabs that stick out past its page. */
     const edges = new WeakMap<CanvasImageSource, TurnEdge>();
+    /** A marked picture's marks on their own. */
+    const marksAlone = new WeakMap<CanvasImageSource, HTMLCanvasElement>();
     let marksHidden = 0;
     const hideMarks = (on: boolean) => {
       marksHidden = Math.max(0, marksHidden + (on ? 1 : -1));
@@ -1461,6 +1473,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         toBlur: softenedPicture(turn.images.to),
         fromEdge: turn.margin && turn.images.from ? edges.get(turn.images.from) ?? null : null,
         toEdge: turn.margin && turn.images.to ? edges.get(turn.images.to) ?? null : null,
+        fromMarks: turn.images.from ? marksAlone.get(turn.images.from) ?? null : null,
       });
       clipUnder(turn);
     };

@@ -68,7 +68,18 @@ export interface TurnFrame {
    */
   fromEdge?: TurnEdge | null;
   toEdge?: TurnEdge | null;
+  /**
+   * The front's marks alone (highlights, underlines, quote bands, captions,
+   * squares), the size of `from`. They show through the back of the sheet more
+   * strongly than the print: at the print's strength a wash all but vanished.
+   */
+  fromMarks?: CanvasImageSource | null;
 }
+
+/** How strongly the front shows through the back of a single sheet. */
+export const PRINT_THROUGH = 0.15;
+/** …and its marks, which are light washes and thin rules to begin with. */
+export const MARKS_THROUGH = 0.35;
 
 /** An edge picture's part outside the page, drawn in page coordinates. */
 function drawEdge(ctx: CanvasRenderingContext2D, edge: TurnEdge, W: number, H: number): void {
@@ -221,17 +232,20 @@ function paintSideFold(ctx: CanvasRenderingContext2D, frame: TurnFrame): number 
     ctx.fillRect(0, 0, W, H);
     if (frame.from) {
       // Print showing through from the front, mirrored about the fold row by row.
-      ctx.globalAlpha = 0.1;
-      for (let i = 0; i < SIDE_ROWS; i += 1) {
-        const x = f.fold[i]!.x;
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(-W, top(i), 3 * W, rowH(i));
-        ctx.clip();
-        ctx.translate(2 * x, 0);
-        ctx.scale(-1, 1);
-        drawSlice(ctx, frame, frame.from, 0, 1, 0, W);
-        ctx.restore();
+      for (const [image, alpha] of [[frame.from, PRINT_THROUGH], [frame.fromMarks ?? null, MARKS_THROUGH]] as const) {
+        if (!image) continue;
+        ctx.globalAlpha = alpha;
+        for (let i = 0; i < SIDE_ROWS; i += 1) {
+          const x = f.fold[i]!.x;
+          ctx.save();
+          ctx.beginPath();
+          ctx.rect(-W, top(i), 3 * W, rowH(i));
+          ctx.clip();
+          ctx.translate(2 * x, 0);
+          ctx.scale(-1, 1);
+          drawSlice(ctx, frame, image, 0, 1, 0, W);
+          ctx.restore();
+        }
       }
       ctx.globalAlpha = 1;
     }
@@ -450,9 +464,13 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     } else {
       ctx.fillStyle = frame.paper;
       ctx.fillRect(0, 0, w, H);
-      // Print showing through from the front.
-      ctx.globalAlpha = 0.1;
+      // Print showing through from the front, its marks a little more.
+      ctx.globalAlpha = PRINT_THROUGH;
       drawSlice(ctx, frame, frame.from, 0, 1, 0, w);
+      if (frame.fromMarks) {
+        ctx.globalAlpha = MARKS_THROUGH;
+        drawSlice(ctx, frame, frame.fromMarks, 0, 1, 0, w);
+      }
       ctx.globalAlpha = 1;
     }
     // The curve of the paper: light along the fold, falling away from it.

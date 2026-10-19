@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { flatSheet, paintTurn, underBlur } from "./paintTurn";
+import { MARKS_THROUGH, PRINT_THROUGH, flatSheet, paintTurn, underBlur } from "./paintTurn";
 
 describe("flatSheet", () => {
   const frame = { layout: "sheet" as const, width: 400, height: 600, bottom: false };
@@ -48,6 +48,19 @@ describe("the page being turned to", () => {
   const frame = (x: number) => ({
     layout: "sheet" as const, width: 400, height: 600, from: null, to, toBlur: soft,
     sourceWidth: 400, sourceHeight: 600, corner: { x, y: 600 }, bottom: true, paper: "#fff",
+  });
+
+  it("the back of the sheet shows its print faintly and its marks more strongly", () => {
+    const from = { width: 400, height: 600 } as unknown as HTMLCanvasElement;
+    const marks = { width: 400, height: 600 } as unknown as HTMLCanvasElement;
+    // A corner curl, and a sheet held by its side: both have a back.
+    for (const restY of [undefined, 300]) {
+      const { ctx, drawn } = recordingContext();
+      paintTurn(ctx, { ...frame(120), from, fromMarks: marks, restY, corner: { x: 120, y: restY ?? 600 } });
+      expect(drawn.some((d) => d.image === from && d.alpha === PRINT_THROUGH)).toBe(true);
+      expect(drawn.some((d) => d.image === marks && d.alpha === MARKS_THROUGH)).toBe(true);
+    }
+    expect(MARKS_THROUGH).toBeGreaterThan(PRINT_THROUGH);
   });
 
   it("shows through its softened copy as the turn starts, and comes sharp as it lands", () => {
