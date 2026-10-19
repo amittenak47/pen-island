@@ -4,8 +4,11 @@
 .lc-dialog-foot-spacer { flex: 1; }
 .lc-dialog-frame.lc-library-menu .lc-dialog-foot { gap: 8px; }
 .lc-dialog-frame.lc-library-menu[data-dialog-shape="blocky"] { --lc-dialog-control-radius: var(--lc-r-block); }
+/* One row icon: the file menus are this much wider, for the copies list on each row. */
+:root { --lc-menu-icon-width: 30px; }
+@media (pointer: coarse) { :root { --lc-menu-icon-width: 40px; } }
 .lc-settings-modal.lc-library-menu {
-  width: min(620px, 100%);
+  width: min(calc(620px + var(--lc-menu-icon-width)), 100%);
   max-height: min(70dvh, 480px);
 }
 .lc-library-menu .lc-settings-head {

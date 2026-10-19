@@ -125,6 +125,21 @@ describe("retained copies in Recents", () => {
     expect([...document.querySelectorAll(".lc-version-menu .lc-version-num")].map(node => node.textContent)).toEqual(["Now", "1", "2"]);
   });
 
+  it("shows 0 for a book with no copies, in the same place, so the columns line up", async () => {
+    live.rows = [...live.rows, { id: "plain", name: "Plain.md", hash: "h", docType: "markdown", updatedAt: 4 }];
+    await mount(); await recents();
+    const rows = [...document.querySelectorAll<HTMLElement>(".lc-settings-choice > .lc-scratch-load-entry")];
+    const plain = rows.find(node => node.textContent?.includes("Plain.md"))!;
+    const pick = plain.querySelector<HTMLButtonElement>(".lc-version-pick")!;
+    expect(pick.textContent).toBe("0");
+    expect(pick.disabled).toBe(true);
+    expect(pick.getAttribute("aria-label")).toContain("no retained copies");
+    // Same controls, same order, on a row with copies and a row without.
+    const order = (row: HTMLElement) => [...row.children].map(child =>
+      ["lc-scratch-load-lock", "lc-version-pick", "lc-version-share", "lc-scratch-load-trash"].find(name => child.classList.contains(name))).filter(Boolean);
+    expect(order(plain)).toEqual(order(rows.find(node => node.textContent?.includes("Book.pdf"))!));
+  });
+
   it("shows a picked copy's own name, why it was kept and its size, and goes back to Now", async () => {
     await mount(); await recents();
     await pickCopy(2);

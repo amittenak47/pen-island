@@ -108,18 +108,19 @@ export function VersionPicker({ name, versions, picked, currentBytes, currentHas
     window.addEventListener("keydown", escape, true);
     return () => { window.removeEventListener("pointerdown", outside, true); window.removeEventListener("keydown", escape, true); };
   }, [open]);
-  if (!versions.length) return null;
+  // No copies still shows "0", so every row's controls line up in columns.
+  const none = versions.length === 0;
   const choose = (id: string | null) => { setOpen(false); onPick(id); };
   return <>
     <button ref={buttonRef} type="button"
-      className={`lc-version-pick${picked ? " is-picked" : ""}${picked?.trashedAt ? " is-trashed" : ""}`}
-      disabled={disabled} aria-haspopup="menu" aria-expanded={open}
-      aria-label={picked ? `${name}: showing copy ${picked.number}. Choose a version` : `${name}: ${versions.length} retained ${versions.length === 1 ? "copy" : "copies"}. Choose a version`}
+      className={`lc-version-pick${picked ? " is-picked" : ""}${picked?.trashedAt ? " is-trashed" : ""}${none ? " is-empty" : ""}`}
+      disabled={disabled || none} aria-haspopup={none ? undefined : "menu"} aria-expanded={none ? undefined : open}
+      aria-label={none ? `${name}: no retained copies` : picked ? `${name}: showing copy ${picked.number}. Choose a version` : `${name}: ${versions.length} retained ${versions.length === 1 ? "copy" : "copies"}. Choose a version`}
       onClick={event => { event.stopPropagation(); setOpen(value => !value); }}>
       <svg className="lc-icon-svg" viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.75"
         strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8m0-5v5h5M12 7v5l3 2" /></svg>
       <b>{picked ? picked.number : versions.length}</b>
-      {picked?.trashedAt ? <span aria-hidden="true">(!)</span> : null}
+      {picked?.trashedAt ? <span className="lc-version-bang" aria-hidden="true">(!)</span> : null}
     </button>
     {presence.mounted && createPortal(<div ref={menuRef} role="menu" aria-label={`Versions of ${name}`}
       className={`lc-doc-sync-pop lc-tab-hold-pop lc-version-menu${presence.leaving ? " is-leaving" : ""}`} style={placed} inert={presence.leaving}>
