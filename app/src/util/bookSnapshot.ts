@@ -9,6 +9,7 @@ import { notifyBookMetadataChanged, LocalBookConflictError } from "./localBookSt
 import { LOCAL_VIEW_KEYS, recordHash, hashBytes } from "./syncContent";
 import { recordAuthoredExtras } from "./recordAuthoredExtras";
 import { mergeAgentMessages } from "../modes/coachSessions";
+import { canonicalAgentMessages } from "./agentMessageFormat";
 import { equalStored } from "./queueMigration";
 import { requireArtifactCatalogTransition } from "./artifactCatalogEdits";
 import { bookWireRecord } from "./bookWireRecord";
@@ -53,7 +54,7 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
   if (!meta || !payload || meta.purgedAt !== undefined) return null;
   if (!object(payload.board) || payload.board.v !== 1 || !Array.isArray(payload.board.elements)) throw new Error("The saved book is unreadable. Its content was kept.");
   const common = { ...(object(meta.authoredExtras) ? meta.authoredExtras : {}), id,
-    board: payload.board, agent: Array.isArray(payload.agent) ? payload.agent : [],
+    board: payload.board, agent: canonicalAgentMessages(Array.isArray(payload.agent) ? payload.agent : []),
     ...(payload.artifacts !== undefined ? { artifacts: payload.artifacts } : {}) };
   if (kind === "whiteboard") return { ...common, title: meta.title, page_count: meta.pageCount, updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
   if (kind === "problem") return { ...common, dataset: meta.dataset, task_id: meta.taskId, updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };

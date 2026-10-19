@@ -26,6 +26,7 @@ import type { BoardBlob } from "../canvas/BoardHandle";
 import { bookDisplay, type BookDisplay } from "./bookSyncMessages";
 import { captureArtifactSnapshot } from "./artifactSnapshot";
 import type { SnapshotInkPage } from "./padSnapshotPayload";
+import { canonicalAgentMessages } from "./agentMessageFormat";
 
 export type BookErrorKind = "unreachable" | "storage" | "needs_choice" | "merge_mount" | "local_page" | "hub_page"
   | "stage" | "unconfirmed" | "hub_changed" | "local_changed" | "missing_staging" | "missing_parent" | "dependency" | "gone" | "cap" | "invalid";
@@ -183,7 +184,7 @@ export async function saveHubSnapshotCopy(client: LcClient, capture: BookCapture
   await prepareDependencies(client, capture, remote.record, false, options, signal);
   const artifactBundle = await captureArtifactSnapshot(artifactCatalogFields(remote.record.artifacts, capture).artifacts);
   const payload = { name: String(remote.record.title ?? remote.record.name ?? "Book"), board: remote.record.board,
-    agent: remote.record.agent ?? [], ink, bookRecord: remote.record,
+    agent: canonicalAgentMessages(Array.isArray(remote.record.agent) ? remote.record.agent : []), ink, bookRecord: remote.record,
     ...(remote.record.page_count !== undefined ? { pageCount: remote.record.page_count } : {}),
     ...(capture.kind === "annotate" ? { source: remote.record.source ?? "", footnotes: remote.record.footnotes ?? [],
       footnoteBoards: remote.record.footnote_boards ?? {}, footnoteInk } : {}),

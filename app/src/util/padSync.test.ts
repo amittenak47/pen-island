@@ -38,6 +38,8 @@ import { visibleDrawings } from "../viz/drawingState";
 import { memoryBookTransaction } from "./testBookTransaction";
 import { mutateLocalBook, resetLocalBookStoreForTests } from "./localBookStore";
 import { getBookSyncState } from "./syncState";
+/** Stored agent messages always carry their on/off flags (see agentMessageFormat). */
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false };
 const durable = vi.hoisted(() => new Map<string, Map<IDBValidKey, unknown>>());
 vi.mock("./idb", async original => ({
   ...await original<typeof import("./idb")>(),
@@ -304,7 +306,7 @@ describe("padSync pull", () => {
     for (const restore of [restoreWhiteboardNotebook, restoreAnnotateDoc]) {
       const saved = restore.mock.calls[0]![0] as { agent: unknown[] };
       const reopened = restoreAgentMessages(saved.agent);
-      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...message, sessionId: "session-question", queued: false })));
+      expect(reopened).toEqual(messages.slice(0, 2).map(message => ({ ...message, sessionId: "session-question", ...FLAGS_OFF })));
       expect(visibleDrawings(reopened)).toHaveLength(expanded ? 1 : 0);
     }
   });
@@ -321,7 +323,7 @@ describe("padSync pull", () => {
     });
     expect(await discoverHubPads(client)).toBe(1);
     expect(restoreWhiteboardNotebook).toHaveBeenCalledWith(expect.objectContaining({
-      id: "w1", hubAckUpdatedAt: 100, syncSeq: 2, agent: row.agent,
+      id: "w1", hubAckUpdatedAt: 100, syncSeq: 2, agent: row.agent.map(message => ({ ...message, ...FLAGS_OFF })),
     }));
     expect(hubAutosyncState.on).toBe(false);
   });
@@ -410,7 +412,7 @@ describe("padSync pull", () => {
     });
     await expect(discoverHubPads(client)).rejects.toThrow(/Added 2 pads.*Incomplete notebook.*missing/);
     expect(restoreWhiteboardNotebook).toHaveBeenCalledTimes(1);
-    expect(restoreWhiteboardNotebook).toHaveBeenCalledWith(expect.objectContaining({ id: "complete", agent: [{ id: "kept-chat" }] }));
+    expect(restoreWhiteboardNotebook).toHaveBeenCalledWith(expect.objectContaining({ id: "complete", agent: [{ id: "kept-chat", ...FLAGS_OFF }] }));
     expect(restoreAnnotateDoc).toHaveBeenCalledWith(expect.objectContaining({ id: "document" }));
     expect(hubAutosyncState.on).toBe(false);
   });

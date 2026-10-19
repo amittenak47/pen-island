@@ -6,6 +6,8 @@ import { editWhiteboardArtifacts, getWhiteboardNotebook, listWhiteboardNotebooks
 import { editArtifactCatalog, type ArtifactCatalogEdit } from "./artifactCatalogEdits";
 import type { ArtifactCatalog, ArtifactParent } from "./padArtifacts";
 import type { BoardBlob } from "../canvas/BoardHandle";
+/** Stored agent messages always carry their on/off flags (see agentMessageFormat). */
+const FLAGS_OFF = { pending: false, queued: false, bridgePending: false };
 
 const state = vi.hoisted(() => ({
   db: new Map<string, any>(), meta: new Map<string, any>(), sync: new Map<string, any>(), ls: new Map<string, string>(),
@@ -64,9 +66,9 @@ describe("transactional parent attachment preservation", () => {
     state.db.set("a1", { board, source: "newer source", agent: [{ id: "q", content: "question", deletedAt: 8 }] });
     await putParentContent(parent, { artifacts: undefined, agent: [{ id: "q", content: "question" }, { id: "remote" }] }, { agentOnly: true });
     expect(state.db.get("a1")).toMatchObject({ source: "newer source", board,
-      agent: [expect.objectContaining({ id: "q", deletedAt: 8 }), { id: "remote" }] });
+      agent: [expect.objectContaining({ id: "q", deletedAt: 8 }), { id: "remote", ...FLAGS_OFF }] });
     await putParentContent(parent, { artifacts: undefined, board, agent: [{ id: "q", content: "question" }] });
-    expect(state.db.get("a1").agent).toEqual([expect.objectContaining({ id: "q", deletedAt: 8 }), { id: "remote" }]);
+    expect(state.db.get("a1").agent).toEqual([expect.objectContaining({ id: "q", deletedAt: 8 }), { id: "remote", ...FLAGS_OFF }]);
   });
   it("preserves a catalog added after an ordinary save began", async () => {
     const artifacts = catalog();
