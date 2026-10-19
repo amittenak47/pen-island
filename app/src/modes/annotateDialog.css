@@ -1,6 +1,6 @@
 /* Scoped to the document and Web menus; Settings keeps its existing layout. */
 .lc-settings-modal.lc-dialog-frame.lc-annotate-dialog {
-  width: min(calc(500px + var(--lc-menu-icon-width, 30px)), 100%);
+  width: min(calc(500px + 2 * var(--lc-menu-icon-width, 30px)), 100%);
   max-height: min(80dvh, 640px);
 }
 .lc-dialog-frame.lc-annotate-dialog .lc-dialog-context { padding: 16px 24px 0; }

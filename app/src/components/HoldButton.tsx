@@ -310,6 +310,9 @@ export function HoldButton({
       onPointerDown={(event) => {
         event.preventDefault();
         event.stopPropagation();
+        // Only the main mouse button taps or holds. A right or middle click
+        // opened a new tab from a header icon (its tap), or a menu (its hold).
+        if (event.pointerType === "mouse" && event.button !== 0) return;
         const scroller = (event.currentTarget as HTMLElement).closest(".lc-library-menu .lc-settings-body, .lc-dialog-frame .lc-dialog-body, .lc-footnote-overview-link-list.is-scrolling, .lc-footnote-overview-hub");
         scrollRef.current = scroller instanceof HTMLElement
           ? {

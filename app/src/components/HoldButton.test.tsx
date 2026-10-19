@@ -197,6 +197,46 @@ describe("HoldButton", () => {
     host.remove();
   });
 
+  it.each([[2, "right"], [1, "middle"]])("ignores the %s (%s) mouse button: no tap, and holding it never confirms", async (buttonIndex) => {
+    vi.useFakeTimers();
+    const onTap = vi.fn();
+    const onConfirm = vi.fn();
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+    await act(async () => {
+      root.render(<HoldButton label="Web" onConfirm={onConfirm} onTap={onTap} holdMs={300} />);
+    });
+    const button = host.querySelector("button")!;
+    vi.spyOn(button, "setPointerCapture").mockImplementation(() => undefined);
+    const mouse = (type: string) => {
+      const event = new PointerEvent(type, { bubbles: true, pointerId: 1, button: buttonIndex });
+      Object.defineProperty(event, "pointerType", { value: "mouse" });
+      return event;
+    };
+    // A click: down and up.
+    await act(async () => { button.dispatchEvent(mouse("pointerdown")); });
+    await act(async () => { button.dispatchEvent(mouse("pointerup")); });
+    // A hold: down, well past the fill, then up.
+    await act(async () => { button.dispatchEvent(mouse("pointerdown")); });
+    await act(async () => { vi.advanceTimersByTime(1_000); });
+    await act(async () => { button.dispatchEvent(mouse("pointerup")); });
+    expect(onTap).not.toHaveBeenCalled();
+    expect(onConfirm).not.toHaveBeenCalled();
+    // The main button still works.
+    const left = (type: string) => {
+      const event = new PointerEvent(type, { bubbles: true, pointerId: 1, button: 0 });
+      Object.defineProperty(event, "pointerType", { value: "mouse" });
+      return event;
+    };
+    await act(async () => { button.dispatchEvent(left("pointerdown")); });
+    await act(async () => { button.dispatchEvent(left("pointerup")); });
+    expect(onTap).toHaveBeenCalledTimes(1);
+    await act(async () => { root.unmount(); });
+    host.remove();
+    vi.useRealTimers();
+  });
+
   it("does not wash fill on a tap when onTap is set", async () => {
     const onTap = vi.fn();
     const onConfirm = vi.fn();

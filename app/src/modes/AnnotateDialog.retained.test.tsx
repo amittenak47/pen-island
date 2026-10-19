@@ -102,6 +102,8 @@ async function pickCopy(number: number | "Now") {
   const item = [...document.querySelectorAll<HTMLButtonElement>(".lc-version-menu button")]
     .find(button => button.querySelector(".lc-version-num")?.textContent?.startsWith(String(number)))!;
   await act(async () => { item.click(); });
+  // The row's text swaps with motion: the old one leaves before the new one shows.
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 300)); });
 }
 const row = () => document.querySelector<HTMLElement>(".lc-scratch-load-entry")!;
 

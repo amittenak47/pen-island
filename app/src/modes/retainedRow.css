@@ -10,6 +10,18 @@
 /* A fixed width, whatever the count: every row's controls stay in their columns. */
 .lc-library-menu .lc-version-pick { position: relative; width: 42px; min-width: 42px; padding: 0 4px; }
 .lc-library-menu .lc-version-bang { position: absolute; top: 1px; right: 0; font-size: 9px; font-weight: 700; line-height: 1; }
+/* The count's box clips the roll, so a changing number never jumps the row. */
+.lc-library-menu .lc-version-count { position: relative; display: inline-flex; min-width: 1ch; height: 1.2em; overflow: hidden; align-items: center; justify-content: center; }
+
+/* A row's text: the same column as the label it sits in (see .lc-scratch-load-hold). */
+.lc-version-face { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; width: 100%; min-width: 0; }
+.lc-library-menu .lc-scratch-load-hold .lc-version-face > strong { display: block; width: auto; max-width: calc(100% - 2.75rem); font-size: 13px; }
+/* The size arrives after the row: it fades in rather than popping. */
+.lc-library-size { animation: lc-version-fade-in 180ms ease-out both; }
+@keyframes lc-version-fade-in { from { opacity: 0; } }
+/* One trash button, whatever it trashes: its colour moves between the two. */
+.lc-library-menu .lc-hold-reveal.lc-scratch-load-trash { transition: color 180ms ease, background-color 180ms ease; }
+.lc-library-menu :is(.lc-version-pick, .lc-version-share) { transition: color 180ms ease, background-color 180ms ease, opacity 180ms ease; }
 .lc-library-menu .lc-version-share:not([data-filling]) .lc-hold-reveal-fill { visibility: hidden; }
 .lc-library-menu .lc-version-share .lc-hold-reveal-label { position: static; display: inline-flex; align-items: center; justify-content: center; }
 .lc-library-menu :is(.lc-version-pick, .lc-version-share):hover:not(:disabled) { color: var(--ink); background: color-mix(in srgb, var(--ink) 6%, transparent); }
@@ -38,5 +50,6 @@
   .lc-library-menu .lc-hold-reveal.lc-version-share { width: 40px; min-width: 40px; height: 40px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .lc-library-menu :is(.lc-version-pick, .lc-version-share) { transition: none; }
+  .lc-library-menu :is(.lc-version-pick, .lc-version-share, .lc-hold-reveal.lc-scratch-load-trash) { transition: none; }
+  .lc-library-size { animation: none; }
 }

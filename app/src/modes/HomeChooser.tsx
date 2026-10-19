@@ -954,6 +954,8 @@ export function HomeChooser({
               aria-keyshortcuts="Delete"
               onPointerDown={(event)=>{
                 if (busy || editing) return;
+                // A right-button hold is not a hold: only the main button edits.
+                if (event.pointerType === "mouse" && event.button !== 0) return;
                 clearHold();
                 holdFired.current = false;
                 holdFrom.current = {x:event.clientX, y:event.clientY};

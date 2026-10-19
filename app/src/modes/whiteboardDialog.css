@@ -1,6 +1,6 @@
 /* Whiteboard only: other library dialogs migrate at their own checkpoint. */
 .lc-settings-modal.lc-dialog-frame.lc-whiteboard-dialog {
-  width: min(calc(500px + var(--lc-menu-icon-width, 30px)), 100%);
+  width: min(calc(500px + 2 * var(--lc-menu-icon-width, 30px)), 100%);
   max-height: min(80vh, 640px);
   max-height: min(80dvh, 640px);
 }
