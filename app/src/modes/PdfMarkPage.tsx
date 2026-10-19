@@ -3,8 +3,11 @@ import { pdfPageFromDocScope, type LocalRect } from "../util/docMarquee";
 import { subscribePdfPageQuality } from "./pdfFilm";
 
 /** A small compositing group, with the existing body-local mark coordinates. */
-export function PdfMarkPage({ filmScope, scope, page, children }: {
-  filmScope?: string; scope?: string; page?: LocalRect; children: ReactNode;
+export function PdfMarkPage({ filmScope, scope, page, offView, children }: {
+  filmScope?: string; scope?: string; page?: LocalRect;
+  /** A neighbour of the pages in view: laid out (a page turn pictures it) but hidden. */
+  offView?: boolean;
+  children: ReactNode;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const number = pdfPageFromDocScope(scope);
@@ -20,7 +23,7 @@ export function PdfMarkPage({ filmScope, scope, page, children }: {
     });
   }, [filmScope, number, grouped]);
   if (!grouped) return <>{children}</>;
-  return <div ref={ref} className="lc-doc-page-marks" data-mark-page={number!}
+  return <div ref={ref} className="lc-doc-page-marks" data-mark-page={number!} data-off-view={offView || undefined}
     style={{ left: box.left, top: box.top, width: box.width, height: box.height }}>
     <div className="lc-doc-page-marks-origin" style={{ left: -box.left, top: -box.top }}>{children}</div>
   </div>;
