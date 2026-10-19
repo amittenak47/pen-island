@@ -48,7 +48,8 @@ export function liveFootnoteAnchorRect(
     document.querySelectorAll<HTMLElement>(
       `.lc-doc-footnote-pack[data-footnote-id="${escapeAttrSelector(footnoteId)}"]`,
     ),
-  ).filter((node) => node.isConnected);
+  // A neighbouring page's marks are kept hidden for page turns; not on screen.
+  ).filter((node) => node.isConnected && !node.closest("[data-off-view]"));
   if (packs.length === 0) return null;
   let pack = packs[0]!;
   if (packs.length > 1 && hint && (hint.width > 0 || hint.height > 0)) {

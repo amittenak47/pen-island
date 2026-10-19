@@ -211,7 +211,7 @@ export function collectDomLinkHits(
     const out: LinkHit[] = [];
     for (const node of document.querySelectorAll<HTMLElement>(".lc-doc-footnote[data-lc-id]")) {
       const id = node.dataset.lcId;
-      if (!id) continue;
+      if (!id || node.closest("[data-off-view]")) continue;
       const box = node.getBoundingClientRect();
       let left = box.left;
       let top = box.top;

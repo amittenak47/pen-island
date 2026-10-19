@@ -19588,6 +19588,12 @@ button.lc-row-selected:hover:not(:disabled) {
   visibility: hidden;
 }
 
+/* A neighbour's marks, kept for the page turn's picture: never shown or hit. */
+.lc-doc-page-marks[data-off-view] {
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 .lc-doc-page-marks[data-pdf-quality="sharp"],
 .lc-page-booktabs-slot .lc-doc-page-marks:is([data-pdf-quality="preview"], [data-pdf-quality="sharp"]) {
   opacity: 1;

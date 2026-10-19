@@ -2567,12 +2567,26 @@ export function DocSelectionLayer({
     ? footnoteThemeVars(subMarkPaintTheme.color, subMarkPaintTheme.palette)
     : subMarkTint;
 
+  /*
+   * The pages in view, and one either side. A page turn pictures the page it
+   * turns to with its booktabs and squares on it, so the neighbours' marks
+   * exist too, hidden (`offView`) until their page is in view.
+   */
+  const markPages = useMemo(
+    () => viewPages.length === 0 ? viewPages : [...new Set(viewPages.flatMap(page => [page - 1, page, page + 1]))],
+    [viewPages],
+  );
+  const offView = useCallback((scope?: string) => {
+    if (viewPages.length === 0) return false;
+    const page = pdfPageFromDocScope(scope);
+    return page != null && !viewPages.includes(page);
+  }, [viewPages]);
   const visibleRibbons = useMemo(
     () =>
       ribbons.filter((entry) =>
-        footnoteVisibleOnViewPages(entry.footnote.anchor.scope, viewPages),
+        footnoteVisibleOnViewPages(entry.footnote.anchor.scope, markPages),
       ),
-    [ribbons, viewPages],
+    [ribbons, markPages],
   );
   const visibleSubMarks = useMemo(
     () =>
@@ -2721,7 +2735,7 @@ export function DocSelectionLayer({
               />
             );
           })}
-          {pageMarkGroups.map(([key, group]) => <PdfMarkPage key={key} filmScope={cameraScope} scope={group.scope} page={group.page}>
+          {pageMarkGroups.map(([key, group]) => <PdfMarkPage key={key} filmScope={cameraScope} scope={group.scope} page={group.page} offView={offView(group.scope)}>
           {group.ribbons.map(({ footnote, at, bands, useBands, number }) => {
             /*
              * Tap opens the mark; hold fills left→right and deletes.
@@ -2817,7 +2831,7 @@ export function DocSelectionLayer({
                   );
                 })}
                 {tabRect ? overlay(booktabsHost,
-                  <PdfMarkPage filmScope={cameraScope} scope={group.scope} page={booktabsHost && group.page ? tabRect : undefined}>
+                  <PdfMarkPage filmScope={cameraScope} scope={group.scope} page={booktabsHost && group.page ? tabRect : undefined} offView={offView(group.scope)}>
                   <span
                     className={`lc-doc-footnote lc-doc-footnote-${footnote.kind} lc-doc-footnote-tab`}
                     aria-hidden="true"
@@ -2841,7 +2855,7 @@ export function DocSelectionLayer({
                   it. Its quote and caption stay on the page.
                 */}
                 {overlay(booktabsHost,
-                  <PdfMarkPage filmScope={cameraScope} scope={group.scope}
+                  <PdfMarkPage filmScope={cameraScope} scope={group.scope} offView={offView(group.scope)}
                     page={booktabsHost && group.page ? { left: chipLeft, top: chipTop, width: chipW, height: chipW } : undefined}>
                   <HoldButton
                     label={String(number)}

@@ -489,6 +489,42 @@ interface Turn {
   detached: boolean;
   sheetOnly: boolean;
   abort: AbortController;
+  /** This sheet hid the live booktabs and squares (its pictures carry them). */
+  marksHidden?: boolean;
+}
+
+/**
+ * A booktab or footnote square painted onto a page's picture as it looks on
+ * the page: its box, fill, edge and number.
+ */
+function paintMark(ctx: CanvasRenderingContext2D, element: HTMLElement, box: DOMRect): void {
+  const style = getComputedStyle(element);
+  const radius = Math.min(parseFloat(style.borderTopLeftRadius) || 0, box.width / 2, box.height / 2);
+  ctx.save();
+  ctx.beginPath();
+  ctx.roundRect(box.left, box.top, box.width, box.height, radius);
+  const fill = style.backgroundColor;
+  if (fill && fill !== "transparent" && !/^rgba\(.*,\s*0\)$/.test(fill)) {
+    ctx.fillStyle = fill;
+    ctx.fill();
+  }
+  const edge = parseFloat(style.borderTopWidth) || 0;
+  if (edge > 0 && style.borderTopStyle !== "none") {
+    ctx.lineWidth = edge;
+    ctx.strokeStyle = style.borderTopColor;
+    ctx.stroke();
+  }
+  const text = element.textContent?.trim();
+  if (text) {
+    const label = element.querySelector<HTMLElement>(".lc-doc-footnote-tag") ?? element;
+    const font = getComputedStyle(label);
+    ctx.fillStyle = font.color;
+    ctx.font = `${font.fontWeight} ${font.fontSize} ${font.fontFamily}`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, box.left + box.width / 2, box.top + box.height / 2);
+  }
+  ctx.restore();
 }
 
 export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEnabled, spread, paged, fit = null }: PageTurnProps) {
@@ -797,6 +833,45 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
 
     /*
+     * Booktabs and footnote squares turn with their page.
+     *
+     * They live on the layer above the page mask, not in the page's picture,
+     * so a turn showed them staying put over the moving sheet (or vanishing
+     * under it). Each picture a turn uses gets them painted on, read from the
+     * layer as laid out (the pages either side of the view keep theirs there,
+     * hidden), and the live layer is hidden while a sheet with them is up.
+     */
+    const marksLayer = () =>
+      document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-booktabs-slot") ?? null;
+    const withMarks = (b: BoardHandle, scene: Scene, picture: HTMLCanvasElement | null): HTMLCanvasElement | null => {
+      const layer = picture ? marksLayer() : null;
+      if (!picture || !layer) return picture;
+      const tl = b.sceneToClient(scene.x, scene.y);
+      const br = b.sceneToClient(scene.x + scene.width, scene.y + scene.height);
+      if (!tl || !br || br.x - tl.x < 1) return picture;
+      const marks = [...layer.querySelectorAll<HTMLElement>(".lc-doc-footnote-tab, .lc-doc-footnote-bookmark")]
+        .map((element) => ({ element, box: element.getBoundingClientRect() }))
+        .filter(({ box }) => box.width > 0 && box.right > tl.x && box.left < br.x && box.bottom > tl.y && box.top < br.y);
+      if (marks.length === 0) return picture;
+      const copy = document.createElement("canvas");
+      copy.width = picture.width;
+      copy.height = picture.height;
+      const ctx = copy.getContext("2d");
+      if (!ctx) return picture;
+      ctx.drawImage(picture, 0, 0);
+      const k = picture.width / (br.x - tl.x);
+      ctx.setTransform(k, 0, 0, k, -tl.x * k, -tl.y * k);
+      for (const { element, box } of marks) paintMark(ctx, element, box);
+      return copy;
+    };
+    let marksHidden = 0;
+    const hideMarks = (on: boolean) => {
+      marksHidden = Math.max(0, marksHidden + (on ? 1 : -1));
+      const layer = marksLayer();
+      if (layer) layer.style.visibility = marksHidden > 0 ? "hidden" : "";
+    };
+
+    /*
      * Flicking through: a turn taken soon after the last one landed.
      *
      * Each new picture is a few hundred milliseconds of the main thread, and a
@@ -826,6 +901,12 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const origin = surface.getBoundingClientRect();
       const left = `${turn.rect.left - origin.left + surface.scrollLeft - surface.clientLeft}px`;
       const top = `${turn.rect.top - origin.top + surface.scrollTop - surface.clientTop}px`;
+      // The page being left is pictured, marks and all: the live ones would float over the sheet.
+      const leaving = turn.images ? (turn.direction === "next" ? turn.images.from : turn.images.to) : null;
+      if (leaving && !turn.marksHidden) {
+        turn.marksHidden = true;
+        hideMarks(true);
+      }
       for (const layer of turn.under ? [turn.under, turn.canvas] : [turn.canvas]) {
         layer.style.left = left;
         layer.style.top = top;
@@ -1043,7 +1124,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return (i: number): Promise<HTMLCanvasElement | null> => {
         const f = frames[i];
         const scene = f ? pageBoxScene(b, f) : null;
-        return f && scene ? shot(b, scene, scale, f.maxY, f.pageId) : Promise.resolve(null);
+        return f && scene ? shot(b, scene, scale, f.maxY, f.pageId).then((picture) => withMarks(b, scene, picture)) : Promise.resolve(null);
       };
     };
 
@@ -1219,11 +1300,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const toScene = { ...scene, y: to.minY + (scene.y - from.minY) };
       // PDFs already have pixels: never clone/style the document on input.
       const fast = pagedRef.current || flicking();
-      const hereShot = shot(b, scene, scale, from.maxY, from.pageId, fast);
-      const thereShot = pagedRef.current
+      const hereShot = shot(b, scene, scale, from.maxY, from.pageId, fast).then((picture) => withMarks(b, scene, picture));
+      const thereShot = (pagedRef.current
         ? waitForPdfTurnPreview(document.querySelector(hostSelector), to.pageId, turn.abort.signal)
           .then(ready => ready && !disposed && !turn.done ? shot(b, toScene, scale, to.maxY, to.pageId, fast) : null)
-        : shot(b, toScene, scale, to.maxY, to.pageId, fast);
+        : shot(b, toScene, scale, to.maxY, to.pageId, fast)).then((picture) => withMarks(b, toScene, picture));
       // Turning back is turning forward from the previous page, reversed.
       const place = (here: HTMLCanvasElement | null, there: HTMLCanvasElement | null) => {
         turn.images = direction === "next" ? { from: here, to: there } : { from: there, to: here };
@@ -1342,6 +1423,10 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         turn.canvas.remove();
         turn.under?.remove();
         layers.delete(turn);
+        if (turn.marksHidden) {
+          turn.marksHidden = false;
+          hideMarks(false);
+        }
       };
       requestAnimationFrame(() => requestAnimationFrame(removeLayers));
     };
@@ -2068,6 +2153,10 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       if (el && mouse) el.style.cursor = "";
       unsubscribeFilm();
       queued = null;
+      // Every sheet goes: the live booktabs and squares come back.
+      marksHidden = 0;
+      const marks = marksLayer();
+      if (marks) marks.style.visibility = "";
       for (const turn of layers) {
         teardown(turn);
         turn.canvas.remove();
