@@ -558,6 +558,19 @@ describe("booktab display choices", () => {
       expect(tab("right")).not.toBeNull();
     } finally { act(() => root.unmount()); }
   });
+  it("puts the squares of passages that start on one line side by side, the later nearer the edge", () => {
+    savePageFit("margin"); saveBooktabFootnotes("all");
+    const { host, root } = mountTabs(true);
+    try {
+      const square = (id: string) => host.querySelector<HTMLElement>(`[data-footnote-id="${id}"] .lc-doc-footnote-bookmark`)
+        ?? document.querySelector<HTMLElement>(`.lc-doc-footnote-bookmark[data-footnote-id="${id}"]`);
+      const left = square("left"), right = square("right");
+      expect(left && right).toBeTruthy();
+      // One row: the same top, a square's width apart.
+      expect(left!.style.top).toBe(right!.style.top);
+      expect(parseFloat(right!.style.left) - parseFloat(left!.style.left)).toBe(20);
+    } finally { act(() => root.unmount()); }
+  });
   it.each(["top", "bottom"] as const)("lays out each PDF sheet's %s tabs in reading order", edge => {
     saveBooktabPosition(edge); saveBooktabFootnotes("all");
     const { root, tab } = mountTabs(true);
