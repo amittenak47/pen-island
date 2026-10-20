@@ -45,7 +45,7 @@ import {
   type DocFootnoteSubMark,
   type DocFootnoteSubMarkKind,
 } from "../util/docFootnotes";
-import { AI_TAB_HEIGHT, AI_TAB_STACK_GAP, AI_TAB_WIDTH, CAPTION_STACK_ROOM, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "../util/aiBookTabs";
+import { AI_TAB_HEIGHT, AI_TAB_STACK_GAP, AI_TAB_WIDTH, CAPTION_STACK_ROOM, aiBookTabLeft, placeMarginSquares, stackAiTabTops, edgeBookTabRects, type MarginSquare } from "../util/aiBookTabs";
 import { useBooktabs } from "../util/booktabsPref";
 import { footnoteCaptionRoom } from "../util/footnoteCaption";
 import { useBooktabPages } from "../util/booktabPages";
@@ -116,6 +116,9 @@ import {
   subscribePageSurfaceMove,
   viewportBoxesOverlap,
 } from "./sheetAnchor";
+
+/** Space between squares that share a row. */
+const SQUARE_ROW_GAP = 4;
 
 /** How far into the edge a drag has to reach before the page starts moving. */
 const SELECT_EDGE_PX = 36;
@@ -2618,28 +2621,38 @@ export function DocSelectionLayer({
     return [...groups.entries()];
   }, [visibleRibbons, visibleSubMarks]);
 
-  const aiTabTops = useMemo(
+  /*
+   * The margin squares on the right, one per passage, and the booktabs that
+   * hang off the left edge beside them.
+   *
+   * Squares whose passages start on one line share a row, with their captions
+   * stacked above; rows stack without overlapping (see `placeMarginSquares`).
+   * The booktabs have no captions, so they stack one by one.
+   */
+  const marginSquares = useMemo<MarginSquare[]>(
     () =>
-      stackAiTabTops(
-        visibleRibbons
-          .filter((entry) => entry.footnote.kind === "ai" ||
-            (booktabs.show && booktabs.footnotes === "all"))
-          .map((entry) => {
-            const lines = entry.useBands && entry.bands.length ? entry.bands : entry.at ? [entry.at] : [];
-            const tops = lines.map((line) => line.top);
-            return {
-              id: entry.footnote.id,
-              // A square may sit beside any line of its passage, first to last.
-              y: tops.length ? Math.min(...tops) : 0,
-              yLast: tops.length ? Math.max(...tops) : 0,
-              // Its caption sits above it, so the square before must clear that too.
-              above: booktabs.titles && entry.footnote.title?.trim() ? CAPTION_STACK_ROOM : 0,
-            };
-          }),
-        AI_TAB_STACK_GAP,
-        0,
-      ),
+      visibleRibbons
+        .filter((entry) => entry.footnote.kind === "ai" ||
+          (booktabs.show && booktabs.footnotes === "all"))
+        .map((entry) => {
+          const lines = entry.useBands && entry.bands.length ? entry.bands : entry.at ? [entry.at] : [];
+          const first = lines.reduce<LocalRect | null>((best, line) => !best || line.top < best.top ? line : best, null);
+          return {
+            id: entry.footnote.id,
+            // A square may sit beside any line of its passage, first to last.
+            y: first?.top ?? 0,
+            yLast: lines.length ? Math.max(...lines.map((line) => line.top)) : 0,
+            x: first?.left ?? 0,
+            number: entry.number,
+            caption: Boolean(booktabs.titles && entry.footnote.title?.trim()),
+          };
+        }),
     [visibleRibbons, booktabs],
+  );
+  const squarePlaces = useMemo(() => placeMarginSquares(marginSquares, AI_TAB_STACK_GAP, 0), [marginSquares]);
+  const aiTabTops = useMemo(
+    () => stackAiTabTops(marginSquares.map(({ id, y, yLast }) => ({ id, y, yLast })), AI_TAB_STACK_GAP, 0),
+    [marginSquares],
   );
   const booktabRects = useMemo(() => {
     const rects = new Map<string, LocalRect>();
@@ -2783,8 +2796,10 @@ export function DocSelectionLayer({
             const chipPad = 3;
             const chipW = 16;
             const pageWidth = bodyRef.current?.offsetWidth ?? 0;
+            const place = isAiTab ? squarePlaces.get(footnote.id) : undefined;
             const chipLeft = isAiTab
-              ? Math.max(0, pageWidth - chipW - chipPad)
+              // Side by side when passages share a line: slot 0 at the page edge.
+              ? Math.max(0, pageWidth - chipW - chipPad - (place?.slot ?? 0) * (chipW + SQUARE_ROW_GAP))
               : markChipLeft({
                   blockLeft: block.left,
                   blockRight: block.right,
@@ -2793,7 +2808,7 @@ export function DocSelectionLayer({
                   pad: chipPad,
                 });
             const chipTop = isAiTab
-              ? (aiTabTops.get(footnote.id) ?? block.top)
+              ? (place?.top ?? block.top)
               : block.top + chipPad;
             const chipStyle = {
               left: chipLeft,
@@ -2851,7 +2866,8 @@ export function DocSelectionLayer({
                 {showCaption ? (
                   <span
                     className="lc-doc-footnote-caption"
-                    style={{ left: chipLeft + chipW, top: chipTop, maxWidth: captionRoom }}
+                    // A row's captions stack: one line each above its squares.
+                    style={{ left: chipLeft + chipW, top: chipTop - (place?.captionLine ?? 0) * CAPTION_STACK_ROOM, maxWidth: captionRoom }}
                   >
                     {caption}
                   </span>

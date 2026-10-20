@@ -83,6 +83,69 @@ export function stackAiTabTops(
   return out;
 }
 
+/** Passages whose first lines are this close share a row of squares. */
+export const SAME_ROW_TOLERANCE = 6;
+
+export interface MarginSquare {
+  id: string;
+  /** First and last line of the passage. */
+  y: number;
+  yLast: number;
+  /** Where the passage starts on its line, for reading order within a row. */
+  x: number;
+  number: number;
+  /** It shows a caption above itself. */
+  caption: boolean;
+}
+
+export interface MarginSquarePlace {
+  top: number;
+  /** Squares in from the page edge: 0 is at the edge, 1 is beside it, and so on. */
+  slot: number;
+  /** Caption lines below this one in its row's stack: 0 is the line just above the squares. */
+  captionLine: number;
+}
+
+/**
+ * Where each margin square goes, with its caption.
+ *
+ * Passages that start on the same line get one row of squares, side by side
+ * in reading order (the last nearest the page edge), with their captions
+ * stacked above, one line each: the first square's caption lowest. Rows are
+ * then stacked by {@link stackAiTabTops}, each reserving its caption lines,
+ * and may drop within the lines its passages share.
+ */
+export function placeMarginSquares(
+  items: ReadonlyArray<MarginSquare>,
+  minGap = AI_TAB_STACK_GAP,
+  minTop = Number.NEGATIVE_INFINITY,
+): Map<string, MarginSquarePlace> {
+  const ordered = [...items].sort((a, b) => a.y - b.y || a.x - b.x || a.number - b.number);
+  const rows: MarginSquare[][] = [];
+  for (const item of ordered) {
+    const row = rows[rows.length - 1];
+    if (row && item.y - row[0]!.y <= SAME_ROW_TOLERANCE) row.push(item);
+    else rows.push([item]);
+  }
+  const tops = stackAiTabTops(rows.map((row, index) => {
+    const y = Math.min(...row.map(item => item.y));
+    // Every square in the row stays beside a line of its own passage.
+    const yLast = Math.max(y, Math.min(...row.map(item => Math.max(item.y, item.yLast))));
+    return { id: String(index), y, yLast, above: row.filter(item => item.caption).length * CAPTION_STACK_ROOM };
+  }), minGap, minTop);
+  const out = new Map<string, MarginSquarePlace>();
+  rows.forEach((row, index) => {
+    const top = tops.get(String(index))!;
+    row.sort((a, b) => a.x - b.x || a.number - b.number);
+    let line = 0;
+    row.forEach((item, at) => {
+      out.set(item.id, { top, slot: row.length - 1 - at, captionLine: line });
+      if (item.caption) line += 1;
+    });
+  });
+  return out;
+}
+
 export type BooktabRect = { left: number; top: number; width: number; height: number };
 export const BOOKTAB_EDGE_GAP = 4;
 export const BOOKTAB_MIN_WIDTH = 12;

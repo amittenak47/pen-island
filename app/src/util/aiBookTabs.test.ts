@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { AI_TAB_WIDTH, AI_TAB_HEIGHT, BOOKTAB_EDGE_GAP, BOOKTAB_MIN_WIDTH, BOOKTAB_JITTER_GAP, BOOKTAB_JITTER_RISE, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "./aiBookTabs";
+import { AI_TAB_WIDTH, AI_TAB_HEIGHT, BOOKTAB_EDGE_GAP, BOOKTAB_MIN_WIDTH, BOOKTAB_JITTER_GAP, BOOKTAB_JITTER_RISE, CAPTION_STACK_ROOM, aiBookTabLeft, placeMarginSquares, stackAiTabTops, edgeBookTabRects } from "./aiBookTabs";
 
 describe("aiBookTabLeft", () => {
   it("hangs half the bookmark outside the left edge", () => {
@@ -87,6 +87,39 @@ describe("stackAiTabTops", () => {
     );
     expect(tops.get("a")).toBe(0);
     expect(tops.get("b")).toBe(20);
+  });
+});
+
+describe("placeMarginSquares", () => {
+  const square = (id: string, y: number, x: number, number: number, caption = true, yLast = y) => ({ id, y, yLast, x, number, caption });
+
+  it("puts squares for passages starting on one line side by side, the last nearest the edge", () => {
+    const places = placeMarginSquares([square("b", 100, 300, 2), square("a", 102, 40, 1)]);
+    expect(places.get("a")).toMatchObject({ top: 100, slot: 1, captionLine: 0 });
+    expect(places.get("b")).toMatchObject({ top: 100, slot: 0, captionLine: 1 });
+  });
+
+  it("stacks a row's captions, counting only squares that have one", () => {
+    const places = placeMarginSquares([square("a", 100, 10, 1, false), square("b", 100, 20, 2), square("c", 100, 30, 3)]);
+    expect([..."abc"].map(id => places.get(id)!.captionLine)).toEqual([0, 0, 1]);
+    expect([..."abc"].map(id => places.get(id)!.slot)).toEqual([2, 1, 0]);
+  });
+
+  it("keeps the row above clear of every caption line of the row below", () => {
+    const places = placeMarginSquares([
+      square("above", 60, 10, 1),
+      square("left", 70, 10, 2, true, 200), square("right", 70, 50, 3, true, 200),
+    ], 20);
+    const above = places.get("above")!.top, row = places.get("left")!.top;
+    expect(places.get("right")!.top).toBe(row);
+    expect(row - above).toBeGreaterThanOrEqual(20 + 2 * CAPTION_STACK_ROOM);
+  });
+
+  it("keeps squares on lines that start apart in their own rows", () => {
+    const places = placeMarginSquares([square("a", 100, 10, 1), square("b", 140, 10, 2)]);
+    expect(places.get("a")!.slot).toBe(0);
+    expect(places.get("b")!.slot).toBe(0);
+    expect(places.get("b")!.top).toBeGreaterThan(places.get("a")!.top);
   });
 });
 
