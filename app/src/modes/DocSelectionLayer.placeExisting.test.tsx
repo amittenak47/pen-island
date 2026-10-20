@@ -543,7 +543,9 @@ describe("booktab display choices", () => {
       expect(tab("left")!.style.height).toBe("18px");
       act(() => saveBooktabFootnotes("all"));
       expect(host.querySelectorAll(".lc-doc-footnote-tab")).toHaveLength(4);
-      expect(tab("right")!.style.top).toBe("140px");
+      // Two tabs for passages on the same line split around it, 20px apart.
+      expect(tab("left")!.style.top).toBe("110px");
+      expect(tab("right")!.style.top).toBe("130px");
       for (const element of host.querySelectorAll(".lc-doc-footnote-tab")) {
         expect(element.tagName).toBe("SPAN");
         expect(element.getAttribute("aria-hidden")).toBe("true");
@@ -582,7 +584,8 @@ describe("booktab display choices", () => {
     const { root, tab } = mountTabs(false);
     try {
       expect(tab("left")!.style.left).toBe("-14px");
-      expect(tab("right")!.style.top).toBe("60px");
+      // Same line: split around it rather than the second pushed down.
+      expect(tab("right")!.style.top).toBe("40px");
       act(() => publishBooktabPages("booktabs-render", [
         { rect: { left: 0, top: 0, width: 400, height: 60 }, contentBottom: 60 },
         { rect: { left: 0, top: 60, width: 400, height: 60 }, contentBottom: 120 },

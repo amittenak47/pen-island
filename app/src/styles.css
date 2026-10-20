@@ -125,6 +125,59 @@ html {
   -webkit-tap-highlight-color: transparent;
 }
 
+/*
+ * Cursors: an arrow by default, a hand on what you click, and the text cursor
+ * only where text can be typed or selected.
+ *
+ * Chromium shows the text cursor over any text whose cursor is left `auto`,
+ * selectable or not, so the footnote panel and every menu read as editable.
+ * All `:where()`, so these never outrank a control's own cursor (resize
+ * sashes, drag grips, the board's tools).
+ */
+body {
+  cursor: default;
+}
+
+:where(
+  button:not(:disabled),
+  [role="button"]:not([aria-disabled="true"]),
+  [role="tab"],
+  [role="menuitem"],
+  [role="menuitemradio"],
+  [role="menuitemcheckbox"],
+  [role="option"],
+  a[href],
+  summary,
+  select,
+  input[type="checkbox"],
+  input[type="radio"],
+  input[type="range"],
+  input[type="color"],
+  label:has(> input[type="checkbox"]),
+  label:has(> input[type="radio"])
+) {
+  cursor: pointer;
+}
+
+:where(
+  input:not([type="checkbox"], [type="radio"], [type="range"], [type="color"], [type="button"], [type="submit"], [type="reset"], [type="file"]),
+  textarea,
+  [contenteditable]:not([contenteditable="false"])
+) {
+  cursor: text;
+}
+
+/* Text you can select keeps the browser's own: the text cursor over the words, an arrow between. */
+:where(
+  .lc-doc-selectable-body,
+  .lc-page-content-editing,
+  .lc-scene-text-editor,
+  .lc-md-edit-fallback,
+  .lc-settings-licenses
+) {
+  cursor: auto;
+}
+
 button,
 input,
 textarea,
@@ -20239,7 +20292,8 @@ button.lc-row-selected:hover:not(:disabled) {
   font-weight: 600;
   line-height: 1.25;
   text-align: left;
-  cursor: text;
+  /* A tap renames it: a button, so a hand, not a text cursor. */
+  cursor: pointer;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

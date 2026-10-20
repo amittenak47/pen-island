@@ -45,7 +45,7 @@ import {
   type DocFootnoteSubMark,
   type DocFootnoteSubMarkKind,
 } from "../util/docFootnotes";
-import { AI_TAB_HEIGHT, AI_TAB_WIDTH, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "../util/aiBookTabs";
+import { AI_TAB_HEIGHT, AI_TAB_STACK_GAP, AI_TAB_WIDTH, CAPTION_STACK_ROOM, aiBookTabLeft, stackAiTabTops, edgeBookTabRects } from "../util/aiBookTabs";
 import { useBooktabs } from "../util/booktabsPref";
 import { footnoteCaptionRoom } from "../util/footnoteCaption";
 import { useBooktabPages } from "../util/booktabPages";
@@ -2624,13 +2624,20 @@ export function DocSelectionLayer({
         visibleRibbons
           .filter((entry) => entry.footnote.kind === "ai" ||
             (booktabs.show && booktabs.footnotes === "all"))
-          .map((entry) => ({
-            id: entry.footnote.id,
-            y:
-              (entry.useBands && entry.bands[0]
-                ? entry.bands[0].top
-                : entry.at?.top) ?? 0,
-          })),
+          .map((entry) => {
+            const lines = entry.useBands && entry.bands.length ? entry.bands : entry.at ? [entry.at] : [];
+            const tops = lines.map((line) => line.top);
+            return {
+              id: entry.footnote.id,
+              // A square may sit beside any line of its passage, first to last.
+              y: tops.length ? Math.min(...tops) : 0,
+              yLast: tops.length ? Math.max(...tops) : 0,
+              // Its caption sits above it, so the square before must clear that too.
+              above: booktabs.titles && entry.footnote.title?.trim() ? CAPTION_STACK_ROOM : 0,
+            };
+          }),
+        AI_TAB_STACK_GAP,
+        0,
       ),
     [visibleRibbons, booktabs],
   );
