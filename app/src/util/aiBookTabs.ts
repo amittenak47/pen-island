@@ -8,21 +8,77 @@ export function aiBookTabLeft(tabWidth = AI_TAB_WIDTH): number {
   return -tabWidth / 2;
 }
 
+/** Room a square's caption takes above it (one 9px line, its 2px lift, and air). */
+export const CAPTION_STACK_ROOM = 14;
+
 /**
- * Keep tabs from stacking on the same band. Input Y is the passage top.
- * Returns a top for each id, in the same order as `items`.
+ * Keep tabs from stacking on the same band. `y` is the passage's first line;
+ * `yLast` its last line (the same as `y` for a one-line passage); `above` is
+ * room the tab needs over its top (its caption). Returns a top for each id,
+ * never above `minTop`.
+ *
+ * A tab is on its passage anywhere from its first line to its last, and with
+ * room to spare it stays on the first line. A run of tabs too close to fit
+ * first uses that freedom: a later tab drops to a lower line of its own
+ * passage. Only what still does not fit is spread past the passages, centred
+ * on them rather than pushed only downward: the least-squares fit (distance
+ * outside each passage) under the spacing, by pool adjacent violators.
  */
 export function stackAiTabTops(
-  items: ReadonlyArray<{ id: string; y: number }>,
+  items: ReadonlyArray<{ id: string; y: number; yLast?: number; above?: number }>,
   minGap = AI_TAB_STACK_GAP,
+  minTop = Number.NEGATIVE_INFINITY,
 ): Map<string, number> {
   const ordered = [...items].sort((a, b) => a.y - b.y || a.id.localeCompare(b.id));
+  // How far each top must be below the first, if the whole run were packed.
+  const offsets: number[] = [];
+  ordered.forEach((item, index) => {
+    offsets.push(index === 0 ? 0 : offsets[index - 1]! + minGap + (item.above ?? 0));
+  });
+  // Packed, a tab's top is its offset plus one shared shift; in shift terms
+  // each tab is happy anywhere in [lo, hi].
+  const ranges = ordered.map((item, index) => ({
+    lo: item.y - offsets[index]!,
+    hi: Math.max(item.y, item.yLast ?? item.y) - offsets[index]!,
+  }));
+  // The best shift for a run: the highest one where moving lower stops
+  // helping (the left end of the minimum of a sum of squared distances).
+  const bestShift = (from: number, to: number): number => {
+    let low = Number.POSITIVE_INFINITY, high = Number.NEGATIVE_INFINITY;
+    for (let k = from; k < to; k += 1) { low = Math.min(low, ranges[k]!.lo); high = Math.max(high, ranges[k]!.hi); }
+    const slope = (shift: number) => {
+      let total = 0;
+      for (let k = from; k < to; k += 1) {
+        const { lo, hi } = ranges[k]!;
+        if (shift < lo) total += shift - lo; else if (shift > hi) total += shift - hi;
+      }
+      return total;
+    };
+    for (let step = 0; step < 48 && high - low > 0.01; step += 1) {
+      const mid = (low + high) / 2;
+      if (slope(mid) >= 0) high = mid; else low = mid;
+    }
+    return high;
+  };
+  // Merge runs until the shifts never decrease, so no tab overlaps the one before.
+  const blocks: Array<{ from: number; to: number; shift: number }> = [];
+  ordered.forEach((_, index) => {
+    blocks.push({ from: index, to: index + 1, shift: bestShift(index, index + 1) });
+    while (blocks.length > 1) {
+      const last = blocks[blocks.length - 1]!, prev = blocks[blocks.length - 2]!;
+      if (prev.shift <= last.shift) break;
+      blocks.splice(blocks.length - 2, 2, { from: prev.from, to: last.to, shift: bestShift(prev.from, last.to) });
+    }
+  });
   const out = new Map<string, number>();
-  let last = Number.NEGATIVE_INFINITY;
-  for (const item of ordered) {
-    const top = item.y < last + minGap ? last + minGap : item.y;
-    out.set(item.id, top);
-    last = top;
+  // Held below `minTop` (the first top is offset 0), and never above the run before.
+  let floor = minTop;
+  for (const block of blocks) {
+    const shift = Math.max(block.shift, floor);
+    floor = shift;
+    for (let index = block.from; index < block.to; index += 1) {
+      out.set(ordered[index]!.id, Math.round(shift + offsets[index]!));
+    }
   }
   return out;
 }

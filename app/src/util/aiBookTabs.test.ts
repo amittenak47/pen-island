@@ -23,16 +23,70 @@ describe("stackAiTabTops", () => {
     expect(tops.get("b")).toBe(200);
   });
 
-  it("pushes overlapping tabs apart so they stay hittable", () => {
+  it("spreads one-line passages that are too close apart, centred on them rather than pushed down", () => {
     const tops = stackAiTabTops(
       [
         { id: "a", y: 40 },
-        { id: "b", y: 45 },
+        { id: "b", y: 50 },
+      ],
+      20,
+    );
+    // Each moves 5px: the run sits midway, still 20px apart.
+    expect(tops.get("a")).toBe(35);
+    expect(tops.get("b")).toBe(55);
+  });
+
+  it("lets a later tab drop to a lower line of its own passage before moving anything", () => {
+    const tops = stackAiTabTops(
+      [
+        { id: "a", y: 40 },
+        { id: "b", y: 45, yLast: 120 },
       ],
       20,
     );
     expect(tops.get("a")).toBe(40);
     expect(tops.get("b")).toBe(60);
+  });
+
+  it("leaves room for a caption above the tab that has one", () => {
+    const tops = stackAiTabTops(
+      [
+        { id: "a", y: 40 },
+        { id: "b", y: 45, yLast: 200, above: 14 },
+      ],
+      20,
+    );
+    expect(tops.get("a")).toBe(40);
+    expect(tops.get("b")).toBe(74);
+  });
+
+  it("fills a crowded paragraph from its passages' own lines, and never overlaps", () => {
+    // Three marks starting on neighbouring lines of one paragraph, each a few lines long.
+    const items = [
+      { id: "a", y: 100, yLast: 124, above: 14 },
+      { id: "b", y: 112, yLast: 160, above: 14 },
+      { id: "c", y: 124, yLast: 184, above: 14 },
+    ];
+    const tops = stackAiTabTops(items, 20);
+    const list = items.map(item => tops.get(item.id)!);
+    for (let i = 1; i < list.length; i += 1) expect(list[i]! - list[i - 1]!).toBeGreaterThanOrEqual(34);
+    items.forEach((item, i) => {
+      expect(list[i]!).toBeGreaterThanOrEqual(item.y);
+      expect(list[i]!).toBeLessThanOrEqual(item.yLast);
+    });
+  });
+
+  it("never puts a tab above minTop, and keeps the runs below it in order", () => {
+    const tops = stackAiTabTops(
+      [
+        { id: "a", y: -30 },
+        { id: "b", y: 5 },
+      ],
+      20,
+      0,
+    );
+    expect(tops.get("a")).toBe(0);
+    expect(tops.get("b")).toBe(20);
   });
 });
 
