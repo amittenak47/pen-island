@@ -16907,6 +16907,16 @@ button.lc-row-selected:hover:not(:disabled) {
   opacity: 1;
 }
 
+/*
+ * A length, so it resolves to pixels where it is read: the page turn lifts
+ * the side stacks from the row's height before this drop (see PageTurn).
+ */
+@property --lc-map-drop {
+  syntax: "<length>";
+  inherits: true;
+  initial-value: 0px;
+}
+
 /* ---------------------------------------------------------------------------
  * Coach as a bottom sheet.
  *
@@ -16932,6 +16942,13 @@ button.lc-row-selected:hover:not(:disabled) {
   --lc-agent-peek: 52px;
   /* Gap between map chrome and the parked coach peek strip. */
   --lc-map-above-coach: 10px;
+  /*
+   * How much lower than that the board's bottom row sits: the annotate
+   * toggle, the stack's fold and the pen toolbar, as one group. The peek
+   * strip is hidden while parked, so the row was floating a square and a
+   * half above nothing.
+   */
+  --lc-map-drop: calc(1.5 * var(--touch));
 }
 
 @media (pointer: coarse) and (min-width: 768px) {
@@ -17046,9 +17063,13 @@ button.lc-row-selected:hover:not(:disabled) {
  */
 .lc-mobile .lc-map-controls {
   /* Room for the parked coach peek handle under the chrome. */
-  bottom: calc(
-    4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
-      var(--lc-map-above-coach)
+  /* Never into the gesture bar: `--lc-safe-bottom` is the floor. */
+  bottom: max(
+    var(--lc-safe-bottom),
+    calc(
+      4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
+        var(--lc-map-above-coach) - var(--lc-map-drop, 0px)
+    )
   );
   /* Back after the sheet has closed, as a quick fade: it used to pop in at
      full size over a sheet that was still shrinking. */
@@ -17420,9 +17441,13 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-mobile .lc-map-controls {
   left: 4px;
   right: 4px;
-  bottom: calc(
-    4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
-      var(--lc-map-above-coach)
+  /* Never into the gesture bar: `--lc-safe-bottom` is the floor. */
+  bottom: max(
+    var(--lc-safe-bottom),
+    calc(
+      4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
+        var(--lc-map-above-coach) - var(--lc-map-drop, 0px)
+    )
   );
   /*
    * Must stay end/flex-end — NOT center. Centre vertically lifts Theme /

@@ -640,9 +640,12 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         if (controls) resize?.observe(controls);
       }
       if (!controls) return;
-      // Half as high again as the stacks' own gap above the screen's foot.
+      // Half as high again as the stacks' own gap above the screen's foot,
+      // measured as if the row had not been lowered (`--lc-map-drop`): the
+      // row moves down as a group, and the stacks' lift with it, not twice.
       const base = controls.getBoundingClientRect().bottom;
-      const lift = Math.max(0, window.innerHeight - base) * CHROME_LIFT;
+      const drop = Number.parseFloat(getComputedStyle(controls).getPropertyValue("--lc-map-drop")) || 0;
+      const lift = Math.max(0, window.innerHeight - base + drop) * CHROME_LIFT;
       controls.style.setProperty("--lc-page-corner-clearance", `${Math.ceil(lift)}px`);
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(position); };
