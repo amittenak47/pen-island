@@ -33,7 +33,7 @@ import { keepResumePicture } from "../../util/resumePicture";
 import { canvasGestureFrame, protectGestureSurface } from "../../util/gestureExclusion";
 import { turnCornerAt, turnEdgeAt, turnCornerSize, turnReachAt } from "./corners";
 import { cssColorLuminance } from "../../util/webPagePaper";
-import { scrollHostAtPoint } from "../scrollHost";
+import { hasSideScrollRoom, scrollHostAtPoint } from "../scrollHost";
 
 /** In Pages reading the side stacks sit this much further up, as a share of their gap from the bottom. */
 const CHROME_LIFT = 0.5;
@@ -1920,7 +1920,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       if (!r) return false;
       // A code block or a wide equation scrolls sideways itself.
       const scroller = scrollHostAtPoint(start.x, start.y);
-      if (scroller && scroller.scrollWidth > scroller.clientWidth + 1) return false;
+      if (scroller && hasSideScrollRoom(scroller)) return false;
       const direction: Direction = event.clientX < start.x ? "next" : "prev";
       const heldY = Math.min(r.bottom - 1, Math.max(r.top + 1, start.y));
       const turn = planTurn(direction, heldY > r.top + r.height / 2, undefined, heldY);

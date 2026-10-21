@@ -46,6 +46,22 @@ export function isVerticalScrollHost(node: HTMLElement): boolean {
   return overflowY === "auto" || overflowY === "scroll";
 }
 
+/**
+ * Sideways room a box needs before it may take a finger's swipe from the page.
+ *
+ * Still a host for ink below this — keys must not move — but a table a few
+ * pixels too wide for its wrapper is a rounding leftover, not something to
+ * scroll. An AI-written page wrapped most of its length in one: every swipe
+ * that started a little sideways went to its 3 px of room, and the page did
+ * not move.
+ */
+export const SIDE_SCROLL_MIN_PX = 16;
+
+/** Whether `node` has enough sideways room to claim a sideways swipe. */
+export function hasSideScrollRoom(node: HTMLElement): boolean {
+  return node.scrollWidth - node.clientWidth >= SIDE_SCROLL_MIN_PX && isHorizontalScrollHost(node);
+}
+
 export function isNestedScrollHost(node: HTMLElement): boolean {
   return isHorizontalScrollHost(node) || isVerticalScrollHost(node);
 }
