@@ -135,10 +135,33 @@ function webFetchProxy(): Plugin {
   };
 }
 
+/**
+ * Dev only: serve the GPU proof-of-concept's test PDFs from a folder outside
+ * the repository (`POC_PDF_DIR`), so no book ever sits in the checkout.
+ */
+function pocPdfs(): Plugin {
+  const dir = process.env.POC_PDF_DIR;
+  return {
+    name: "poc-pdfs",
+    configureServer(server) {
+      if (!dir) return;
+      server.middlewares.use("/poc-pdf/", (req: IncomingMessage, res: ServerResponse, next) => {
+        const name = decodeURIComponent((req.url ?? "").split("?")[0]!.replace(/^\//, ""));
+        const file = join(dir, name);
+        if (!name || name.includes("..") || !existsSync(file)) return next();
+        res.setHeader("Content-Type", "application/pdf");
+        createReadStream(file).pipe(res);
+      });
+    },
+  };
+}
+
 // Tauri serves the built assets from a fixed port in dev and expects a
 // relative base so the same bundle works from a file:// origin on Android.
 export default defineConfig({
-  plugins: [react(), pdfjsAssets(), webFetchProxy()],
+  plugins: [react(), pdfjsAssets(), webFetchProxy(), pocPdfs()],
+  // HEPR ships its own workers and WebAssembly; Vite must not pre-bundle it.
+  optimizeDeps: { exclude: ["@soadzoor/hepr/bundler"] },
   resolve: {
     // `invoke` with a debug-log hook; the rest is the real module. See
     // tauriCore.ts. Builds only: tests mock `@tauri-apps/api/core` themselves.
