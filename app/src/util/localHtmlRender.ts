@@ -1,8 +1,11 @@
 import { PAGE_MAX_BYTES, pageFromCapturedHtml, webPageWidthForViewport } from "./webPage";
+import { liveOriginalKey, putLiveOriginal } from "./liveHtmlStore";
 
 export const LOCAL_HTML_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https:; font-src https: data:; img-src https: data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 export const LOCAL_HTML_MESSAGE = "lc-local-html-render";
 export const LOCAL_HTML_TIMEOUT_MS = 4000;
+export const LIVE_HTML_CSP = "default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'unsafe-inline' https:; font-src https: data:; img-src https: data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
+export const LIVE_HTML_MESSAGE = "lc-live-html";
 
 const absoluteResource = /^(https:|data:|blob:|#)/i;
 
@@ -98,6 +101,83 @@ export function localHtmlSrcdoc(original: string, nonce: string): string {
   return doctype + "\n" + doc.documentElement.outerHTML;
 }
 
+export function liveHtmlSrcdoc(original: string, nonce: string): string {
+  const doc = new DOMParser().parseFromString(original, "text/html");
+  removeRelativeResources(doc);
+  const policy = doc.createElement("meta");
+  policy.httpEquiv = "Content-Security-Policy";
+  policy.content = LIVE_HTML_CSP;
+  doc.head.prepend(policy);
+  const envelope = JSON.stringify({ type: LIVE_HTML_MESSAGE, nonce }).replace(/</g, "\\u003c");
+  const bridge = doc.createElement("script");
+  bridge.textContent = `(function() {
+    const envelope = ${envelope};
+    let ready = false;
+    let lastHeight = null;
+    let lastReport = -Infinity;
+    let timer = null;
+    // Walks every element: after load and after a tap only. Run on each
+    // report, an animated page paid for it five times a second.
+    function settle() {
+      ${UNROLL_SCROLL_BOXES}
+      ${UNPIN_STICKY}
+    }
+    function report() {
+      lastReport = performance.now();
+      const height = Math.ceil(document.documentElement.scrollHeight);
+      if (lastHeight === null || Math.abs(height - lastHeight) > 1) {
+        lastHeight = height;
+        parent.postMessage({...envelope, height}, "*");
+      }
+    }
+    function schedule() {
+      if (!ready || timer !== null) return;
+      timer = setTimeout(function() {
+        timer = null;
+        report();
+      }, Math.max(0, 200 - (performance.now() - lastReport)));
+    }
+    window.addEventListener("load", async function() {
+      await Promise.race([document.fonts ? document.fonts.ready : Promise.resolve(), new Promise(r => setTimeout(r, 1200))]);
+      await new Promise(r => setTimeout(r, 300));
+      ready = true;
+      settle();
+      report();
+      new ResizeObserver(schedule).observe(document.body);
+      new MutationObserver(schedule).observe(document.body, {childList: true, subtree: true, attributes: true});
+    }, {once: true});
+    window.addEventListener("message", function(event) {
+      const data = event.data;
+      if (event.source !== parent || !data || data.type !== envelope.type || data.nonce !== envelope.nonce) return;
+      const tap = data.tap;
+      if (!tap || typeof tap.x !== "number" || typeof tap.y !== "number" || !Number.isFinite(tap.x) || !Number.isFinite(tap.y)) return;
+      const el = document.elementFromPoint(tap.x, tap.y);
+      if (el) {
+        const options = {bubbles: true, cancelable: true, clientX: tap.x, clientY: tap.y};
+        el.dispatchEvent(new PointerEvent("pointerdown", {...options, pointerType: "touch"}));
+        el.dispatchEvent(new MouseEvent("mousedown", options));
+        el.dispatchEvent(new PointerEvent("pointerup", {...options, pointerType: "touch"}));
+        el.dispatchEvent(new MouseEvent("mouseup", options));
+        // An SVG shape has no click(): send the event itself.
+        if (typeof el.click === "function") el.click();
+        else el.dispatchEvent(new MouseEvent("click", options));
+        const focusable = el.closest("input, textarea, select, button, [tabindex], [contenteditable]") || el;
+        if (focusable && typeof focusable.focus === "function") focusable.focus();
+      }
+      // A tap can open a section or a scroll box: settle what it showed.
+      setTimeout(function() { if (ready) { settle(); schedule(); } }, 50);
+    });
+    document.addEventListener("click", function(event) {
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (anchor && !anchor.getAttribute("href").startsWith("#")) event.preventDefault();
+    }, true);
+    window.open = () => null;
+  })();`;
+  policy.after(bridge);
+  const doctype = doc.doctype ? new XMLSerializer().serializeToString(doc.doctype) : "<!DOCTYPE html>";
+  return doctype + "\n" + doc.documentElement.outerHTML;
+}
+
 export interface LocalHtmlRenderOptions {
   /** Test seam: jsdom does not execute srcdoc. Production appends to body. */
   mount?: (iframe: HTMLIFrameElement) => void;
@@ -149,5 +229,7 @@ export async function freezeLocalHtml(original: string, opts?: LocalHtmlRenderOp
   const rendered = await renderLocalHtml(original, opts);
   const doc = new DOMParser().parseFromString(rendered, "text/html");
   removeRelativeResources(doc);
-  return (await pageFromCapturedHtml(doc.documentElement.outerHTML, "", { mode: "page" })).html;
+  const frozen = (await pageFromCapturedHtml(doc.documentElement.outerHTML, "", { mode: "page" })).html;
+  void putLiveOriginal(liveOriginalKey(frozen), original);
+  return frozen;
 }

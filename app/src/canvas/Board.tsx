@@ -1325,6 +1325,11 @@ export interface BoardProps {
   /** Edit is on. Owned by the workspace, since it owns the buffer. */
   editing?: boolean;
   onToggleEdit?: () => void;
+  /** Offer Live beside the edit toggle for a local HTML original. */
+  liveToggle?: boolean;
+  /** Live is on. Owned by the workspace, since it owns the original. */
+  live?: boolean;
+  onToggleLive?: () => void;
   /** Insert markdown around the caret while Edit is on. */
   onMdFormat?: (kind: MdFormatKind) => void;
   /** Wipe document footnote marks when Reset includes annotations. */
@@ -1443,6 +1448,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     editToggle = false,
     editing = false,
     onToggleEdit,
+    liveToggle = false,
+    live = false,
+    onToggleLive,
     onMdFormat,
     linkToggle = false,
     linking = false,
@@ -11042,6 +11050,17 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                     <span className="lc-tool-emoji" aria-hidden>
                       {editing ? "E" : "P"}
                     </span>
+                  </button>
+                )}
+                {mountStackTools && liveToggle && (
+                  <button
+                    type="button"
+                    className={live ? "lc-lined-toggle lc-tip-target is-active" : "lc-lined-toggle lc-tip-target"}
+                    aria-pressed={live}
+                    aria-label={live ? "Live page — switch to still copy" : "Still copy — switch to live page"}
+                    onClick={() => onToggleLive?.()}
+                  >
+                    <span className="lc-tool-emoji" aria-hidden>{live ? "L" : "S"}</span>
                   </button>
                 )}
                 {mountStackTools &&

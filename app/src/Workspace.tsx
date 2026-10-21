@@ -227,6 +227,7 @@ import { footnoteNoteTab } from "./modes/FootnoteNoteWorkspace";
 import { loadMiniNotePlacements, saveMiniNotePlacements, MINI_NOTE_RESTORE_EVENT, takeMiniNoteRestore, type MiniNotePlacements } from "./util/miniNoteWindows";
 import { EpubDocument } from "./modes/EpubDocument";
 import { WebDocument } from "./modes/WebDocument";
+import { getLiveOriginal, liveOriginalKey } from "./util/liveHtmlStore";
 import {
   canStepWeb,
   currentEntry,
@@ -852,6 +853,34 @@ export const Workspace = memo(function Workspace({
     createAnnotateUntouched, createSaveAnnotateSession,
     trackFootnoteBoardSaves, registerAnnotateFootnotes, mirrorAnnotateDocId, mirrorAnnotateTitle,
   } = useAnnotateSession({ tab, boardRef, patchTab, setError });
+  const [liveOriginal, setLiveOriginal] = useState<string | null>(null);
+  const [liveChoice, setLiveChoice] = useState<string | null>(null);
+  useEffect(() => {
+    let stale = false;
+    setLiveOriginal(null);
+    let choice: string | null = null;
+    try {
+      if (annotateSource) choice = localStorage.getItem("lc-live-html:" + annotateSource.hash);
+    } catch { /* Live still works when device preferences cannot be saved. */ }
+    setLiveChoice(choice);
+    if (annotateSource?.docType === "web" && annotateSource.localFileHash) {
+      void getLiveOriginal(liveOriginalKey(annotateSource.text)).then((original) => {
+        if (!stale) setLiveOriginal(original);
+      });
+    }
+    return () => { stale = true; };
+  }, [annotateSource]);
+  const liveOn = Boolean(liveOriginal) && liveChoice !== "off";
+  const onToggleLive = useCallback(() => {
+    if (!annotateSource) return;
+    const choice = liveOn ? "off" : null;
+    try {
+      const key = "lc-live-html:" + annotateSource.hash;
+      if (choice) localStorage.setItem(key, choice);
+      else localStorage.removeItem(key);
+    } catch { /* Keep the current session's choice even without localStorage. */ }
+    setLiveChoice(choice);
+  }, [annotateSource, liveOn]);
   /** Address bar for a web snapshot — kept outside the camera-scaled page. */
   const webUrlRef = useRef("");
   const paneTabRef = useRef(tab);
@@ -10723,6 +10752,9 @@ export const Workspace = memo(function Workspace({
             editToggle={annotateOwned && !footnoteBoardSession}
             editing={editMarkdown && !footnoteBoardSession}
             onToggleEdit={toggleEditMarkdown}
+            liveToggle={Boolean(liveOriginal) && !footnoteBoardSession}
+            live={liveOn}
+            onToggleLive={onToggleLive}
             onMdFormat={(kind) => mdEditorRef.current?.format(kind)}
             linkToggle={Boolean(problem) && !editMarkdown && !footnoteBoardSession}
             linking={linkMode}
@@ -10882,10 +10914,11 @@ export const Workspace = memo(function Workspace({
                       html={annotateSource.text}
                       url={annotateSource.name}
                       localFile={Boolean(annotateSource.localFileHash)}
+                      live={liveOn ? liveOriginal : null}
                       source={webHtmlSource ?? undefined}
                       note={webHtmlNote ?? undefined}
                       onMeasure={onMdInkMeasure}
-                      selectable={!annotateCode || Boolean(openFootnote) || highlighting}
+                      selectable={!liveOn && (!annotateCode || Boolean(openFootnote) || highlighting)}
                       onNavigate={annotateSource.localFileHash ? undefined : (href) => void openWebPage(href)}
                     />
                   ) : (

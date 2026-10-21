@@ -1559,6 +1559,21 @@ a,
   color-scheme: light;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .lc-live-html-frame {
+    transition: opacity 160ms;
+  }
+
+  .lc-web-doc.is-still-return {
+    animation: lc-still-return 160ms ease-out;
+  }
+}
+
+@keyframes lc-still-return {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 html[data-theme="dark"] .lc-web-doc {
   color-scheme: dark;
 }
@@ -1580,6 +1595,22 @@ html[data-theme="dark"] .lc-web-doc {
 
 .lc-board-reading .lc-page-content-slot .lc-web-doc a {
   pointer-events: auto;
+}
+
+/*
+ * The board scrolls a web page, never the browser.
+ *
+ * `touch-action` stops at a scroll container: the board's `none` reaches no
+ * further than the first one on the way down, and `.lc-web-doc` is one (its
+ * `overflow-x: hidden` makes `overflow-y` auto), as is every table wrapper a
+ * page brings. Below them a finger was `auto` again, so the WebView raced the
+ * board for each swipe and, when it won, cancelled the touch: the page stood
+ * still, most often on a table. Every element says `none` itself instead.
+ * Always on, like the code block hosts: toggling it restyles the whole page.
+ */
+.lc-page-content-slot .lc-web-doc,
+.lc-page-content-slot .lc-web-doc * {
+  touch-action: none;
 }
 
 .lc-header-center {
