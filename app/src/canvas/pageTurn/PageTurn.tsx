@@ -31,7 +31,7 @@ import { isCameraBusy } from "../../util/cameraBusy";
 import { notePageTurn } from "../../util/pageTurnBusy";
 import { keepResumePicture } from "../../util/resumePicture";
 import { canvasGestureFrame, protectGestureSurface } from "../../util/gestureExclusion";
-import { turnCornerAt, turnEdgeAt, turnCornerSize } from "./corners";
+import { turnCornerAt, turnEdgeAt, turnCornerSize, turnReachAt } from "./corners";
 import { cssColorLuminance } from "../../util/webPagePaper";
 import { scrollHostAtPoint } from "../scrollHost";
 
@@ -136,6 +136,28 @@ const BODY_FLICK_PX_PER_MS = 0.35;
 const BODY_FLICK_WINDOW_MS = 280;
 /** …and mostly sideways: at least this many times its rise or fall. */
 const BODY_FLICK_SLOPE = 1.8;
+/**
+ * A drag from inside a strip's reach (`turnReachAt`) takes hold of the page
+ * once it has gone this far inward, more sideways than up or down (px).
+ */
+const REACH_DRAG_PX = 10;
+/**
+ * Another touch is a pinch only while a turn is just starting: its second
+ * finger lands with the first. Once the held finger has moved `REACH_DRAG_PX`
+ * or held on this long, a touch that lands is the hand holding the tablet.
+ */
+const STRAY_AFTER_MS = 250;
+/**
+ * Paper below a text page's cut starts this far under it (scene units).
+ *
+ * Pages are cut on the top of the first block that does not fit, and in a
+ * collapsed table that is the line between two rows: it straddles the cut.
+ * The view showed its upper half; a picture blanked from the cut's own pixel
+ * down took the whole line, so the table lost its last rule the moment a turn
+ * was taken hold of. One unit keeps the line and shows nothing of the block
+ * below it, which starts with the line itself or with its own spacing.
+ */
+const CUT_BLEED = 1;
 /** Turns queued while a preview loads play at this pace. */
 const QUICK_TURN_MS = 240;
 /** Most turns a held or hammered key may queue ahead. */
@@ -325,11 +347,11 @@ function takeShot(
     // Below a text page's cut is the next page's text, which the view
     // hides; the picture has to hide it too.
     taken = (quick ? b.captureSceneQuick(scene, scale) : b.captureSceneFrame(scene, scale)).then((canvas) => {
-      const cut = cutY - scene.y;
+      const cut = cutY - scene.y + CUT_BLEED;
       if (!canvas || !(cut < scene.height)) return canvas;
       const ctx = canvas.getContext("2d");
       if (!ctx) return canvas;
-      const top = Math.max(0, Math.round((cut / scene.height) * canvas.height));
+      const top = Math.max(0, Math.ceil((cut / scene.height) * canvas.height));
       ctx.fillStyle = paperColor();
       ctx.fillRect(0, top, canvas.width, canvas.height - top);
       return canvas;
@@ -1026,7 +1048,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       copy.style.transform = `scale(${k})`;
       under.appendChild(copy);
       // A text page cut short is blank paper below its cut.
-      const cut = (page.maxY - scene.y) * k;
+      const cut = (page.maxY - scene.y + CUT_BLEED) * k;
       const blank = cut < turn.rect.height ? document.createElement("div") : null;
       if (blank) {
         Object.assign(blank.style, { position: "absolute", left: "0", right: "0", top: `${Math.max(0, cut)}px`, bottom: "0", background: paper });
@@ -1878,7 +1900,17 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      * Until it is plainly that, the touch is the page's: scrolling, selecting,
      * a code block's own sideways scroll.
      */
-    let pending: { id: number; x: number; y: number; t: number; target: EventTarget | null } | null = null;
+    let pending: {
+      id: number; x: number; y: number; t: number; target: EventTarget | null;
+      /** Started inside a strip's reach: a slow sideways drag inward takes hold too. */
+      reach?: "left" | "right" | null;
+    } | null = null;
+    /**
+     * Other touches that landed while a turn was held: the heel of the hand
+     * or a finger of the hand holding the tablet. Not a pinch — they would
+     * have dropped the sheet the thumb was carrying — so nothing gets them.
+     */
+    const strays = new Set<number>();
     /** True while `startFlick` cancels the page's own handling of a touch it took. */
     let cancelling = false;
 
@@ -1918,7 +1950,16 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
 
     const onDown = (event: PointerEvent) => {
-      // A second finger is a pinch, not a turn: the held sheet goes back.
+      const underWay = active != null && (
+        Math.abs(active.atX - active.fromX) >= REACH_DRAG_PX ||
+        event.timeStamp - active.trail[0]!.t >= STRAY_AFTER_MS);
+      if (!event.isPrimary && event.pointerType === "touch" && underWay) {
+        strays.add(event.pointerId);
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        return;
+      }
+      // A second finger is a pinch, not a turn: a sheet still turning goes on.
       if (!event.isPrimary && event.pointerType === "touch") {
         pending = null;
         queued = null;
@@ -1994,7 +2035,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       }
       if (!side) {
         if (event.pointerType !== "mouse") {
-          pending = { id: event.pointerId, x: event.clientX, y: event.clientY, t: event.timeStamp, target: event.target };
+          const r = pageRect();
+          pending = {
+            id: event.pointerId, x: event.clientX, y: event.clientY, t: event.timeStamp, target: event.target,
+            reach: r ? turnReachAt(r, event.clientX, event.clientY) : null,
+          };
         }
         return;
       }
@@ -2062,7 +2107,29 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
 
     const onMove = (event: PointerEvent) => {
-      if (pending && !active && event.pointerId === pending.id) {
+      if (strays.has(event.pointerId)) {
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        return;
+      }
+      if (pending?.reach && !active && event.pointerId === pending.id) {
+        const start = pending;
+        const dx = event.clientX - start.x;
+        const dy = event.clientY - start.y;
+        const inward = start.reach === "right" ? -dx : dx;
+        if (inward >= REACH_DRAG_PX && inward >= Math.abs(dy)) {
+          pending = null;
+          if (!turnRef.current && startFlick(event, start)) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return;
+          }
+        } else if (Math.abs(dy) >= REACH_DRAG_PX || -inward >= REACH_DRAG_PX) {
+          // Up, down or outward: a scroll, or a flick back the flick test below can still take.
+          start.reach = null;
+        }
+      }
+      if (pending && !pending.reach && !active && event.pointerId === pending.id) {
         const start = pending;
         const dx = event.clientX - start.x;
         const dy = event.clientY - start.y;
@@ -2118,6 +2185,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
 
     const onUp = (event: PointerEvent) => {
       if (cancelling) return;
+      if (strays.delete(event.pointerId)) {
+        event.stopImmediatePropagation();
+        event.preventDefault();
+        return;
+      }
       if (pending?.id === event.pointerId) {
         const start = pending;
         pending = null;

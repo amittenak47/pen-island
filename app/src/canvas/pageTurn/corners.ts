@@ -16,14 +16,36 @@ export function turnCornerAt(rect: Box, x: number, y: number): "left" | "right" 
   return null;
 }
 
-/** About 1.5 cm at Android's CSS/dp scale; peels keep their corner shape. */
+/** A side strip that takes hold of the page as it is touched: about 1.3 cm on the tablet. */
+const EDGE_STRIP_PX = 64;
+/** How far in a sideways drag still takes hold of it: about twice that. */
+const EDGE_REACH_PX = 128;
+
+/**
+ * The side strips, peels keeping their corner shape, and the dark margin
+ * beside the page out to the edge of the screen: a hand holding the tablet
+ * rests its thumb there, not on the page.
+ */
 export function turnEdgeAt(rect: Box, x: number, y: number): "left" | "right" | null {
   const corner = turnCornerAt(rect, x, y);
   if (corner) return corner;
   const dx = x - rect.left, dy = y - rect.top;
-  if (dx < 0 || dy < 0 || dx > rect.width || dy > rect.height) return null;
-  const strip = Math.min(64, rect.width / 4);
+  if (dy < 0 || dy > rect.height) return null;
+  const strip = Math.min(EDGE_STRIP_PX, rect.width / 4);
   return dx <= strip ? "left" : rect.width - dx <= strip ? "right" : null;
+}
+
+/**
+ * Inside a strip's reach, on the page: a thumb swinging in from the edge
+ * lands here as often as on the strip. Unlike the strip it takes hold only
+ * once the drag is plainly sideways, so a scroll or a hold to select that
+ * starts here is still the page's.
+ */
+export function turnReachAt(rect: Box, x: number, y: number): "left" | "right" | null {
+  const dx = x - rect.left, dy = y - rect.top;
+  if (dx < 0 || dy < 0 || dx > rect.width || dy > rect.height) return null;
+  const reach = Math.min(EDGE_REACH_PX, rect.width / 4);
+  return dx <= reach ? "left" : rect.width - dx <= reach ? "right" : null;
 }
 
 /** Android accepts rectangles: short bands approximate each corner triangle. */

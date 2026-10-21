@@ -353,8 +353,9 @@ it("hides what lies past a text page's cut in the picture of it", async () => {
   pointer("pointerdown", 380, 580);
   pointer("pointermove", 340, 585);
   await settle();
-  // This page: blank from its cut (380 of 600 down) to the bottom.
-  expect(fills).toContainEqual([0, 380, 400, 220]);
+  // This page: blank from just under its cut (380 of 600 down) to the
+  // bottom, so a table's line on the cut stays with the page above it.
+  expect(fills).toContainEqual([0, 381, 400, 219]);
   pointer("pointerup", 340, 585);
   await settle();
   board.readingPageFrames.mockReturnValue(FRAMES);
@@ -821,7 +822,7 @@ it("holds a PDF on its page when the next one has nothing painted yet", async ()
 it("leaves the page body to a slow drag and to a swipe up or down", async () => {
   mount();
   // Sideways, but slowly: a selection or a pan.
-  pointer("pointerdown", 300, 300, "touch", 1000);
+  pointer("pointerdown", 250, 300, "touch", 1000);
   pointer("pointermove", 140, 305, "touch", 1600);
   pointer("pointerup", 140, 305, "touch", 1650);
   // Quick, but mostly up the page.
@@ -831,6 +832,49 @@ it("leaves the page body to a slow drag and to a swipe up or down", async () => 
   await settle();
   expect(board.captureSceneFrame).not.toHaveBeenCalled();
   expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+});
+
+it("takes hold for a slow drag inward from within a strip's reach", async () => {
+  mount();
+  // Slower than any flick, and starting a little short of the strip.
+  pointer("pointerdown", 330, 300, "touch", 1000);
+  pointer("pointermove", 326, 301, "touch", 1300);
+  pointer("pointermove", 318, 302, "touch", 1600);
+  pointer("pointermove", 100, 305, "touch", 2400);
+  pointer("pointerup", 100, 305, "touch", 2600);
+  for (let i = 0; i < 4; i += 1) await settle();
+  expect(board.jumpToPageFrame).toHaveBeenCalledWith(expect.objectContaining({ pageId: 3 }));
+});
+
+it("leaves a drag up or down within a strip's reach to the page", async () => {
+  mount();
+  pointer("pointerdown", 330, 300, "touch", 1000);
+  pointer("pointermove", 328, 330, "touch", 1200);
+  pointer("pointermove", 300, 340, "touch", 1600);
+  pointer("pointerup", 300, 340, "touch", 1650);
+  await settle();
+  expect(board.captureSceneFrame).not.toHaveBeenCalled();
+  expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+});
+
+it("keeps a turn under way when the hand holding the tablet touches the glass", async () => {
+  mount();
+  pointer("pointerdown", 380, 580, "touch", 1000);
+  pointer("pointermove", 300, 585, "touch", 1100);
+  const heel = new PointerEvent("pointerdown", { clientX: 390, clientY: 700, pointerId: 8, pointerType: "touch", isPrimary: false, button: 0, bubbles: true, cancelable: true });
+  Object.defineProperty(heel, "timeStamp", { value: 1150 });
+  const reached = vi.fn();
+  host.addEventListener("pointerdown", reached);
+  act(() => { host.dispatchEvent(heel); });
+  host.removeEventListener("pointerdown", reached);
+  // Nothing under the page (a pinch, a pan) hears of it.
+  expect(reached).not.toHaveBeenCalled();
+  expect(heel.defaultPrevented).toBe(true);
+  pointer("pointermove", 150, 585, "touch", 1200);
+  pointer("pointerup", 150, 585, "touch", 1250);
+  act(() => { host.dispatchEvent(new PointerEvent("pointerup", { clientX: 390, clientY: 700, pointerId: 8, pointerType: "touch", isPrimary: false, button: 0, bubbles: true })); });
+  for (let i = 0; i < 4; i += 1) await settle();
+  expect(board.jumpToPageFrame).toHaveBeenCalledTimes(1);
 });
 
 it("turns the page for a quick sideways flick from anywhere on it", async () => {
