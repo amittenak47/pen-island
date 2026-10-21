@@ -18,10 +18,12 @@ const backend = (params.get("backend") ?? "webgpu") as "webgpu" | "webgl";
 const loading = (params.get("loading") ?? "auto") as "auto" | "all" | "eager";
 const pages = params.get("pages") ?? undefined;
 const compressScans = params.get("compress") === "1";
+// Multisampling on the host renderer; HEPR smooths its own edges.
+const antialias = params.get("aa") !== "0";
 
 const hud = document.getElementById("hud")!;
 const canvas = document.getElementById("view") as HTMLCanvasElement;
-const stats: Stats = { src, backend, loading, pages: pages ?? "all", compressScans };
+const stats: Stats = { src, backend, loading, pages: pages ?? "all", compressScans, antialias };
 const stages: string[] = [];
 (window as unknown as { __pocEarly: unknown }).__pocEarly = { stats, stages };
 const t0 = performance.now();
@@ -77,8 +79,8 @@ async function main(): Promise<void> {
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
   // The WebGPU renderer only exists in the three/webgpu build.
   const renderer = backend === "webgpu"
-    ? new (THREE as typeof import("three/webgpu")).WebGPURenderer({ canvas, antialias: true })
-    : new (THREE as typeof import("three")).WebGLRenderer({ canvas, antialias: true });
+    ? new (THREE as typeof import("three/webgpu")).WebGPURenderer({ canvas, antialias })
+    : new (THREE as typeof import("three")).WebGLRenderer({ canvas, antialias });
   if ("init" in renderer && typeof renderer.init === "function") await renderer.init();
   renderer.setPixelRatio(dpr);
   renderer.setSize(window.innerWidth, window.innerHeight, false);
@@ -89,6 +91,8 @@ async function main(): Promise<void> {
   const camera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1000, 1000);
   camera.position.set(0, 0, 10);
 
+  // Open time counts from here: HEPR's own modules are already loaded.
+  const openStart = since();
   const pdf = await pdfObjectGenerator(`/poc-pdf/${encodeURIComponent(src)}`, {
     pageLoading: loading,
     compressScans,
@@ -99,11 +103,14 @@ async function main(): Promise<void> {
       hud.textContent = `${stage} ${Math.round(value * 100)}% @${since()}ms`;
     },
   }, backend);
-  stats.openMs = since();
+  stats.openMs = since() - openStart;
+  stats.openedAtMs = since();
   scene.add(pdf);
 
   const bounds = pdf.sceneData.pageBounds as { minX: number; maxX: number; minY: number; maxY: number };
-  const pageCount = (await pdf.getPages()).length;
+  // `pageCount`, never `getPages()`: that prepares a separate view per page
+  // and switches HEPR to per-page batching, which is not how a book is shown.
+  const pageCount = pdf.pageCount;
   stats.pageCount = pageCount;
   const pageW = bounds.maxX - bounds.minX;
   const docH = bounds.maxY - bounds.minY;
@@ -116,6 +123,9 @@ async function main(): Promise<void> {
 
   let dirty = true;
   const intervals: number[] = [];
+  // Main-thread time spent inside render(): HEPR's per-frame CPU work plus
+  // command submission. Frame interval minus this is time waiting on the GPU.
+  const renderCpu: number[] = [];
   let recording = false, last = 0;
   const apply = () => {
     const w = window.innerWidth * view.scale, h = window.innerHeight * view.scale;
@@ -131,7 +141,9 @@ async function main(): Promise<void> {
     if (dirty || recording) {
       dirty = false;
       apply();
+      const renderStart = performance.now();
       renderer.render(scene, camera);
+      if (recording) renderCpu.push(performance.now() - renderStart);
       if (firstFrame) { firstFrame = false; stats.firstFrameMs = since(); show(stages.slice(-6).join("\n")); }
     }
     requestAnimationFrame(tick);
@@ -168,7 +180,7 @@ async function main(): Promise<void> {
   window.addEventListener("resize", () => { renderer.setSize(window.innerWidth, window.innerHeight, false); dirty = true; });
 
   const record = async (move: (progress: number) => void, ms: number): Promise<Stats> => {
-    intervals.length = 0; longTasks.length = 0; last = 0; recording = true;
+    intervals.length = 0; renderCpu.length = 0; longTasks.length = 0; last = 0; recording = true;
     const start = performance.now();
     await new Promise<void>((done) => {
       const step = () => {
@@ -179,7 +191,9 @@ async function main(): Promise<void> {
       requestAnimationFrame(step);
     });
     recording = false;
-    return { ...frameSummary(intervals), longTasks: longTasks.length, longMax: Math.max(0, ...longTasks) };
+    const cpu = [...renderCpu].sort((a, b) => a - b);
+    const cpuAt = (p: number) => (cpu.length ? +cpu[Math.min(cpu.length - 1, Math.floor(p * cpu.length))]!.toFixed(1) : null);
+    return { ...frameSummary(intervals), renderCpuP50: cpuAt(0.5), renderCpuP95: cpuAt(0.95), longTasks: longTasks.length, longMax: Math.max(0, ...longTasks) };
   };
 
   const poc = {
