@@ -6247,8 +6247,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       left: node.offsetLeft, top: node.offsetTop, dock: node === dock }));
     readingZoomRef.current = { base, bounds: region, floor, ceiling, inset, layers };
     readingZoomGenerationRef.current++;
-    if (boardRef.current) hideForReadingZoom(boardRef.current, true);
-    rasterInkRef.current?.setCameraZooming(true);
+    // With no document under them, the annotations are the whole page: hiding
+    // them blanked a notebook for the length of every pinch. They ride it.
+    const keepAnnotations = !pageContentRef.current;
+    if (boardRef.current && !keepAnnotations) hideForReadingZoom(boardRef.current, true);
+    rasterInkRef.current?.setCameraZooming(true, keepAnnotations);
     rasterInkRef.current?.setCameraMoving(true);
   }, [docFlags, getViewport, refreshPanRideNodes]);
 
