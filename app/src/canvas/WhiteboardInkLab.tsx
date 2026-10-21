@@ -144,7 +144,8 @@ export interface RasterInkHandle {
   commitCamera(): void;
   setCameraMoving(moving: boolean): void;
   /** Reuse painted pixels during a pinch; remesh only on release. */
-  setCameraZooming(zooming: boolean): void;
+  /** `keepInk`: stretch the painted ink with the pinch rather than hide it. */
+  setCameraZooming(zooming: boolean, keepInk?: boolean): void;
   /** Tool changes stop pan bookkeeping without pretending to be a camera settle. */
   cancelCameraMotion(): void;
   getOps(): InkOp[];
@@ -1339,11 +1340,15 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
           if (canvasRef.current?.style.transform) return;
           presentIfCameraMoved(true);
         },
-        setCameraZooming(zooming) {
+        setCameraZooming(zooming, keepInk = false) {
           cameraZoomingRef.current = zooming;
           if (zooming) {
-            zoomPaintPendingRef.current = true;
             cameraPaintPendingRef.current = true;
+            // A notebook's ink is its page: stretch the bitmap with the pinch,
+            // as a panel ease does, instead of blanking the whole board. Over a
+            // document the page stays and the ink waits for the final camera.
+            if (keepInk) return;
+            zoomPaintPendingRef.current = true;
             if (canvasRef.current) canvasRef.current.style.visibility = "hidden";
           }
         },
