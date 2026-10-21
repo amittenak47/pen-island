@@ -675,6 +675,50 @@ it("shows text pages two to a spread, and turns them two at a time", async () =>
   board.readingPageFrames.mockReturnValue(FRAMES);
 });
 
+it("turns a text spread at once without pictures: the next right page live under the sheet", async () => {
+  const textFrames = [
+    { pageId: 1, minY: 0, maxY: 600 },
+    { pageId: 2, minY: 600, maxY: 1200 },
+    { pageId: 3, minY: 1200, maxY: 1800 },
+    { pageId: 4, minY: 1800, maxY: 2400 },
+  ];
+  board.readingPageFrames.mockReturnValue(textFrames);
+  view = { x: 0, y: 0, width: 400, height: 600, zoom: 1 };
+  pageBox = { minX: 0, maxX: 200, minY: 0, maxY: 600 };
+  const copy = document.createElement("div");
+  board.livePageCopy.mockReturnValue(copy);
+  const hole = document.createElement("div");
+  hole.className = "lc-page-mask-hole";
+  hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+  const mask = document.createElement("div");
+  mask.className = "lc-page-mask";
+  mask.append(hole);
+  const ref = { current: board as unknown as BoardHandle };
+  act(() =>
+    root.render(
+      <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} />,
+    ),
+  );
+  host.append(mask);
+  pointer("pointerdown", 380, 580);
+  pointer("pointermove", 300, 585);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  // No page cloned and styled into a picture: that was the second's wait.
+  expect(board.captureSceneFrame).not.toHaveBeenCalled();
+  const under = host.querySelector<HTMLElement>(".lc-page-turn-under");
+  expect(under?.contains(copy)).toBe(true);
+  // The next spread's right page, in the right half.
+  expect((copy.parentElement as HTMLElement).style.left).toBe("200px");
+  pointer("pointermove", 20, 585);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+  pointer("pointerup", 20, 585);
+  for (let i = 0; i < 6; i += 1) await settle();
+  expect(board.jumpToPageFrame).toHaveBeenCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
+  expect(host.querySelector(".lc-page-turn-under")).toBeNull();
+  board.readingPageFrames.mockReturnValue(FRAMES);
+  board.livePageCopy.mockReturnValue(null);
+});
+
 it("keeps the canvas frame protected when annotation takes over in Pages mode", () => {
   mount(true);
   expect(gesture.protect).toHaveBeenCalledWith(host, expect.any(Function));

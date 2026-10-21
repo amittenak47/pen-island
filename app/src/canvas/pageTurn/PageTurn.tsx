@@ -491,6 +491,11 @@ interface Turn {
   under: HTMLElement | null;
   /** A retained live copy belongs to the moving sheet, rather than its backdrop. */
   underSheet: boolean;
+  /**
+   * A text spread turned without pictures: the pages it shows that are not on
+   * the board, as live copies inside `under` — see `planSpreadTurn`.
+   */
+  spreadLive?: { left: HTMLElement | null; right: HTMLElement | null };
   /** Settles true once both pictures are in, false if they cannot be had. */
   ready: Promise<boolean>;
   corner: Point;
@@ -1065,9 +1070,77 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return under;
     };
 
+    /**
+     * The pages a live spread turn shows that the board does not.
+     *
+     * Turning on, the next right page, where the sheet has come off it.
+     * Turning back, the earlier spread: its left page whole, beneath the
+     * returning sheet, and its right page where that sheet lies flat. The
+     * board keeps showing the spread on screen everywhere else.
+     */
+    const liveSpread = (b: BoardHandle, turn: Turn, frames: readonly PageFrame[], other: number): HTMLElement | null => {
+      const pane = document.querySelector<HTMLElement>(hostSelector);
+      const surface = pane?.querySelector<HTMLElement>(".lc-board") ?? pane;
+      if (!surface) return null;
+      const w = turn.rect.width / 2;
+      const H = turn.rect.height;
+      const paper = turnPaperColor(paperColor(), false);
+      const page = (frame: PageFrame | undefined, side: "left" | "right"): HTMLElement | null => {
+        const scene = frame ? pageBoxScene(b, frame) : null;
+        const holder = document.createElement("div");
+        Object.assign(holder.style, {
+          position: "absolute", top: "0", left: side === "right" ? `${w}px` : "0",
+          width: `${w}px`, height: `${H}px`, overflow: "hidden", background: paper,
+        });
+        // A spread's last page can be missing: plain paper, as the board shows it.
+        if (!frame || !scene || !(scene.width > 0)) return holder;
+        const copy = b.livePageCopy(scene, surface);
+        if (!copy) return holder;
+        const k = w / scene.width;
+        copy.style.transformOrigin = "0 0";
+        copy.style.transform = `scale(${k})`;
+        holder.appendChild(copy);
+        const cut = (frame.maxY - scene.y + CUT_BLEED) * k;
+        const blank = cut < H ? document.createElement("div") : null;
+        if (blank) {
+          Object.assign(blank.style, { position: "absolute", left: "0", right: "0", top: `${Math.max(0, cut)}px`, bottom: "0", background: paper });
+          holder.appendChild(blank);
+        }
+        void b.captureSceneMarks(scene, shotScale(w, scene.width)).then((marks) => {
+          if (!marks || turn.done) return;
+          Object.assign(marks.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%" });
+          holder.insertBefore(marks, blank);
+        }, () => {});
+        return holder;
+      };
+      const under = document.createElement("div");
+      under.className = "lc-page-turn-under";
+      under.setAttribute("aria-hidden", "true");
+      Object.assign(under.style, { width: `${turn.rect.width}px`, height: `${H}px` });
+      const left = turn.direction === "prev" ? page(frames[other], "left") : null;
+      const right = page(frames[other + 1], "right");
+      if (right) right.style.clipPath = "inset(100%)";
+      for (const holder of [left, right]) if (holder) under.appendChild(holder);
+      turn.spreadLive = { left, right };
+      return under;
+    };
+
     /** Show the live page underneath only where that page shows: uncovered going on, laid down coming back. */
     const clipUnder = (turn: Turn) => {
       if (!turn.under) return;
+      if (turn.spreadLive) {
+        const right = turn.spreadLive.right;
+        if (!right) return;
+        const w = turn.rect.width / 2, H = turn.rect.height;
+        const flat = flatSheet({ layout: "book", width: w, height: H, corner: turn.corner, bottom: turn.bottom, restY: turn.restY });
+        const sheet = flat.length >= 3 ? `M${flat.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join("L")}Z` : "";
+        // On: the next page where the sheet has come off it. Back: the
+        // returning page where it lies flat.
+        right.style.clipPath = turn.direction === "next"
+          ? (sheet ? `path(evenodd, "M0 0H${w}V${H}H0Z${sheet}")` : "none")
+          : (sheet ? `path("${sheet}")` : "inset(100%)");
+        return;
+      }
       const { width: W, height: H } = turn.rect;
       const flat = flatSheet({ layout: turn.layout, width: W, height: H, corner: turn.corner, bottom: turn.bottom, restY: turn.restY });
       const sheet = flat.length >= 3
@@ -1223,10 +1296,10 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const first = frames[0] ? pageBoxScene(b, frames[0]) : null;
       if (!r || !first) return null;
       const scale = shotScale(r.width / 2, first.width);
-      return (i: number): Promise<HTMLCanvasElement | null> => {
+      return (i: number, onlyIfTaken = pagedRef.current): Promise<HTMLCanvasElement | null> => {
         const f = frames[i];
         const scene = f ? pageBoxScene(b, f) : null;
-        return f && scene ? shot(b, scene, scale, f.maxY, f.pageId).then((picture) => withMarks(b, scene, picture)) : Promise.resolve(null);
+        return f && scene ? shot(b, scene, scale, f.maxY, f.pageId, onlyIfTaken).then((picture) => withMarks(b, scene, picture)) : Promise.resolve(null);
       };
     };
 
@@ -1294,12 +1367,29 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       };
       liveTurns.add(turn);
       layers.add(turn);
-      const spreadShot = (s: number) =>
-        Promise.all([pageShot(s), pageShot(s + 1)]).then(([left, right]) => composeSpread(left, right));
-      turn.ready = Promise.all([spreadShot(start), spreadShot(toStart)]).then(
-        ([here, there]) => {
-          if (disposed || turn.done || !here || !there) return false;
-          turn.images = direction === "next" ? { from: here, to: there } : { from: there, to: here };
+      /*
+       * Pictures only if all four pages already have one. Taking them here
+       * held the grab for about a second on the tablet, a third of a second a
+       * page. Without them the turn is live, as a single page's is: the board
+       * shows the spread being left, live copies show the pages it does not,
+       * and the back of the lifting page is plain paper until a later turn
+       * has its picture. The prefetch takes them once the hand rests.
+       */
+      const ids = [start, start + 1, toStart, toStart + 1];
+      turn.ready = Promise.all(ids.map((i) => frames[i] ? pageShot(i, true) : Promise.resolve(null))).then(
+        ([hereLeft, hereRight, thereLeft, thereRight]) => {
+          if (disposed || turn.done) return false;
+          const all = (left: HTMLCanvasElement | null, right: HTMLCanvasElement | null, i: number) =>
+            (left || !frames[i]) && (right || !frames[i + 1]);
+          if (all(hereLeft ?? null, hereRight ?? null, start) && all(thereLeft ?? null, thereRight ?? null, toStart)) {
+            const here = composeSpread(hereLeft ?? null, hereRight ?? null);
+            const there = composeSpread(thereLeft ?? null, thereRight ?? null);
+            if (!here || !there) return false;
+            turn.images = direction === "next" ? { from: here, to: there } : { from: there, to: here };
+          } else {
+            turn.images = { from: null, to: null };
+            turn.under = liveSpread(b, turn, frames, toStart);
+          }
           mountTurnCanvas(turn);
           draw(turn);
           return true;
@@ -1574,6 +1664,14 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     /** Move navigation on while this sheet finishes its own animation. */
     const continueTurn = (turn: Turn) => {
       if (turn.done) return;
+      // A live spread's sheet is the board behind it: landing moves the board,
+      // so the sheet goes with it rather than finishing over the next spread.
+      if (turn.spreadLive) {
+        turn.anim = null;
+        if (turn.commit) land(turn);
+        teardown(turn);
+        return;
+      }
       if (!turn.commit || !turn.images) {
         turn.anim = null;
         teardown(turn);

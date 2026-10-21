@@ -506,7 +506,10 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     ctx.clip();
     if (book) {
       // The back of this page is the left page of the next spread, mirrored
-      // into the sheet so it reads the right way round once it lands.
+      // into the sheet so it reads the right way round once it lands. Paper
+      // first: a live spread turn has no picture of it yet.
+      ctx.fillStyle = frame.paper;
+      ctx.fillRect(0, 0, w, H);
       ctx.save();
       ctx.translate(w, 0);
       ctx.scale(-1, 1);
