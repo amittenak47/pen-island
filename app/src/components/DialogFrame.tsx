@@ -56,9 +56,16 @@ export function DialogFrame({
       aria-describedby={description ? `${titleId}-description` : undefined}
       inert={inert || exiting || !present}
       aria-hidden={inert || exiting || !present || undefined}
-      initial={reduced ? false : { opacity: 0, y: 12, scale: 0.965 }}
-      animate={{ opacity: exiting ? 0 : 1, y: exiting ? 8 : 0, scale: exiting ? 0.975 : 1 }}
-      exit={{ opacity: 0, y: 8, scale: 0.975, transition: { duration: reduced || exiting ? 0 : 0.18 } }}
+      /*
+       * One `transform`, not `y` and `scale`: Motion drives separate transform
+       * values from the main thread, frame by frame, and opening a dialog is
+       * exactly when that thread is busy rendering it (Settings renders twice
+       * as it opens). A whole transform goes to the compositor, which keeps
+       * its frames whatever the page is doing.
+       */
+      initial={reduced ? false : { opacity: 0, transform: "translateY(12px) scale(0.965)" }}
+      animate={{ opacity: exiting ? 0 : 1, transform: exiting ? "translateY(8px) scale(0.975)" : "translateY(0px) scale(1)" }}
+      exit={{ opacity: 0, transform: "translateY(8px) scale(0.975)", transition: { duration: reduced || exiting ? 0 : 0.18 } }}
       transition={{ duration: reduced ? 0 : exiting ? 0.18 : 0.24, ease: [0.22, 1, 0.36, 1] }}
       {...buttonPress}
     >
