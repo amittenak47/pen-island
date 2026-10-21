@@ -2,6 +2,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
+  hasSideScrollRoom,
   horizontalScrollHost,
   horizontalScrollHostsIn,
   hitScrollHostAtPoint,
@@ -494,5 +495,21 @@ describe("pinHostScroll", () => {
     pinHostScroll(el, 80, 12);
     expect(el.scrollLeft).toBe(80);
     expect(el.scrollTop).toBe(12);
+  });
+});
+
+describe("hasSideScrollRoom", () => {
+  it("leaves a box a few pixels too wide to the page, though it is still a host", () => {
+    const box = document.createElement("div");
+    box.style.overflowX = "auto";
+    document.body.appendChild(box);
+    sizeOf(box, 652, 649);
+    expect(horizontalScrollHostsIn(document.body)).toContain(box);
+    expect(hasSideScrollRoom(box)).toBe(false);
+    sizeOf(box, 665, 649);
+    expect(hasSideScrollRoom(box)).toBe(true);
+    box.style.overflowX = "hidden";
+    expect(hasSideScrollRoom(box)).toBe(false);
+    box.remove();
   });
 });

@@ -254,6 +254,7 @@ import {
 } from "./docSelectionGesture";
 import {
   horizontalScrollHost,
+  hasSideScrollRoom,
   hitBoardScrollHostAtPoint,
   invalidateBoardScrollHostLayout,
   isInkPadTarget,
@@ -4448,10 +4449,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       target: EventTarget | null,
     ) => {
       invalidateBoardScrollHostLayout(root);
-      return (
+      const host =
         hitBoardScrollHostAtPoint(clientX, clientY, root) ??
-        horizontalScrollHost(target)
-      );
+        horizontalScrollHost(target);
+      // Up and down is always the page's; only real sideways room is the box's.
+      return host && hasSideScrollRoom(host) ? host : null;
     };
 
     const canOwnScroll = () => {
