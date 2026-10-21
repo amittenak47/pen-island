@@ -3,8 +3,64 @@ import { act } from "react";
 import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 import { WebDocument } from "./WebDocument";
+import { LIVE_HTML_MESSAGE } from "../util/localHtmlRender";
 
-afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals(); });
+afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+it("keeps the existing DOM when live is unset", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  await act(async () => root.render(<WebDocument html="<p>Still copy</p>" url="guide.html" selectable />));
+  expect(host.innerHTML).toBe('<div class="lc-web-doc-wrap"><div class="lc-web-doc" data-doc-scope="guide.html"><p>Still copy</p></div></div>');
+  act(() => root.unmount());
+});
+
+it("keeps the frozen node mounted and hidden while live measures the larger height", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  let resized!: () => void;
+  vi.stubGlobal("ResizeObserver", class { constructor(cb: () => void) { resized = cb; } observe() {} disconnect() {} });
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  const onMeasure = vi.fn();
+  const html = "<p>Still copy</p>";
+  const original = "<p>Original</p><script>render()</script>";
+  await act(async () => root.render(<WebDocument html={html} url="guide.html" selectable onMeasure={onMeasure} />));
+  const frozen = host.querySelector<HTMLDivElement>(".lc-web-doc")!;
+  let frozenHeight = 500;
+  Object.defineProperty(frozen, "scrollHeight", { get: () => frozenHeight });
+  Object.defineProperty(frozen, "clientWidth", { value: 920 });
+  act(() => resized());
+  expect(onMeasure).toHaveBeenLastCalledWith(500);
+  await act(async () => root.render(<WebDocument html={html} url="guide.html" live={original} selectable onMeasure={onMeasure} />));
+  expect(host.querySelector(".lc-web-doc")).toBe(frozen);
+  expect(frozen.style.visibility).toBe("hidden");
+  expect(frozen.getAttribute("aria-hidden")).toBe("true");
+  const frame = host.querySelector("iframe")!;
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  const report = (height: number) => act(() => window.dispatchEvent(new MessageEvent("message", {
+    source: frame.contentWindow, data: { type: LIVE_HTML_MESSAGE, nonce, height },
+  })));
+  report(700);
+  const wrap = host.querySelector<HTMLDivElement>(".lc-web-doc-wrap")!;
+  expect(wrap.style.position).toBe("relative");
+  expect(wrap.style.minHeight).toBe("700px");
+  expect(onMeasure).toHaveBeenLastCalledWith(700);
+  frozenHeight = 900;
+  act(() => resized());
+  expect(onMeasure).toHaveBeenLastCalledWith(900);
+  report(600);
+  expect(onMeasure).toHaveBeenLastCalledWith(900);
+  await act(async () => root.render(<WebDocument html={html} url="guide.html" selectable onMeasure={onMeasure} />));
+  expect(host.querySelector(".lc-web-doc")).toBe(frozen);
+  expect(frozen.style.visibility).toBe("");
+  expect(frozen.hasAttribute("aria-hidden")).toBe(false);
+  expect(host.querySelector("iframe")).toBeNull();
+  expect(wrap.style.position).toBe("");
+  expect(wrap.style.minHeight).toBe("");
+  expect(onMeasure).toHaveBeenLastCalledWith(900);
+  act(() => root.unmount());
+});
 
 it.each([true, false])("fragment clicks never navigate or change the app URL (local file: %s)", async localFile => {
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);

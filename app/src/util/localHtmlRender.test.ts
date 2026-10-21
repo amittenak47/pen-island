@@ -2,9 +2,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { PAGE_MAX_BYTES, webPageWidthForViewport } from "./webPage";
 import { docIdentityHash, hashMarkdown } from "./annotateStore";
+import { IDBFactory } from "fake-indexeddb";
+import { getLiveOriginal, liveOriginalKey } from "./liveHtmlStore";
 import {
   freezeLocalHtml, localHtmlSrcdoc, renderLocalHtml, LOCAL_HTML_CSP,
   LOCAL_HTML_MESSAGE, LOCAL_HTML_TIMEOUT_MS, UNPIN_STICKY, UNROLL_SCROLL_BOXES,
+  liveHtmlSrcdoc, LIVE_HTML_CSP, LIVE_HTML_MESSAGE,
 } from "./localHtmlRender";
 
 afterEach(() => {
@@ -138,6 +141,134 @@ describe("local HTML sandbox", () => {
   });
 });
 
+describe("live HTML sandbox", () => {
+  it.each([
+    '<!doctype html><html><head><script>window.authored = true</script></head><body>Body</body></html>',
+    '<script>window.authored = true</script><p>Body</p>',
+  ])("puts the live CSP first and the nonce bridge before authored scripts: %s", original => {
+    const srcdoc = liveHtmlSrcdoc(original, "unique-live-nonce");
+    const doc = new DOMParser().parseFromString(srcdoc, "text/html");
+    const policy = doc.head.firstElementChild as HTMLMetaElement;
+    expect(srcdoc).toMatch(/^<!DOCTYPE html>\n/);
+    expect(policy.tagName).toBe("META");
+    expect(policy.httpEquiv).toBe("Content-Security-Policy");
+    expect(policy.content).toBe(LIVE_HTML_CSP);
+    expect(LIVE_HTML_CSP).toBe("default-src 'none'; script-src 'unsafe-inline' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://unpkg.com; style-src 'unsafe-inline' https:; font-src https: data:; img-src https: data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'");
+    expect(policy.nextElementSibling?.tagName).toBe("SCRIPT");
+    expect(policy.nextElementSibling?.textContent).toContain(JSON.stringify({ type: LIVE_HTML_MESSAGE, nonce: "unique-live-nonce" }));
+    expect(doc.querySelectorAll("script")[1].textContent).toBe("window.authored = true");
+  });
+
+  it("removes relative resources but keeps inline scripts and explicit allowed CDN scripts", () => {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc(`
+      <base href="file:///keep/"><link rel="stylesheet" href="./local.css">
+      <script src="./local.js"></script><script src="https://cdn.jsdelivr.net/npm/example/index.js"></script>
+      <style>@import "./local.css"; p { background:url(./figure.png) }</style>
+      <img src="./figure.png"><img src="https://example.com/image.png">
+      <script>window.inlineScript = true</script>`, "n"), "text/html");
+    expect(doc.querySelector("base")).toBeNull();
+    expect(doc.querySelector("link")?.hasAttribute("href")).toBe(false);
+    expect(doc.querySelectorAll("script")[1].hasAttribute("src")).toBe(false);
+    expect(doc.querySelectorAll("script")[2].getAttribute("src")).toBe("https://cdn.jsdelivr.net/npm/example/index.js");
+    expect(doc.querySelector("img")?.hasAttribute("src")).toBe(false);
+    expect(doc.querySelectorAll("img")[1].getAttribute("src")).toBe("https://example.com/image.png");
+    expect(doc.querySelector("style")?.textContent).not.toContain("./");
+    expect(doc.querySelectorAll("script")[3].textContent).toBe("window.inlineScript = true");
+  });
+
+  function bridgeHarness() {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc('<button><span>Tap</span></button><a href="https://example.com/next">Next</a><a href="#inside">Inside</a>', "n"), "text/html");
+    let onLoad!: () => Promise<void>;
+    let onMessage!: (event: { source: unknown; data: unknown }) => void;
+    let onResize!: () => void;
+    let onMutation!: () => void;
+    const parent = { postMessage: vi.fn() };
+    const fakeWindow = { open: () => ({}), addEventListener: vi.fn((type, callback) => {
+      if (type === "load") onLoad = callback;
+      if (type === "message") onMessage = callback;
+    }) };
+    const resizeObserve = vi.fn();
+    const mutationObserve = vi.fn();
+    class ResizeObserver { constructor(callback: () => void) { onResize = callback; } observe = resizeObserve; }
+    class MutationObserver { constructor(callback: () => void) { onMutation = callback; } observe = mutationObserve; }
+    class PointerEvent extends MouseEvent {
+      pointerType: string;
+      constructor(type: string, options: PointerEventInit) { super(type, options); this.pointerType = options.pointerType ?? ""; }
+    }
+    new Function("window", "document", "parent", "ResizeObserver", "MutationObserver", "PointerEvent", doc.head.querySelector("script")!.textContent!)(
+      fakeWindow, doc, parent, ResizeObserver, MutationObserver, PointerEvent,
+    );
+    return { doc, parent, fakeWindow, resizeObserve, mutationObserve, load: () => onLoad(), resize: () => onResize(), mutate: () => onMutation(), message: (source: unknown, data: unknown) => onMessage({ source, data }) };
+  }
+
+  it.each([true, false])("settles after fonts, then throttles changed heights from both observers (fonts ready: %s)", async ready => {
+    vi.useFakeTimers();
+    vi.spyOn(performance, "now").mockImplementation(() => Date.now());
+    const harness = bridgeHarness();
+    const { doc, parent } = harness;
+    let height = 700;
+    Object.defineProperty(doc.documentElement, "scrollHeight", { get: () => height });
+    Object.defineProperty(doc, "fonts", { value: { ready: ready ? Promise.resolve() : new Promise(() => {}) } });
+    const pending = harness.load();
+    await vi.advanceTimersByTimeAsync((ready ? 0 : 1200) + 299);
+    expect(parent.postMessage).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(parent.postMessage).toHaveBeenCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n", height: 700 }, "*");
+    expect(harness.resizeObserve).toHaveBeenCalledWith(doc.body);
+    expect(harness.mutationObserve).toHaveBeenCalledWith(doc.body, { childList: true, subtree: true, attributes: true });
+    height = 701;
+    harness.resize(); harness.mutate();
+    await vi.advanceTimersByTimeAsync(200);
+    expect(parent.postMessage).toHaveBeenCalledTimes(1);
+    height = 850;
+    harness.mutate(); harness.resize();
+    await vi.advanceTimersByTimeAsync(199);
+    expect(parent.postMessage).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(parent.postMessage).toHaveBeenLastCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n", height: 850 }, "*");
+  });
+
+  it("validates taps, dispatches the event sequence and focuses the closest control", () => {
+    const { doc, parent, message } = bridgeHarness();
+    const button = doc.querySelector("button")!;
+    const span = button.querySelector("span")!;
+    const elementFromPoint = vi.fn(() => span);
+    Object.defineProperty(doc, "elementFromPoint", { value: elementFromPoint });
+    const focus = vi.spyOn(button, "focus");
+    const events: string[] = [];
+    for (const type of ["pointerdown", "mousedown", "pointerup", "mouseup", "click"]) span.addEventListener(type, event => {
+      events.push(event.type);
+      expect(event.bubbles).toBe(true);
+      expect(event.cancelable).toBe(true);
+      if (type !== "click") {
+        expect((event as MouseEvent).clientX).toBe(25);
+        expect((event as MouseEvent).clientY).toBe(35);
+      }
+      if (type.startsWith("pointer")) expect((event as PointerEvent).pointerType).toBe("touch");
+    });
+    const data = { type: LIVE_HTML_MESSAGE, nonce: "n", tap: { x: 25, y: 35 } };
+    message({}, data); message(parent, { ...data, nonce: "wrong" });
+    message(parent, { ...data, tap: { x: "25", y: 35 } });
+    expect(elementFromPoint).not.toHaveBeenCalled();
+    message(parent, data);
+    expect(elementFromPoint).toHaveBeenCalledWith(25, 35);
+    expect(events).toEqual(["pointerdown", "mousedown", "pointerup", "mouseup", "click"]);
+    expect(focus).toHaveBeenCalledTimes(1);
+  });
+
+  it("prevents non-fragment navigation and window.open", () => {
+    const { doc, fakeWindow } = bridgeHarness();
+    const anchors = doc.querySelectorAll("a");
+    const outside = new MouseEvent("click", { bubbles: true, cancelable: true });
+    const inside = new MouseEvent("click", { bubbles: true, cancelable: true });
+    anchors[0].dispatchEvent(outside); anchors[1].dispatchEvent(inside);
+    expect(outside.defaultPrevented).toBe(true);
+    expect(inside.defaultPrevented).toBe(false);
+    expect(fakeWindow.open()).toBeNull();
+  });
+});
+
 describe("inner scroll boxes", () => {
   it("grows a box that scrolls vertically and leaves one that fits", () => {
     document.body.innerHTML =
@@ -189,6 +320,21 @@ describe("pinned bars", () => {
 });
 
 describe("local HTML freeze and identity", () => {
+  it("saves the original under the frozen content key without changing the still copy", async () => {
+    vi.stubGlobal("indexedDB", new IDBFactory());
+    const original = '<p>Original</p><script>render()</script>';
+    const frozen = await freezeLocalHtml(original, { mount(frame) {
+      document.body.append(frame);
+      const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+      window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: {
+        type: LOCAL_HTML_MESSAGE, nonce, html: "<p>Rendered</p>",
+      } }));
+    } });
+    expect(frozen).toContain("Rendered");
+    expect(frozen).not.toContain("render()");
+    await vi.waitFor(async () => expect(await getLiveOriginal(liveOriginalKey(frozen))).toBe(original));
+  });
+
   it("keeps explicit HTTPS linked styles without inventing a base address", async () => {
     const fetch = vi.fn(async () => ({ ok: true, text: async () => "p {color:green}" }));
     vi.stubGlobal("fetch", fetch);

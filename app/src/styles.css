@@ -1559,6 +1559,21 @@ a,
   color-scheme: light;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .lc-live-html-frame {
+    transition: opacity 160ms;
+  }
+
+  .lc-web-doc.is-still-return {
+    animation: lc-still-return 160ms ease-out;
+  }
+}
+
+@keyframes lc-still-return {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 html[data-theme="dark"] .lc-web-doc {
   color-scheme: dark;
 }

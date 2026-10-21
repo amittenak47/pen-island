@@ -2,19 +2,22 @@
  * A captured web page as the paper under the ink.
  *
  * Same column as markdown/EPUB: sanitised HTML, measured height, board camera.
- * Not a live iframe — see `webPage.ts`.
+ * Local files can also run in an opaque frame above the still copy.
  */
 
-import { useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import { promoteLazyImages, type WebHtmlSource } from "../util/webPage";
 import { columnIsMeasurable } from "./AnnotateDocument";
+import { LiveHtmlFrame } from "./LiveHtmlFrame";
 
 export interface WebDocumentProps {
   html: string;
   url: string;
   /** A frozen file has no address to browse, including through its links. */
   localFile?: boolean;
+  /** The device-local original runs above the frozen page while Live is on. */
+  live?: string | null;
   onMeasure?: (height: number) => void;
   selectable?: boolean;
   /** Reading-mode taps on links fetch a new snapshot instead of leaving the app. */
@@ -29,6 +32,7 @@ export function WebDocument({
   html,
   url,
   localFile = false,
+  live,
   onMeasure,
   selectable = false,
   onNavigate,
@@ -41,6 +45,19 @@ export function WebDocument({
   onNavigateRef.current = onNavigate;
   const localFileRef = useRef(localFile);
   localFileRef.current = localFile;
+  const [liveMeasurement, setLiveMeasurement] = useState<{ original: string; height: number } | null>(null);
+  const liveHeight = live && liveMeasurement?.original === live ? liveMeasurement.height : 0;
+  const onLiveHeight = useCallback((height: number) => {
+    if (live) setLiveMeasurement({ original: live, height });
+  }, [live]);
+  // Back from Live, the still copy fades in as the live page faded in.
+  const wasLive = useRef(Boolean(live));
+  const [stillReturned, setStillReturned] = useState(false);
+  useEffect(() => {
+    if (wasLive.current && !live) setStillReturned(true);
+    if (live) setStillReturned(false);
+    wasLive.current = Boolean(live);
+  }, [live]);
 
   useEffect(() => {
     const node = nodeRef.current;
@@ -53,7 +70,7 @@ export function WebDocument({
       // so the page scrolled far past its end. Wait for a real column, as the
       // markdown reader does; the observer reports again when it arrives.
       if (!columnIsMeasurable(node.clientWidth)) return;
-      const height = node.scrollHeight;
+      const height = Math.max(node.scrollHeight, liveHeight);
       if (height > 0) onMeasureRef.current?.(height);
     };
     report();
@@ -61,7 +78,7 @@ export function WebDocument({
     const observer = new ResizeObserver(report);
     observer.observe(node);
     return () => observer.disconnect();
-  }, [html]);
+  }, [html, liveHeight]);
 
   useEffect(() => {
     const node = nodeRef.current;
@@ -98,15 +115,21 @@ export function WebDocument({
    * part of the site's own content, which is why nobody saw it.
    */
   return (
-    <div className="lc-web-doc-wrap">
+    <div className="lc-web-doc-wrap" style={live ? { position: "relative", minHeight: liveHeight } : undefined}>
       <div
         ref={nodeRef}
-        className={source === "reader" ? "lc-web-doc is-reader" : "lc-web-doc"}
+        className={[
+          "lc-web-doc",
+          source === "reader" && "is-reader",
+          stillReturned && !live && "is-still-return",
+        ].filter(Boolean).join(" ")}
         data-doc-scope={url}
-        aria-hidden={selectable ? undefined : true}
+        aria-hidden={live || !selectable ? true : undefined}
+        style={live ? { visibility: "hidden" } : undefined}
         // eslint-disable-next-line react/no-danger -- sanitised in fetchWebPage
         dangerouslySetInnerHTML={{ __html: html }}
       />
+      {live && <LiveHtmlFrame original={live} onHeight={onLiveHeight} />}
     </div>
   );
 }
