@@ -690,6 +690,9 @@ it("turns a text spread at once without pictures: the next right page live under
   const hole = document.createElement("div");
   hole.className = "lc-page-mask-hole";
   hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+  const facing = document.createElement("div");
+  facing.className = "lc-page-mask-facing";
+  hole.append(facing);
   const mask = document.createElement("div");
   mask.className = "lc-page-mask";
   mask.append(hole);
@@ -715,6 +718,10 @@ it("turns a text spread at once without pictures: the next right page live under
   for (let i = 0; i < 6; i += 1) await settle();
   expect(board.jumpToPageFrame).toHaveBeenCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
   expect(host.querySelector(".lc-page-turn-under")).toBeNull();
+  // The landed spread's facing page is the copy the turn showed, not a
+  // picture taken on landing.
+  expect(facing.contains(copy)).toBe(true);
+  expect(board.captureSceneFrame).not.toHaveBeenCalled();
   board.readingPageFrames.mockReturnValue(FRAMES);
   board.livePageCopy.mockReturnValue(null);
 });

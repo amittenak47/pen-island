@@ -615,6 +615,13 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
   const restZoomRef = useRef<number | null>(null);
   /** Pictures of pages taken ahead of a turn, keyed by what they show. */
   const shotsRef = useRef(new Map<string, Promise<HTMLCanvasElement | null>>());
+  /**
+   * The facing page a live spread turn landed with: its live copy, handed to
+   * the facing slot instead of a picture taken on landing (half a second of
+   * the main thread, which held the next grab back). The facing page's own
+   * pictures wait until the hand has rested.
+   */
+  const facingHandoffRef = useRef<{ minY: number } | null>(null);
   useEffect(() => () => shotsRef.current.clear(), []);
 
   // Lift the side stacks — the menu toolbar, the mode toggle and their
@@ -817,6 +824,14 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const i = frames.findIndex((f) => same(f, held));
       if (i < 0) return;
       const facing = frames[i % 2 === 0 ? i + 1 : i - 1];
+      // A live copy from the turn that landed here shows this facing page
+      // already: its pictures wait for the hand to rest, not the landing.
+      const handoff = facingHandoffRef.current;
+      if (handoff && facing && Math.abs(handoff.minY - facing.minY) < 0.5) {
+        if (!inputQuiet()) return;
+      } else if (handoff) {
+        facingHandoffRef.current = null;
+      }
       const hole = el.parentElement?.getBoundingClientRect();
       const heldScene = pageBoxScene(b, held);
       if (!hole || !heldScene) return;
@@ -837,6 +852,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         if (disposed || !canvas || lockedRef.current !== held || el.hidden) return;
         if (el.firstElementChild !== canvas) el.replaceChildren(canvas);
         shows = facing.minY;
+        facingHandoffRef.current = null;
       });
       void Promise.all([liveShot, facingShot]).finally(() => { refreshing = false; });
     };
@@ -1652,6 +1668,18 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       b.setPageLock(turn.to);
       b.jumpToPageFrame({ ...turn.to, minY: turn.to.minY + turn.offsetInPage });
       heading = turn.direction;
+      // The spread lands with its left page held: the right one, which the
+      // turn already shows live, is the facing page.
+      const facingCopy = turn.spreadLive?.right;
+      const facingEl = document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-mask-facing");
+      const frames = turn.spreadLive ? b.readingPageFrames() : [];
+      const facingPage = frames[frames.findIndex((f) => Math.abs(f.minY - turn.to.minY) < 0.5) + 1];
+      if (facingCopy && facingEl && facingPage && !facingEl.hidden) {
+        Object.assign(facingCopy.style, { left: "0", clipPath: "none" });
+        facingEl.replaceChildren(facingCopy);
+        facingHandoffRef.current = { minY: facingPage.minY };
+        if (turn.spreadLive) turn.spreadLive.right = null;
+      }
       const flipping = flicking();
       lastLandAt = performance.now();
       // Mid-flick, the next picture waits for the hand to rest. So does a
