@@ -384,6 +384,22 @@ describe("annotation camera presentation", () => {
     expect(alpha(100, 280)).toBeGreaterThan(0);
   });
 
+  it("keeps a notebook's ink on screen, stretched, through a pinch", async () => {
+    await ready([stroke(100)]);
+    ref.current!.setCameraZooming(true, true);
+    expect(surface().style.visibility).toBe("");
+    view = { ...view, zoom: 2 };
+    ref.current!.setPanOffset(view);
+    expect(surface().style.visibility).toBe("");
+    expect(surface().style.transform).toContain("scale(2)");
+    ref.current!.setCameraZooming(false);
+    const settled = ref.current!.syncCamera(); await frames(80); await settled;
+    expect(surface().style.visibility).toBe("");
+    expect(surface().style.transform).toBe("");
+    // The stroke at scene y 100 repainted at zoom 2: screen y 200, past the overdraw.
+    expect(alpha(200, 380)).toBeGreaterThan(0);
+  });
+
   it("does not reveal a previous pinch's tiles during a new pinch", async () => {
     await ready([stroke(100)]);
     worker.blocked = true;
