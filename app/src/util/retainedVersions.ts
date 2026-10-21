@@ -17,112 +17,66 @@
  * conflict or an old format leaves (`attached`) belong to the book too: they
  * go when the book is deleted for good, and are otherwise left alone.
  */
-import { run, STORE_CONTENT, STORE_INK_PAGES, STORE_SYNC_RECOVERY, withStore } from "./idb";
+import { run, STORE_SYNC_RECOVERY, withStore } from "./idb";
 import { lengthFromHash } from "./docBytes";
 import type { RecoveryCopy } from "./syncRecovery";
-import type { BookMeta } from "./syncState";
-import { getInkPageRecords, type InkPageRecord } from "./inkPageStore";
+import { readBookData, readSummaries } from "./retainedRead";
+import type { AttachedCopy, RetainedKind, RetainedVersion, Summary } from "./retainedSummary";
+import type { RetainedSizesReply } from "./retainedSizes.worker";
 
-export type RetainedKind = "annotate" | "whiteboard";
+export type { AttachedCopy, RetainedKind, RetainedVersion } from "./retainedSummary";
+export { approxBytes, recordOfCopy } from "./retainedSummary";
 
-export interface RetainedVersion {
-  id: string;
-  kind: RetainedKind;
-  bookId: string;
-  /** 1 is the newest. Assigned per book by `versionsByBook`. */
-  number: number;
-  /** When that version was last edited (its own metadata), 0 when unknown. */
-  editedAt: number;
-  /** When it was kept; older copies without the stamp use `editedAt`. */
-  keptAt: number;
-  /** Why it was kept, in the reader's words. */
-  reason: string;
-  name: string;
-  label: string;
-  /** The document file this version draws on; "" for whiteboards and text. */
-  hash: string;
-  /** "pdf", "markdown", "web"…; "" for whiteboards. */
-  docType: string;
-  /** Its own data and ink, in bytes (the file is counted by the reader of this). */
-  dataBytes: number;
-  /** Trashed on its own, on this device. */
-  trashedAt: number | null;
-  /** How to bring it back: a whole book, or an old unsaved branch. */
-  restore: "record" | "branch";
-}
-
-/** A copy that is not a version on its own: kept with the book, never numbered. */
-export interface AttachedCopy { id: string; kind: RetainedKind; bookId: string }
-
-interface Summary { version: Omit<RetainedVersion, "number"> | null; attached: AttachedCopy | null }
-
-const REASONS: Record<string, string> = {
-  "document-source-update": "Before updating to a newer file",
-  "atomic-book-local-alternative": "This device's version, from a sync choice",
-  "atomic-book-hub-alternative": "The hub's version, from a sync choice",
-  "retained-restore-with-local-parent": "Before a restore",
-  "explicit-recovery-restore": "Before restoring a copy",
-  "snapshot-restore": "Before restoring a snapshot",
-  "legacy-single-whiteboard": "Older whiteboard format",
-  "fallback-branch": "Unsaved branch",
-  "explicit-fallback-choice": "Before choosing a saved branch",
-};
-
-function object(value: unknown): value is Record<string, unknown> {
-  return !!value && typeof value === "object" && !Array.isArray(value);
-}
-
-/** The whole book a copy holds, when it holds one (the shape `restoreRetainedRecord` restores). */
-export function recordOfCopy(copy: RecoveryCopy): NonNullable<RecoveryCopy["record"]> | null {
-  if (copy.record && (copy.type === "record" || copy.type === "conflict")) return copy.record;
-  if (copy.type !== "conflict" || !copy.kind || !copy.bookId || !object(copy.content)
-    || !object(copy.content.metadata) || !object(copy.content.payload)) return null;
-  const prefix = `fnwb:${copy.bookId}:`, children = object(copy.content.children) ? copy.content.children : {};
-  return {
-    meta: copy.content.metadata as BookMeta, payload: copy.content.payload,
-    children: Object.fromEntries(Object.entries(children).map(([key, child]) => [key.startsWith(prefix) ? key.slice(prefix.length) : key, child])),
-    ...(Array.isArray(copy.content.ink) ? { ink: copy.content.ink as InkPageRecord[] } : {}),
-  };
-}
-
-/**
- * Roughly how many bytes a stored value takes: binary at its length, text at
- * its length, the rest by walking it. Close enough to say "2.3 MB".
+/*
+ * The reading, in a worker (`retainedSizes.worker.ts`).
+ *
+ * One worker for a burst of requests, let go once it has been idle a while.
+ * Where none can start (tests, an old WebView) or it fails, the same reading
+ * runs here instead: slower to look at, never wrong.
  */
-export function approxBytes(value: unknown, seen = new Set<object>()): number {
-  if (value == null) return 0;
-  if (typeof value === "string") return value.length;
-  if (typeof value === "number" || typeof value === "boolean") return 8;
-  if (value instanceof ArrayBuffer) return value.byteLength;
-  if (ArrayBuffer.isView(value)) return value.byteLength;
-  if (typeof Blob !== "undefined" && value instanceof Blob) return value.size;
-  if (typeof value !== "object" || seen.has(value)) return 0;
-  seen.add(value);
-  let total = 0;
-  if (Array.isArray(value)) for (const item of value) total += approxBytes(item, seen);
-  else for (const [key, item] of Object.entries(value)) total += key.length + approxBytes(item, seen);
-  return total;
+type WorkerAsk =
+  | { op: "summaries"; keys: IDBValidKey[] }
+  | { op: "book"; kind: RetainedKind; bookId: string };
+const WORKER_IDLE_MS = 10_000;
+let sizesWorker: Worker | null = null;
+let sizesWorkerIdle: ReturnType<typeof setTimeout> | null = null;
+let nextAsk = 0;
+const asked = new Map<number, { resolve: (reply: unknown) => void; reject: (cause: Error) => void }>();
+
+function dropWorker(cause: Error): void {
+  sizesWorker?.terminate();
+  sizesWorker = null;
+  for (const pending of asked.values()) pending.reject(cause);
+  asked.clear();
 }
 
-function summarize(copy: RecoveryCopy): Summary {
-  const kind = copy.kind;
-  if ((kind !== "annotate" && kind !== "whiteboard") || !copy.bookId) return { version: null, attached: null };
-  const source = typeof copy.provenance?.source === "string" ? copy.provenance.source : "";
-  const trashedAt = typeof copy.trashedAt === "number" ? copy.trashedAt : null;
-  const branch = source === "fallback-branch" && object(copy.content) && typeof copy.content.raw === "string";
-  const record = recordOfCopy(copy);
-  if (!record && !branch) return { version: null, attached: { id: copy.id, kind, bookId: copy.bookId } };
-  const meta = (record?.meta ?? {}) as Record<string, unknown>;
-  const text = (key: string) => typeof meta[key] === "string" ? meta[key] as string : "";
-  const keptStamp = typeof copy.provenance?.retainedAt === "number" ? copy.provenance.retainedAt : null;
-  const editedAt = typeof meta.updatedAt === "number" ? meta.updatedAt : keptStamp ?? 0;
-  return { attached: null, version: {
-    id: copy.id, kind, bookId: copy.bookId, editedAt, keptAt: keptStamp ?? editedAt,
-    reason: REASONS[source] ?? "Kept copy",
-    name: text("name") || text("title"), label: text("label"), hash: text("hash"), docType: text("docType"),
-    dataBytes: approxBytes(record ? { payload: record.payload, children: record.children, ink: record.ink } : copy.content),
-    trashedAt, restore: record ? "record" : "branch",
-  } };
+function askWorker<T>(ask: WorkerAsk): Promise<T> {
+  if (typeof Worker === "undefined") return Promise.reject(new Error("no worker"));
+  if (!sizesWorker) {
+    try {
+      sizesWorker = new Worker(new URL("./retainedSizes.worker.ts", import.meta.url), { type: "module" });
+    } catch (cause) {
+      return Promise.reject(cause instanceof Error ? cause : new Error(String(cause)));
+    }
+    sizesWorker.onmessage = (event: MessageEvent<RetainedSizesReply>) => {
+      const pending = asked.get(event.data.id);
+      if (!pending) return;
+      asked.delete(event.data.id);
+      if ("error" in event.data) pending.reject(new Error(event.data.error));
+      else pending.resolve(event.data);
+      if (asked.size === 0) {
+        if (sizesWorkerIdle) clearTimeout(sizesWorkerIdle);
+        sizesWorkerIdle = setTimeout(() => { if (asked.size === 0) dropWorker(new Error("idle")); }, WORKER_IDLE_MS);
+      }
+    };
+    sizesWorker.onerror = (event) => dropWorker(new Error(event.message || "retained sizes worker failed"));
+  }
+  if (sizesWorkerIdle) { clearTimeout(sizesWorkerIdle); sizesWorkerIdle = null; }
+  const id = ++nextAsk;
+  return new Promise<T>((resolve, reject) => {
+    asked.set(id, { resolve: resolve as (reply: unknown) => void, reject });
+    sizesWorker!.postMessage({ id, ...ask });
+  });
 }
 
 /*
@@ -134,8 +88,13 @@ function summarize(copy: RecoveryCopy): Summary {
  */
 const cache = new Map<string, Summary>();
 
-/** For tests: forget every summary. */
-export function resetRetainedVersionCache(): void { cache.clear(); }
+/** For tests: forget every summary and size, and let the worker go. */
+export function resetRetainedVersionCache(): void {
+  cache.clear();
+  bookSizes.clear();
+  if (sizesWorkerIdle) { clearTimeout(sizesWorkerIdle); sizesWorkerIdle = null; }
+  dropWorker(new Error("reset"));
+}
 
 async function summaries(): Promise<Summary[]> {
   const keys = await run<IDBValidKey[]>(STORE_SYNC_RECOVERY, "readonly", store => store.getAllKeys());
@@ -143,8 +102,9 @@ async function summaries(): Promise<Summary[]> {
   for (const key of [...cache.keys()]) if (!live.has(key)) cache.delete(key);
   const missing = keys.filter(key => !cache.has(String(key)));
   if (missing.length) {
-    const rows = await Promise.all(missing.map(key => run<RecoveryCopy | undefined>(STORE_SYNC_RECOVERY, "readonly", store => store.get(key))));
-    rows.forEach((row, index) => cache.set(String(missing[index]), row ? summarize(row) : { version: null, attached: null }));
+    const read = await askWorker<{ summaries: Summary[] }>({ op: "summaries", keys: missing })
+      .then(reply => reply.summaries, () => readSummaries(missing));
+    read.forEach((summary, index) => cache.set(String(missing[index]), summary));
   }
   return keys.map(key => cache.get(String(key))!).filter(Boolean);
 }
@@ -226,16 +186,8 @@ export async function bookBytes(kind: RetainedKind, id: string, updatedAt: numbe
   const key = `${kind}:${id}`;
   const cached = bookSizes.get(key);
   if (cached && cached.updatedAt === updatedAt) return cached.bytes + (hash ? lengthFromHash(hash) ?? 0 : 0);
-  let data = approxBytes(await run<unknown>(STORE_CONTENT, "readonly", store => store.get(id)));
-  data += approxBytes(await getInkPageRecords(`${kind === "annotate" ? "md" : "wb"}:${id}`));
-  if (kind === "annotate") {
-    const prefix = `fnwb:${id}:`;
-    // Scratch boards and their ink sit under the book's prefix in both stores.
-    for (const name of [STORE_CONTENT, STORE_INK_PAGES]) await withStore(name, "readonly", store => {
-      const request = store.openCursor(IDBKeyRange.bound(prefix, `${prefix}￿`));
-      request.onsuccess = () => { const cursor = request.result; if (cursor) { data += approxBytes(cursor.value); cursor.continue(); } };
-    });
-  }
+  const data = await askWorker<{ bytes: number }>({ op: "book", kind, bookId: id })
+    .then(reply => reply.bytes, () => readBookData(kind, id));
   bookSizes.set(key, { updatedAt, bytes: data });
   return data + (hash ? lengthFromHash(hash) ?? 0 : 0);
 }
