@@ -24,15 +24,31 @@ export function paletteContrast(a: string, b: string): number {
   return (Math.max(x, y) + .05) / (Math.min(x, y) + .05);
 }
 
+/*
+ * Lab for each colour already seen.
+ *
+ * Giving every footnote a colour of its own compares each shade it might take
+ * with every colour in use: a few hundred colours, converted tens of thousands
+ * of times, which was a quarter of a second of a tablet's launch. The values
+ * are never changed after they are made.
+ */
+const labs = new Map<string, readonly number[]>();
+const LAB_CACHE_MAX = 4096;
+
 /** sRGB, D65 reference white, CIE76 distance. */
-function lab(hex: string): number[] {
+function lab(hex: string): readonly number[] {
+  const known = labs.get(hex);
+  if (known) return known;
   const [r, g, b] = rgb(hex).map(linear);
   const d = 6 / 29;
   const f = (t: number) => t > d ** 3 ? Math.cbrt(t) : t / (3 * d * d) + 4 / 29;
   const x = f((.4124564 * r! + .3575761 * g! + .1804375 * b!) / .95047);
   const y = f(.2126729 * r! + .7151522 * g! + .072175 * b!);
   const z = f((.0193339 * r! + .119192 * g! + .9503041 * b!) / 1.08883);
-  return [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+  const value = [116 * y - 16, 500 * (x - y), 200 * (y - z)];
+  if (labs.size >= LAB_CACHE_MAX) labs.clear();
+  labs.set(hex, value);
+  return value;
 }
 
 export function paletteDeltaE(a: string, b: string): number {
