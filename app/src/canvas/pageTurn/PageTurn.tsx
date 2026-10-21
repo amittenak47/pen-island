@@ -1564,8 +1564,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       heading = turn.direction;
       const flipping = flicking();
       lastLandAt = performance.now();
-      // Mid-flick, the next picture waits for the hand to rest.
-      prefetch(flipping ? PREFETCH_IDLE_MS : LANDED_PREFETCH_MS);
+      // Mid-flick, the next picture waits for the hand to rest. So does a
+      // text page's, always: its pictures are about half a second of the
+      // main thread each, and taken just after landing they held the next
+      // grab back by a second. A grab needs none now (see `planTurn`).
+      prefetch(flipping || !pagedRef.current ? PREFETCH_IDLE_MS : LANDED_PREFETCH_MS);
     };
 
     /** Move navigation on while this sheet finishes its own animation. */
