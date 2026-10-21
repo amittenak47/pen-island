@@ -320,7 +320,7 @@ describe("pinned bars", () => {
 });
 
 describe("local HTML freeze and identity", () => {
-  it("saves the original under the frozen content key without changing the still copy", async () => {
+  it("saves the original under its own hash without changing the still copy", async () => {
     vi.stubGlobal("indexedDB", new IDBFactory());
     const original = '<p>Original</p><script>render()</script>';
     const frozen = await freezeLocalHtml(original, { mount(frame) {
@@ -332,7 +332,7 @@ describe("local HTML freeze and identity", () => {
     } });
     expect(frozen).toContain("Rendered");
     expect(frozen).not.toContain("render()");
-    await vi.waitFor(async () => expect(await getLiveOriginal(liveOriginalKey(frozen))).toBe(original));
+    await vi.waitFor(async () => expect(await getLiveOriginal(liveOriginalKey(original))).toBe(original));
   });
 
   it("keeps explicit HTTPS linked styles without inventing a base address", async () => {

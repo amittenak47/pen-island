@@ -230,6 +230,6 @@ export async function freezeLocalHtml(original: string, opts?: LocalHtmlRenderOp
   const doc = new DOMParser().parseFromString(rendered, "text/html");
   removeRelativeResources(doc);
   const frozen = (await pageFromCapturedHtml(doc.documentElement.outerHTML, "", { mode: "page" })).html;
-  void putLiveOriginal(liveOriginalKey(frozen), original);
+  void putLiveOriginal(liveOriginalKey(original), original);
   return frozen;
 }

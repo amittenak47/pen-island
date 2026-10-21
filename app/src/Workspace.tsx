@@ -227,7 +227,7 @@ import { footnoteNoteTab } from "./modes/FootnoteNoteWorkspace";
 import { loadMiniNotePlacements, saveMiniNotePlacements, MINI_NOTE_RESTORE_EVENT, takeMiniNoteRestore, type MiniNotePlacements } from "./util/miniNoteWindows";
 import { EpubDocument } from "./modes/EpubDocument";
 import { WebDocument } from "./modes/WebDocument";
-import { getLiveOriginal, liveOriginalKey } from "./util/liveHtmlStore";
+import { getLiveOriginal } from "./util/liveHtmlStore";
 import {
   canStepWeb,
   currentEntry,
@@ -864,7 +864,7 @@ export const Workspace = memo(function Workspace({
     } catch { /* Live still works when device preferences cannot be saved. */ }
     setLiveChoice(choice);
     if (annotateSource?.docType === "web" && annotateSource.localFileHash) {
-      void getLiveOriginal(liveOriginalKey(annotateSource.text)).then((original) => {
+      void getLiveOriginal(annotateSource.localFileHash).then((original) => {
         if (!stale) setLiveOriginal(original);
       });
     }
