@@ -167,3 +167,20 @@ it("removes all window listeners on unmount", async () => {
   expect(removed).toHaveBeenCalledWith("message", expect.any(Function));
   root = createRoot(host);
 });
+
+it("reports an in-page link's target at its client y, scaled from the page's own px", async () => {
+  const onAnchor = vi.fn();
+  await act(async () => root.render(<LiveHtmlFrame original="<p>Live original</p>" onHeight={vi.fn()} onAnchor={onAnchor} />));
+  const frame = host.querySelector("iframe")!;
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  tapHarness(frame);
+  const send = (data: object, source: Window | null = frame.contentWindow) =>
+    act(() => window.dispatchEvent(new MessageEvent("message", { source, data: { type: LIVE_HTML_MESSAGE, ...data } })));
+  // Another window, or the wrong nonce, is not the page.
+  send({ nonce, anchor: 600 }, window);
+  send({ nonce: "forged", anchor: 600 });
+  expect(onAnchor).not.toHaveBeenCalled();
+  // 600 of the frame's 1200 px, in a frame drawn 300 px tall from y 200.
+  send({ nonce, anchor: 600 });
+  expect(onAnchor).toHaveBeenCalledWith(350);
+});

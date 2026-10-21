@@ -135,3 +135,30 @@ it("waits for a real column before reporting its height", async () => {
     if (saved.sh) Object.defineProperty(proto, "scrollHeight", saved.sh); else delete (proto as { scrollHeight?: number }).scrollHeight;
   }
 });
+
+it("brings an in-page link's target up instead of navigating", async () => {
+  vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+  const host = document.createElement("div"); document.body.append(host);
+  const root = createRoot(host);
+  const onAnchor = vi.fn();
+  const onNavigate = vi.fn();
+  const html = '<nav><a href="#week-3">Week 3</a><a href="#missing">Gone</a><a href="#named">Named</a></nav><h2 id="week-3">Week 3</h2><a name="named"></a>';
+  await act(async () => root.render(<WebDocument html={html} url="guide.html" localFile selectable onAnchor={onAnchor} onNavigate={onNavigate} />));
+  const doc = host.querySelector(".lc-web-doc")!;
+  vi.spyOn(doc.querySelector("#week-3")!, "getBoundingClientRect").mockReturnValue({ top: 1234 } as DOMRect);
+  vi.spyOn(doc.querySelector('[name="named"]')!, "getBoundingClientRect").mockReturnValue({ top: 77 } as DOMRect);
+  const [week, missing, named] = [...doc.querySelectorAll("a[href]")];
+  const click = (el: Element) => {
+    const event = new MouseEvent("click", { bubbles: true, cancelable: true });
+    act(() => { el.dispatchEvent(event); });
+    return event;
+  };
+  expect(click(week!).defaultPrevented).toBe(true);
+  expect(onAnchor).toHaveBeenLastCalledWith(1234);
+  click(missing!);
+  expect(onAnchor).toHaveBeenCalledTimes(1);
+  click(named!);
+  expect(onAnchor).toHaveBeenLastCalledWith(77);
+  expect(onNavigate).not.toHaveBeenCalled();
+  act(() => root.unmount());
+});

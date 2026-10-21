@@ -161,6 +161,15 @@ export function liveHtmlSrcdoc(original: string, nonce: string): string {
         // An SVG shape has no click(): send the event itself.
         if (typeof el.click === "function") el.click();
         else el.dispatchEvent(new MouseEvent("click", options));
+        // An in-page link: the frame does not scroll, so the app brings its
+        // target up. Measured after the page's own handlers have run.
+        const link = el.closest('a[href^="#"]');
+        if (link) {
+          let name = link.getAttribute("href").slice(1);
+          try { name = decodeURIComponent(name); } catch (_) {}
+          const target = name ? (document.getElementById(name) || document.getElementsByName(name)[0]) : null;
+          if (target) parent.postMessage({...envelope, anchor: target.getBoundingClientRect().top}, "*");
+        }
         const focusable = el.closest("input, textarea, select, button, [tabindex], [contenteditable]") || el;
         if (focusable && typeof focusable.focus === "function") focusable.focus();
       }

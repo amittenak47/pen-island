@@ -319,6 +319,12 @@ describe("pinned bars", () => {
   });
 });
 
+it("has the bridge report an in-page link's target for the board to bring up", () => {
+  const srcdoc = liveHtmlSrcdoc('<a href="#a">A</a><h2 id="a">A</h2>', "n-1");
+  expect(srcdoc).toContain('el.closest(\'a[href^="#"]\')');
+  expect(srcdoc).toContain("anchor: target.getBoundingClientRect().top");
+});
+
 describe("local HTML freeze and identity", () => {
   it("saves the original under its own hash without changing the still copy", async () => {
     vi.stubGlobal("indexedDB", new IDBFactory());

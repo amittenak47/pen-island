@@ -6,20 +6,24 @@ const TAP_EXCLUSIONS = "button, a, input, textarea, select, [role='button'], [ro
 interface LiveHtmlFrameProps {
   original: string;
   onHeight: (height: number) => void;
+  /** The page followed one of its own `#` links: its target is at this client y. */
+  onAnchor?: (clientY: number) => void;
 }
 
-export function LiveHtmlFrame({ original, onHeight }: LiveHtmlFrameProps) {
+export function LiveHtmlFrame({ original, onHeight, onAnchor }: LiveHtmlFrameProps) {
   // A new original starts with a fresh nonce, measurement and growth guard.
-  return <LiveHtmlFrameContent key={original} original={original} onHeight={onHeight} />;
+  return <LiveHtmlFrameContent key={original} original={original} onHeight={onHeight} onAnchor={onAnchor} />;
 }
 
-function LiveHtmlFrameContent({ original, onHeight }: LiveHtmlFrameProps) {
+function LiveHtmlFrameContent({ original, onHeight, onAnchor }: LiveHtmlFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [nonce] = useState(() => crypto.getRandomValues(new Uint32Array(4)).join("-"));
   const srcdoc = useMemo(() => liveHtmlSrcdoc(original, nonce), [original, nonce]);
   const [height, setHeight] = useState(0);
   const onHeightRef = useRef(onHeight);
   onHeightRef.current = onHeight;
+  const onAnchorRef = useRef(onAnchor);
+  onAnchorRef.current = onAnchor;
 
   useEffect(() => {
     const frame = frameRef.current;
@@ -33,8 +37,14 @@ function LiveHtmlFrameContent({ original, onHeight }: LiveHtmlFrameProps) {
     const onMessage = (event: MessageEvent) => {
       const data: unknown = event.data;
       if (event.source !== frame.contentWindow || !data || typeof data !== "object") return;
-      const reply = data as { type?: unknown; nonce?: unknown; height?: unknown };
+      const reply = data as { type?: unknown; nonce?: unknown; height?: unknown; anchor?: unknown };
       if (reply.type !== LIVE_HTML_MESSAGE || reply.nonce !== nonce) return;
+      if (typeof reply.anchor === "number" && Number.isFinite(reply.anchor)) {
+        // The page's own px; the board scales the frame.
+        const rect = frame.getBoundingClientRect();
+        if (frame.offsetHeight > 0) onAnchorRef.current?.(rect.top + reply.anchor * rect.height / frame.offsetHeight);
+        return;
+      }
       const next = reply.height;
       if (typeof next !== "number" || !Number.isFinite(next) || next < 0) return;
       if (next > currentHeight) {
