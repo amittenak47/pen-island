@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { BoardHandle } from "../BoardHandle";
 import { markBootSettled } from "../../util/bootSettled";
-import { glide, PageTurn, rollMs, turnPaperColor } from "./PageTurn";
+import { glide, PageTurn, rollMs, takeShot, turnPaperColor } from "./PageTurn";
 import { flatSheet, paintTurn } from "./paintTurn";
 import { touchPointersIn } from "../touchPointers";
 
@@ -331,13 +331,6 @@ it("turns only the page, not the board around it", async () => {
 it("hides what lies past a text page's cut in the picture of it", async () => {
   // A text page cut at 1000 in a box a screenful high: below the cut is the
   // next page's text, which the view masks and the picture must too.
-  const cutFrames = [
-    { pageId: 1, minY: 0, maxY: 600 },
-    { pageId: 2, minY: 620, maxY: 1000 },
-    { pageId: 3, minY: 1000, maxY: 1600 },
-  ];
-  board.readingPageFrames.mockReturnValue(cutFrames);
-  pageBox = { minX: 0, maxX: 400, minY: 620, maxY: 1220 };
   const fills: number[][] = [];
   board.captureSceneFrame.mockImplementation(async () => {
     const canvas = document.createElement("canvas");
@@ -349,16 +342,10 @@ it("hides what lies past a text page's cut in the picture of it", async () => {
     });
     return canvas;
   });
-  mount(true, 1, false);
-  pointer("pointerdown", 380, 580);
-  pointer("pointermove", 340, 585);
-  await settle();
-  // This page: blank from just under its cut (380 of 600 down) to the
-  // bottom, so a table's line on the cut stays with the page above it.
+  await takeShot(new Map(), board as unknown as BoardHandle, { x: 0, y: 620, width: 400, height: 600 }, 1, 1000, "");
+  // Blank from just under its cut (380 of 600 down) to the bottom, so a
+  // table's line on the cut stays with the page above it.
   expect(fills).toContainEqual([0, 381, 400, 219]);
-  pointer("pointerup", 340, 585);
-  await settle();
-  board.readingPageFrames.mockReturnValue(FRAMES);
   board.captureSceneFrame.mockImplementation(async () => document.createElement("canvas"));
 });
 
@@ -746,42 +733,18 @@ it("keeps a sheet held by its side from tilting with every wobble of the hand", 
   await settle();
 });
 
-it("turns over plain paper while the next page is still being pictured, then shows it", async () => {
-  let finish!: (canvas: HTMLCanvasElement) => void;
-  const late = document.createElement("canvas");
-  board.captureSceneFrame
-    .mockImplementationOnce(async () => document.createElement("canvas"))
-    .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+it("takes no pictures of a text page on the grab: the sheet lifts at once over the live page", async () => {
   mount(true, null, false);
   pointer("pointerdown", 380, 300);
   pointer("pointermove", 300, 300);
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
-  const first = vi.mocked(paintTurn).mock.calls.at(-1)![1];
-  expect(first.to).not.toBe(late);
-  await act(async () => { finish(late); await new Promise((resolve) => setTimeout(resolve, 30)); });
-  expect(vi.mocked(paintTurn).mock.calls.at(-1)![1].to).toBe(late);
-  pointer("pointerup", 380, 300);
+  // Taking them is cloning and styling the page: most of a second on the tablet.
+  expect(board.captureSceneFrame).not.toHaveBeenCalled();
+  expect(vi.mocked(paintTurn).mock.calls.at(-1)![1].from).toBeNull();
+  pointer("pointerup", 300, 300);
   await settle();
 });
 
-it("turns at once with the live page showing through while its picture is still being taken", async () => {
-  let finish!: (canvas: HTMLCanvasElement) => void;
-  const here = document.createElement("canvas");
-  board.captureSceneFrame
-    .mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }))
-    .mockImplementationOnce(async () => document.createElement("canvas"));
-  mount(true, null, false);
-  pointer("pointerdown", 380, 300);
-  pointer("pointermove", 300, 300);
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
-  const first = vi.mocked(paintTurn).mock.calls.at(-1)![1];
-  expect(first.from).toBeNull();
-  expect(first.to).toBeInstanceOf(HTMLCanvasElement);
-  await act(async () => { finish(here); await new Promise((resolve) => setTimeout(resolve, 30)); });
-  expect(vi.mocked(paintTurn).mock.calls.at(-1)![1].from).toBe(here);
-  pointer("pointerup", 380, 300);
-  await settle();
-});
 
 it("turns a text page over its live copy while the next page has no picture", async () => {
   const copy = document.createElement("div");

@@ -327,7 +327,7 @@ type ShotCache = Map<string, Promise<HTMLCanvasElement | null>>;
  * paint — so a stroke added since, a zoom or a sharper paint takes a fresh
  * one. At most a few kept: each is a screenful of pixels.
  */
-function takeShot(
+export function takeShot(
   shots: ShotCache,
   b: BoardHandle,
   scene: Scene,
@@ -1404,8 +1404,16 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       // is taken at the same place within it the view shows of this one.
       const scale = shotScale(rect.width, scene.width);
       const toScene = { ...scene, y: to.minY + (scene.y - from.minY) };
-      // PDFs already have pixels: never clone/style the document on input.
-      const fast = pagedRef.current || flicking();
+      /*
+       * Never clone and style the document on input: only pictures already
+       * taken. A PDF copies its bitmaps in a few ms. A text page has no
+       * pixels to copy, and taking its two pictures here held the grab for
+       * most of a second on the tablet before the sheet could lift. Without
+       * them it turns as it does mid-flick: the live page where the sheet
+       * still lies, a live copy of the next one under it, plain paper on the
+       * back. The prefetch after the view rests takes the pictures for later.
+       */
+      const fast = true;
       const hereShot = shot(b, scene, scale, from.maxY, from.pageId, fast).then((picture) => withMarks(b, scene, picture));
       const thereShot = (pagedRef.current
         ? waitForPdfTurnPreview(document.querySelector(hostSelector), to.pageId, turn.abort.signal)
