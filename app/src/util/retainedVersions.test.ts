@@ -3,9 +3,11 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { closeDbForTests } from "./idb";
 import { listRecoveryCopies, readRecoveryCopy, retainRecoveryCopy, type RecoveryCopy } from "./syncRecovery";
 import {
-  deleteBookRetainedCopies, deleteRetainedCopies, resetRetainedVersionCache, trashRetainedCopy, untrashRetainedCopy,
+  bookBytes, deleteBookRetainedCopies, deleteRetainedCopies, resetRetainedVersionCache, trashRetainedCopy, untrashRetainedCopy,
   versionBytes, versionsByBook,
 } from "./retainedVersions";
+import { readBookData, readSummaries } from "./retainedRead";
+import { putContent } from "./contentStore";
 
 const board = { v: 1 as const, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } };
 // A 2 MB PDF: the length rides in the hash's last segment, base 36.
@@ -97,5 +99,47 @@ describe("retained copies as numbered versions", () => {
     await retainRecoveryCopy(record("b", "book", 2, "snapshot-restore"));
     const rows = (await versionsByBook("annotate")).versions.get("book")!;
     expect(rows.map(row => row.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("reading off the main thread", () => {
+  /** A worker that answers in-process, as `retainedSizes.worker.ts` would. */
+  function fakeWorker(fail = false) {
+    const asks: string[] = [];
+    class FakeWorker {
+      onmessage: ((event: MessageEvent) => void) | null = null;
+      onerror: ((event: ErrorEvent) => void) | null = null;
+      postMessage(request: { id: number; op: string; keys?: IDBValidKey[]; kind?: "annotate"; bookId?: string }) {
+        asks.push(request.op);
+        if (fail) { queueMicrotask(() => this.onerror?.({ message: "boom" } as ErrorEvent)); return; }
+        const work = request.op === "summaries"
+          ? readSummaries(request.keys!).then(summaries => ({ id: request.id, summaries }))
+          : readBookData(request.kind!, request.bookId!).then(bytes => ({ id: request.id, bytes }));
+        void work.then(reply => this.onmessage?.({ data: reply } as MessageEvent));
+      }
+      terminate() {}
+    }
+    vi.stubGlobal("Worker", FakeWorker);
+    return asks;
+  }
+
+  it("asks the worker for summaries and sizes, and agrees with reading them here", async () => {
+    await retainRecoveryCopy(record("a", "book", 1, "snapshot-restore"));
+    await putContent("book", { source: "x".repeat(500) });
+    const here = { rows: (await versionsByBook("annotate")).versions.get("book")!, bytes: await bookBytes("annotate", "book", 1) };
+    resetRetainedVersionCache();
+    const asks = fakeWorker();
+    const rows = (await versionsByBook("annotate")).versions.get("book")!;
+    const bytes = await bookBytes("annotate", "book", 2);
+    expect(asks).toEqual(["summaries", "book"]);
+    expect(rows).toEqual(here.rows);
+    expect(bytes).toBe(here.bytes);
+  });
+
+  it("reads here instead when the worker fails", async () => {
+    await retainRecoveryCopy(record("a", "book", 1, "snapshot-restore"));
+    const asks = fakeWorker(true);
+    expect((await versionsByBook("annotate")).versions.get("book")!.map(row => row.id)).toEqual(["a"]);
+    expect(asks).toEqual(["summaries"]);
   });
 });
