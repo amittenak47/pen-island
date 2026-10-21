@@ -83,14 +83,44 @@ export const MARKS_THROUGH = 0.4;
 
 /** An edge picture's part outside the page, drawn in page coordinates. */
 function drawEdge(ctx: CanvasRenderingContext2D, edge: TurnEdge, W: number, H: number): void {
-  const { pad } = edge;
-  ctx.save();
-  ctx.beginPath();
-  ctx.rect(-pad, -pad, W + 2 * pad, H + 2 * pad);
-  ctx.rect(0, 0, W, H);
-  ctx.clip("evenodd");
-  ctx.drawImage(edge.image, -pad, -pad, W + 2 * pad, H + 2 * pad);
-  ctx.restore();
+  drawEdgeIn(ctx, edge, W, H, -edge.pad, W + edge.pad, -edge.pad, H + edge.pad);
+}
+
+/**
+ * The part of an edge picture outside the page and inside `x0`–`x1`,
+ * `y0`–`y1` (page coordinates).
+ *
+ * Copied as at most four plain rectangles, the bands above and below the page
+ * and the columns beside it, each from its own part of the picture. The whole
+ * picture used to be drawn through a ring-shaped path clip instead, and a
+ * sheet held by its side did that twice for every one of its rows: 96 clipped
+ * draws of the whole picture a frame, which the tablet could not keep up with.
+ */
+function drawEdgeIn(
+  ctx: CanvasRenderingContext2D,
+  edge: TurnEdge,
+  W: number,
+  H: number,
+  x0: number,
+  x1: number,
+  y0: number,
+  y1: number,
+): void {
+  const { image, pad } = edge;
+  const { width: iw, height: ih } = image as { width: number; height: number };
+  if (!(iw > 0 && ih > 0)) return;
+  const kx = iw / (W + 2 * pad);
+  const ky = ih / (H + 2 * pad);
+  const part = (left: number, top: number, right: number, bottom: number) => {
+    const l = Math.max(left, x0), r = Math.min(right, x1);
+    const t = Math.max(top, y0), b = Math.min(bottom, y1);
+    if (r <= l || b <= t) return;
+    ctx.drawImage(image, (l + pad) * kx, (t + pad) * ky, (r - l) * kx, (b - t) * ky, l, t, r - l, b - t);
+  };
+  part(-pad, -pad, W + pad, 0);
+  part(-pad, H, W + pad, H + pad);
+  part(-pad, 0, 0, H);
+  part(W, 0, W + pad, H);
 }
 
 /** The page being turned to: its tabs come in as the sheet comes off it. */
@@ -258,18 +288,20 @@ function paintSideFold(ctx: CanvasRenderingContext2D, frame: TurnFrame): number 
       for (const [image, alpha] of [[frame.from, PRINT_THROUGH], [frame.fromMarks ?? null, MARKS_THROUGH]] as const) {
         if (!image) continue;
         ctx.globalAlpha = alpha;
+        // Each row copies only its own rows of the picture. Drawing the whole
+        // picture into a row-high clip, 192 times a frame, is what held a
+        // turn below the panel's rate; the pixels that land are the same.
+        const base = ctx.getTransform();
+        const k = frame.sourceHeight / H;
         for (let j = 0; j < rows; j += 1) {
           const y0 = snap((H * j) / rows);
           const y1 = snap((H * (j + 1)) / rows);
+          if (y1 <= y0) continue;
           const x = foldAt((y0 + y1) / 2);
-          ctx.save();
-          ctx.beginPath();
-          ctx.rect(-W, y0, 3 * W, y1 - y0);
-          ctx.clip();
           ctx.translate(2 * x, 0);
           ctx.scale(-1, 1);
-          drawSlice(ctx, frame, image, 0, 1, 0, W);
-          ctx.restore();
+          ctx.drawImage(image, 0, y0 * k, frame.sourceWidth, (y1 - y0) * k, 0, y0, W, y1 - y0);
+          ctx.setTransform(base);
         }
       }
       ctx.globalAlpha = 1;
@@ -308,20 +340,12 @@ function paintSideFold(ctx: CanvasRenderingContext2D, frame: TurnFrame): number 
       const x = f.fold[i]!.x;
       const y0 = i === 0 ? -edge.pad : top(i);
       const y1 = i === SIDE_ROWS - 1 ? H + edge.pad : top(i + 1);
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(-edge.pad, y0, x + edge.pad, y1 - y0);
-      ctx.clip();
-      drawEdge(ctx, edge, W, H);
-      ctx.restore();
+      drawEdgeIn(ctx, edge, W, H, -edge.pad, x, y0, y1);
       ctx.save();
       clipToBinding(ctx, H);
       ctx.translate(2 * x, 0);
       ctx.scale(-1, 1);
-      ctx.beginPath();
-      ctx.rect(x, y0, W + edge.pad - x, y1 - y0);
-      ctx.clip();
-      drawEdge(ctx, edge, W, H);
+      drawEdgeIn(ctx, edge, W, H, x, W + edge.pad, y0, y1);
       ctx.restore();
     }
   }
