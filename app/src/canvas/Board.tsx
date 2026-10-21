@@ -410,6 +410,9 @@ import { sectionPages, type TextBlock } from "./pageTurn/sectionPages";
 const TEXT_PAGE_BLOCKS =
   "p, h1, h2, h3, h4, h5, h6, li, pre, blockquote, tr, hr, img, figure, .katex-display, dt, dd";
 
+/** How long an in-page link's jump glides. */
+const PAN_BY_MS = 320;
+
 /** Margin around the composite, so ink at the edge isn't flush with it. */
 const EXPORT_PADDING = 10;
 
@@ -10235,6 +10238,37 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         ink.setOps(next, { frames: toFrames, preserveIds: true });
         inkSpreadRef.current = null;
         return true;
+      },
+      panBy: (dy) => {
+        // The wheel's camera: pending, then live, then the last committed one.
+        const pending = pendingVisualScrollRef.current;
+        const live = liveCameraRef.current;
+        const committed = committedPanCameraRef.current;
+        const zoom = Math.max(0.05, live?.zoom ?? committed.zoom);
+        const fromY = pending ? pending.scrollY : live != null ? live.scrollY : committed.scrollY;
+        const lockX = scrollModeRef.current ? lockedScrollXRef.current : null;
+        const fromX = lockX ?? (pending ? pending.scrollX : live != null ? live.scrollX : committed.scrollX);
+        const to = clampPanScroll(fromX, fromY - dy / zoom, zoom);
+        const toX = lockX ?? to.scrollX;
+        userAdjustedCameraRef.current = true;
+        stopPanInertia();
+        const place = (x: number, y: number) => {
+          if (!liveCameraRef.current?.live) applyVisualScrollNowRef.current(x, y);
+          else scheduleVisualScrollRef.current(x, y);
+        };
+        if (typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          place(toX, to.scrollY);
+          return;
+        }
+        // On the coast's frame handle, so a finger that lands mid-glide stops it.
+        const t0 = performance.now();
+        const step = (now: number) => {
+          const t = Math.min(1, (now - t0) / PAN_BY_MS);
+          const k = 1 - Math.pow(1 - t, 3);
+          place(fromX + (toX - fromX) * k, fromY + (to.scrollY - fromY) * k);
+          inertiaFrameRef.current = t < 1 ? requestAnimationFrame(step) : 0;
+        };
+        inertiaFrameRef.current = requestAnimationFrame(step);
       },
       restoreView: (saved) => {
         const api = apiRef.current;

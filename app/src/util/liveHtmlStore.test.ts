@@ -7,7 +7,8 @@ beforeEach(() => vi.stubGlobal("indexedDB", new IDBFactory()));
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllGlobals(); });
 
 it("keeps frozen HTML keys identical to hashMarkdown", () => {
-  expect(liveOriginalKey("<p>Still copy</p>")).toBe(hashMarkdown("<p>Still copy</p>"));
+  // The original's own hash, which is a local HTML file's `localFileHash`.
+  expect(liveOriginalKey("<p>Original</p>")).toBe(hashMarkdown("<p>Original</p>"));
 });
 
 it("resolves harmlessly when IndexedDB is missing", async () => {

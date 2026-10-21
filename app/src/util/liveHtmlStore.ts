@@ -74,6 +74,14 @@ export async function getLiveOriginal(key: string): Promise<string | null> {
   finally { try { db?.close(); } catch { /* Live storage is optional. */ } }
 }
 
-export function liveOriginalKey(frozenHtml: string): string {
-  return hashMarkdown(frozenHtml);
+/**
+ * The original's own hash: what a local HTML file's `localFileHash` already
+ * is, at open and after a newer version replaces it.
+ *
+ * Not the still copy's: that is saved after small rewrites of its own, so the
+ * copy in the library never hashed the same as the one the freeze returned,
+ * and no original was ever found.
+ */
+export function liveOriginalKey(original: string): string {
+  return hashMarkdown(original);
 }

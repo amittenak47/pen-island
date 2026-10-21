@@ -365,6 +365,11 @@ export interface BoardHandle {
    * single-page docs restore scroll/zoom as written.
    */
   restoreView(saved: { scrollX: number; scrollY: number; zoom: number; pdfPage?: number }): void;
+  /**
+   * Glide the page `dy` screen pixels down (up when negative), as the wheel
+   * moves it: an in-page link's jump. A touch stops it like a coast.
+   */
+  panBy(dy: number): void;
   /** Recolor template scaffolding for the current theme (after restore/seed). */
   applyThemeInk(themeId: string): void;
   /** Drop all coach viz elements — used before re-applying from chat drawings. */

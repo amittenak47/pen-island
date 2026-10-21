@@ -20,12 +20,24 @@ export interface WebDocumentProps {
   live?: string | null;
   onMeasure?: (height: number) => void;
   selectable?: boolean;
+  /** An in-page link was followed: bring its target, now at this client y, into view. */
+  onAnchor?: (clientY: number) => void;
   /** Reading-mode taps on links fetch a new snapshot instead of leaving the app. */
   onNavigate?: (url: string) => void;
   /** Vite / fetch_html GET — page JS never ran. */
   source?: WebHtmlSource;
   /** Why the rendered capture was not used. Surfaced in the address bar. */
   note?: string;
+}
+
+/** The element an in-page `#name` link points at: by id, else by `name`. */
+function anchorTarget(root: ParentNode, href: string): Element | null {
+  let name = href.slice(1);
+  try { name = decodeURIComponent(name); } catch { /* the raw name is the next best guess */ }
+  if (!name) return null;
+  // Compared, not put in a selector: ids from the wild need no escaping then.
+  const marked = [...root.querySelectorAll("[id], [name]")];
+  return marked.find((el) => el.id === name) ?? marked.find((el) => el.getAttribute("name") === name) ?? null;
 }
 
 export function WebDocument({
@@ -36,6 +48,7 @@ export function WebDocument({
   onMeasure,
   selectable = false,
   onNavigate,
+  onAnchor,
   source,
 }: WebDocumentProps) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
@@ -43,6 +56,8 @@ export function WebDocument({
   onMeasureRef.current = onMeasure;
   const onNavigateRef = useRef(onNavigate);
   onNavigateRef.current = onNavigate;
+  const onAnchorRef = useRef(onAnchor);
+  onAnchorRef.current = onAnchor;
   const localFileRef = useRef(localFile);
   localFileRef.current = localFile;
   const [liveMeasurement, setLiveMeasurement] = useState<{ original: string; height: number } | null>(null);
@@ -90,7 +105,14 @@ export function WebDocument({
       if (!anchor) return;
       event.preventDefault();
       const href = anchor.getAttribute("href");
-      if (localFileRef.current || !href || href.startsWith("#") || href.startsWith("mailto:")) return;
+      // A contents list's own links: the page has no scroll of its own, so
+      // the board brings the target up.
+      if (href?.startsWith("#")) {
+        const at = anchorTarget(node, href);
+        if (at) onAnchorRef.current?.(at.getBoundingClientRect().top);
+        return;
+      }
+      if (localFileRef.current || !href || href.startsWith("mailto:")) return;
       onNavigateRef.current?.(href);
     };
     // A middle click on a link would open it in a new window: links open
@@ -129,7 +151,7 @@ export function WebDocument({
         // eslint-disable-next-line react/no-danger -- sanitised in fetchWebPage
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      {live && <LiveHtmlFrame original={live} onHeight={onLiveHeight} />}
+      {live && <LiveHtmlFrame original={live} onHeight={onLiveHeight} onAnchor={onAnchor} />}
     </div>
   );
 }

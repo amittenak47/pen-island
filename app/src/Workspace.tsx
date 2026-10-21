@@ -139,6 +139,8 @@ import { ensureTypingImports } from "./util/pythonImports";
 
 /** Room under the last line of code so a note fits below it. */
 const CODE_PAGE_TAIL = 160;
+/** An HTML page's `#` link leaves its target this far under the top of the board. */
+const WEB_ANCHOR_MARGIN_PX = 16;
 const newerDocSources = new Set<string>();
 const pendingSourcePrompts = new Map<string, { name: string; content: Awaited<ReturnType<typeof checkDocSource>>; linking?: boolean; documentName?: string }>();
 import { WhiteboardLibraryDialog } from "./modes/WhiteboardLibraryDialog";
@@ -227,7 +229,7 @@ import { footnoteNoteTab } from "./modes/FootnoteNoteWorkspace";
 import { loadMiniNotePlacements, saveMiniNotePlacements, MINI_NOTE_RESTORE_EVENT, takeMiniNoteRestore, type MiniNotePlacements } from "./util/miniNoteWindows";
 import { EpubDocument } from "./modes/EpubDocument";
 import { WebDocument } from "./modes/WebDocument";
-import { getLiveOriginal, liveOriginalKey } from "./util/liveHtmlStore";
+import { getLiveOriginal } from "./util/liveHtmlStore";
 import {
   canStepWeb,
   currentEntry,
@@ -864,13 +866,19 @@ export const Workspace = memo(function Workspace({
     } catch { /* Live still works when device preferences cannot be saved. */ }
     setLiveChoice(choice);
     if (annotateSource?.docType === "web" && annotateSource.localFileHash) {
-      void getLiveOriginal(liveOriginalKey(annotateSource.text)).then((original) => {
+      void getLiveOriginal(annotateSource.localFileHash).then((original) => {
         if (!stale) setLiveOriginal(original);
       });
     }
     return () => { stale = true; };
   }, [annotateSource]);
   const liveOn = Boolean(liveOriginal) && liveChoice !== "off";
+  /** An HTML page's own `#` link: glide its target to just under the top of the board. */
+  const onWebAnchor = useCallback((clientY: number) => {
+    const board = document.querySelector(`[data-lc-tab="${cssEscape(tab.id)}"] .lc-board`);
+    const top = board?.getBoundingClientRect().top ?? 0;
+    boardRef.current?.panBy(clientY - top - WEB_ANCHOR_MARGIN_PX);
+  }, [tab.id]);
   const onToggleLive = useCallback(() => {
     if (!annotateSource) return;
     const choice = liveOn ? "off" : null;
@@ -10915,6 +10923,7 @@ export const Workspace = memo(function Workspace({
                       url={annotateSource.name}
                       localFile={Boolean(annotateSource.localFileHash)}
                       live={liveOn ? liveOriginal : null}
+                      onAnchor={onWebAnchor}
                       source={webHtmlSource ?? undefined}
                       note={webHtmlNote ?? undefined}
                       onMeasure={onMdInkMeasure}
