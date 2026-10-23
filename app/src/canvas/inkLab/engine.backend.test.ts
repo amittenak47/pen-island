@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { createInkLabEngine } from "./engine";
 
@@ -46,6 +46,8 @@ function fake2d(canvas: FakeCanvas): CanvasRenderingContext2D {
 
 let webgl: ((attrs?: WebGLContextAttributes) => WebGL2RenderingContext | null) = () => null;
 
+const created: FakeCanvas[] = [];
+
 class FakeCanvas {
   width: number;
   height: number;
@@ -54,6 +56,7 @@ class FakeCanvas {
   drawn: unknown[] = [];
   gl: WebGL2RenderingContext | null = null;
   constructor(w = 240, h = 160) {
+    created.push(this);
     this.width = w;
     this.height = h;
     this.clientWidth = w;
@@ -108,6 +111,91 @@ describe("ink lab backend selection", () => {
     engine.paint();
     expect(gl.calls.filter((c) => c === "drawArraysInstanced")).toHaveLength(1);
     engine.destroy();
+  });
+
+  it("redraws only the capsules near the tail as a long stroke grows", () => {
+    const gl: GlStub = { lost: false, failCompile: false, calls: [], args: [] };
+    webgl = () => fakeGl(gl);
+    const host = new FakeCanvas(2400, 300) as unknown as HTMLCanvasElement;
+    const engine = createInkLabEngine();
+    engine.attach(host);
+    engine.down({ x: 20, y: 100, p: 0.5, t: 0 });
+    let x = 20, t = 0;
+    for (let frame = 0; frame < 40; frame++) {
+      const batch = [];
+      for (let i = 0; i < 8; i++) batch.push({ x: (x += 6), y: 100, p: 0.5, t: (t += 4) });
+      engine.move(batch);
+      engine.paint();
+    }
+    engine.move([1, 2, 3].map(() => ({ x: (x += 6), y: 100, p: 0.5, t: (t += 4) })));
+    gl.args!.length = 0;
+    const stats = engine.paint();
+    const drawn = gl.args!.filter(([k]) => k === "drawArraysInstanced").map(([, a]) => a[3] as number);
+    expect(stats.segs).toBeGreaterThan(250);
+    expect(drawn.length).toBeGreaterThan(0);
+    expect(drawn.reduce((s, n) => s + n, 0)).toBeLessThan(40);
+    // The GL surface covers the tail box, not the 2400px host.
+    const surface = created.find((c) => c.gl != null && c !== (host as unknown as FakeCanvas))!;
+    expect(surface.width).toBeLessThan(300);
+    expect(surface.height).toBeLessThan(200);
+    engine.destroy();
+  });
+
+  it("still redraws an old part of the stroke that the tail crosses", () => {
+    const gl: GlStub = { lost: false, failCompile: false, calls: [], args: [] };
+    webgl = () => fakeGl(gl);
+    const host = new FakeCanvas(1200, 400) as unknown as HTMLCanvasElement;
+    const engine = createInkLabEngine();
+    engine.attach(host);
+    engine.down({ x: 100, y: 200, p: 0.5, t: 0 });
+    let t = 0;
+    const go = (pts: [number, number][]) => {
+      for (const [x, y] of pts) { engine.move([{ x, y, p: 0.5, t: (t += 6) }]); engine.paint(); }
+    };
+    // Right along y=200, a loop down, then up through the first stretch.
+    go(Array.from({ length: 80 }, (_, i) => [100 + i * 8, 200] as [number, number]));
+    go(Array.from({ length: 30 }, (_, i) => [740 - i * 2, 200 + i * 6] as [number, number]));
+    go(Array.from({ length: 30 }, (_, i) => [680 - i * 16, 380 - i * 6] as [number, number]));
+    gl.args!.length = 0;
+    go([[180, 190], [170, 185]]);
+    const drawCalls = gl.args!.filter(([k]) => k === "drawArraysInstanced").length;
+    // The tail's own run plus the run it lies over near the start.
+    expect(drawCalls).toBeGreaterThanOrEqual(2 * 2);
+    engine.destroy();
+  });
+
+  it("hands each live frame over as a transferred bitmap from an unpreserved OffscreenCanvas", () => {
+    const gl: GlStub = { lost: false, failCompile: false, calls: [] };
+    let attrs: WebGLContextAttributes | undefined;
+    const frames: { closed: boolean }[] = [];
+    class FakeOffscreen {
+      constructor(public width: number, public height: number) {}
+      getContext(kind: string, a?: WebGLContextAttributes) {
+        if (kind !== "webgl2") return null;
+        attrs = a;
+        return fakeGl(gl);
+      }
+      transferToImageBitmap() {
+        const frame = { closed: false, close() { this.closed = true; } };
+        frames.push(frame);
+        return frame;
+      }
+    }
+    vi.stubGlobal("OffscreenCanvas", FakeOffscreen);
+    try {
+      const host = new FakeCanvas() as unknown as HTMLCanvasElement & FakeCanvas;
+      const engine = createInkLabEngine();
+      expect(engine.attach(host)).toBe("webgl2");
+      expect(attrs?.preserveDrawingBuffer).toBe(false);
+      stroke(engine);
+      engine.paint();
+      expect(frames.length).toBeGreaterThan(0);
+      expect(host.drawn).toContain(frames[frames.length - 1]);
+      expect(frames.every((f) => f.closed)).toBe(true);
+      engine.destroy();
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   it("falls back to the 2D strip when the capsule shader will not compile", () => {

@@ -23,6 +23,7 @@ layout(location=4) in float a_r1;
 layout(location=5) in vec3 a_c0;
 layout(location=6) in vec3 a_c1;
 uniform vec2 u_view;
+uniform vec2 u_origin;
 out vec2 v_p;
 out vec2 v_p0;
 out vec2 v_p1;
@@ -42,7 +43,9 @@ void main() {
   v_r1 = a_r1;
   v_c0 = a_c0;
   v_c1 = a_c1;
-  vec2 clip = (pos / u_view) * 2.0 - 1.0;
+  // Positions stay absolute (fwidth and the SDF see host pixels); the surface
+  // can be a small window onto the host starting at u_origin.
+  vec2 clip = ((pos - u_origin) / u_view) * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
 }
 `;
@@ -85,6 +88,11 @@ void main() {
 export type SdfRenderer = {
   canvas: HTMLCanvasElement;
   resize(w: number, h: number): void;
+  /**
+   * Host pixel at the surface's top-left. Instances and boxes stay in host
+   * pixels, so a small surface can render any window of a large host.
+   */
+  setOrigin(x: number, y: number): void;
   upload(data: Float32Array, count: number): void;
   /**
    * Write hops `[from, count)` into the instance buffer.
@@ -98,6 +106,8 @@ export type SdfRenderer = {
   erase(aabb: StrokeAabb): void;
   /** Draw instances from `from` scissored to `aabb`. Does not clear. */
   redraw(aabb: StrokeAabb, from?: number): void;
+  /** Draw instance ranges, flat `[from, to)` pairs, scissored to `aabb`. Does not clear. */
+  redrawRanges(aabb: StrokeAabb, ranges: readonly number[]): void;
   clear(): void;
   isLost(): boolean;
   destroy(): void;
@@ -132,6 +142,11 @@ export function tryCreateSdfRenderer(
   w: number,
   h: number,
   peer: (w: number, h: number) => HTMLCanvasElement | null,
+  /**
+   * `preserve: false` for a surface that is fully redrawn before every read:
+   * a preserved buffer has to be copied and synced each time 2D reads it.
+   */
+  { preserve = true }: { preserve?: boolean } = {},
 ): SdfRenderer | null {
   const canvas = makeGlCanvas(w, h, peer);
   if (!canvas) return null;
@@ -143,7 +158,7 @@ export function tryCreateSdfRenderer(
       alpha: true,
       antialias: false,
       premultipliedAlpha: true,
-      preserveDrawingBuffer: true,
+      preserveDrawingBuffer: preserve,
       depth: false,
     }) as WebGL2RenderingContext | null;
   } catch {
@@ -162,6 +177,7 @@ export function tryCreateSdfRenderer(
   if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) return null;
   gl.useProgram(prog);
   const uView = gl.getUniformLocation(prog, "u_view");
+  const uOrigin = gl.getUniformLocation(prog, "u_origin");
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -202,6 +218,8 @@ export function tryCreateSdfRenderer(
   let instCap = 32;
   let viewW = canvas.width;
   let viewH = canvas.height;
+  let originX = 0;
+  let originY = 0;
   gl.bindBuffer(gl.ARRAY_BUFFER, inst);
   gl.bufferData(gl.ARRAY_BUFFER, instCap * stride, gl.DYNAMIC_DRAW);
 
@@ -223,10 +241,10 @@ export function tryCreateSdfRenderer(
 
   const scissorAabb = (aabb: StrokeAabb) => {
     const pad = SDF_SCISSOR_PAD;
-    const x0 = Math.max(0, Math.floor(aabb.minX) - pad);
-    const y0 = Math.max(0, Math.floor(aabb.minY) - pad);
-    const x1 = Math.min(viewW, Math.ceil(aabb.maxX) + pad);
-    const y1 = Math.min(viewH, Math.ceil(aabb.maxY) + pad);
+    const x0 = Math.max(0, Math.floor(aabb.minX - originX) - pad);
+    const y0 = Math.max(0, Math.floor(aabb.minY - originY) - pad);
+    const x1 = Math.min(viewW, Math.ceil(aabb.maxX - originX) + pad);
+    const y1 = Math.min(viewH, Math.ceil(aabb.maxY - originY) + pad);
     if (x1 <= x0 || y1 <= y0) {
       gl!.disable(gl.SCISSOR_TEST);
       return;
@@ -259,6 +277,10 @@ export function tryCreateSdfRenderer(
   return {
     canvas,
     resize,
+    setOrigin(x, y) {
+      originX = x;
+      originY = y;
+    },
     upload(data, n) {
       count = Math.max(0, n);
       growInst(Math.max(count, 1));
@@ -301,6 +323,7 @@ export function tryCreateSdfRenderer(
       gl!.viewport(0, 0, viewW, viewH);
       gl!.useProgram(prog);
       gl!.uniform2f(uView, viewW, viewH);
+      gl!.uniform2f(uOrigin, originX, originY);
       gl!.bindVertexArray(vao);
       bindInstAt(index);
       scissorAabb(aabb);
@@ -324,6 +347,7 @@ export function tryCreateSdfRenderer(
       }
       gl!.useProgram(prog);
       gl!.uniform2f(uView, viewW, viewH);
+      gl!.uniform2f(uOrigin, originX, originY);
       gl!.bindVertexArray(vao);
       bindInstAt(0);
       gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, count);
@@ -342,10 +366,29 @@ export function tryCreateSdfRenderer(
       gl!.viewport(0, 0, viewW, viewH);
       gl!.useProgram(prog);
       gl!.uniform2f(uView, viewW, viewH);
+      gl!.uniform2f(uOrigin, originX, originY);
       gl!.bindVertexArray(vao);
       bindInstAt(start);
       scissorAabb(aabb);
       gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+      bindInstAt(0);
+      gl!.disable(gl.SCISSOR_TEST);
+    },
+    redrawRanges(aabb, ranges) {
+      if (ranges.length < 2) return;
+      gl!.viewport(0, 0, viewW, viewH);
+      gl!.useProgram(prog);
+      gl!.uniform2f(uView, viewW, viewH);
+      gl!.uniform2f(uOrigin, originX, originY);
+      gl!.bindVertexArray(vao);
+      scissorAabb(aabb);
+      for (let k = 0; k + 1 < ranges.length; k += 2) {
+        const start = Math.max(0, Math.min(ranges[k]!, count));
+        const end = Math.max(start, Math.min(ranges[k + 1]!, count));
+        if (end <= start) continue;
+        bindInstAt(start);
+        gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, end - start);
+      }
       bindInstAt(0);
       gl!.disable(gl.SCISSOR_TEST);
     },

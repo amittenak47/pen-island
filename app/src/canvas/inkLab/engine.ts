@@ -236,6 +236,20 @@ function peerFactory(
   };
 }
 
+/**
+ * The live GL surface. An OffscreenCanvas can hand each frame to the 2D host
+ * with transferToImageBitmap: no copy and no sync stall, where drawing a
+ * just-rendered GL canvas into 2D held the tablet at ~60 of 90 Hz.
+ */
+function liveSurfacePeer(
+  fallback: (w: number, h: number) => HTMLCanvasElement | null,
+): (w: number, h: number) => HTMLCanvasElement | null {
+  const g = globalThis as { OffscreenCanvas?: new (w: number, h: number) => OffscreenCanvas };
+  if (typeof g.OffscreenCanvas !== "function") return fallback;
+  const Offscreen = g.OffscreenCanvas;
+  return (w, h) => new Offscreen(Math.max(1, w), Math.max(1, h)) as unknown as HTMLCanvasElement;
+}
+
 function dprOf(canvas: HTMLCanvasElement): number {
   const css = Math.max(1, canvas.clientWidth || canvas.width);
   return Math.max(1, canvas.width / css);
@@ -921,7 +935,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       const w = Math.max(1, el.width || 1);
       const h = Math.max(1, el.height || 1);
       // WebGL2 first. The 2D strip is only for a GPU that will not start.
-      const sdf = allowSdf ? tryCreateSdfRenderer(w, h, peer) : null;
+      const sdf = allowSdf ? tryCreateSdfRenderer(w, h, liveSurfacePeer(peer), { preserve: false }) : null;
       if (sdf) {
         gpu = createLiveSdf(sdf);
         backend = "webgl2";
