@@ -118,7 +118,7 @@ export function createLiveSdf(sdf: SdfRenderer) {
     if (typeof surface.transferToImageBitmap === "function") {
       const frame = surface.transferToImageBitmap();
       dest.drawImage(frame, sx, sy, w, h, dx, dy, w, h);
-      frame.close();
+      (frame as Partial<ImageBitmap>).close?.();
       return;
     }
     dest.drawImage(sdf.canvas, sx, sy, w, h, dx, dy, w, h);

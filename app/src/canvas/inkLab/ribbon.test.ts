@@ -47,6 +47,37 @@ describe("board pen ribbon", () => {
     }
   });
 
+  it("fills a stroke that doubles back on itself: no zero-winding holes, no spikes", () => {
+    const c = canvas(800, 300), ctx = c.getContext("2d")!;
+    // Back and forth, densely sampled as a smoothed stroke is, colour varying.
+    const points: SpineDot[] = Array.from({ length: 400 }, (_, i) => {
+      const u = i / 399;
+      return { x: 400 + 300 * Math.sin(2 * Math.PI * 4 * u), y: 60 + 160 * u, r: 14,
+        rgb: [60 + (i % 9) * 8, 20, 80] as [number, number, number] };
+    });
+    fillMiterStroke(ctx, points, null, [0, 0, 0]);
+    const d = ctx.getImageData(0, 0, 800, 300).data;
+    const near = (x: number, y: number, slack: number) => {
+      let best = Infinity;
+      for (let i = 1; i < points.length; i++) {
+        const a = points[i - 1]!, b = points[i]!;
+        const dx = b.x - a.x, dy = b.y - a.y, l2 = dx * dx + dy * dy || 1;
+        const t = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / l2));
+        best = Math.min(best, Math.hypot(x - a.x - dx * t, y - a.y - dy * t));
+      }
+      return best <= a0r + slack;
+    };
+    const a0r = 14;
+    let holes = 0, spikes = 0;
+    for (let y = 0; y < 300; y += 2) for (let x = 0; x < 800; x += 2) {
+      const alpha = d[(y * 800 + x) * 4 + 3]!;
+      if (alpha < 250 && near(x, y, -3)) holes++;
+      if (alpha > 0 && !near(x, y, 2)) spikes++;
+    }
+    expect(holes).toBe(0);
+    expect(spikes).toBe(0);
+  });
+
   it("paints the live 2D tail without seams where frames meet", () => {
     const host = canvas(), snap = canvas();
     const ribbon = createLiveRibbon();

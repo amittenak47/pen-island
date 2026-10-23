@@ -169,6 +169,33 @@ function miterEdge(spine: readonly SpineDot[], i: number): [number, number] {
   return [ux * radius, uy * radius];
 }
 
+/** Unit normal of the nearest non-zero hop from dot `i`, walking `step` (+1 or -1). */
+function hopNormal(spine: readonly SpineDot[], i: number, step: 1 | -1): [number, number] | null {
+  const p = spine[i]!;
+  for (let k = i + step; k >= 0 && k < spine.length; k += step) {
+    const q = spine[k]!;
+    const dx = step > 0 ? q.x - p.x : p.x - q.x, dy = step > 0 ? q.y - p.y : p.y - q.y;
+    const len = Math.hypot(dx, dy);
+    if (len > 1e-4) return [-dy / len, dx / len];
+  }
+  return null;
+}
+
+/**
+ * A turn sharper than this splits the strip at the dot. There the miter
+ * vertex is clamped and can point almost along the stroke, twisting a quad
+ * into a backwards bow-tie whose zero winding cut holes in the edges where
+ * the pen doubles back. Each side ends on its own normal and a disc rounds
+ * the turn.
+ */
+const SHARP_TURN_COS = -0.3;
+
+function sharpJoint(spine: readonly SpineDot[], i: number): boolean {
+  if (i <= 0 || i >= spine.length - 1) return false;
+  const n1 = hopNormal(spine, i, -1), n2 = hopNormal(spine, i, 1);
+  return !!n1 && !!n2 && n1[0] * n2[0] + n1[1] * n2[1] < SHARP_TURN_COS;
+}
+
 function circle(ctx: CanvasRenderingContext2D, p: SpineDot): void {
   ctx.moveTo(p.x + p.r, p.y);
   // Same winding as the strip, so a cap overlaps rather than cuts it out.
@@ -185,12 +212,29 @@ function outline(
   capHead: boolean,
   capEnd: boolean,
 ): void {
+  const discs = new Set<number>();
   for (const [from, to] of spans) {
     for (let i = from; i < to; i++) {
       const a = spine[i]!, b = spine[i + 1]!;
-      if (Math.hypot(b.x - a.x, b.y - a.y) < 1e-4) continue;
-      let [ax, ay] = miterEdge(spine, i), [bx, by] = miterEdge(spine, i + 1);
+      const len = Math.hypot(b.x - a.x, b.y - a.y);
+      if (len < 1e-4) continue;
       const nx = a.y - b.y, ny = b.x - a.x;
+      const own = (p: SpineDot): [number, number] => [nx / len * p.r, ny / len * p.r];
+      let [ax, ay] = sharpJoint(spine, i) ? own(a) : miterEdge(spine, i);
+      let [bx, by] = sharpJoint(spine, i + 1) ? own(b) : miterEdge(spine, i + 1);
+      // Where the curve is tighter than the nib, neighbouring miter vertices
+      // cross and an edge of this quad runs backwards: zero winding again.
+      // Such a quad stands on its own normal, and discs close its ends.
+      const hx = b.x - a.x, hy = b.y - a.y;
+      const flipA = ax * nx + ay * ny < 0 ? -1 : 1, flipB = bx * nx + by * ny < 0 ? -1 : 1;
+      const e1 = (hx + bx * flipB - ax * flipA) * hx + (hy + by * flipB - ay * flipA) * hy;
+      const e2 = (hx - bx * flipB + ax * flipA) * hx + (hy - by * flipB + ay * flipA) * hy;
+      if (e1 <= 0 || e2 <= 0) {
+        [ax, ay] = own(a);
+        [bx, by] = own(b);
+        discs.add(i);
+        discs.add(i + 1);
+      }
       // A retrace reverses the geometric normal. Orient both ends to this
       // hop, otherwise the quad becomes a bow-tie with a transparent centre.
       if (ax * nx + ay * ny < 0) { ax = -ax; ay = -ay; }
@@ -200,6 +244,11 @@ function outline(
       ctx.lineTo(b.x - bx, b.y - by);
       ctx.lineTo(a.x - ax, a.y - ay);
       ctx.closePath();
+    }
+  }
+  for (const [from, to] of spans) {
+    for (let i = Math.max(1, from); i <= Math.min(spine.length - 2, to); i++) {
+      if (sharpJoint(spine, i) || discs.has(i)) circle(ctx, spine[i]!);
     }
   }
   const head = spine[0];
@@ -374,7 +423,7 @@ function fillLayered(
   if (typeof offscreen.transferToImageBitmap === "function") {
     const frame = offscreen.transferToImageBitmap();
     ctx.drawImage(frame, 0, 0, w, h, bx, by, w, h);
-    frame.close();
+    (frame as Partial<ImageBitmap>).close?.();
   } else {
     ctx.drawImage(pad.canvas, 0, 0, w, h, bx, by, w, h);
   }
