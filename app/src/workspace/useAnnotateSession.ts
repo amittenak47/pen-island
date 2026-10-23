@@ -19,6 +19,7 @@ import { annotateDocKey } from "../util/inkPageStore";
 import { messageOf, traceOpen } from "../util/messageOf";
 import { recordPadSnapshotsWithExtras } from "../util/padSnapshotExtras";
 import type { TabRecord } from "../util/tabs";
+import type { PdfFormValues } from "../modes/pdfForms";
 
 type AnnotateSessionArgs = Pick<ShellValue, "patchTab" | "setError"> & {
   tab: Pick<TabRecord, "id" | "kind">;
@@ -135,6 +136,12 @@ export function useAnnotateSession({ tab, boardRef, patchTab, setError }: Annota
   const annotatePristineHashRef = useRef<number | null>(null);
   /** Footnote revision at open / last explicit save — not merely "any footnotes". */
   const annotatePristineMarksRef = useRef("");
+  /**
+   * A fillable PDF's values, and what they were at open / last explicit save.
+   * Filling a form without inking is still work, so leaving offers to keep it.
+   */
+  const annotateFormFieldsRef = useRef<PdfFormValues>({});
+  const annotatePristineFormRef = useRef("{}");
   /** Asks whose pending mark has not yet been stored, so they must not be posted. */
   const heldFootnoteAsksRef = useRef<HeldFootnoteAsk[]>([]);
   const deliverHeldFootnoteAsksRef = useRef<
@@ -193,6 +200,7 @@ export function useAnnotateSession({ tab, boardRef, patchTab, setError }: Annota
     if (footnotesPendingSave(annotateFootnotesRef.current, annotatePristineMarksRef.current)) {
       return false;
     }
+    if (JSON.stringify(annotateFormFieldsRef.current) !== annotatePristineFormRef.current) return false;
     if (
       JSON.stringify(persistableAgentMessages(agentMessagesRef.current)) !==
       annotatePristineAgentRef.current
@@ -268,6 +276,7 @@ export function useAnnotateSession({ tab, boardRef, patchTab, setError }: Annota
       heldFootnoteAsksRef.current = delivered.keep;
       await deliverHeldFootnoteAsksRef.current(saved, delivered.send);
       annotatePristineAgentRef.current = JSON.stringify(persistableAgentMessages(agentMessages));
+      annotatePristineFormRef.current = JSON.stringify(annotateFormFieldsRef.current);
       await recordPadSnapshotsWithExtras({
             kind: "annotate",
             key: saved.id,
@@ -347,6 +356,7 @@ export function useAnnotateSession({ tab, boardRef, patchTab, setError }: Annota
     annotateHeight, setAnnotateHeight, annotateHeightRef, onMdInkMeasure,
     annotatePageWidth, setAnnotatePageWidth, annotatePageWidthRef,
     annotateBaselineRef, annotatePristineHashRef, annotatePristineMarksRef, annotatePristineAgentRef,
+    annotateFormFieldsRef, annotatePristineFormRef,
     heldFootnoteAsksRef, deliverHeldFootnoteAsksRef,
     createAnnotateUntouched, createSaveAnnotateSession,
     trackFootnoteBoardSaves, registerAnnotateFootnotes, mirrorAnnotateDocId, mirrorAnnotateTitle,

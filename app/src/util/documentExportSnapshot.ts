@@ -10,6 +10,7 @@ import type { DocFootnote } from "./docFootnotes";
 import type { DocType } from "./annotateStore";
 import type { AgentChatMessage } from "../modes/AgentSidePanel";
 import { compositePageLayers } from "../canvas/exportPageComposite";
+import type { PdfFormValues } from "../modes/pdfForms";
 
 export interface ExportSource { name: string; text: string; hash: string; docType: DocType; bytes?: ArrayBuffer | null }
 export interface ExportScope { id: string; bounds: SceneBounds; page?: number; right?: boolean; spread?: boolean; blocks: {text: string; y: number}[] }
@@ -20,6 +21,8 @@ export interface ExportSnapshot {
   readInk(pageId: number): Promise<InkOp[]>;
   hosts: ReturnType<typeof scrollHostLookupFromSlot>; zoom: number;
   renderContent?(ctx: CanvasRenderingContext2D, bounds: SceneBounds, scale: number): Promise<void>;
+  /** A fillable PDF's values, written into its form on export. */
+  formFields?: PdfFormValues;
 }
 
 /** Capture current layout and dirty ink without changing the reader's scroll position. */

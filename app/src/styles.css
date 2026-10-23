@@ -8797,6 +8797,38 @@ body[data-lc-sash-drag="horizontal"] {
   opacity: 1;
 }
 
+/* Fill form: the button is also the badge that says the PDF has fields. */
+.lc-form-fill-toggle {
+  position: relative;
+}
+
+.lc-form-fill-toggle .lc-form-fill-count {
+  position: absolute;
+  right: -3px;
+  top: -3px;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--surface);
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 15px;
+  text-align: center;
+  pointer-events: none;
+  transition: transform 160ms cubic-bezier(0.22, 1, 0.36, 1), opacity 160ms linear;
+}
+
+.lc-form-fill-toggle.is-active .lc-form-fill-count {
+  transform: scale(0.6);
+  opacity: 0;
+}
+
+.lc-form-fill-toggle.is-xfa {
+  opacity: 0.6;
+}
+
 .lc-spread-toggle .lc-spread-busy .lc-spinner {
   width: 16px;
   height: 16px;
@@ -21748,6 +21780,152 @@ button.lc-row-selected:hover:not(:disabled) {
   left: 0;
   height: 100%;
   pointer-events: none;
+}
+
+/*
+ * Form fields, in sheet coordinates under the ink. Outlines show only in Fill
+ * form mode and fade both ways; they never take the pointer — the pen tap is
+ * caught at the window (see `PdfFormFill`). A pending value is the new value
+ * shown until the page bitmap repaints with it, so it is always visible.
+ */
+.lc-pdf-form {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.lc-pdf-form-box {
+  position: absolute;
+  box-sizing: border-box;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 60%, transparent);
+  opacity: 0;
+  transition: opacity 180ms ease;
+}
+
+.lc-pdf-doc.is-form-fill .lc-pdf-form-box {
+  opacity: 1;
+}
+
+.lc-pdf-doc.is-form-fill .lc-pdf-form-box.is-readonly {
+  opacity: 0;
+}
+
+.lc-pdf-doc:not(.is-form-fill) .lc-pdf-form-box:has(.lc-pdf-form-pending) {
+  opacity: 1;
+  background: transparent;
+  box-shadow: none;
+}
+
+.lc-pdf-form-pending {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  padding: 0 2px;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #111;
+  font-family: Helvetica, Arial, sans-serif;
+  line-height: 1;
+  /* The bitmap underneath still shows the old value until it repaints. */
+  background: #fff;
+  animation: lc-pdf-form-pending-in 120ms ease both;
+}
+
+.lc-pdf-form-pending.is-multiline {
+  align-items: flex-start;
+  white-space: pre-wrap;
+  padding-top: 2px;
+}
+
+.lc-pdf-form-checkbox .lc-pdf-form-pending,
+.lc-pdf-form-radio .lc-pdf-form-pending {
+  justify-content: center;
+  padding: 0;
+}
+
+@keyframes lc-pdf-form-pending-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+.lc-pdf-form-editor {
+  position: fixed;
+  z-index: 232;
+  box-sizing: border-box;
+  transform-origin: 50% 0;
+}
+
+.lc-pdf-form-input {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  margin: 0;
+  padding: 4px 8px;
+  border: 1.5px solid var(--accent);
+  border-radius: 6px;
+  background: var(--panel);
+  color: var(--ink);
+  font-family: inherit;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+  outline: none;
+  resize: none;
+}
+
+.lc-pdf-form-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: min(320px, 50vh);
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--overlay-bg, var(--panel));
+  border: 1px solid var(--chrome-edge, var(--line));
+  border-radius: max(12px, var(--lc-r-round));
+  box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
+}
+
+.lc-pdf-form-option,
+.lc-pdf-form-done {
+  min-height: 38px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+
+.lc-pdf-form-option:hover {
+  background: color-mix(in srgb, var(--ink) 7%, transparent);
+}
+
+.lc-pdf-form-option.is-picked {
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  font-weight: 600;
+}
+
+.lc-pdf-form-done {
+  margin-top: 4px;
+  text-align: center;
+  background: var(--accent);
+  color: var(--surface);
+  font-weight: 600;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-pdf-form-box,
+  .lc-form-fill-toggle .lc-form-fill-count {
+    transition: none;
+  }
+  .lc-pdf-form-pending {
+    animation: none;
+  }
 }
 
 /*

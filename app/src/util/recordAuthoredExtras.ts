@@ -2,7 +2,7 @@
 const translated = new Set([
   "id", "name", "label", "hash", "doc_type", "updated_at", "deleted_at", "sync_seq",
   "page_count", "title", "dataset", "task_id", "board", "agent", "source", "footnotes",
-  "footnote_boards", "artifacts", "rev", "base_rev", "base_updated_at",
+  "footnote_boards", "form_fields", "artifacts", "rev", "base_rev", "base_updated_at",
   "record_rev", "book_rev", "record_hash",
   "upload_id", "request_hash",
 ]);

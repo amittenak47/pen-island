@@ -1,5 +1,7 @@
-import { PDFDocument, PDFName, PDFHexString, PDFString, PDFArray,
+import { PDFDocument, PDFName, PDFHexString, PDFString, PDFArray, PDFBool,
+  PDFTextField, PDFCheckBox, PDFRadioGroup, PDFDropdown, PDFOptionList,
   pushGraphicsState, popGraphicsState, concatTransformationMatrix } from "pdf-lib";
+import type { PdfFormValues } from "../modes/pdfForms";
 
 export interface PdfPlacement { page:number; right?:boolean; spread?:boolean }
 /** Displayed bottom-left coordinates to the PDF crop box, including rotation. */
@@ -12,6 +14,7 @@ export function pdfDisplayTransform(box:{x:number;y:number;width:number;height:n
 }
 
 export class AnnotatedPdf {
+  private keepAppearances=false;
   private constructor(private pdf:PDFDocument) {}
   static async open(bytes:Uint8Array) { return new AnnotatedPdf(await PDFDocument.load(bytes)); }
   static async create() { return new AnnotatedPdf(await PDFDocument.create()); }
@@ -37,9 +40,44 @@ export class AnnotatedPdf {
     const existing=page.node.lookupMaybe(PDFName.of("Annots"),PDFArray) ?? this.pdf.context.obj([]);
     existing.push(this.pdf.context.register(annotation));page.node.set(PDFName.of("Annots"),existing);
   }
+  /**
+   * Write the reader's values into the AcroForm, or flatten them into the page.
+   * Runs before the ink overlays, so flattened values sit under the ink.
+   * Returns the fields that could not take their value.
+   */
+  form(values:PdfFormValues,flatten:boolean):string[] {
+    const form=this.pdf.getForm();const skipped:string[]=[];
+    for(const field of form.getFields()) {
+      const name=field.getName();
+      if(!Object.prototype.hasOwnProperty.call(values,name))continue;
+      const value=values[name]!;const list=Array.isArray(value) ? value:typeof value==="string" && value ? [value]:[];
+      try {
+        if(field instanceof PDFTextField)field.setText(typeof value==="string" ? value:"");
+        else if(field instanceof PDFCheckBox){if(value===true)field.check();else field.uncheck();}
+        else if(field instanceof PDFRadioGroup){if(list[0])field.select(list[0]);else field.clear();}
+        else if(field instanceof PDFDropdown || field instanceof PDFOptionList) {
+          // Stored as export values; pdf-lib selects by what it lists (display text).
+          const labels=list.map(v=>{const option=field.acroField.getOptions().find(o=>o.value.decodeText()===v);return option ? (option.display ?? option.value).decodeText():v;});
+          if(labels.length===0)field.clear();
+          else if(labels.every(label=>field.getOptions().includes(label)))field.select(labels.length>1 ? labels:labels[0]!);
+          else skipped.push(name);
+        }
+      }catch{skipped.push(name);}
+    }
+    // A hybrid file's XFA copy would win in Acrobat and show the old values.
+    form.deleteXFA();
+    try{form.updateFieldAppearances();}
+    catch(error) {
+      if(flatten)throw new Error("A filled value uses characters the export font cannot draw. Export without flattening to keep it.");
+      // Leave drawing the values to the viewer.
+      form.acroForm.dict.set(PDFName.of("NeedAppearances"),PDFBool.True);this.keepAppearances=true;
+    }
+    if(flatten)form.flatten({updateFieldAppearances:false});
+    return skipped;
+  }
   async appendix(png:Uint8Array) {
     const image=await this.pdf.embedPng(png);const page=this.pdf.addPage([612,792]);
     page.drawImage(image,{x:0,y:0,width:612,height:792});await this.pdf.flush();
   }
-  finish() { return this.pdf.save({objectsPerTick:25}); }
+  finish() { return this.pdf.save({objectsPerTick:25,updateFieldAppearances:!this.keepAppearances}); }
 }

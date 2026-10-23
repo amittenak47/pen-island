@@ -259,6 +259,7 @@ import {
 import { WorkspaceLinkPicker, groupLabel, type LinkTarget } from "./modes/WorkspaceLinkPicker";
 import { resolveWikiLinks } from "./util/wikiLinks";
 import { PdfDocument } from "./modes/PdfDocument";
+import type { PdfFormKind, PdfFormModel, PdfFormValues } from "./modes/pdfForms";
 import { pdfInkRestoreSpread } from "./modes/pdfInkSpread";
 import { PdfPageRail } from "./modes/PdfPageRail";
 import { publishPdfFilmCurrent, peekPdfFilmCurrent, peekPdfReadingFrames } from "./modes/pdfFilm";
@@ -328,6 +329,7 @@ import {
   AnnotateLibraryFullError,
   restoreAnnotateDoc,
   saveAnnotateDoc,
+  setAnnotateFormFields as saveAnnotateFormFields,
   markAnnotateHubAck,
   uniqueAnnotateName,
   type DocType,
@@ -851,6 +853,7 @@ export const Workspace = memo(function Workspace({
     annotateHeight, setAnnotateHeight, annotateHeightRef, onMdInkMeasure,
     annotatePageWidth, setAnnotatePageWidth, annotatePageWidthRef,
     annotateBaselineRef, annotatePristineHashRef, annotatePristineMarksRef, annotatePristineAgentRef,
+    annotateFormFieldsRef, annotatePristineFormRef,
     heldFootnoteAsksRef, deliverHeldFootnoteAsksRef,
     createAnnotateUntouched, createSaveAnnotateSession,
     trackFootnoteBoardSaves, registerAnnotateFootnotes, mirrorAnnotateDocId, mirrorAnnotateTitle,
@@ -922,6 +925,15 @@ export const Workspace = memo(function Workspace({
    * Practice statements use these marks too, so their state stays here.
    */
   const [annotateFootnotes, setAnnotateFootnotesRaw] = useState<DocFootnote[]>([]);
+  /*
+   * A fillable PDF: its values (mirrored in `annotateFormFieldsRef` for the
+   * leave check), what kind of form the file turned out to be, and Fill form
+   * mode. Values are written on their own — see `setAnnotateFormFields`.
+   */
+  const [annotateFormFields, setAnnotateFormFieldsState] = useState<PdfFormValues>({});
+  const [pdfForm, setPdfForm] = useState<{ kind: PdfFormKind; fields: number }>({ kind: "none", fields: 0 });
+  const [formFillOn, setFormFillOn] = useState(false);
+  const formWriteRef = useRef<Promise<void>>(Promise.resolve());
   const assistantRunnerStatus = useAssistantRunnerStatus(client,
     active && annotateFootnotes.some(mark => Boolean(mark.pending) && mark.answerMode === "app"),
     annotateFootnotes.filter(mark => mark.pending && mark.answerMode === "app").map(mark => mark.pending).join(","));
@@ -4060,6 +4072,10 @@ export const Workspace = memo(function Workspace({
         // its marks back and an unrelated document starts clean.
         setAnnotateFootnotes(existing?.footnotes ?? []);
         annotateFootnotesRef.current = existing?.footnotes ?? [];
+        annotateFormFieldsRef.current = existing?.formFields ?? {};
+        setAnnotateFormFieldsState(annotateFormFieldsRef.current);
+        setPdfForm({ kind: "none", fields: 0 });
+        setFormFillOn(false);
         /*
          * Marks that already were links become edges.
          *
@@ -4290,6 +4306,7 @@ export const Workspace = memo(function Workspace({
             : null;
           annotatePristineMarksRef.current = footnoteRevision(annotateFootnotesRef.current);
           annotatePristineAgentRef.current = JSON.stringify(persistableAgentMessages(resumed));
+          annotatePristineFormRef.current = JSON.stringify(annotateFormFieldsRef.current);
         }
 
         // Complete the loading transition (same beats and teardown as
@@ -7620,6 +7637,11 @@ export const Workspace = memo(function Workspace({
     annotatePristineHashRef.current = null;
     annotatePristineMarksRef.current = "";
     annotatePristineAgentRef.current = "";
+    annotateFormFieldsRef.current = {};
+    annotatePristineFormRef.current = "{}";
+    setAnnotateFormFieldsState({});
+    setPdfForm({ kind: "none", fields: 0 });
+    setFormFillOn(false);
     setAnnotateDocId(null);
     setAnnotateOwned(false);
     setEditMarkdown(false);
@@ -7700,6 +7722,44 @@ export const Workspace = memo(function Workspace({
     agentMessages, agentMessagesRef, saveEditBuffer, closeFootnoteBoardSession,
     footnoteBoardSessionRef, annotateFootnotesRef, flushDirtyInk,
   }), [annotateDocId, annotateFootnotes, annotateSource, agentMessages, client, patchTab, saveEditBuffer, closeFootnoteBoardSession, tab.id, tab.kind]);
+
+  /**
+   * A field was filled. The value shows at once; the write follows, queued so
+   * two quick taps land in order. A set that is not in the library yet is
+   * saved first — its id is chosen at open, but the values need a row to live on.
+   */
+  const onPdfFormChange = useCallback((values: PdfFormValues) => {
+    annotateFormFieldsRef.current = values;
+    setAnnotateFormFieldsState(values);
+    formWriteRef.current = formWriteRef.current.then(async () => {
+      const known = annotateDocIdRef.current && getAnnotateDocMeta(annotateDocIdRef.current);
+      const id = known ? annotateDocIdRef.current : (await saveAnnotateSession())?.id ?? null;
+      if (!id) return;
+      await saveAnnotateFormFields(id, annotateFormFieldsRef.current);
+    }).catch((cause: unknown) => setError(messageOf(cause)));
+  }, [saveAnnotateSession]);
+
+  const onPdfFormModel = useCallback((model: PdfFormModel) => {
+    setPdfForm({ kind: model.kind, fields: new Set(model.widgets.map((widget) => widget.field)).size });
+  }, []);
+
+  // Values another device filled arrive with the hub's reload of this set.
+  useEffect(() => {
+    const onHub = (event: Event) => {
+      const detail = (event as CustomEvent<{ kind?: string; id?: string; op?: string }>).detail;
+      if (detail?.kind !== "annotate" || detail.op !== "reload" || !detail.id || detail.id !== annotateDocIdRef.current) return;
+      void getAnnotateDoc(detail.id).then((doc) => {
+        if (!doc || doc.id !== annotateDocIdRef.current) return;
+        const next = doc.formFields ?? {};
+        if (JSON.stringify(next) === JSON.stringify(annotateFormFieldsRef.current)) return;
+        annotateFormFieldsRef.current = next;
+        annotatePristineFormRef.current = JSON.stringify(next);
+        setAnnotateFormFieldsState(next);
+      }, () => {});
+    };
+    window.addEventListener("lc-pad-hub", onHub);
+    return () => window.removeEventListener("lc-pad-hub", onHub);
+  }, []);
 
   useLayoutEffect(() => registerAnnotateFootnotes(
     saveAnnotateSession, annotateFootnotesRef, setAnnotateFootnotes,
@@ -10894,6 +10954,10 @@ export const Workspace = memo(function Workspace({
                       onNav={setPdfNav}
                       onThumbRenderer={onPdfThumbRenderer}
                       spread={pdfSpread}
+                      formValues={annotateFormFields}
+                      formFill={formFillOn}
+                      onFormModel={onPdfFormModel}
+                      onFormChange={onPdfFormChange}
                       selectable={!annotateCode || Boolean(openFootnote) || highlighting}
                       onError={(message) => {
                         if (/cancel|abort|worker.*(destroy|terminat|not running)/i.test(message)) {
@@ -10998,6 +11062,16 @@ export const Workspace = memo(function Workspace({
                 : null
             }
             pdfDocument={annotateSource?.docType === "pdf" && !footnoteBoardSession}
+            formFill={
+              annotateSource?.docType === "pdf" && !footnoteBoardSession && pdfForm.kind !== "none"
+                ? {
+                    kind: pdfForm.kind,
+                    fields: pdfForm.fields,
+                    on: formFillOn,
+                    onToggle: () => setFormFillOn((on) => !on),
+                  }
+                : null
+            }
             readingShare={pageFitShare(pageFit)}
             pageSpread={
               annotateSource?.docType === "pdf"
@@ -11600,6 +11674,7 @@ export const Workspace = memo(function Workspace({
 
       <DialogPresence>{documentExportOpen && annotateSource && annotateDocId && (
         <DocumentExportDialog name={annotateSource.name} docType={annotateSource.docType} format={documentExportFormat}
+          form={pdfForm.kind === "acroform"}
           onClose={() => setDocumentExportOpen(false)}
           onExport={async (options, progress, signal) => {
             const id = annotateDocId;
@@ -11610,6 +11685,7 @@ export const Workspace = memo(function Workspace({
             const { exportAnnotatedDocument } = await import("./util/documentExport");
             if (annotateDocIdRef.current !== id) throw new Error("The open document changed. Reopen Export and try again.");
             const snapshot = await snapshotDocumentExport(board, source, id, annotateFootnotesRef.current, agentMessagesRef.current);
+            snapshot.formFields = annotateFormFieldsRef.current;
             signal.throwIfAborted();
             return exportAnnotatedDocument(snapshot, id, options, progress, signal);
           }} />

@@ -5,8 +5,10 @@ import { rangeFromAnchor } from "./docAnchors";
 import { canvasPng, rasterAnnotation, sceneBounds, type ExportSnapshot } from "./documentExportSnapshot";
 import { noteText, noteAttachments } from "./documentExportNotes";
 
-export interface DocumentExportOptions { ink:boolean; footnotes:boolean; threads:boolean; format?:"source"|"pdf" }
-export interface ExportFile { name:string; blob:Blob }
+/** `form`: a fillable PDF's values written into its fields, or flattened into the page. */
+export interface DocumentExportOptions { ink:boolean; footnotes:boolean; threads:boolean; format?:"source"|"pdf"; form?:"fill"|"flatten" }
+/** `notice`: something the reader should know about a file that did save. */
+export interface ExportFile { name:string; blob:Blob; notice?:string }
 type Progress=(message:string)=>void;
 const tick=()=>new Promise<void>(resolve=>setTimeout(resolve,0));
 const baseName=(name:string)=>name.replace(/\.[^.]+$/,"").replace(/[\\/:*?"<>|]/g,"_") || "Document";
@@ -26,10 +28,10 @@ async function exportPdf(s:ExportSnapshot,docId:string,o:DocumentExportOptions,p
   const pages=[...new Set(s.scopes.map(scope=>scope.page!))].sort((a,b)=>a-b);
   if(originalPdf && o.ink && s.pageIds.some(id=>id>0 && !pages.includes(id)))throw new Error("Some handwriting pages have no matching PDF page. Export stopped to avoid omitting them.");
   const worker=new Worker(new URL("./documentExport.worker.ts",import.meta.url),{type:"module"});
-  let seq=0;
+  let seq=0;let skippedFields:string[]=[];
   const pending=new Map<number,{resolve:(bytes?:Uint8Array<ArrayBuffer>)=>void;reject:(error:Error)=>void}>();
   const fail=(error:Error)=>{for(const task of pending.values())task.reject(error);pending.clear();};
-  worker.onmessage=({data})=>{const task=pending.get(data.id);pending.delete(data.id);if(data.error)task?.reject(new Error(data.error));else task?.resolve(data.bytes);};
+  worker.onmessage=({data})=>{if(Array.isArray(data.skipped))skippedFields=data.skipped;const task=pending.get(data.id);pending.delete(data.id);if(data.error)task?.reject(new Error(data.error));else task?.resolve(data.bytes);};
   worker.onerror=event=>fail(new Error(event.message || "PDF export worker failed"));
   const abort=()=>{worker.terminate();fail(new DOMException("Export cancelled","AbortError"));};signal.addEventListener("abort",abort,{once:true});
   const send=(op:string,extra:Record<string,unknown>={},bytes?:Uint8Array<ArrayBuffer>)=>new Promise<Uint8Array<ArrayBuffer>|undefined>((resolve,reject)=>{
@@ -37,7 +39,14 @@ async function exportPdf(s:ExportSnapshot,docId:string,o:DocumentExportOptions,p
   });
   try {
     progress("Preparing PDF…");
-    if(originalPdf) await send("open",{pages},new Uint8Array(s.source.bytes!.slice(0)));
+    if(originalPdf) {
+      await send("open",{pages},new Uint8Array(s.source.bytes!.slice(0)));
+      const values=s.formFields ?? {};
+      if(o.form==="flatten" || Object.keys(values).length>0) {
+        progress(o.form==="flatten" ? "Flattening form…":"Filling form…");
+        await send("form",{values,flatten:o.form==="flatten"});
+      }
+    }
     else {
       await send("create");
       await exportRenderedPages(s,o,progress,signal,png=>send("appendix",{},png).then(()=>{}));
@@ -79,7 +88,8 @@ async function exportPdf(s:ExportSnapshot,docId:string,o:DocumentExportOptions,p
       }finally {appendix.dispose();}
     }
     progress("Finishing PDF…");const bytes=await send("finish");if(!bytes)throw new Error("The PDF export returned no file");
-    return {name:`${baseName(s.source.name)}.annotated.pdf`,blob:new Blob([bytes],{type:"application/pdf"})};
+    const notice=skippedFields.length ? `${skippedFields.length===1 ? "One field":`${skippedFields.length} fields`} kept the file's own value: ${skippedFields.slice(0,3).join(", ")}${skippedFields.length>3 ? "…":""}`:undefined;
+    return {name:`${baseName(s.source.name)}.annotated.pdf`,blob:new Blob([bytes],{type:"application/pdf"}),...(notice ? {notice}:{})};
   }finally{signal.removeEventListener("abort",abort);worker.terminate();}
 }
 
