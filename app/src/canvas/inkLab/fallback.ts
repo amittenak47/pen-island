@@ -399,6 +399,14 @@ function fillLayered(
     }
   }
   const end = dev[last];
+  // The end cap in the tip's own colour, so a blot pool is whole (as WebGL).
+  const capDot = devTip && capEnd ? devTip : capEnd ? end : null;
+  if (capDot && spans.some(([, t]) => t === last)) {
+    s.fillStyle = cssRgb(capDot.rgb ?? rgb);
+    s.beginPath();
+    s.arc(capDot.x, capDot.y, capDot.r + 0.5, 0, Math.PI * 2);
+    s.fill();
+  }
   if (devTip && capEnd && end && tip !== spine[last]) {
     s.strokeStyle = cssRgb(devTip.rgb ?? rgb);
     s.lineWidth = Math.max(devTip.r, end.r) * 4;

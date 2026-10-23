@@ -2,10 +2,15 @@
  * WebGL2 instanced sdRoundCone (tapered capsule). Draw the stroke AABB, not
  * the full screen. AA with smoothstep + fwidth.
  *
- * One stroke per surface. Capsules blend with MAX, so each pixel keeps the
- * highest coverage any capsule gives it: neighbouring capsules' antialiased
- * edges no longer add up into a bead at every joint. The 2D blit that
- * presents the surface then lays the stroke's colour down once.
+ * One stroke per surface, drawn in two passes over the same capsules:
+ * - coverage: alpha only, MAX, so each pixel keeps the highest coverage any
+ *   capsule gives it and neighbouring antialiased edges no longer add up into
+ *   a bead at every joint;
+ * - colour: RGB only, each capsule's colour times that coverage, later
+ *   capsules on top, so the ink blends along the stroke and a blot pool lies
+ *   whole over the line it grew from. MAX on colour picked the lighter
+ *   capsule per channel: discrete light stamps, half-hidden blots.
+ * The 2D blit that presents the surface lays the stroke down once.
  */
 
 import { SDF_SCISSOR_PAD } from "./clipBlit";
@@ -59,6 +64,7 @@ in float v_r0;
 in float v_r1;
 in vec3 v_c0;
 in vec3 v_c1;
+uniform int u_pass;
 out vec4 frag;
 
 float sdRoundCone(vec2 p, vec2 a, vec2 b, float ra, float rb) {
@@ -80,8 +86,9 @@ void main() {
   float l2 = max(dot(ba, ba), 1e-8);
   float h = clamp(dot(v_p - v_p0, ba) / l2, 0.0, 1.0);
   vec3 rgb = mix(v_c0, v_c1, h) / 255.0;
-  // Premultiplied. Under MAX a joint keeps max(a0, a1), not a0 + a1(1 - a0).
-  frag = vec4(rgb * alpha, alpha);
+  // Pass 0 writes coverage (a joint keeps max(a0, a1), not a0 + a1(1 - a0));
+  // pass 1 writes colour, premultiplied by that coverage in the blend.
+  frag = u_pass == 0 ? vec4(0.0, 0.0, 0.0, alpha) : vec4(rgb, 1.0);
 }
 `;
 
@@ -178,6 +185,7 @@ export function tryCreateSdfRenderer(
   gl.useProgram(prog);
   const uView = gl.getUniformLocation(prog, "u_view");
   const uOrigin = gl.getUniformLocation(prog, "u_origin");
+  const uPass = gl.getUniformLocation(prog, "u_pass");
 
   const vao = gl.createVertexArray();
   gl.bindVertexArray(vao);
@@ -210,9 +218,23 @@ export function tryCreateSdfRenderer(
   }
 
   gl.enable(gl.BLEND);
-  gl.blendEquation(gl.MAX);
   gl.disable(gl.DEPTH_TEST);
   gl.clearColor(0, 0, 0, 0);
+
+  /** Run `drawCalls` for coverage, then again for colour. See the header. */
+  const twoPass = (drawCalls: () => void) => {
+    gl!.colorMask(false, false, false, true);
+    gl!.blendEquation(gl!.MAX);
+    gl!.uniform1i(uPass, 0);
+    drawCalls();
+    gl!.colorMask(true, true, true, false);
+    gl!.blendEquation(gl!.FUNC_ADD);
+    gl!.blendFunc(gl!.DST_ALPHA, gl!.ZERO);
+    gl!.uniform1i(uPass, 1);
+    drawCalls();
+    // Clears honour the colour mask.
+    gl!.colorMask(true, true, true, true);
+  };
 
   let count = 0;
   let instCap = 32;
@@ -327,7 +349,7 @@ export function tryCreateSdfRenderer(
       gl!.bindVertexArray(vao);
       bindInstAt(index);
       scissorAabb(aabb);
-      gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, 1);
+      twoPass(() => gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, 1));
       bindInstAt(0);
       gl!.disable(gl.SCISSOR_TEST);
     },
@@ -350,7 +372,7 @@ export function tryCreateSdfRenderer(
       gl!.uniform2f(uOrigin, originX, originY);
       gl!.bindVertexArray(vao);
       bindInstAt(0);
-      gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, count);
+      twoPass(() => gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, count));
       gl!.disable(gl.SCISSOR_TEST);
     },
     erase(aabb) {
@@ -370,7 +392,7 @@ export function tryCreateSdfRenderer(
       gl!.bindVertexArray(vao);
       bindInstAt(start);
       scissorAabb(aabb);
-      gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, n);
+      twoPass(() => gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, n));
       bindInstAt(0);
       gl!.disable(gl.SCISSOR_TEST);
     },
@@ -382,13 +404,16 @@ export function tryCreateSdfRenderer(
       gl!.uniform2f(uOrigin, originX, originY);
       gl!.bindVertexArray(vao);
       scissorAabb(aabb);
-      for (let k = 0; k + 1 < ranges.length; k += 2) {
-        const start = Math.max(0, Math.min(ranges[k]!, count));
-        const end = Math.max(start, Math.min(ranges[k + 1]!, count));
-        if (end <= start) continue;
-        bindInstAt(start);
-        gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, end - start);
-      }
+      // Ranges ascend, so in the colour pass later ink lands on top.
+      twoPass(() => {
+        for (let k = 0; k + 1 < ranges.length; k += 2) {
+          const start = Math.max(0, Math.min(ranges[k]!, count));
+          const end = Math.max(start, Math.min(ranges[k + 1]!, count));
+          if (end <= start) continue;
+          bindInstAt(start);
+          gl!.drawArraysInstanced(gl.TRIANGLES, 0, 6, end - start);
+        }
+      });
       bindInstAt(0);
       gl!.disable(gl.SCISSOR_TEST);
     },

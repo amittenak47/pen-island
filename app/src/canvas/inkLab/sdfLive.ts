@@ -84,9 +84,14 @@ export function createLiveSdf(sdf: SdfRenderer) {
       writeOne(0, p, p);
       return 1;
     }
-    ensure(n - 1);
+    ensure(n);
     for (let i = from; i < n - 1; i++) writeOne(i, points[i]!, points[i + 1]!);
-    return n - 1;
+    // The end dot as its own disc, drawn last: the last capsule fades from
+    // the line's colour to the tip's, which left a growing blot pool half
+    // line-coloured (a "D" instead of a pool).
+    const tail = points[n - 1]!;
+    writeOne(n - 1, tail, tail);
+    return n;
   };
 
   const boxOf = (points: readonly SpineDot[], from: number): StrokeAabb => {

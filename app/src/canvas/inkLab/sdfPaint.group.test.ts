@@ -62,7 +62,8 @@ describe("paintSdfSpines", () => {
     const { ctx, blits } = dest();
     expect(paintSdfSpines(ctx, [line(10, 10, 60, 10), line(10, 80, 60, 80), line(200, 10, 260, 40)])).toBe(true);
     expect(blits).toHaveLength(1);
-    expect(glCalls.filter((c) => c === "drawArraysInstanced")).toHaveLength(1);
+    // One coverage and one colour draw for the whole pass.
+    expect(glCalls.filter((c) => c === "drawArraysInstanced")).toHaveLength(2);
   });
 
   it("starts a new pass when a stroke crosses the pending ones, so it stays on top", async () => {

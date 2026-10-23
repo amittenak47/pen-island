@@ -95,7 +95,7 @@ function paintGroup(dest: CanvasRenderingContext2D, sdf: SdfRenderer, group: rea
     box.minY = Math.min(box.minY, s.box.minY);
     box.maxX = Math.max(box.maxX, s.box.maxX);
     box.maxY = Math.max(box.maxY, s.box.maxY);
-    hops += Math.max(1, s.dots.length - 1);
+    hops += s.dots.length;
   }
   const { w: destW, h: destH } = destSize(dest);
   const pad = 4;
@@ -126,6 +126,9 @@ function paintGroup(dest: CanvasRenderingContext2D, sdf: SdfRenderer, group: rea
       const b = shift(dots[i]!);
       writeInstance(inst, n++, a, b, a.rgb ?? INK_RGB, b.rgb ?? INK_RGB);
     }
+    // End disc in the tip's own colour, as the live pen draws it.
+    const tail = shift(dots[dots.length - 1]!);
+    writeInstance(inst, n++, tail, tail, tail.rgb ?? INK_RGB, tail.rgb ?? INK_RGB);
   }
   sdf.upload(inst, n);
   sdf.draw({ minX: 0, minY: 0, maxX: w, maxY: h });

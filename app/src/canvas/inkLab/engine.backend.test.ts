@@ -98,7 +98,7 @@ describe("ink lab backend selection", () => {
     engine.destroy();
   });
 
-  it("issues one instanced draw per live paint however many hops arrive", () => {
+  it("issues one coverage and one colour draw per live paint however many hops arrive", () => {
     const { gl, host } = setup();
     const engine = createInkLabEngine();
     engine.attach(host);
@@ -109,7 +109,7 @@ describe("ink lab backend selection", () => {
     engine.move(batch);
     gl.calls.length = 0;
     engine.paint();
-    expect(gl.calls.filter((c) => c === "drawArraysInstanced")).toHaveLength(1);
+    expect(gl.calls.filter((c) => c === "drawArraysInstanced")).toHaveLength(2);
     engine.destroy();
   });
 
@@ -246,7 +246,7 @@ describe("ink lab backend selection", () => {
     engine.destroy();
   });
 
-  it("keeps the highest coverage per pixel instead of stacking capsule edges", () => {
+  it("keeps the highest coverage per pixel, and lays colour later-on-top", () => {
     const gl: GlStub = { lost: false, failCompile: false, calls: [], args: [] };
     let attrs: WebGLContextAttributes | undefined;
     webgl = (a) => {
@@ -255,9 +255,16 @@ describe("ink lab backend selection", () => {
     };
     const engine = createInkLabEngine();
     expect(engine.attach(new FakeCanvas() as unknown as HTMLCanvasElement)).toBe("webgl2");
+    stroke(engine);
+    engine.paint();
+    // Coverage pass: alpha only, MAX. Colour pass: rgb only, colour times that
+    // coverage, replacing what is under it (MAX on colour stamped light discs).
+    expect(gl.args).toContainEqual(["colorMask", [false, false, false, true]]);
     expect(gl.args).toContainEqual(["blendEquation", [constOf("MAX")]]);
+    expect(gl.args).toContainEqual(["colorMask", [true, true, true, false]]);
+    expect(gl.args).toContainEqual(["blendEquation", [constOf("FUNC_ADD")]]);
+    expect(gl.args).toContainEqual(["blendFunc", [constOf("DST_ALPHA"), constOf("ZERO")]]);
     expect(gl.args).toContainEqual(["disable", [constOf("DEPTH_TEST")]]);
-    expect(gl.calls).not.toContain("blendFunc");
     expect(attrs?.depth).toBe(false);
     engine.destroy();
   });
