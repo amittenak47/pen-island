@@ -144,6 +144,18 @@ import { alignTextLayerToGlyphs } from "../util/pdfTextFit";
 import { bindPdfTextGeometry, PdfTextGeometry } from "../util/pdfTextGeometry";
 import type { TextContent, PDFPageProxy } from "pdfjs-dist/types/src/display/api";
 import { loadPdfPageSizes, savePdfPageSizes } from "./pdfPageSizeCache";
+import {
+  NO_PDF_FORM,
+  pdfFieldValue,
+  readPdfForm,
+  samePdfFormValue,
+  seedPdfFormStorage,
+  type PdfFormModel,
+  type PdfFormValue,
+  type PdfFormValues,
+  type PdfFormWidget,
+} from "./pdfForms";
+import { PdfFormBoxes, usePdfFormFill } from "./PdfFormFill";
 
 /**
  * Supersampling of the page bitmap relative to its scene size.
@@ -323,7 +335,19 @@ export interface PdfDocumentProps {
    * for a question about one page, so the panes ask for a thin one.
    */
   paintRadius?: number;
+  /**
+   * The reader's values for a fillable PDF's fields, keyed by field name —
+   * see `pdfForms`. Painted into the page bitmaps; never written to `bytes`.
+   */
+  formValues?: PdfFormValues;
+  /** Fill form mode: a pen tap on a field edits it instead of inking. */
+  formFill?: boolean;
+  /** What kind of form the file is, once its fields have been read. */
+  onFormModel?: (model: PdfFormModel) => void;
+  onFormChange?: (values: PdfFormValues) => void;
 }
+
+const NO_FORM_VALUES: PdfFormValues = {};
 
 /** Viewport index plus per-page width/height for filmstrip placeholders. */
 export interface PdfNav {
@@ -611,6 +635,10 @@ export function PdfDocument({
   standalone = false,
   paintRadius = PDF_PREVIEW_RADIUS,
   scrollRoot = null,
+  formValues = NO_FORM_VALUES,
+  formFill = false,
+  onFormModel,
+  onFormChange,
 }: PdfDocumentProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [pages, setPages] = useState<RenderedPage[]>([]);
@@ -701,6 +729,34 @@ export function PdfDocument({
   const preemptPaintIfNeededRef = useRef<() => void>(() => {});
   /** Set on unmount / reload, so in-flight paints stop touching dead nodes. */
   const disposedRef = useRef(false);
+  /*
+   * Fillable form. The model is read once the stack is laid out, off the
+   * opening path; values go into pdf.js's annotation storage and the pages
+   * they sit on are painted again. `formPending` shows a new value in its box
+   * until that repaint lands, so a tap never shows the old value for a beat.
+   */
+  const [formModel, setFormModel] = useState<PdfFormModel>(NO_PDF_FORM);
+  const formModelRef = useRef(formModel);
+  formModelRef.current = formModel;
+  const formSeededRef = useRef<PdfFormValues>(NO_FORM_VALUES);
+  const formPendingPagesRef = useRef(new Set<number>());
+  const [formPending, setFormPending] = useState<ReadonlyMap<string, PdfFormValue>>(() => new Map());
+  const onFormModelRef = useRef(onFormModel);
+  onFormModelRef.current = onFormModel;
+  const onFormChangeRef = useRef(onFormChange);
+  onFormChangeRef.current = onFormChange;
+  const settleFormPageRef = useRef<(page: number) => void>(() => {});
+  settleFormPageRef.current = (page: number) => {
+    if (!formPendingPagesRef.current.delete(page)) return;
+    const waiting = formPendingPagesRef.current;
+    setFormPending((current) => {
+      const next = new Map<string, PdfFormValue>();
+      for (const [field, value] of current) {
+        if (formModelRef.current.widgets.some((w) => w.field === field && waiting.has(w.page))) next.set(field, value);
+      }
+      return next;
+    });
+  };
   const naturalsRef = useRef<PdfPageNatural[]>([]);
   const spreadRef = useRef(spread);
   const frameWidthRef = useRef(frameWidth);
@@ -1696,6 +1752,7 @@ export function PdfDocument({
           },
         });
         done = true;
+        settleFormPageRef.current(n);
       };
       const rememberScratch = async (src: HTMLCanvasElement, pixelScale: number) => {
         const sheet = await snapshotSheet(src, pixelScale);
@@ -1762,6 +1819,9 @@ export function PdfDocument({
           canvas: scratch,
           canvasContext: scratchCtx,
           viewport,
+          // ENABLE_STORAGE: form fields paint with the reader's values. Plain
+          // ENABLE for everything else, so no other file's picture changes.
+          annotationMode: formModelRef.current.kind === "acroform" ? 3 : 1,
         });
         paint = task;
         task.onContinue = (resume: () => void) => {
@@ -2126,6 +2186,69 @@ export function PdfDocument({
     return () => observer.disconnect();
   }, [pages]);
 
+  const laidOut = pages.length > 0;
+  useEffect(() => {
+    // Previews borrow the reader's open document; its storage already holds the values.
+    if (!laidOut || standalone || previewPage != null) return;
+    const doc = docRef.current;
+    if (!doc) return;
+    let cancelled = false;
+    void readPdfForm(doc).then((model) => {
+      if (cancelled || disposedRef.current) return;
+      setFormModel(model);
+      onFormModelRef.current?.(model);
+    }, () => {});
+    return () => {
+      cancelled = true;
+      formSeededRef.current = NO_FORM_VALUES;
+      formPendingPagesRef.current.clear();
+      setFormModel(NO_PDF_FORM);
+      setFormPending(new Map());
+    };
+  }, [laidOut, docHash, standalone, previewPage]);
+
+  useEffect(() => {
+    const doc = docRef.current;
+    if (!doc || formModel.kind !== "acroform") return;
+    const previous = formSeededRef.current;
+    const changed = seedPdfFormStorage(doc, formModel, formValues, previous);
+    formSeededRef.current = formValues;
+    if (changed.size === 0) return;
+    const pending = new Map<string, PdfFormValue>();
+    for (const widget of formModel.widgets) {
+      if (!changed.has(widget.page) || !paintedRef.current.has(widget.page)) continue;
+      const now = pdfFieldValue(formModel, formValues, widget.field);
+      if (!samePdfFormValue(now, pdfFieldValue(formModel, previous, widget.field))) pending.set(widget.field, now);
+    }
+    for (const n of changed) {
+      // Stale sheets would blit the old value straight back.
+      if (inFlightPaintRef.current?.page === n) inFlightPaintRef.current.cancel();
+      sheetLruRef.current.forget(n);
+      sessionRef.current.delete(n);
+      if (paintedRef.current.has(n)) formPendingPagesRef.current.add(n);
+    }
+    if (pending.size > 0) setFormPending((current) => new Map([...current, ...pending]));
+    setWindowTick((tick) => tick + 1);
+  }, [formModel, formValues]);
+
+  const formWidgetsByPage = useMemo(() => {
+    const byPage = new Map<number, PdfFormWidget[]>();
+    for (const widget of formModel.widgets) {
+      let list = byPage.get(widget.page);
+      if (!list) byPage.set(widget.page, list = []);
+      list.push(widget);
+    }
+    return byPage;
+  }, [formModel]);
+
+  const formEditor = usePdfFormFill({
+    model: formModel,
+    values: formValues,
+    fill: formFill && formModel.kind === "acroform" && !standalone && !paused && !offscreen,
+    slotsFor: (n) => (hostRef.current ? queryPageSlots(hostRef.current, n) : []),
+    onChange: (values) => onFormChangeRef.current?.(values),
+  });
+
   // Focus and paint-pump ticks do not change the page skeleton. Reusing its
   // elements lets React skip hundreds of slots (and their pdf.js-owned DOM)
   // when a mounted book returns to the screen.
@@ -2176,21 +2299,30 @@ export function PdfDocument({
               }}
             >
               <div className="lc-pdf-text textLayer" />
+              {formWidgetsByPage.has(page.pageNumber) && (
+                <PdfFormBoxes
+                  widgets={formWidgetsByPage.get(page.pageNumber)!}
+                  sheetWidth={page.sheetWidth}
+                  height={page.height}
+                  pending={formPending}
+                />
+              )}
             </div>
           </div>
         )),
-      ), [pages, spread, previewPage]);
+      ), [pages, spread, previewPage, formWidgetsByPage, formPending]);
 
   return (
     <div
       ref={hostRef}
-      className="lc-pdf-doc"
+      className={formFill && formModel.kind === "acroform" ? "lc-pdf-doc is-form-fill" : "lc-pdf-doc"}
       data-pdf-film-scope={filmScope}
       aria-hidden={selectable ? undefined : true}
       style={{ gap: PAGE_GAP }}
     >
       {pageSlots}
       {pages.length === 0 && <p className="lc-pdf-loading">Opening…</p>}
+      {formEditor}
     </div>
   );
 }

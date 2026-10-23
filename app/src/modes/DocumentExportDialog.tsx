@@ -8,11 +8,13 @@ import { saveDocumentExport } from "../util/saveDocumentExport";
 interface Props {
   name:string; docType:DocType;
   format?:"source"|"pdf";
+  /** The PDF has fillable fields: offer keeping them fillable or flattening. */
+  form?:boolean;
   onExport:(options:DocumentExportOptions,progress:(text:string)=>void,signal:AbortSignal)=>Promise<ExportFile>;
   onClose:()=>void;
 }
-export function DocumentExportDialog({name,docType,format:requestedFormat="source",onExport,onClose}:Props) {
-  const [options,setOptions]=useState<DocumentExportOptions>({ink:true,footnotes:true,threads:false,format:requestedFormat});
+export function DocumentExportDialog({name,docType,format:requestedFormat="source",form=false,onExport,onClose}:Props) {
+  const [options,setOptions]=useState<DocumentExportOptions>({ink:true,footnotes:true,threads:false,format:requestedFormat,form:"fill"});
   const [phase,setPhase]=useState<"ready"|"exporting"|"saving"|"done">("ready");
   const [progress,setProgress]=useState("");
   const [error,setError]=useState("");
@@ -26,7 +28,7 @@ export function DocumentExportDialog({name,docType,format:requestedFormat="sourc
       const file=await onExport(options,setProgress,task.signal);
       task.signal.throwIfAborted();setPhase("saving");
       const result=await saveDocumentExport(file,task.signal,setProgress);
-      setProgress(result ?? "Save cancelled. Your annotations are still in the app.");setPhase(result ? "done":"ready");
+      setProgress(result ? (file.notice ? `${result} ${file.notice}.`:result):"Save cancelled. Your annotations are still in the app.");setPhase(result ? "done":"ready");
     }catch(reason){
       if(task.signal.aborted){setProgress("Export cancelled.");setPhase("ready");}
       else{setError(reason instanceof Error ? reason.message:String(reason));setPhase("ready");}
@@ -44,6 +46,10 @@ export function DocumentExportDialog({name,docType,format:requestedFormat="sourc
           <label><input type="checkbox" checked={options.footnotes} disabled={busy} onChange={e=>setOptions({...options,footnotes:e.target.checked})}/> Footnotes and attached sketches</label>
           <label><input type="checkbox" checked={options.threads} disabled={busy || !options.footnotes} onChange={e=>setOptions({...options,threads:e.target.checked})}/> Include conversations linked to footnotes</label>
         </div>
+        {form && docType==="pdf" && <div className="lc-document-export-options" role="radiogroup" aria-label="Form fields">
+          <label><input type="radio" name="document-export-form" checked={options.form!=="flatten"} disabled={busy} onChange={()=>setOptions({...options,form:"fill"})}/> Form fields stay fillable</label>
+          <label><input type="radio" name="document-export-form" checked={options.form==="flatten"} disabled={busy} onChange={()=>setOptions({...options,form:"flatten"})}/> Flatten form values into the page</label>
+        </div>}
         {progress && <p role="status" aria-live="polite">{progress}</p>}
         {error && <p className="lc-error" role="alert">{error}</p>}
       </div>

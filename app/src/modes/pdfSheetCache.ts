@@ -242,6 +242,17 @@ export class PdfSheetLru {
     return count;
   }
 
+  /** Drop one page's sheets — its picture changed (a form value), so they are stale. */
+  forget(page: number): void {
+    for (const [map, order] of [[this.preview, this.previewOrder], [this.rest, this.restOrder]] as const) {
+      const sheet = map.get(page);
+      if (sheet) closeSheet(sheet);
+      map.delete(page);
+      const at = order.indexOf(page);
+      if (at >= 0) order.splice(at, 1);
+    }
+  }
+
   clear(): void {
     for (const sheet of this.preview.values()) closeSheet(sheet);
     for (const sheet of this.rest.values()) closeSheet(sheet);

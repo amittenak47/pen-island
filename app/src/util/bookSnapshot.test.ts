@@ -98,3 +98,24 @@ it.each([undefined, "", "   "])("writes an explicit empty wire label for %s", as
     board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } } });
   expect((await captureBook({ kind: "annotate", id: "blank-label" })).record).toHaveProperty("label", "");
 });
+
+it("carries a fillable PDF's form values through a hub download, and omits them when empty", async () => {
+  const base = { id: "form", updated_at: 1, board: { v: 1, elements: [], appState: { scrollX: 0, scrollY: 0, zoom: 1 } },
+    agent: [], name: "Form.pdf", hash: "h", doc_type: "pdf", source: "", footnotes: [] };
+  for (const [form_fields, expected] of [
+    [{ "applicant.name": "Grace", agree: true, colors: ["Red"] }, { "applicant.name": "Grace", agree: true, colors: ["Red"] }],
+    [undefined, undefined],
+  ] as const) {
+    const before = await captureBook({ kind: "annotate", id: "form" });
+    const record = { ...base, ...(form_fields ? { form_fields } : {}) };
+    const hash = await recordHash(record);
+    const book = { kind: "annotate" as const, id: "form", state: "live" as const, book_rev: 1, record_rev: 1, record_hash: hash, record, pages: [], gone_seq: null };
+    await publishBook(before, { book, record, recordLocalHash: hash, pages: [] });
+    const after = await captureBook({ kind: "annotate", id: "form" });
+    expect(after.payload!.formFields).toEqual(expected);
+    expect(after.metadata!.authoredExtras).not.toHaveProperty("form_fields");
+    expect(after.record).toEqual(expect.objectContaining(form_fields ? { form_fields } : {}));
+    if (!form_fields) expect(after.record).not.toHaveProperty("form_fields");
+    expect(await recordHash(after.record)).toBe(hash);
+  }
+});

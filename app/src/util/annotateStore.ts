@@ -40,6 +40,7 @@ import { webIdentityUrl } from "./webIdentity";
 import { artifactCatalogFields, type ArtifactCatalog } from "./padArtifacts";
 import { getCachedBookMetadata, mutateLocalBook, type LocalBookEdit } from "./localBookStore";
 import { canonicalAgentMessages, canonicalFootnotes } from "./agentMessageFormat";
+import { hasPdfFormValues, sanitizePdfFormValues, type PdfFormValues } from "../modes/pdfForms";
 
 export const ANNOTATE_LIBRARY_LIMIT = 250;
 export const ANNOTATE_TRASH_TTL_MS = 3 * 24 * 60 * 60 * 1000;
@@ -191,6 +192,8 @@ export interface AnnotateDoc extends AnnotateDocMeta {
   captures?: WebCapture[];
   /** See {@link AnnotateContent.padKind}. Web pads only. */
   padKind?: WebPadKind;
+  /** See {@link AnnotateContent.formFields}. PDFs with fillable fields only. */
+  formFields?: PdfFormValues;
 }
 
 /**
@@ -223,6 +226,14 @@ interface AnnotateContent {
   captures?: WebCapture[];
   /** How the reader answered "page, or feed?" — remembered per pad. */
   padKind?: WebPadKind;
+  /**
+   * What the reader typed into a fillable PDF's fields, keyed by field name.
+   *
+   * Beside the ink rather than in the file: the PDF's bytes are this set's
+   * identity, so they never change while reading. Export writes them into
+   * the form. Absent when empty, so a set with no values syncs as before.
+   */
+  formFields?: PdfFormValues;
 }
 
 /**
@@ -477,6 +488,7 @@ async function readContent(meta: AnnotateDocMeta): Promise<AnnotateDoc | null> {
       ...fields,
       ...(Array.isArray(content.captures) ? { captures: content.captures } : {}),
       ...(content.padKind ? { padKind: content.padKind } : {}),
+      ...(hasPdfFormValues(content.formFields) ? { formFields: sanitizePdfFormValues(content.formFields) } : {}),
     };
   }
   // Written by the old build, still whole in the legacy key.
@@ -784,6 +796,35 @@ export async function mutateAnnotateFootnotes(
   });
 }
 
+/**
+ * Replace a set's form values inside the book's write gate.
+ *
+ * Its own write rather than a field on every autosave: the form changes on a
+ * tap, the ink on a stroke, and neither should have to carry the other.
+ */
+export async function setAnnotateFormFields(
+  id: string,
+  values: PdfFormValues,
+): Promise<"saved" | "gone" | "unchanged"> {
+  const next = sanitizePdfFormValues(values);
+  return mutateLocalBook({ kind: "annotate", id }, { authored: true }, (ctx) => {
+    const meta = ctx.metadata as AnnotateDocMeta | null;
+    if (!meta || meta.deletedAt !== undefined) return "gone" as const;
+    const content = ctx.content as (AnnotateContent & Record<string, unknown>) | null;
+    if (!content?.board) return "gone" as const;
+    const current = sanitizePdfFormValues(content.formFields);
+    if (JSON.stringify(current) === JSON.stringify(next)) return "unchanged" as const;
+    const { formFields: _old, ...rest } = content;
+    ctx.setContent(hasPdfFormValues(next) ? { ...rest, formFields: next } : rest);
+    ctx.setMetadata({
+      ...meta,
+      kind: "annotate",
+      updatedAt: Math.max(Date.now(), (meta.updatedAt ?? 0) + 1),
+    });
+    return "saved" as const;
+  });
+}
+
 export async function editAnnotateArtifacts(
   id: string, expectedCatalogRevision: string | null, edit: ArtifactCatalogEdit,
 ): Promise<ArtifactCatalog> {
@@ -877,11 +918,12 @@ export async function deleteAnnotateDoc(id: string, preserveTombstone = false): 
  * `restoreWhiteboardNotebook` for why both of those would be wrong here.
  */
 export async function restoreAnnotateDoc(entry: AnnotateDoc): Promise<void> {
-  const { source, board, footnotes, agent, artifacts, captures, padKind, ...meta } = entry;
+  const { source, board, footnotes, agent, artifacts, captures, padKind, formFields, ...meta } = entry;
   const captured = getAnnotateDocMeta(entry.id);
   await putParentRecord<AnnotateContent, AnnotateDocMeta>({ kind: "annotate", id: entry.id }, {
     artifacts, source, board, footnotes: canonicalFootnotes(footnotes ?? []), agent: canonicalAgentMessages(Array.isArray(agent) ? agent : []),
     ...(captures !== undefined ? { captures } : {}), ...(padKind !== undefined ? { padKind } : {}),
+    formFields: hasPdfFormValues(formFields) ? formFields : undefined,
   }, { allowCatalogReplacement: true, metadata: (current, saved) => {
     if (JSON.stringify(current) !== JSON.stringify(captured)) throw new Error("Document changed during restore; current work was kept.");
     const next = { ...current, ...meta, label: meta.label ?? current?.label ?? "" };

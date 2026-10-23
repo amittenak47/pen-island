@@ -14,6 +14,7 @@ import { equalStored } from "./queueMigration";
 import { requireArtifactCatalogTransition } from "./artifactCatalogEdits";
 import { bookWireRecord } from "./bookWireRecord";
 import { isAnnotatePageFrame } from "../templates/annotate";
+import { hasPdfFormValues, sanitizePdfFormValues } from "../modes/pdfForms";
 
 export interface BookCapture extends BookIdentity {
   metadata: BookMeta | null;
@@ -72,6 +73,8 @@ function buildRecord(capture: Omit<BookCapture, "record">): Record<string, unkno
     ...(meta.localFileHash ? { local_file_hash: meta.localFileHash } : {}),
     label: typeof meta.label === "string" && meta.label.trim() ? meta.label : "",
     source: payload.source ?? "", footnotes: canonicalFootnotes(footnotes), footnote_boards: children,
+    // Absent when empty: a set nobody filled keeps the record hash it had.
+    ...(hasPdfFormValues(sanitizePdfFormValues(payload.formFields)) ? { form_fields: sanitizePdfFormValues(payload.formFields) } : {}),
     updated_at: meta.updatedAt ?? 0, sync_seq: meta.syncSeq ?? 0 };
 }
 
@@ -206,6 +209,11 @@ function localRecordParts(owner: BookIdentity, record: Record<string, unknown>, 
     artifacts: record.artifacts ?? null };
   if (Array.isArray(payload.footnotes)) payload.footnotes = canonicalFootnotes(payload.footnotes);
   if (owner.kind === "annotate" && metadata.docType === "web") payload.captures ??= [];
+  if (owner.kind === "annotate") {
+    const formFields = sanitizePdfFormValues(record.form_fields);
+    if (hasPdfFormValues(formFields)) payload.formFields = formFields;
+    else delete payload.formFields;
+  }
   return { metadata, payload };
 }
 

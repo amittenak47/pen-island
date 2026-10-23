@@ -1388,6 +1388,12 @@ export interface BoardProps {
    * reading are shown two side by side.
    */
   pageSpread?: { on: boolean; onToggle: () => void; busy?: boolean; kind?: "pdf" | "text" } | null;
+  /**
+   * The PDF has form fields. The button is also the badge that says so: an
+   * AcroForm toggles Fill form; an XFA form can only be inked over, and the
+   * button says why instead of toggling.
+   */
+  formFill?: { kind: "acroform" | "xfa"; fields: number; on: boolean; onToggle: () => void } | null;
 }
 
 function roundPx(value: number): number {
@@ -1471,6 +1477,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     pdfDocument = false,
     readingShare = 1,
     pageSpread = null,
+    formFill = null,
   },
   ref,
 ) {
@@ -11190,6 +11197,50 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
                     </span>
                   </button>
                 )}
+                <AnimatePresence initial={false}>
+                  {mountStackTools && formFill && (
+                    <motion.button
+                      key="form-fill"
+                      type="button"
+                      className={[
+                        "lc-lined-toggle lc-tip-target lc-form-fill-toggle",
+                        formFill.on ? "is-active" : "",
+                        formFill.kind === "xfa" ? "is-xfa" : "",
+                      ].filter(Boolean).join(" ")}
+                      initial={{ opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.6 }}
+                      transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                      aria-pressed={formFill.kind === "acroform" ? formFill.on : undefined}
+                      aria-label={
+                        formFill.kind === "xfa"
+                          ? "XFA form: Pen Island can't fill it — ink over the page instead"
+                          : formFill.on
+                            ? "Stop filling the form"
+                            : `Fill form (${formFill.fields} field${formFill.fields === 1 ? "" : "s"})`
+                      }
+                      data-tip={
+                        formFill.kind === "xfa"
+                          ? "XFA form — can't be filled here"
+                          : formFill.on
+                            ? "Filling form — tap a field"
+                            : `Fillable form · ${formFill.fields} field${formFill.fields === 1 ? "" : "s"}`
+                      }
+                      onPointerDown={(event) => event.preventDefault()}
+                      onClick={() => {
+                        if (formFill.kind === "xfa") {
+                          modeIndicatorRef.current?.show("XFA form — can't be filled here");
+                          return;
+                        }
+                        modeIndicatorRef.current?.show(formFill.on ? "Fill form off" : "Fill form — tap a field");
+                        formFill.onToggle();
+                      }}
+                    >
+                      <FormFillIcon />
+                      {formFill.kind === "acroform" && <span className="lc-form-fill-count" aria-hidden="true">{formFill.fields}</span>}
+                    </motion.button>
+                  )}
+                </AnimatePresence>
                 {mountStackTools && <RecenterFullscreenControl onRecenter={() => recentreKeepPlace()} />}
                 {stackPageGroup && stackAskGroup && <span className="lc-chrome-stack-sep" aria-hidden />}
                 {mountStackTools && chatBot && (
@@ -11663,6 +11714,28 @@ function PagesFilmIcon() {
     >
       <rect x="4" y="7" width="11" height="14" rx="1.5" />
       <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4H19a1.5 1.5 0 0 1 1.5 1.5V17A1.5 1.5 0 0 1 19 18.5h-4" />
+    </svg>
+  );
+}
+
+/** A form: two filled lines and a ticked box. */
+function FormFillIcon() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      width="16"
+      height="16"
+      aria-hidden
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.75"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect x="4" y="3" width="16" height="18" rx="2" />
+      <path d="M8 8h8M8 12h5" />
+      <rect x="8" y="15" width="3.5" height="3.5" rx="0.6" />
+      <path d="m14 16.8 1.2 1.2 2.3-2.6" />
     </svg>
   );
 }

@@ -1,6 +1,7 @@
 import { AnnotatedPdf, type PdfPlacement } from "./documentExportPdf";
+import type { PdfFormValues } from "../modes/pdfForms";
 let pdf:AnnotatedPdf | undefined;
-self.onmessage=async ({data}:{data:{id:number;op:string;bytes?:Uint8Array;pages?:number[];placement?:PdfPlacement;note?:Parameters<AnnotatedPdf["note"]>[0]}}) => {
+self.onmessage=async ({data}:{data:{id:number;op:string;bytes?:Uint8Array;pages?:number[];placement?:PdfPlacement;note?:Parameters<AnnotatedPdf["note"]>[0];values?:PdfFormValues;flatten?:boolean}}) => {
   try {
     if(data.op==="open") {
       pdf=await AnnotatedPdf.open(data.bytes!);
@@ -12,6 +13,7 @@ self.onmessage=async ({data}:{data:{id:number;op:string;bytes?:Uint8Array;pages?
     else if(!pdf)throw new Error("PDF export was not initialized");
     else if(data.op==="overlay")await pdf.overlay({...data.placement!,png:data.bytes!});
     else if(data.op==="note")pdf.note(data.note!);
+    else if(data.op==="form"){self.postMessage({id:data.id,skipped:pdf.form(data.values ?? {},!!data.flatten)});return;}
     else if(data.op==="appendix")await pdf.appendix(data.bytes!);
     else if(data.op==="finish") {
       const bytes=await pdf.finish();self.postMessage({id:data.id,bytes}, {transfer:[bytes.buffer]});pdf=undefined;return;
