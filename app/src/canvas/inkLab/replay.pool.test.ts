@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { InkDrawOp } from "../rasterInk";
+import { poolSeed } from "./instance";
 import { labSpineFromDrawOp } from "./replay";
 
 const op = (halts?: InkDrawOp["blotHalts"]): InkDrawOp => ({
@@ -29,5 +30,12 @@ describe("replayed blot pools", () => {
 
   it("leaves a stroke without halts alone", () => {
     expect(labSpineFromDrawOp(op()).some((d) => d.pool !== undefined)).toBe(false);
+  });
+
+  it("gives a blot the same texture seed live and after the store rounds its pressure", () => {
+    for (const p of [0.1234, 0.4235294117647059, 0.61, 0.999]) {
+      const stored = Math.round(p * 255) / 255;
+      expect(poolSeed({ x: 0, y: 0, r: 1, p: stored })).toBe(poolSeed({ x: 0, y: 0, r: 1, p }));
+    }
   });
 });

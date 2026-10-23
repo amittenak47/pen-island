@@ -57,8 +57,9 @@ export function createLiveSdf(sdf: SdfRenderer) {
 
   const writeOne = (i: number, a: SpineDot, b: SpineDot, pools = 0) => {
     writeInstance(inst, i, a, b, inkOf(a), inkOf(b), pools);
-    // The shader's quad is the hop box grown by the radius + 2.5 px.
-    const pad = Math.max(a.r, b.r) + 3;
+    // The shader's quad is the hop box grown by the radius + 2.5 px (a pool's
+    // rim bulges 5% further).
+    const pad = Math.max(a.r, b.r) * (pools > 0 ? 1.05 : 1) + 3;
     const o = i * 4;
     boxes[o] = Math.min(a.x, b.x) - pad;
     boxes[o + 1] = Math.min(a.y, b.y) - pad;

@@ -34,6 +34,7 @@ layout(location=4) in float a_r1;
 layout(location=5) in vec3 a_c0;
 layout(location=6) in vec3 a_c1;
 layout(location=7) in float a_pools;
+layout(location=8) in vec2 a_seeds;
 uniform vec2 u_view;
 uniform vec2 u_origin;
 out vec2 v_p;
@@ -44,8 +45,10 @@ out float v_r1;
 out vec3 v_c0;
 out vec3 v_c1;
 flat out float v_pools;
+flat out vec2 v_seeds;
 void main() {
-  float rad = max(a_r0, a_r1) + 2.5;
+  // A pool's rim bulges up to RIM_BULGE past its radius.
+  float rad = max(a_r0, a_r1) * (a_pools > 0.5 ? 1.05 : 1.0) + 2.5;
   vec2 mn = min(a_p0, a_p1) - vec2(rad);
   vec2 mx = max(a_p0, a_p1) + vec2(rad);
   vec2 pos = mix(mn, mx, a_unit);
@@ -57,6 +60,7 @@ void main() {
   v_c0 = a_c0;
   v_c1 = a_c1;
   v_pools = a_pools;
+  v_seeds = a_seeds;
   // Positions stay absolute (fwidth and the SDF see host pixels); the surface
   // can be a small window onto the host starting at u_origin.
   vec2 clip = ((pos - u_origin) / u_view) * 2.0 - 1.0;
@@ -74,10 +78,54 @@ in float v_r1;
 in vec3 v_c0;
 in vec3 v_c1;
 flat in float v_pools;
+flat in vec2 v_seeds;
 uniform int u_pass;
 out vec4 frag;
 // A pool's disc against the line under it (whose weights add to about 2).
 const float POOL_WEIGHT = 4.0;
+
+// Blot texture, in the pool's own unit disc so it scales with the pool and
+// any zoom, and seeded per blot (see poolSeed):
+// - an uneven rim, bulging up to RIM_BULGE of the radius, like ink spreading;
+// - soft grain, a few broad cells across the pool, so it blends, no specks;
+// - a pooled edge, a thin darker ring at the rim, like a dried drop.
+const float RIM_BULGE = 0.03;
+const float GRAIN = 0.07;
+const float GRAIN_CELLS = 3.5;
+const float RING_DARK = 0.12;
+const float RING_WEIGHT = 3.0;
+
+float hash21(vec2 p, float s) {
+  return fract(sin(dot(p, vec2(127.1, 311.7)) + s * 74.7) * 43758.5453);
+}
+
+float vnoise(vec2 p, float s) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i, s), b = hash21(i + vec2(1.0, 0.0), s);
+  float c = hash21(i + vec2(0.0, 1.0), s), d = hash21(i + vec2(1.0, 1.0), s);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// The pool's radius in the direction of p: its rim, with the bulges.
+float poolRim(vec2 p, vec2 c, float r, float s) {
+  vec2 o = p - c;
+  float l = length(o);
+  vec2 dir = l > 1e-4 ? o / l : vec2(1.0, 0.0);
+  float n = 0.85 * vnoise(dir * 3.0 + 5.0, s) + 0.15 * vnoise(dir * 7.0 + 9.0, s + 3.0);
+  return r * (1.0 + RIM_BULGE * n);
+}
+
+// x: grain factor on the pool colour, y: how much of the pooled ring is here.
+vec2 poolLook(vec2 p, vec2 c, float rim, float s) {
+  vec2 q = (p - c) / rim;
+  float e = 1.0 - length(q);
+  float fade = clamp(e / 0.3, 0.0, 1.0);
+  float grain = 1.0 + (vnoise(q * GRAIN_CELLS + s * 0.37, s) - 0.5) * 2.0 * GRAIN * fade;
+  float ring = exp(-pow((e - 0.03) / 0.035, 2.0));
+  return vec2(grain, ring);
+}
 
 // Exact tapered capsule: the hull of the two end discs. The cheaper
 // length(p - a - ba*h) - mix(ra, rb, h) shrinks the radius along the hop,
@@ -105,6 +153,13 @@ void main() {
   float h = l2 < 1e-8 ? 0.0 : clamp(dot(v_p - v_p0, ba) / l2, 0.0, 1.0);
   float r = mix(v_r0, v_r1, h);
   float d = sdTaper(v_p, v_p0, v_p1, v_r0, v_r1);
+  bool poolA = v_pools > 0.5 && mod(v_pools, 2.0) > 0.5;
+  bool poolB = v_pools > 1.5;
+  float rimA = poolA ? poolRim(v_p, v_p0, max(v_r0, 0.5), v_seeds.x) : 0.0;
+  float rimB = poolB ? poolRim(v_p, v_p1, max(v_r1, 0.5), v_seeds.y) : 0.0;
+  // The bulges only add to the capsule: its own disc is the rim's floor.
+  if (poolA) d = min(d, length(v_p - v_p0) - rimA);
+  if (poolB) d = min(d, length(v_p - v_p1) - rimB);
   float rad = max(v_r0, v_r1);
   float aa = max(fwidth(d), clamp(rad * 0.4, 0.18, 0.75));
   float alpha = 1.0 - smoothstep(-aa, aa, d);
@@ -120,6 +175,13 @@ void main() {
     return;
   }
   if (u_pass == 1) {
+    // Without the float blend a pool is its own colour inside its rim.
+    vec2 pc = poolB ? v_p1 : v_p0;
+    float pRim = poolB ? rimB : rimA;
+    if ((poolA || poolB) && length(v_p - pc) < pRim) {
+      vec2 look = poolLook(v_p, pc, pRim, poolB ? v_seeds.y : v_seeds.x);
+      rgb = (poolB ? v_c1 : v_c0) / 255.0 * look.x * (1.0 - RING_DARK * look.y);
+    }
     frag = vec4(rgb, 1.0);
     return;
   }
@@ -127,17 +189,19 @@ void main() {
   float w = alpha * (0.02 + smoothstep(0.0, 1.0, depth)) * max(sqrt(l2), 0.25 * rad) / max(rad, 0.5);
   vec4 sum = vec4(rgb * w, w);
   // A blot pool at either end: its own disc, weighted to win at its centre
-  // and fade into the line toward its rim, so it reads as a pool, not a ring.
-  if (v_pools > 0.5) {
-    bool atA = mod(v_pools, 2.0) > 0.5;
-    vec2 c = atA ? v_p0 : v_p1;
-    float pr = max(atA ? v_r0 : v_r1, 0.5);
-    float pw = alpha * POOL_WEIGHT * smoothstep(0.0, 1.0, clamp(1.0 - length(v_p - c) / pr, 0.0, 1.0));
-    sum += vec4((atA ? v_c0 : v_c1) / 255.0 * pw, pw);
-    if (v_pools > 2.5) {
-      float qw = alpha * POOL_WEIGHT * smoothstep(0.0, 1.0, clamp(1.0 - length(v_p - v_p1) / max(v_r1, 0.5), 0.0, 1.0));
-      sum += vec4(v_c1 / 255.0 * qw, qw);
-    }
+  // and fade into the line toward its rim, so it reads as a pool, not a ring;
+  // its pooled ring weighs more, so the dried edge shows over the line too.
+  for (int k = 0; k < 2; k++) {
+    bool on = k == 0 ? poolA : poolB;
+    if (!on) continue;
+    vec2 c = k == 0 ? v_p0 : v_p1;
+    float rim = k == 0 ? rimA : rimB;
+    vec3 ink = (k == 0 ? v_c0 : v_c1) / 255.0;
+    vec2 look = poolLook(v_p, c, rim, k == 0 ? v_seeds.x : v_seeds.y);
+    float pw = alpha * POOL_WEIGHT * smoothstep(0.0, 1.0, clamp(1.0 - length(v_p - c) / rim, 0.0, 1.0));
+    float rw = alpha * RING_WEIGHT * look.y;
+    sum += vec4(ink * look.x * pw, pw);
+    sum += vec4(ink * look.x * (1.0 - RING_DARK) * rw, rw);
   }
   frag = sum;
 }
@@ -360,6 +424,7 @@ export function tryCreateSdfRenderer(
     [5, 3, 6],
     [6, 3, 9],
     [7, 1, 12],
+    [8, 2, 13],
   ];
   for (const [loc, size, offsetFloats] of specs) {
     gl.enableVertexAttribArray(loc);

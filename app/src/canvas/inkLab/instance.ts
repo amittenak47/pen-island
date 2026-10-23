@@ -1,6 +1,15 @@
 /** One round-cone instance. CPU append, GPU instanced draw. */
 
-export const INSTANCE_FLOATS = 13;
+export const INSTANCE_FLOATS = 15;
+
+/**
+ * A blot's texture seed: its starting pressure as the byte the stroke store
+ * keeps, so live, saved and every zoom draw the same rim and grain.
+ */
+export function poolSeed(d: SpineDot): number {
+  const p = d.p ?? 0.5;
+  return Math.round(Math.max(0, Math.min(1, Number.isFinite(p) ? p : 0.5)) * 255);
+}
 
 export type SpineDot = {
   x: number;
@@ -44,6 +53,8 @@ export function writeInstance(
   data[o + 10] = c1[1];
   data[o + 11] = c1[2];
   data[o + 12] = pools;
+  data[o + 13] = poolSeed(a);
+  data[o + 14] = poolSeed(b);
 }
 
 export type StrokeAabb = {
