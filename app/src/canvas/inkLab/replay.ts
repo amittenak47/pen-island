@@ -4,6 +4,7 @@
  */
 
 import { fillMiterStroke } from "./fallback";
+import { paintSdfSpines } from "./sdfPaint";
 import { labDepositAmt, labDotWashRgb, labMixDepositRgb, labNibRadius } from "./style";
 import type { SpineDot } from "./instance";
 import {
@@ -127,9 +128,12 @@ export function paintLabDrawOps(
     const spine = labSpineFromDrawOp(op);
     if (spine.length > 0) strokes.push(spine);
   }
-  for (const spine of strokes) {
-    const rgb = spine[0]!.rgb ?? [26, 26, 26];
-    fillMiterStroke(ctx, spine, null, rgb);
+  // Same capsules as the live pen; the 2D strip only without WebGL2.
+  if (!paintSdfSpines(ctx, strokes)) {
+    for (const spine of strokes) {
+      const rgb = spine[0]!.rgb ?? [26, 26, 26];
+      fillMiterStroke(ctx, spine, null, rgb);
+    }
   }
   if (clip) ctx.restore();
 }
