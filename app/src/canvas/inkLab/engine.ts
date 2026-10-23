@@ -940,8 +940,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
         gpu = createLiveSdf(sdf);
         backend = "webgl2";
       } else {
-        const prefix = peer(w, h);
-        ribbon = prefix ? createLiveRibbon(prefix) : null;
+        ribbon = createLiveRibbon();
         backend = "canvas2d";
       }
       // A context-loss restart keeps the committed page.
