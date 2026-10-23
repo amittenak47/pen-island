@@ -21851,7 +21851,14 @@ button.lc-row-selected:hover:not(:disabled) {
   to { opacity: 1; }
 }
 
+/*
+ * The editor sits on the PDF page, which is white paper in every theme, so it
+ * wears paper colours rather than the app's panel: a black box on a white form
+ * reads as a hole in the page.
+ */
 .lc-pdf-form-editor {
+  --lc-form-paper: #fff;
+  --lc-form-ink: #111;
   position: fixed;
   z-index: 232;
   box-sizing: border-box;
@@ -21866,8 +21873,9 @@ button.lc-row-selected:hover:not(:disabled) {
   padding: 4px 8px;
   border: 1.5px solid var(--accent);
   border-radius: 6px;
-  background: var(--panel);
-  color: var(--ink);
+  background: var(--lc-form-paper);
+  color: var(--lc-form-ink);
+  caret-color: var(--accent);
   font-family: inherit;
   box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
   outline: none;
@@ -21881,8 +21889,8 @@ button.lc-row-selected:hover:not(:disabled) {
   max-height: min(320px, 50vh);
   overflow-y: auto;
   padding: 6px;
-  background: var(--overlay-bg, var(--panel));
-  border: 1px solid var(--chrome-edge, var(--line));
+  background: var(--lc-form-paper);
+  border: 1px solid color-mix(in srgb, var(--lc-form-ink) 18%, transparent);
   border-radius: max(12px, var(--lc-r-round));
   box-shadow: 0 8px 28px rgb(0 0 0 / 22%);
 }
@@ -21894,7 +21902,7 @@ button.lc-row-selected:hover:not(:disabled) {
   border: 0;
   border-radius: 8px;
   background: transparent;
-  color: var(--ink);
+  color: var(--lc-form-ink);
   font: inherit;
   text-align: left;
   cursor: pointer;
@@ -21902,7 +21910,7 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 .lc-pdf-form-option:hover {
-  background: color-mix(in srgb, var(--ink) 7%, transparent);
+  background: color-mix(in srgb, var(--lc-form-ink) 7%, transparent);
 }
 
 .lc-pdf-form-option.is-picked {
