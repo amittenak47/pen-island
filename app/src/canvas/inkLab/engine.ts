@@ -14,6 +14,8 @@ import { exposedShiftRects, shiftClearsSnap, spineHitsRects } from "./cameraShif
 import { createEkf, type EkfFilter } from "./ekf";
 import { fillMiterStroke } from "./fallback";
 import { createLiveRibbon } from "./ribbon";
+import { tryCreateSdfRenderer } from "./sdf";
+import { createLiveSdf } from "./sdfLive";
 import {
   emptyAabb,
   expandAabb,
@@ -118,19 +120,19 @@ export type InkLabEngine = {
   paint(): InkLabPaintStats;
   /**
    * Copy the in-DOM host into the committed snap. Call once at pointerdown;
-   * live composite is that snap plus the live ribbon until lift.
+   * live composite is that snap plus the live stroke until lift.
    */
   captureSnap(): void;
   /**
    * Rebuild the committed snap (camera change, undo). Next {@link paint}
-   * presents this plus any live ribbon.
+   * presents this plus any live stroke.
    */
   redrawSnap(paint: (ctx: CanvasRenderingContext2D) => void): void;
   /** Replace and present only a device-pixel region; leave other live pixels alone. */
   redrawSnapRegion(box: { x: number; y: number; w: number; h: number }, paint: (ctx: CanvasRenderingContext2D) => void): void;
   /**
-   * Replace the committed snap with ribbons for these overlay-space
-   * spines. Same strip geometry as live paint. No-op while a live
+   * Replace the committed snap with these overlay-space spines, drawn by the
+   * live backend (WebGL2 capsules, else the 2D strip). No-op while a live
    * stroke is down — replay belongs to lift / camera, not the nib rAF.
    */
   replaySpines(strokes: readonly SpineDot[][]): void;
@@ -158,7 +160,7 @@ export type InkLabEngine = {
 export type InkLabEngineOpts = {
   clothoid?: boolean;
   capillary?: boolean;
-  /** Legacy caller option. Board ink uses a tail-only Canvas2D ribbon. */
+  /** When false, skip WebGL2 even if it starts. Tests use this. */
   sdf?: boolean;
 };
 
@@ -172,6 +174,12 @@ export function labStampGatePx(radiusPx: number, dpr: number): number {
   return Math.min(cap, byNib);
 }
 const HOLD_TICK_MS = 32;
+/**
+ * Smallest undo-patch canvas side. Chrome keeps a 2D canvas under ~130x130
+ * on the CPU, and drawing the GPU snap into one reads the whole snap back:
+ * a 60-90 ms frame after every letter on the tablet.
+ */
+export const SNAP_PATCH_MIN_PX = 256;
 const HOLD_PLATEAU_EPS = 1e-3;
 
 function wallNow(): number {
@@ -228,6 +236,20 @@ function peerFactory(
   };
 }
 
+/**
+ * The live GL surface. An OffscreenCanvas can hand each frame to the 2D host
+ * with transferToImageBitmap: no copy and no sync stall, where drawing a
+ * just-rendered GL canvas into 2D held the tablet at ~60 of 90 Hz.
+ */
+function liveSurfacePeer(
+  fallback: (w: number, h: number) => HTMLCanvasElement | null,
+): (w: number, h: number) => HTMLCanvasElement | null {
+  const g = globalThis as { OffscreenCanvas?: new (w: number, h: number) => OffscreenCanvas };
+  if (typeof g.OffscreenCanvas !== "function") return fallback;
+  const Offscreen = g.OffscreenCanvas;
+  return (w, h) => new Offscreen(Math.max(1, w), Math.max(1, h)) as unknown as HTMLCanvasElement;
+}
+
 function dprOf(canvas: HTMLCanvasElement): number {
   const css = Math.max(1, canvas.clientWidth || canvas.width);
   return Math.max(1, canvas.width / css);
@@ -240,8 +262,11 @@ function nibRadius(vx: number, vy: number, dpr: number, pressure: number): numbe
 export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
   const useClothoid = opts.clothoid === true;
   const useCapillary = opts.capillary === true;
+  const allowSdf = opts.sdf !== false;
   let host: HTMLCanvasElement | null = null;
-  const backend: InkLabBackend = "canvas2d";
+  let backend: InkLabBackend = "canvas2d";
+  /** WebGL2 capsules. Null when WebGL2 would not start; then {@link ribbon}. */
+  let gpu: ReturnType<typeof createLiveSdf> | null = null;
   let ribbon: ReturnType<typeof createLiveRibbon> | null = null;
   let snap: HTMLCanvasElement | null = null;
   let peer: ReturnType<typeof peerFactory> | null = null;
@@ -295,6 +320,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     liveRedrawBox = null;
     liveSmoothCache = null;
     liveSmoothScene.length = 0;
+    gpu?.clear();
     ribbon?.clear();
   };
 
@@ -568,6 +594,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     lastHoldWall = 0;
     holdPlateau = false;
     ekf = createEkf();
+    gpu?.clear();
     ribbon?.clear();
     blotTipGrow = savedGrow;
     blotHalts = savedHalts;
@@ -616,7 +643,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       ? clipBlitRect(box, snap.width, snap.height, CLIP_BLIT_PAD)
       : { x: 0, y: 0, w: snap.width, h: snap.height };
     if (!rect) return null;
-    const image = peer(rect.w, rect.h);
+    const image = peer(Math.max(rect.w, SNAP_PATCH_MIN_PX), Math.max(rect.h, SNAP_PATCH_MIN_PX));
     const pctx = image?.getContext("2d");
     if (!image || !pctx) return null;
     pctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -647,7 +674,8 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     if (!sctx) return;
     sctx.setTransform(1, 0, 0, 1, 0, 0);
     sctx.clearRect(patch.x, patch.y, patch.w, patch.h);
-    sctx.drawImage(patch.image, patch.x, patch.y);
+    // The patch canvas can be larger than the patch; copy only the patch.
+    sctx.drawImage(patch.image, 0, 0, patch.w, patch.h, patch.x, patch.y, patch.w, patch.h);
   };
 
   const shiftSnap = (dx: number, dy: number): PixelRect[] | null => {
@@ -700,6 +728,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       if (blitClip && !spineHitsRects(stroke, blitClip)) continue;
       applyBaked(stroke.map(cloneDot));
       blitLiveToSnap();
+      gpu?.clear();
       ribbon?.clear();
     }
     resetAfterBlit();
@@ -750,7 +779,9 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     const strokeClip = clipBlitRect(aabb, snap.width, snap.height, CLIP_BLIT_PAD);
     const dests = destClipsFor(strokeClip, snap.width, snap.height);
     if (dests.length === 0 && blitClip) return;
-    if (dests.length > 0) {
+    if (gpu) {
+      gpu.paintStroke(sctx, spine, tip, aabb, dests);
+    } else if (dests.length > 0) {
       sctx.save();
       sctx.beginPath();
       for (const clip of dests) sctx.rect(clip.x, clip.y, clip.w, clip.h);
@@ -816,8 +847,9 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       // Keep a neighbour past the frozen join for its miter normal.
       stableTo = Math.max(0, reshaped.from - 1);
     }
-    if (ribbon) {
-      liveRedrawBox = ribbon.paint(host, snap, points, stableTo);
+    const painter = gpu ?? ribbon;
+    if (painter) {
+      liveRedrawBox = painter.paint(host, snap, points, stableTo);
       unionAabb(aabb, liveRedrawBox);
     }
     return lastSuffix;
@@ -873,6 +905,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     drawing = false;
     holding = false;
     holdPlateau = false;
+    gpu?.clear();
     ribbon?.clear();
     resetAfterBlit();
     liveSmoothCache = null;
@@ -889,17 +922,29 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
 
   return {
     attach(el) {
-      if (host === el && ribbon) {
+      if (host === el && (gpu ? !gpu.isLost() : ribbon)) {
         syncSize();
         return backend;
       }
+      const keepSnap = host === el;
+      gpu?.destroy();
+      gpu = null;
+      ribbon = null;
       host = el;
       peer = peerFactory(el);
       const w = Math.max(1, el.width || 1);
       const h = Math.max(1, el.height || 1);
-      const prefix = peer(w, h);
-      ribbon = prefix ? createLiveRibbon(prefix) : null;
-      snap = peer(w, h);
+      // WebGL2 first. The 2D strip is only for a GPU that will not start.
+      const sdf = allowSdf ? tryCreateSdfRenderer(w, h, liveSurfacePeer(peer), { preserve: false }) : null;
+      if (sdf) {
+        gpu = createLiveSdf(sdf);
+        backend = "webgl2";
+      } else {
+        ribbon = createLiveRibbon();
+        backend = "canvas2d";
+      }
+      // A context-loss restart keeps the committed page.
+      if (!keepSnap || !snap) snap = peer(w, h);
       return backend;
     },
     setPen(next) {
@@ -963,6 +1008,8 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     },
     paint() {
       const t0 = performance.now();
+      // A lost context restarts WebGL2, or drops to the 2D strip.
+      if (host && gpu?.isLost()) this.attach(host);
       if (drawing && holding && pen) applyHoldGrow(t0);
       syncSize();
       const tDraw = performance.now();
@@ -1070,6 +1117,8 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     },
     destroy() {
       resetLive();
+      gpu?.destroy();
+      gpu = null;
       ribbon = null;
       snap = null;
       host = null;

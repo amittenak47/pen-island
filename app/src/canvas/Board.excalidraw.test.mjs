@@ -429,7 +429,8 @@ describe("WhiteboardInkLab", () => {
       readFileSync(join(here, "inkLab/engine.ts"), "utf8").indexOf("type LiftState"),
     );
     expect(composite).toMatch(/presentHost\(ctx, null, snap\)/);
-    expect(composite).toMatch(/ribbon\.paint\(host, snap, points, stableTo\)/);
+    expect(composite).toMatch(/const painter = gpu \?\? ribbon;/);
+    expect(composite).toMatch(/painter\.paint\(host, snap, points, stableTo\)/);
     expect(src).not.toMatch(/Math\.max\(1, painted\.marginY\)/);
     const tick = src.slice(src.indexOf("const onPaintFrame"), src.indexOf("const schedulePaint"));
     expect(tick.indexOf("keepLivePaintPump")).toBeGreaterThan(-1);

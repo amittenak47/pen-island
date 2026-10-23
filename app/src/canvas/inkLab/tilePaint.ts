@@ -11,6 +11,7 @@ import {
 } from "../rasterInk";
 import { isInkLabPenOp, labSpineFromDrawOp } from "./replay";
 import { fillMiterStroke } from "./fallback";
+import { paintSdfSpines } from "./sdfPaint";
 import { noteInkTileRaster } from "../inkTileMetrics";
 import { TILE_OVERLAP_PX, TILE_PX, inkTileCanvasPx, levelScale, tileSceneSize } from "../inkTileGrid";
 
@@ -228,6 +229,12 @@ export function paintInkTile(
     sourceOps ??= new Map(job.ops.map((op) => [op.id, op]));
     const spines = labRuns.map(labSpineFromDrawOp);
     const sdf0 = performance.now();
+    // Same capsules as the live pen; the 2D strip only without WebGL2.
+    if (paintSdfSpines(ctx, spines)) {
+      sdfMs += performance.now() - sdf0;
+      labRuns = [];
+      return;
+    }
     for (let i = 0; i < spines.length; i++) {
       const spine = spines[i]!;
       const run = labRuns[i]!;

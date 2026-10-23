@@ -267,18 +267,20 @@ describe("annotation camera presentation", () => {
     expect(Math.max(...ys) - Math.min(...ys)).toBeLessThan(1);
   });
 
-  it("hides an unsafe old camera until interrupted loading lands at the latest page", async () => {
+  it("keeps the old camera on screen, moved with the paper, until interrupted loading lands at the latest page", async () => {
     await ready([stroke(100), stroke(850)]);
     worker.blocked = true;
     view = { ...view, scrollY: -400 };
     expect(ref.current!.setPanOffset(view)).toBe(false);
-    expect(surface().style.visibility).toBe("hidden");
+    expect(surface().style.visibility).toBe("");
+    expect(surface().style.transform).toBe("translate3d(0px, -400px, 0) scale(1)");
     const pending = ref.current!.syncCamera();
     await frames(3);
-    expect(surface().style.visibility).toBe("hidden");
+    expect(surface().style.visibility).toBe("");
     view = { ...view, scrollY: -800 };
     ref.current!.setPanOffset(view);
-    expect(surface().style.visibility).toBe("hidden");
+    expect(surface().style.visibility).toBe("");
+    expect(surface().style.transform).toBe("translate3d(0px, -800px, 0) scale(1)");
     worker.blocked = false; worker.release.splice(0).forEach(resolve => resolve());
     await frames(80); await pending;
     expect(surface().style.visibility).toBe("");
@@ -506,14 +508,38 @@ describe("annotation camera presentation", () => {
     expect(alpha(120, 280)).toBeGreaterThan(0);
   });
 
-  it("hides a stale zoom until an aligned replacement is presented", async () => {
+  it("keeps the ink on screen and in place through a window resize until the new tiles land", async () => {
+    await ready([stroke(100)]);
+    expect(alpha(100, 280)).toBeGreaterThan(0); // 180px overdraw at 240px tall
+    worker.blocked = true;
+    // Maximize: same camera, a larger host, so a larger overdraw margin.
+    view = { ...view, width: 600, height: 360 };
+    surface().parentElement!.style.width = "600px";
+    surface().parentElement!.style.height = "360px";
+    const settled = ref.current!.syncCamera();
+    await frames(3);
+    expect(surface().style.visibility).toBe("");
+    expect(surface().width).toBe(600);
+    // Margin is now 270px: the stroke moves down with it, not stretched.
+    expect(alpha(100, 370)).toBeGreaterThan(0);
+    expect(alpha(100, 280)).toBe(0);
+    worker.blocked = false; worker.release.splice(0).forEach(resolve => resolve());
+    await frames(80); await settled;
+    expect(surface().style.visibility).toBe("");
+    expect(surface().style.transform).toBe("");
+    expect(alpha(100, 370)).toBeGreaterThan(0);
+  });
+
+  it("scales a stale zoom with the camera until an aligned replacement is presented", async () => {
     await ready([stroke(100)]);
     view = { ...view, zoom: 2 };
-    ref.current!.setPanOffset(view);
-    expect(surface().style.visibility).toBe("hidden");
+    expect(ref.current!.setPanOffset(view)).toBe(false);
+    expect(surface().style.visibility).toBe("");
+    expect(surface().style.transform).toMatch(/scale\(2\)$/);
     const pending = ref.current!.syncCamera();
     await frames(); await pending;
     expect(surface().style.visibility).toBe("");
+    expect(surface().style.transform).toBe("");
     expect(alpha(200, 380)).toBeGreaterThan(0);
   });
 
@@ -594,7 +620,7 @@ it("passes the actual viewport separately from the parked overdraw canvas", asyn
   }
 });
 
-it("keeps a jumped page hidden when an earlier camera's unfinished tiles arrive", async () => {
+it("keeps riding to a jumped page when an earlier camera's unfinished tiles arrive", async () => {
   await ready([stroke(100), stroke(900), stroke(2100)]);
   worker.blocked = true;
   view = { ...view, scrollY: -700 };
@@ -604,11 +630,14 @@ it("keeps a jumped page hidden when an earlier camera's unfinished tiles arrive"
   view = { ...view, scrollY: -1900 };
   const second = ref.current!.syncCamera();
   await frames(3);
-  expect(surface().style.visibility).toBe("hidden");
+  // The last complete picture stays up, moved to the newest camera.
+  expect(surface().style.visibility).toBe("");
+  expect(surface().style.transform).toBe("translate3d(0px, -1900px, 0) scale(1)");
   const old = worker.release.splice(0);
   old.forEach(resolve => resolve());
   await frames(4);
-  expect(surface().style.visibility).toBe("hidden");
+  // The earlier camera's tiles must not be presented for the jumped page.
+  expect(surface().style.transform).toBe("translate3d(0px, -1900px, 0) scale(1)");
   worker.blocked = false; worker.release.splice(0).forEach(resolve => resolve());
   await frames(80); await Promise.all([first, second]);
   expect(surface().style.visibility).toBe("");

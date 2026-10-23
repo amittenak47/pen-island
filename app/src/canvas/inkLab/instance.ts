@@ -22,6 +22,8 @@ export function writeInstance(
   b: SpineDot,
   c0: readonly [number, number, number],
   c1: readonly [number, number, number],
+  /** Blot pool at the hop's first (1) and second (2) dot; see ./inkSmooth.ts. */
+  pools = 0,
 ): void {
   const o = index * INSTANCE_FLOATS;
   data[o] = a.x;
@@ -36,8 +38,7 @@ export function writeInstance(
   data[o + 9] = c1[0];
   data[o + 10] = c1[1];
   data[o + 11] = c1[2];
-  /** Hop index for later-on-top depth. Same as the instance slot. */
-  data[o + 12] = index;
+  data[o + 12] = pools;
 }
 
 export type StrokeAabb = {
