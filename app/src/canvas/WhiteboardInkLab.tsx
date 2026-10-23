@@ -611,10 +611,9 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
             y: painted.marginY * OVERDRAW_REBASE_HEADROOM,
           })
         : panDelta(camera, painted, painted);
-      // Keep one bitmap during a panel ease. A uniform scene-camera
-      // transform moves ink exactly with the paper, including vertical overdraw.
-      if (document.body.dataset.lcPanelMotion || cameraPaintPendingRef.current) {
-        cameraPaintPendingRef.current = true;
+      // A uniform scene-camera transform moves ink exactly with the paper,
+      // including vertical overdraw and a zoom change.
+      const rideCamera = () => {
         const scale = camera.zoom / painted.zoom;
         const dx = (camera.scrollX - painted.scrollX) * camera.zoom;
         const dy = (camera.scrollY - painted.scrollY) * camera.zoom
@@ -622,13 +621,25 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
         canvas.style.transformOrigin = "0 0";
         canvas.style.transform = `translate3d(${dx}px, ${dy}px, 0) scale(${scale})`;
         canvas.style.visibility = "";
+      };
+      // Keep one bitmap during a panel ease.
+      if (document.body.dataset.lcPanelMotion || cameraPaintPendingRef.current) {
+        cameraPaintPendingRef.current = true;
+        rideCamera();
         return true;
+      }
+      if (delta.rebase) {
+        // Past the overdraw or a new zoom: the camera needs a new frame. Keep
+        // the old one on screen, moved with the paper, until presentCommitted
+        // swaps the complete frame in. Hiding it was the blank flash on scroll.
+        rideCamera();
+        return false;
       }
       const next = delta.dx === 0 && delta.dy === 0
         ? "" : `translate3d(${delta.dx}px, ${delta.dy}px, 0)`;
       if (canvas.style.transform !== next) canvas.style.transform = next;
-      canvas.style.visibility = delta.rebase ? "hidden" : "";
-      return !delta.rebase;
+      canvas.style.visibility = "";
+      return true;
     }, []);
 
     const boardRoot = useCallback((): Element | null => {
@@ -1508,7 +1519,10 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
         if (host.clientWidth < 8 || host.clientHeight < 8) return;
         const marginY = overdrawMarginPx(cssH, dpr);
         const oldDpr = canvas.width / Math.max(1, canvas.clientWidth);
-        const painted = cameraPaintPendingRef.current ? paintedViewRef.current : null;
+        // Any presented camera, not only a pending one: dropping it here made
+        // the next present hide the canvas until every tile at the new size
+        // arrived, the blank flash on maximize and restore.
+        const painted = paintedViewRef.current;
         const camera = painted ? getViewportRef.current() : null;
         marginYRef.current = marginY;
         const canvasCssH = cssH + 2 * marginY;
@@ -1555,7 +1569,15 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
         }
         paintedViewRef.current = painted && camera
           ? { ...camera, width: cssW, height: cssH, marginY } : null;
-        if (painted && camera) alignPresentedInk(null);
+        if (painted && camera) {
+          // The baked picture is a stand-in: the new size still needs tiles,
+          // and a camera-only check would see nothing to repaint.
+          cameraPaintPendingRef.current = true;
+          alignPresentedInk(null);
+          // The snap still holds the old backing's layout. A stroke that
+          // starts before the new tiles land composites over this picture.
+          if (!drawingRef.current) engineRef.current?.captureSnap();
+        }
         if (engineRef.current) {
           if (!paint || preparingRef.current || splitPausedRef.current) return;
           rebuildAndReplay(
