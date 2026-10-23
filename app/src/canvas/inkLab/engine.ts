@@ -195,6 +195,13 @@ const HOLD_BREAK_GROWTH = 0.5;
  */
 const HOLD_START_MS = 64;
 /**
+ * Resting means staying within this many CSS px. Slow writing also lands
+ * inside the stamp gate, so "inside the gate" grew a small pool every few px
+ * (a row of dots, like a colon); a hand slowing to a stop stays put, and
+ * tremor or drift moves far less than this in {@link HOLD_START_MS}.
+ */
+const REST_RADIUS_CSS = 1;
+/**
  * Smallest undo-patch canvas side. Chrome keeps a 2D canvas under ~130x130
  * on the CPU, and drawing the GPU snap into one reads the whole snap back:
  * a 60-90 ms frame after every letter on the tablet.
@@ -306,8 +313,12 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
   let holdTicks = 0;
   let holdBase: SpineDot | null = null;
   let lastHoldWall = 0;
-  /** Wall time the current hold was armed. */
-  let holdArmedAt = 0;
+  /** Where the nib last moved more than the rest radius, and that sample's time. */
+  let restX = 0;
+  let restY = 0;
+  let restT = 0;
+  /** Time of the latest sample. */
+  let lastSampleT = 0;
   /** Pool reached cap; do not re-arm until the pen hops. */
   let holdPlateau = false;
   let blotTipGrow = 0;
@@ -422,7 +433,6 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     holdTicks = 0;
     holdBase = cloneDot(at);
     lastHoldWall = now;
-    holdArmedAt = now;
   };
 
   const endHoldPool = () => {
@@ -432,7 +442,10 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
 
   const applyHoldGrow = (now: number) => {
     if (!holding || !pen || !holdBase || !tip) return;
-    if (now - holdArmedAt < HOLD_START_MS) return;
+    // Only a nib that has come to rest pools; a slow one keeps writing.
+    // Rest is sample time inside the rest radius, plus any quiet since.
+    const rested = lastSampleT - restT + Math.max(0, wallNow() - lastWall);
+    if (rested < HOLD_START_MS) return;
     const dt = now - lastHoldWall;
     if (dt < HOLD_TICK_MS && holdTicks > 0) return;
     const extra = Math.max(1, Math.floor(Math.max(dt, HOLD_TICK_MS) / HOLD_TICK_MS));
@@ -508,6 +521,12 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     lastEkfMs = performance.now() - t0;
     const dist = Math.hypot(dot.x - last.x, dot.y - last.y);
     const gate = labStampGatePx(last.r, dpr);
+    lastSampleT = s.t;
+    if (Math.hypot(dot.x - restX, dot.y - restY) > REST_RADIUS_CSS * dpr) {
+      restX = dot.x;
+      restY = dot.y;
+      restT = s.t;
+    }
     const held = (holding || holdPlateau) && holdBase && tip;
     const breakAt = held ? gate + Math.max(0, tip!.r - holdBase!.r) * HOLD_BREAK_GROWTH : gate;
     if (dist < breakAt) {

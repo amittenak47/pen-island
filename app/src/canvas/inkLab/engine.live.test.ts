@@ -658,6 +658,36 @@ describe("Ink lab live path", () => {
     }
   });
 
+  it("does not pool along a slow stroke that never stops (no row of dots)", () => {
+    let wall = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+      wall += 1;
+      return wall;
+    });
+    const canvas = createCanvas(600, 300) as unknown as HTMLCanvasElement;
+    const engine = createInkLabEngine({ sdf: false });
+    engine.attach(canvas);
+    engine.setPen({
+      color: "#1a1a1a", baseWidth: 30, overlayScale: 1, dpr: 1, maxFullness: 1,
+      pressureClip: 1, pressureSensitive: false, speedInk: 0.3, speedBlotBlend: 1,
+      speedFade: 0, boldness: 1, smoothing: 0,
+    });
+    try {
+      engine.down({ x: 100, y: 120, p: 0.5, t: 0 });
+      // About 25-30 px/s for 2 s: slow writing, every sample inside the gate.
+      for (let i = 1; i <= 480; i++) {
+        engine.move([{ x: 100 + i * 0.1, y: 120, p: 0.5, t: i * 4 }]);
+        if (i % 4 === 0) engine.paint();
+      }
+      const lifted = engine.up({ x: 148, y: 120, p: 0.5, t: 1924 });
+      expect(lifted.blotHalts).toHaveLength(0);
+      expect(lifted.points.some((d) => (d.pool ?? 0) > 1e-3)).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+      engine.destroy();
+    }
+  });
+
   it("keeps a pool held at the start when the pen moves on", () => {
     let wall = 0;
     const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
