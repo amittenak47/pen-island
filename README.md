@@ -23,7 +23,11 @@ on your own machine.
 <!-- TODO: screenshots (docs/screenshots/*.png): Whiteboard, Annotate, Browse, Practice, the Agent panel -->
 
 <p align="center">
-  <video src="https://github.com/amittenak47/pen-island/raw/main/docs/media/test_demo.mp4" width="720" controls muted></video>
+  <a href="docs/media/test_demo.mp4">
+    <img src="docs/media/test_demo.jpg" alt="Pen Island demo video" width="720">
+  </a>
+  <br>
+  <sub>Demo video: click to play</sub>
 </p>
 
 ---
