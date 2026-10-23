@@ -562,7 +562,7 @@ describe("Ink lab live path", () => {
   it("hold grow waits for a still pen inside the distance gate", () => {
     let wall = 0;
     const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
-      wall += 40;
+      wall += 10;
       return wall;
     });
     const canvas = createCanvas(400, 300) as unknown as HTMLCanvasElement;
@@ -591,6 +591,101 @@ describe("Ink lab live path", () => {
       const baked = engine.up({ x: 80.2, y: 90.1, p: 0.5, t: 1400 });
       expect(baked.blotTipGrow).toBeGreaterThan(0.3);
       expect(baked.points[0]!.r).toBeGreaterThan(1.15);
+    } finally {
+      nowSpy.mockRestore();
+      engine.destroy();
+    }
+  });
+
+  it("grows a pool under a resting nib that sends no samples", () => {
+    // Some digitisers go quiet while the nib is still: no samples, yet a hold.
+    let wall = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+      wall += 10;
+      return wall;
+    });
+    const canvas = createCanvas(400, 300) as unknown as HTMLCanvasElement;
+    const engine = createInkLabEngine({ sdf: false });
+    engine.attach(canvas);
+    engine.setPen({
+      color: "#1a1a1a", baseWidth: 2, overlayScale: 1, dpr: 1, maxFullness: 1,
+      pressureClip: 1, pressureSensitive: false, speedInk: 0, speedBlotBlend: 1,
+      speedFade: 0, boldness: 1, smoothing: 0,
+    });
+    try {
+      engine.down({ x: 80, y: 90, p: 0.5, t: 0 });
+      engine.move([{ x: 140, y: 90, p: 0.5, t: 30 }]);
+      for (let i = 0; i < 60; i++) engine.paint();
+      const lifted = engine.up();
+      expect(lifted.blotTipGrow).toBeGreaterThan(0.3);
+      const end = lifted.points[lifted.points.length - 1]!;
+      expect(end.pool).toBeGreaterThan(0.3);
+    } finally {
+      nowSpy.mockRestore();
+      engine.destroy();
+    }
+  });
+
+  it("keeps one pool through hand drift instead of re-arming beside it", () => {
+    let wall = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+      wall += 4;
+      return wall;
+    });
+    const canvas = createCanvas(600, 300) as unknown as HTMLCanvasElement;
+    const engine = createInkLabEngine({ sdf: false });
+    engine.attach(canvas);
+    engine.setPen({
+      color: "#1a1a1a", baseWidth: 30, overlayScale: 1, dpr: 1.7, maxFullness: 1,
+      pressureClip: 1, pressureSensitive: false, speedInk: 1, speedBlotBlend: 1,
+      speedFade: 0, boldness: 1, smoothing: 0,
+    });
+    try {
+      engine.down({ x: 100, y: 120, p: 0.5, t: 0 });
+      let t = 0;
+      for (let i = 1; i <= 60; i++) engine.move([{ x: 100 + i * 4, y: 120, p: 0.5, t: (t += 4) }]);
+      // 1.5 s held, drifting 6 px: more than the stamp gate.
+      for (let i = 1; i <= 360; i++) {
+        engine.move([{ x: 340 + (6 * i) / 360, y: 120 + ((i * 7) % 3) * 0.2, p: 0.5, t: (t += 4) }]);
+        if (i % 4 === 0) engine.paint();
+      }
+      const lifted = engine.up();
+      expect(lifted.blotHalts.length).toBe(1);
+      expect(lifted.points.filter((d) => (d.pool ?? 0) > 1e-3)).toHaveLength(1);
+    } finally {
+      nowSpy.mockRestore();
+      engine.destroy();
+    }
+  });
+
+  it("keeps a pool held at the start when the pen moves on", () => {
+    let wall = 0;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => {
+      wall += 4;
+      return wall;
+    });
+    const canvas = createCanvas(600, 300) as unknown as HTMLCanvasElement;
+    const engine = createInkLabEngine({ sdf: false });
+    engine.attach(canvas);
+    engine.setPen({
+      color: "#1a1a1a", baseWidth: 30, overlayScale: 1, dpr: 1.7, maxFullness: 1,
+      pressureClip: 1, pressureSensitive: false, speedInk: 0, speedBlotBlend: 1,
+      speedFade: 0, boldness: 1, smoothing: 0,
+    });
+    try {
+      engine.down({ x: 100, y: 120, p: 0.5, t: 0 });
+      let t = 0;
+      for (let i = 1; i <= 240; i++) {
+        engine.move([{ x: 100 + (i % 2) * 0.3, y: 120, p: 0.5, t: (t += 4) }]);
+        if (i % 4 === 0) engine.paint();
+      }
+      const held = engine.paint();
+      expect(held.hold || held.pts === 1).toBe(true);
+      for (let i = 1; i <= 60; i++) engine.move([{ x: 100 + i * 6, y: 120, p: 0.5, t: (t += 4) }]);
+      const lifted = engine.up();
+      const first = lifted.points[0]!;
+      expect(first.pool).toBeGreaterThan(0.3);
+      expect(first.r).toBeGreaterThan(lifted.points[30]!.r * 1.3);
     } finally {
       nowSpy.mockRestore();
       engine.destroy();

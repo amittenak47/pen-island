@@ -7,9 +7,9 @@
  * noise. Dots weigh by the travel they stand for, so a slow, dense stretch
  * does not outvote a fast one.
  *
- * A blot pool (a dot clearly wider than both neighbours, {@link isPoolDot})
- * keeps its own colour and stays out of its neighbours' means; the renderers
- * blend it in themselves.
+ * A blot pool (a dot the pen was held on, {@link isPoolDot}) keeps its own
+ * colour and stays out of its neighbours' means; the renderers blend it in
+ * themselves.
  *
  * Every renderer smooths the same way, so live, saved, 2D and export agree.
  * A dot reads raw dots up to two nib radii (at most
@@ -24,21 +24,18 @@ import { INK_RGB } from "./style";
 const REACH_CAP_PX = 40;
 /** How far ahead (and behind) along the stroke a smoothed colour reads. */
 export const SMOOTH_LOOKAHEAD_PX = REACH_CAP_PX * 2;
-/** A pool is this much wider than both neighbours. */
-const POOL_RATIO = 1.15;
 /** Travel a dot stands for at least, px, so a still cluster still counts a little. */
 const MIN_WEIGHT_PX = 0.05;
 
 /** One pass's half-window: the dot's radius, so a nib diameter in all. */
 const reachOf = (d: SpineDot) => Math.min(REACH_CAP_PX, Math.max(1, d.r));
 
-/** Dot `i` is a blot pool: clearly wider than the dots on either side of it. */
+/**
+ * Dot `i` is a blot pool: the pen was held on it. Marked, not guessed from
+ * width: with Speed ink the slow dots around a pool are nearly as wide.
+ */
 export function isPoolDot(points: readonly SpineDot[], i: number): boolean {
-  const p = points[i];
-  if (!p) return false;
-  const a = points[i - 1], b = points[i + 1];
-  if (!a && !b) return false;
-  return p.r > POOL_RATIO * Math.max(a?.r ?? 0, b?.r ?? 0);
+  return (points[i]?.pool ?? 0) > 1e-3;
 }
 
 let arc = new Float64Array(64);

@@ -223,7 +223,7 @@ export function createLiveSdf(sdf: SdfRenderer) {
       if (tip && (tip.r > last.r + 1e-3 || tip.x !== last.x || tip.y !== last.y)) {
         ensure(count + 1);
         // The held tip is the pool the stroke ends in.
-        writeOne(count, tip, tip, tip.r > last.r * 1.15 ? 3 : 0);
+        writeOne(count, tip, tip, (tip.pool ?? 0) > 1e-3 ? 3 : 0);
         count += 1;
       }
       sdf.upload(inst, count);

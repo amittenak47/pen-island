@@ -13,6 +13,11 @@ export type SpineDot = {
   p?: number;
   /** Pace 0–1, for InkOp replay. */
   slow?: number;
+  /**
+   * Blot pool growth 0–1 when the pen was held here. Renderers keep a pool's
+   * own colour and blend it in as a pool (see ./inkSmooth.ts).
+   */
+  pool?: number;
 };
 
 export function writeInstance(

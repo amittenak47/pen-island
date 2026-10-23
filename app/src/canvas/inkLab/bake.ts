@@ -129,11 +129,17 @@ function radiiAlong(
     const p1 = b.p ?? p0;
     const s0 = a.slow;
     const s1 = b.slow;
+    // A held pool is a single dot: blending it into its neighbour shrank and
+    // paled it, so the point nearest it keeps the pool whole.
+    const near = t < 0.5 ? a : b;
+    const pool = (near.pool ?? 0) > 1e-3 ? near : null;
+    const r = a.r + (b.r - a.r) * t;
     out.push({
       x: p.x,
       y: p.y,
-      r: a.r + (b.r - a.r) * t,
-      rgb,
+      r: pool ? Math.max(r, pool.r) : r,
+      rgb: pool?.rgb ?? rgb,
+      ...(pool ? { pool: pool.pool } : {}),
       a: (a.a ?? 1) + ((b.a ?? 1) - (a.a ?? 1)) * t,
       p: p0 + (p1 - p0) * t,
       slow:

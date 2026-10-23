@@ -79,13 +79,32 @@ out vec4 frag;
 // A pool's disc against the line under it (whose weights add to about 2).
 const float POOL_WEIGHT = 4.0;
 
+// Exact tapered capsule: the hull of the two end discs. The cheaper
+// length(p - a - ba*h) - mix(ra, rb, h) shrinks the radius along the hop,
+// so a wide pool next to a narrow dot lost the half of its disc facing the
+// dot: a "D" at a held start, a pool missing a wedge where the pen turned.
+float sdTaper(vec2 p, vec2 a, vec2 b, float ra, float rb) {
+  vec2 ba = b - a;
+  float l = length(ba);
+  // One disc holds the other (or a lone dot): the bigger disc is the shape.
+  if (l <= abs(ra - rb) + 1e-4) return min(length(p - a) - ra, length(p - b) - rb);
+  vec2 dir = ba / l;
+  vec2 q = vec2(abs(dot(p - a, vec2(-dir.y, dir.x))), dot(p - a, dir));
+  float s = (ra - rb) / l;
+  float c = sqrt(1.0 - s * s);
+  float k = dot(q, vec2(-s, c));
+  if (k < 0.0) return length(q) - ra;
+  if (k > c * l) return length(q - vec2(0.0, l)) - rb;
+  return dot(q, vec2(c, s)) - ra;
+}
+
 void main() {
-  // sdRoundCone (tapered capsule), keeping the radius at the closest point.
+  // Position along the hop and the radius there, for colour and weight.
   vec2 ba = v_p1 - v_p0;
   float l2 = dot(ba, ba);
   float h = l2 < 1e-8 ? 0.0 : clamp(dot(v_p - v_p0, ba) / l2, 0.0, 1.0);
   float r = mix(v_r0, v_r1, h);
-  float d = length(v_p - v_p0 - ba * h) - r;
+  float d = sdTaper(v_p, v_p0, v_p1, v_r0, v_r1);
   float rad = max(v_r0, v_r1);
   float aa = max(fwidth(d), clamp(rad * 0.4, 0.18, 0.75));
   float alpha = 1.0 - smoothstep(-aa, aa, d);
