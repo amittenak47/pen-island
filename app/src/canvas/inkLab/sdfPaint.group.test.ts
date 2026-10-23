@@ -74,6 +74,29 @@ describe("paintSdfSpines", () => {
     expect(blits).toHaveLength(2);
   });
 
+  it("splits a pass before its surface outgrows what a GPU accepts", async () => {
+    const { paintSdfSpines } = await import("./sdfPaint");
+    const { ctx, blits } = dest();
+    (ctx.canvas as { width: number; height: number }).width = 12000;
+    // Two short strokes that never touch, 6000px apart: one surface would be too wide.
+    expect(paintSdfSpines(ctx, [line(10, 10, 60, 10), line(6000, 10, 6050, 10)])).toBe(true);
+    expect(blits).toHaveLength(2);
+  });
+
+  it("draws a single stroke too large for any surface with the 2D strip", async () => {
+    const { paintSdfSpines } = await import("./sdfPaint");
+    const { ctx, blits } = dest();
+    (ctx.canvas as { width: number; height: number }).width = 12000;
+    const fills: string[] = [];
+    Object.assign(ctx, {
+      beginPath() {}, moveTo() {}, lineTo() {}, closePath() {}, arc() {},
+      fill() { fills.push("fill"); },
+    });
+    expect(paintSdfSpines(ctx, [line(10, 10, 9000, 10)])).toBe(true);
+    expect(blits).toHaveLength(0);
+    expect(fills.length).toBeGreaterThan(0);
+  });
+
   it("returns false without WebGL2 so callers draw the 2D strip", async () => {
     webgl2 = false;
     const { paintSdfSpines } = await import("./sdfPaint");

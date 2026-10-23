@@ -20,6 +20,9 @@ import { loadInkSpeedBlotBlend } from "../util/inkSpeedPref";
 import { DEBUG_INK, inkMetrics, type InkStageName } from "./inkMetrics";
 import { fillMiterStroke } from "./inkLab/fallback";
 import type { SpineDot } from "./inkLab/instance";
+// Cycle with replay.ts/style.ts: both sides only call each other inside functions.
+import { labSpineFromDrawOp } from "./inkLab/replay";
+import { paintSdfSpines } from "./inkLab/sdfPaint";
 
 function ribbonStage<T>(name: InkStageName, fn: () => T): T {
   if (!DEBUG_INK && !inkMetrics.enabled) return fn();
@@ -5832,13 +5835,34 @@ export function paintInkAtScale(
   hostZoom = 1,
 ): void {
   ctx.setTransform(scale, 0, 0, scale, -origin.x * scale, -origin.y * scale);
+  // Board pen strokes use the same spines and capsules as the screen tiles,
+  // so an export looks like the page; consecutive ones go in one batch.
+  let pen: SpineDot[][] = [];
+  const flushPen = () => {
+    if (pen.length === 0) return;
+    // An eraser op leaves destination-out behind; ink must paint, not punch.
+    ctx.globalCompositeOperation = "source-over";
+    ctx.globalAlpha = 1;
+    if (!paintSdfSpines(ctx, pen)) {
+      for (const spine of pen) fillMiterStroke(ctx, spine, null, spine[0]!.rgb ?? [26, 26, 26]);
+    }
+    pen = [];
+  };
   // Chronological order: a pen stroke drawn *after* an erase must survive.
   // Applying every erase after every draw punched holes through later ink.
   for (const op of ops) {
     if (isHostBoundOp(op)) continue;
+    // isInkLabPenOp without its type guard: highlighter draws fall through.
+    if (op.kind === "draw" && op.highlight !== true) {
+      const spine = labSpineFromDrawOp(op);
+      if (spine.length > 0) pen.push(spine);
+      continue;
+    }
+    flushPen();
     if (op.kind === "draw") drawStrokeFrom(ctx, op, 0, scale);
     else eraseStampsFrom(ctx, op, 0);
   }
+  flushPen();
   if (hosts && hosts.size > 0) {
     paintHostBoundOps(ctx, ops, hosts, scale, undefined, hostZoom);
   }

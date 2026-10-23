@@ -15,6 +15,7 @@ import {
   type SpineDot,
   type StrokeAabb,
 } from "./instance";
+import { fillMiterStroke } from "./fallback";
 import { tryCreateSdfRenderer, type SdfRenderer } from "./sdf";
 import { INK_RGB } from "./style";
 
@@ -72,6 +73,13 @@ function renderer(): SdfRenderer | null {
   if (pooled === undefined) pooled = tryCreateSdfRenderer(1, 1, peer);
   return pooled;
 }
+
+/**
+ * Largest surface side a pass may use. Export canvases can exceed what every
+ * GPU accepts (8192 on the tablet); a larger buffer would be clamped and drawn
+ * wrong, so a bigger group is split and a bigger single stroke uses the strip.
+ */
+const SURFACE_MAX_PX = 4096;
 
 const overlaps = (a: StrokeAabb, b: StrokeAabb) =>
   a.minX < b.maxX && b.minX < a.maxX && a.minY < b.maxY && b.minY < a.maxY;
@@ -147,18 +155,35 @@ export function paintSdfSpines(
     return false;
   }
   let group: Mapped[] = [];
+  const union = emptyAabb();
+  const flush = () => {
+    if (group.length > 0) paintGroup(dest, sdf, group);
+    group = [];
+    Object.assign(union, emptyAabb());
+  };
+  const fits = (b: StrokeAabb) => b.maxX - b.minX <= SURFACE_MAX_PX && b.maxY - b.minY <= SURFACE_MAX_PX;
   for (const stroke of strokes) {
     if (stroke.length === 0) continue;
     const dots = stroke.map((d) => mapDot(transform, d));
     const box = emptyAabb();
     for (const d of dots) expandAabb(box, d);
-    if (group.some((g) => overlaps(g.box, box))) {
-      paintGroup(dest, sdf, group);
-      group = [];
+    if (!fits(box)) {
+      flush();
+      fillMiterStroke(dest, stroke, null, stroke[0]!.rgb ?? INK_RGB);
+      continue;
+    }
+    const grown = {
+      minX: Math.min(union.minX, box.minX), minY: Math.min(union.minY, box.minY),
+      maxX: Math.max(union.maxX, box.maxX), maxY: Math.max(union.maxY, box.maxY),
+    };
+    if (group.some((g) => overlaps(g.box, box)) || !fits(grown)) {
+      flush();
+      Object.assign(grown, box);
     }
     group.push({ dots, box });
+    Object.assign(union, grown);
   }
-  if (group.length > 0) paintGroup(dest, sdf, group);
+  flush();
   return true;
 }
 
