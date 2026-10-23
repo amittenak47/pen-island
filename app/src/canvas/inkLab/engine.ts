@@ -174,6 +174,12 @@ export function labStampGatePx(radiusPx: number, dpr: number): number {
   return Math.min(cap, byNib);
 }
 const HOLD_TICK_MS = 32;
+/**
+ * Smallest undo-patch canvas side. Chrome keeps a 2D canvas under ~130x130
+ * on the CPU, and drawing the GPU snap into one reads the whole snap back:
+ * a 60-90 ms frame after every letter on the tablet.
+ */
+export const SNAP_PATCH_MIN_PX = 256;
 const HOLD_PLATEAU_EPS = 1e-3;
 
 function wallNow(): number {
@@ -623,7 +629,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       ? clipBlitRect(box, snap.width, snap.height, CLIP_BLIT_PAD)
       : { x: 0, y: 0, w: snap.width, h: snap.height };
     if (!rect) return null;
-    const image = peer(rect.w, rect.h);
+    const image = peer(Math.max(rect.w, SNAP_PATCH_MIN_PX), Math.max(rect.h, SNAP_PATCH_MIN_PX));
     const pctx = image?.getContext("2d");
     if (!image || !pctx) return null;
     pctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -654,7 +660,8 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     if (!sctx) return;
     sctx.setTransform(1, 0, 0, 1, 0, 0);
     sctx.clearRect(patch.x, patch.y, patch.w, patch.h);
-    sctx.drawImage(patch.image, patch.x, patch.y);
+    // The patch canvas can be larger than the patch; copy only the patch.
+    sctx.drawImage(patch.image, 0, 0, patch.w, patch.h, patch.x, patch.y, patch.w, patch.h);
   };
 
   const shiftSnap = (dx: number, dy: number): PixelRect[] | null => {
