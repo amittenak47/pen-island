@@ -3,6 +3,7 @@
  * and tail. One tip disc while held. No arc() at interior joins.
  */
 
+import { smoothSpineRgb } from "./inkSmooth";
 import type { SpineDot } from "./instance";
 
 export type FallbackPainter = {
@@ -499,6 +500,13 @@ export function fillMiterStroke(
 ): void {
   const spans = spansOf(spine, opts);
   if (spans.length === 0) return;
+  // Smooth colours along the stroke as WebGL does (see ./inkSmooth.ts), from
+  // the first dot a span or its miter neighbour reads.
+  let first = spine.length;
+  for (const [from] of spans) first = Math.min(first, from);
+  const raw = spine;
+  spine = smoothSpineRgb(raw, Math.max(0, first - 1));
+  if (tip === raw[raw.length - 1]) tip = spine[spine.length - 1]!;
   const last = spine.length - 1;
   const capHead = opts?.capHead !== false && spans.some(([f]) => f === 0);
   const capEnd = opts?.capEnd !== false && spans.some(([, t]) => t === last);

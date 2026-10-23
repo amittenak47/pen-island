@@ -7,6 +7,7 @@ import {
   type SpineDot,
   type StrokeAabb,
 } from "./instance";
+import { poolFlags, smoothSpineRgb, smoothStableTo } from "./inkSmooth";
 import type { SdfRenderer } from "./sdf";
 import { INK_RGB } from "./style";
 
@@ -16,6 +17,11 @@ function inkOf(d: SpineDot): readonly [number, number, number] {
 
 /** Join touching instance runs this close together into one draw. */
 const RANGE_MERGE_GAP = 16;
+/**
+ * Widest box rendered at once. Larger boxes go in chunks, so the weighted
+ * blend's float buffer (16 bytes a pixel) stays at most this square.
+ */
+export const LIVE_CHUNK_PX = 1024;
 
 /**
  * Live WebGL2 capsules with the same contract as {@link createLiveRibbon}.
@@ -49,8 +55,8 @@ export function createLiveSdf(sdf: SdfRenderer) {
     boxes = nextBoxes;
   };
 
-  const writeOne = (i: number, a: SpineDot, b: SpineDot) => {
-    writeInstance(inst, i, a, b, inkOf(a), inkOf(b));
+  const writeOne = (i: number, a: SpineDot, b: SpineDot, pools = 0) => {
+    writeInstance(inst, i, a, b, inkOf(a), inkOf(b), pools);
     // The shader's quad is the hop box grown by the radius + 2.5 px.
     const pad = Math.max(a.r, b.r) + 3;
     const o = i * 4;
@@ -76,7 +82,8 @@ export function createLiveSdf(sdf: SdfRenderer) {
   };
 
   /** Hops `[from, n-1)`, or one round dot for a lone sample. Returns instance count. */
-  const write = (points: readonly SpineDot[], from: number): number => {
+  const write = (raw: readonly SpineDot[], from: number): number => {
+    const points = smoothSpineRgb(raw, from);
     const n = points.length;
     if (n === 1) {
       ensure(1);
@@ -85,12 +92,12 @@ export function createLiveSdf(sdf: SdfRenderer) {
       return 1;
     }
     ensure(n);
-    for (let i = from; i < n - 1; i++) writeOne(i, points[i]!, points[i + 1]!);
+    for (let i = from; i < n - 1; i++) writeOne(i, points[i]!, points[i + 1]!, poolFlags(points, i, i + 1));
     // The end dot as its own disc, drawn last: the last capsule fades from
     // the line's colour to the tip's, which left a growing blot pool half
     // line-coloured (a "D" instead of a pool).
     const tail = points[n - 1]!;
-    writeOne(n - 1, tail, tail);
+    writeOne(n - 1, tail, tail, poolFlags(points, n - 1, n - 1));
     return n;
   };
 
@@ -141,6 +148,27 @@ export function createLiveSdf(sdf: SdfRenderer) {
     sdf.redrawRanges(box, touching(box, count));
   };
 
+  /**
+   * Render host rect `r` (even origin) chunk by chunk and blit the part of
+   * each chunk inside `t` to the same place on `dest`.
+   */
+  const renderBlit = (dest: CanvasRenderingContext2D, r: PixelRect, t: PixelRect, count: number) => {
+    for (let cy = r.y; cy < r.y + r.h; cy += LIVE_CHUNK_PX) {
+      for (let cx = r.x; cx < r.x + r.w; cx += LIVE_CHUNK_PX) {
+        const c = {
+          x: cx, y: cy,
+          w: Math.min(LIVE_CHUNK_PX, r.x + r.w - cx),
+          h: Math.min(LIVE_CHUNK_PX, r.y + r.h - cy),
+        };
+        const x0 = Math.max(c.x, t.x), y0 = Math.max(c.y, t.y);
+        const x1 = Math.min(c.x + c.w, t.x + t.w), y1 = Math.min(c.y + c.h, t.y + t.h);
+        if (x1 <= x0 || y1 <= y0) continue;
+        renderRect(c, count);
+        blit(dest, x0 - c.x, y0 - c.y, x1 - x0, y1 - y0, x0, y0);
+      }
+    }
+  };
+
   const clear = () => {
     frozen = 0;
     previous = null;
@@ -157,7 +185,8 @@ export function createLiveSdf(sdf: SdfRenderer) {
         frozen = 0;
         previous = null;
       }
-      const next = Math.max(frozen, Math.min(stableTo, points.length - 1));
+      // Smoothed colours read ahead along the stroke, so keep that much live.
+      const next = Math.max(frozen, smoothStableTo(points, Math.min(stableTo, points.length - 1)));
       const count = write(points, stale ? 0 : frozen);
       // Old tail plus the hops rewritten this frame, never the stroke box.
       const dirty = boxOf(points, stale ? 0 : frozen);
@@ -175,11 +204,10 @@ export function createLiveSdf(sdf: SdfRenderer) {
       if (!rect) return dirty;
       // A returning tail can cross the frozen prefix inside this box, so
       // every capsule that reaches it is redrawn, not only the tail's.
-      renderRect(rect, count);
       const { x, y, w, h } = rect;
       ctx.clearRect(x, y, w, h);
       if (snap) ctx.drawImage(snap, x, y, w, h, x, y, w, h);
-      blit(ctx, 0, 0, w, h, x, y);
+      renderBlit(ctx, rect, rect, count);
       return dirty;
     },
     /**
@@ -194,7 +222,8 @@ export function createLiveSdf(sdf: SdfRenderer) {
       // A held blot can grow the tip past the last spine dot.
       if (tip && (tip.r > last.r + 1e-3 || tip.x !== last.x || tip.y !== last.y)) {
         ensure(count + 1);
-        writeOne(count, tip, tip);
+        // The held tip is the pool the stroke ends in.
+        writeOne(count, tip, tip, tip.r > last.r * 1.15 ? 3 : 0);
         count += 1;
       }
       sdf.upload(inst, count);
@@ -205,10 +234,7 @@ export function createLiveSdf(sdf: SdfRenderer) {
       dest.setTransform(1, 0, 0, 1, 0, 0);
       for (const target of targets) {
         // Render from an even origin, but blit only the requested strip.
-        const r = even(target, width, height);
-        renderRect(r, count);
-        const ox = target.x - r.x, oy = target.y - r.y;
-        blit(dest, ox, oy, target.w, target.h, target.x, target.y);
+        renderBlit(dest, even(target, width, height), target, count);
       }
       dest.restore();
       // The instance buffer now holds this stroke, not a live one.

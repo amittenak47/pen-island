@@ -16,6 +16,7 @@ import {
   type StrokeAabb,
 } from "./instance";
 import { fillMiterStroke } from "./fallback";
+import { poolFlags, smoothSpineRgb } from "./inkSmooth";
 import { tryCreateSdfRenderer, type SdfRenderer } from "./sdf";
 import { INK_RGB } from "./style";
 
@@ -80,6 +81,8 @@ function renderer(): SdfRenderer | null {
  * wrong, so a bigger group is split and a bigger single stroke uses the strip.
  */
 const SURFACE_MAX_PX = 4096;
+/** Widest square rendered at once; a larger pass is drawn in chunks. */
+const CHUNK_PX = 1024;
 
 const overlaps = (a: StrokeAabb, b: StrokeAabb) =>
   a.minX < b.maxX && b.minX < a.maxX && a.minY < b.maxY && b.minY < a.maxY;
@@ -109,8 +112,10 @@ function paintGroup(dest: CanvasRenderingContext2D, sdf: SdfRenderer, group: rea
   const h = y1 - y0;
   if (w < 1 || h < 1) return;
   // Grow only: tiles reuse one surface instead of reallocating per tile.
-  if (sdf.canvas.width < w || sdf.canvas.height < h) {
-    sdf.resize(Math.max(w, sdf.canvas.width), Math.max(h, sdf.canvas.height));
+  // Chunks cap it, so the weighted blend's float buffer stays small.
+  const sw = Math.min(w, CHUNK_PX), sh = Math.min(h, CHUNK_PX);
+  if (sdf.canvas.width < sw || sdf.canvas.height < sh) {
+    sdf.resize(Math.max(sw, sdf.canvas.width), Math.max(sh, sdf.canvas.height));
   }
   if (inst.length < hops * INSTANCE_FLOATS) inst = new Float32Array(hops * 2 * INSTANCE_FLOATS);
   let n = 0;
@@ -124,17 +129,26 @@ function paintGroup(dest: CanvasRenderingContext2D, sdf: SdfRenderer, group: rea
     for (let i = 1; i < dots.length; i++) {
       const a = shift(dots[i - 1]!);
       const b = shift(dots[i]!);
-      writeInstance(inst, n++, a, b, a.rgb ?? INK_RGB, b.rgb ?? INK_RGB);
+      writeInstance(inst, n++, a, b, a.rgb ?? INK_RGB, b.rgb ?? INK_RGB, poolFlags(dots, i - 1, i));
     }
     // End disc in the tip's own colour, as the live pen draws it.
-    const tail = shift(dots[dots.length - 1]!);
-    writeInstance(inst, n++, tail, tail, tail.rgb ?? INK_RGB, tail.rgb ?? INK_RGB);
+    const end = dots.length - 1;
+    const tail = shift(dots[end]!);
+    writeInstance(inst, n++, tail, tail, tail.rgb ?? INK_RGB, tail.rgb ?? INK_RGB, poolFlags(dots, end, end));
   }
   sdf.upload(inst, n);
-  sdf.draw({ minX: 0, minY: 0, maxX: w, maxY: h });
   dest.save();
   dest.setTransform(1, 0, 0, 1, 0, 0);
-  dest.drawImage(sdf.canvas, 0, 0, w, h, x0, y0, w, h);
+  // Chunk origins stay even (CHUNK_PX is even), as the group's origin is.
+  for (let cy = 0; cy < h; cy += CHUNK_PX) {
+    for (let cx = 0; cx < w; cx += CHUNK_PX) {
+      const cw = Math.min(CHUNK_PX, w - cx), ch = Math.min(CHUNK_PX, h - cy);
+      sdf.setOrigin(cx, cy);
+      sdf.draw({ minX: cx, minY: cy, maxX: cx + cw, maxY: cy + ch });
+      dest.drawImage(sdf.canvas, 0, 0, cw, ch, x0 + cx, y0 + cy, cw, ch);
+    }
+  }
+  sdf.setOrigin(0, 0);
   dest.restore();
 }
 
@@ -167,7 +181,7 @@ export function paintSdfSpines(
   const fits = (b: StrokeAabb) => b.maxX - b.minX <= SURFACE_MAX_PX && b.maxY - b.minY <= SURFACE_MAX_PX;
   for (const stroke of strokes) {
     if (stroke.length === 0) continue;
-    const dots = stroke.map((d) => mapDot(transform, d));
+    const dots = smoothSpineRgb(stroke).map((d) => mapDot(transform, d));
     const box = emptyAabb();
     for (const d of dots) expandAabb(box, d);
     if (!fits(box)) {

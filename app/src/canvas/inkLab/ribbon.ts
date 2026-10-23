@@ -1,5 +1,6 @@
 import { clipBlitRect, CLIP_BLIT_PAD } from "./clipBlit";
 import { fillMiterStroke } from "./fallback";
+import { smoothStableTo } from "./inkSmooth";
 import { emptyAabb, expandAabb, type SpineDot, type StrokeAabb } from "./instance";
 import { INK_RGB } from "./style";
 
@@ -77,7 +78,8 @@ export function createLiveRibbon() {
       points: readonly SpineDot[], stableTo: number): StrokeAabb {
       const ctx = host.getContext("2d")!;
       if (points.length === 0) return emptyAabb();
-      const next = Math.max(frozen, Math.min(stableTo, points.length - 1));
+      // Smoothed colours read ahead along the stroke, so keep that much live.
+      const next = Math.max(frozen, smoothStableTo(points, Math.min(stableTo, points.length - 1)));
       // Hops past the frozen prefix can still change; the one before them
       // shares a dot with the first of them.
       boxHops(points, frozen - 1);
