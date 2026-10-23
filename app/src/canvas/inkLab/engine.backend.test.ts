@@ -2,20 +2,28 @@ import { describe, expect, it } from "vitest";
 
 import { createInkLabEngine } from "./engine";
 
-type GlStub = { lost: boolean; failCompile: boolean; calls: string[] };
+type GlStub = { lost: boolean; failCompile: boolean; calls: string[]; args?: [string, unknown[]][] };
+
+const glConst = new Map<string, number>();
+/** A distinct number per GL constant name, so a test can tell MAX from FUNC_ADD. */
+const constOf = (name: string) => {
+  if (!glConst.has(name)) glConst.set(name, 0x1000 + glConst.size);
+  return glConst.get(name)!;
+};
 
 /** Any GL call is a no-op that answers truthy; constants are numbers. */
 function fakeGl(state: GlStub): WebGL2RenderingContext {
   return new Proxy({}, {
     get(_t, key) {
       if (typeof key !== "string") return undefined;
-      if (/^[A-Z0-9_]+$/.test(key)) return 1;
+      if (/^[A-Z0-9_]+$/.test(key)) return constOf(key);
       if (key === "isContextLost") return () => state.lost;
       if (key === "getShaderParameter") return () => !state.failCompile;
       if (key === "getProgramParameter") return () => true;
       if (key === "getExtension") return () => null;
-      return () => {
+      return (...args: unknown[]) => {
         state.calls.push(key);
+        state.args?.push([key, args]);
         return {};
       };
     },
@@ -36,7 +44,7 @@ function fake2d(canvas: FakeCanvas): CanvasRenderingContext2D {
   }) as CanvasRenderingContext2D;
 }
 
-let webgl: (() => WebGL2RenderingContext | null) = () => null;
+let webgl: ((attrs?: WebGLContextAttributes) => WebGL2RenderingContext | null) = () => null;
 
 class FakeCanvas {
   width: number;
@@ -51,9 +59,9 @@ class FakeCanvas {
     this.clientWidth = w;
     this.clientHeight = h;
   }
-  getContext(kind: string) {
+  getContext(kind: string, attrs?: WebGLContextAttributes) {
     if (kind === "webgl2") {
-      this.gl ??= webgl();
+      this.gl ??= webgl(attrs);
       return this.gl;
     }
     return fake2d(this);
@@ -147,6 +155,22 @@ describe("ink lab backend selection", () => {
     const fresh: GlStub = { lost: false, failCompile: false, calls: [] };
     webgl = () => fakeGl(fresh);
     expect(engine.paint().backend).toBe("webgl2");
+    engine.destroy();
+  });
+
+  it("keeps the highest coverage per pixel instead of stacking capsule edges", () => {
+    const gl: GlStub = { lost: false, failCompile: false, calls: [], args: [] };
+    let attrs: WebGLContextAttributes | undefined;
+    webgl = (a) => {
+      attrs = a;
+      return fakeGl(gl);
+    };
+    const engine = createInkLabEngine();
+    expect(engine.attach(new FakeCanvas() as unknown as HTMLCanvasElement)).toBe("webgl2");
+    expect(gl.args).toContainEqual(["blendEquation", [constOf("MAX")]]);
+    expect(gl.args).toContainEqual(["disable", [constOf("DEPTH_TEST")]]);
+    expect(gl.calls).not.toContain("blendFunc");
+    expect(attrs?.depth).toBe(false);
     engine.destroy();
   });
 

@@ -2,8 +2,10 @@
  * WebGL2 instanced sdRoundCone (tapered capsule). Draw the stroke AABB, not
  * the full screen. AA with smoothstep + fwidth.
  *
- * Depth is hop index only: later on top. SDF is coverage, not a Voronoi pick.
- * See {@link ./sdfDepth.ts}.
+ * One stroke per surface. Capsules blend with MAX, so each pixel keeps the
+ * highest coverage any capsule gives it: neighbouring capsules' antialiased
+ * edges no longer add up into a bead at every joint. The 2D blit that
+ * presents the surface then lays the stroke's colour down once.
  */
 
 import { SDF_SCISSOR_PAD } from "./clipBlit";
@@ -11,7 +13,6 @@ import {
   INSTANCE_FLOATS,
   type StrokeAabb,
 } from "./instance";
-import { SDF_DEPTH_SLOTS } from "./sdfDepth";
 
 const VERT = `#version 300 es
 layout(location=0) in vec2 a_unit;
@@ -21,7 +22,6 @@ layout(location=3) in vec2 a_p1;
 layout(location=4) in float a_r1;
 layout(location=5) in vec3 a_c0;
 layout(location=6) in vec3 a_c1;
-layout(location=7) in float a_index;
 uniform vec2 u_view;
 out vec2 v_p;
 out vec2 v_p0;
@@ -30,7 +30,6 @@ out float v_r0;
 out float v_r1;
 out vec3 v_c0;
 out vec3 v_c1;
-flat out float v_index;
 void main() {
   float rad = max(a_r0, a_r1) + 2.5;
   vec2 mn = min(a_p0, a_p1) - vec2(rad);
@@ -43,7 +42,6 @@ void main() {
   v_r1 = a_r1;
   v_c0 = a_c0;
   v_c1 = a_c1;
-  v_index = a_index;
   vec2 clip = (pos / u_view) * 2.0 - 1.0;
   gl_Position = vec4(clip.x, -clip.y, 0.0, 1.0);
 }
@@ -58,10 +56,7 @@ in float v_r0;
 in float v_r1;
 in vec3 v_c0;
 in vec3 v_c1;
-flat in float v_index;
 out vec4 frag;
-
-const float DEPTH_SLOTS = ${SDF_DEPTH_SLOTS.toFixed(1)};
 
 float sdRoundCone(vec2 p, vec2 a, vec2 b, float ra, float rb) {
   vec2 ba = b - a;
@@ -82,11 +77,8 @@ void main() {
   float l2 = max(dot(ba, ba), 1e-8);
   float h = clamp(dot(v_p - v_p0, ba) / l2, 0.0, 1.0);
   vec3 rgb = mix(v_c0, v_c1, h) / 255.0;
+  // Premultiplied. Under MAX a joint keeps max(a0, a1), not a0 + a1(1 - a0).
   frag = vec4(rgb * alpha, alpha);
-  float step = 1.0 / DEPTH_SLOTS;
-  float idx = clamp(v_index, 0.0, DEPTH_SLOTS - 1.0);
-  float base = (DEPTH_SLOTS - 1.0 - idx) * step;
-  gl_FragDepth = clamp(base, 0.0, 1.0);
 }
 `;
 
@@ -102,7 +94,7 @@ export type SdfRenderer = {
   /** Draw one new capsule without clearing. Live path only. */
   append(data: Float32Array, index: number, aabb: StrokeAabb): void;
   draw(aabb: StrokeAabb): void;
-  /** Scissor-clear color+depth in `aabb`. Frozen prefix outside the box stays. */
+  /** Scissor-clear `aabb`. Frozen prefix outside the box stays. */
   erase(aabb: StrokeAabb): void;
   /** Draw instances from `from` scissored to `aabb`. Does not clear. */
   redraw(aabb: StrokeAabb, from?: number): void;
@@ -152,7 +144,7 @@ export function tryCreateSdfRenderer(
       antialias: false,
       premultipliedAlpha: true,
       preserveDrawingBuffer: true,
-      depth: true,
+      depth: false,
     }) as WebGL2RenderingContext | null;
   } catch {
     gl = null;
@@ -193,7 +185,7 @@ export function tryCreateSdfRenderer(
     [4, 1, 5],
     [5, 3, 6],
     [6, 3, 9],
-    [7, 1, 12],
+    // Slot 12 (hop index) is still written; nothing reads it now.
   ];
   for (const [loc, size, offsetFloats] of specs) {
     gl.enableVertexAttribArray(loc);
@@ -202,9 +194,8 @@ export function tryCreateSdfRenderer(
   }
 
   gl.enable(gl.BLEND);
-  gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
-  gl.enable(gl.DEPTH_TEST);
-  gl.depthFunc(gl.LEQUAL);
+  gl.blendEquation(gl.MAX);
+  gl.disable(gl.DEPTH_TEST);
   gl.clearColor(0, 0, 0, 0);
 
   let count = 0;
@@ -321,12 +312,12 @@ export function tryCreateSdfRenderer(
       count = 0;
       gl!.viewport(0, 0, viewW, viewH);
       gl!.disable(gl.SCISSOR_TEST);
-      gl!.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl!.clear(gl.COLOR_BUFFER_BIT);
     },
     draw(aabb) {
       gl!.viewport(0, 0, viewW, viewH);
       scissorAabb(aabb);
-      gl!.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl!.clear(gl.COLOR_BUFFER_BIT);
       if (count < 1) {
         gl!.disable(gl.SCISSOR_TEST);
         return;
@@ -341,7 +332,7 @@ export function tryCreateSdfRenderer(
     erase(aabb) {
       gl!.viewport(0, 0, viewW, viewH);
       scissorAabb(aabb);
-      gl!.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+      gl!.clear(gl.COLOR_BUFFER_BIT);
       gl!.disable(gl.SCISSOR_TEST);
     },
     redraw(aabb, from = 0) {
