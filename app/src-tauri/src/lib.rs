@@ -4,6 +4,7 @@
 pub mod capture_save;
 pub mod doc_source;
 pub mod document_export;
+pub mod html_assets;
 pub mod colorhunt;
 pub mod dlc;
 pub mod lc_client;
@@ -22,6 +23,13 @@ pub fn run() {
     }
     let builder = tauri::Builder::default()
         .manage(VoiceSession(std::sync::Mutex::new(std::collections::HashMap::new())))
+        .manage(html_assets::HtmlAssets::default())
+        // Files beside a local HTML page, for its live frame. Read off the
+        // web view's own thread: a video slice can take a moment.
+        .register_asynchronous_uri_scheme_protocol(html_assets::SCHEME, |ctx, request, responder| {
+            let app = ctx.app_handle().clone();
+            tauri::async_runtime::spawn_blocking(move || responder.respond(html_assets::respond(&app, request)));
+        })
         // Google Search from a document footnote hands the query to whatever
         // browser the device already uses. Reading is a thing people do with
         // tabs open; an in-app webview would be a worse browser with none of
@@ -202,6 +210,8 @@ pub fn run() {
         doc_source::list_source_folder,
         doc_source::stat_document_source,
         doc_source::read_document_source,
+        html_assets::open_html_folder,
+        html_assets::grant_html_folder,
         document_export::begin_document_export,
         document_export::append_document_export,
         document_export::cancel_document_export,

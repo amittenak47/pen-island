@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ShellValue, WorkspaceApi } from "./shellContext";
 import type { SessionSnapshot } from "./api/types";
 import type { TabRecord } from "./util/tabs";
@@ -10,6 +10,7 @@ import "fake-indexeddb/auto";
 import type { AnnotateDoc } from "./util/annotateStore";
 import { docIdentityHash } from "./util/annotateStore";
 import { loadWebViewMode } from "./util/webViewMode";
+import { setDocSource } from "./util/docSourceStore";
 
 // Mount Workspace with its real address bar, freeze dialog and handlers.
 // Native capture and canvas/layout are boundaries, not replacement handlers.
@@ -18,6 +19,7 @@ const mocks = vi.hoisted(() => ({
   shell: {} as ShellValue,
   api: null as WorkspaceApi | null,
   reset: vi.fn(), finish: vi.fn(), reveal: vi.fn(), setWebUrl: vi.fn(),
+  liveOriginal: null as string | null, openFolder: vi.fn(), grantFolder: vi.fn(), drawPage: false,
 }));
 // Observe the real address state setter while leaving React's state behavior intact.
 vi.mock("react", async original => {
@@ -29,7 +31,8 @@ vi.mock("react", async original => {
   }) as typeof react.useState };
 });
 vi.mock("./shellContext", () => ({ useShell: () => mocks.shell }));
-vi.mock("./canvas/boardChunk", () => ({ peekBoardComponent: () => () => null }));
+// The board draws nothing, or only its page content when a test needs the page's own frame.
+vi.mock("./canvas/boardChunk", () => ({ peekBoardComponent: () => (props: { pageContent?: import("react").ReactNode }) => mocks.drawPage ? props.pageContent ?? null : null }));
 vi.mock("./components/LoadingDoodle", () => ({ LoadingDoodle: () => null }));
 vi.mock("./util/bootSettled", () => ({ afterBootSettled: () => new Promise(() => {}) }));
 vi.mock("./util/loadingDoodleActivity", () => ({
@@ -81,7 +84,9 @@ beforeEach(() => {
   localStorage.clear();
   vi.clearAllMocks();
   mocks.api = null;
-  mocks.native = true; mocks.existing = null;
+  mocks.native = true; mocks.existing = null; mocks.liveOriginal = null; mocks.drawPage = false;
+  mocks.openFolder.mockReset().mockResolvedValue({ status: "unavailable" });
+  mocks.grantFolder.mockReset().mockResolvedValue({ status: "unavailable" });
   mocks.fetch.mockReset(); mocks.serialize.mockReset(); mocks.fromHtml.mockReset();
   host = document.createElement("div");
   document.body.append(host);
@@ -150,6 +155,14 @@ vi.mock("./api/nativeHttp", async original => ({
   ...await original<typeof import("./api/nativeHttp")>(), isTauriRuntime: () => mocks.native,
 }));
 vi.mock("./util/liveWebviewSupport", () => ({ liveWebviewSupported: () => true }));
+vi.mock("./util/liveHtmlStore", async original => ({
+  ...await original<typeof import("./util/liveHtmlStore")>(), getLiveOriginal: async () => mocks.liveOriginal,
+}));
+vi.mock("./util/htmlAssets", () => ({
+  openHtmlFolder: (...args: unknown[]) => mocks.openFolder(...args),
+  grantHtmlFolder: (...args: unknown[]) => mocks.grantFolder(...args),
+  htmlAssetBase: (token: string) => `http://lcasset.localhost/${token}/`,
+}));
 vi.mock("./util/docSourceNative", async original => ({
   ...await original<typeof import("./util/docSourceNative")>(), nativeSourcePickerAvailable: () => true,
 }));
@@ -386,4 +399,42 @@ it("an address web document still sets its URL and offers live browsing and relo
   expect(button("Reload page")).toBeTruthy();
   // A page from an address has no file behind it.
   expect(chromeLink()).toBeNull();
+});
+
+describe("a live local page's own folder", () => {
+  const location = "content://com.android.externalstorage.documents/document/primary%3ADocuments%2Fread%2FGraphs%2Fguide.html";
+  async function mountLinked(id: string) {
+    withMarks();
+    const localFileHash = `original-${id}`;
+    mocks.existing = { ...mocks.existing!, id, name: "guide.html", hash: localFileHash, localFileHash, footnotes: [] };
+    mocks.liveOriginal = '<video controls src="3.7.mp4"></video>';
+    mocks.drawPage = true;
+    setDocSource(id, { kind: "uri", location, name: "guide.html", size: 1, modified: 1, hash: localFileHash, checkedAt: 1 });
+    await mount({ id: "local-file", kind: "annotate", title: "guide.html", docType: "web",
+      hash: localFileHash, docId: id, dirty: false, lastActive: 0, indexed: "idle", source: null });
+  }
+  const liveFrame = () => document.querySelector<HTMLIFrameElement>("iframe.lc-live-html-frame");
+
+  it("points the live page's relative names at the folder of its linked file", async () => {
+    mocks.openFolder.mockResolvedValue({ status: "ready", token: "tok" });
+    await mountLinked("linked-ready");
+    expect(mocks.openFolder).toHaveBeenCalledWith("uri", location);
+    expect(liveFrame()?.srcdoc).toContain('<base href="http://lcasset.localhost/tok/">');
+    expect(dialog("Load this page's videos and pictures?")).toBeNull();
+  });
+
+  it("asks once for a folder it has only the file of, and loads from it once chosen", async () => {
+    mocks.openFolder.mockResolvedValue({ status: "needsAccess", folder: "Graphs" });
+    await mountLinked("linked-ask");
+    expect(liveFrame()?.srcdoc).not.toContain("<base href");
+    expect(dialog("Load this page's videos and pictures?")?.textContent).toContain("“guide.html” loads files from the folder it sits in, “Graphs”.");
+    mocks.grantFolder.mockResolvedValueOnce({ status: "wrongFolder" });
+    await click("Choose folder…");
+    expect(dialog("Load this page's videos and pictures?")?.textContent).toContain("That folder doesn't hold “guide.html”. Choose the folder it's in.");
+    mocks.grantFolder.mockResolvedValueOnce({ status: "ready", token: "granted" });
+    await click("Choose folder…"); await settle();
+    expect(mocks.grantFolder).toHaveBeenLastCalledWith(location);
+    expect(dialog("Load this page's videos and pictures?")).toBeNull();
+    expect(liveFrame()?.srcdoc).toContain('<base href="http://lcasset.localhost/granted/">');
+  });
 });

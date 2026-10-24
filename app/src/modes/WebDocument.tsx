@@ -18,6 +18,8 @@ export interface WebDocumentProps {
   localFile?: boolean;
   /** The device-local original runs above the frozen page while Live is on. */
   live?: string | null;
+  /** Where the live page's own folder is served, for its videos and pictures. */
+  assetBase?: string | null;
   onMeasure?: (height: number) => void;
   selectable?: boolean;
   /** An in-page link was followed: bring its target, now at this client y, into view. */
@@ -45,6 +47,7 @@ export function WebDocument({
   url,
   localFile = false,
   live,
+  assetBase = null,
   onMeasure,
   selectable = false,
   onNavigate,
@@ -151,7 +154,7 @@ export function WebDocument({
         // eslint-disable-next-line react/no-danger -- sanitised in fetchWebPage
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      {live && <LiveHtmlFrame original={live} onHeight={onLiveHeight} onAnchor={onAnchor} />}
+      {live && <LiveHtmlFrame original={live} onHeight={onLiveHeight} onAnchor={onAnchor} assetBase={assetBase} />}
     </div>
   );
 }
