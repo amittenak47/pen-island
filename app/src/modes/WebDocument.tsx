@@ -20,6 +20,8 @@ export interface WebDocumentProps {
   live?: string | null;
   /** Where the live page's own folder is served, for its videos and pictures. */
   assetBase?: string | null;
+  /** The document's id, under which its live page's `localStorage` is kept. */
+  storageId?: string | null;
   onMeasure?: (height: number) => void;
   selectable?: boolean;
   /** An in-page link was followed: bring its target, now at this client y, into view. */
@@ -48,6 +50,7 @@ export function WebDocument({
   localFile = false,
   live,
   assetBase = null,
+  storageId = null,
   onMeasure,
   selectable = false,
   onNavigate,
@@ -154,7 +157,7 @@ export function WebDocument({
         // eslint-disable-next-line react/no-danger -- sanitised in fetchWebPage
         dangerouslySetInnerHTML={{ __html: html }}
       />
-      {live && <LiveHtmlFrame original={live} onHeight={onLiveHeight} onAnchor={onAnchor} assetBase={assetBase} />}
+      {live && <LiveHtmlFrame original={live} onHeight={onLiveHeight} onAnchor={onAnchor} assetBase={assetBase} storageId={storageId} />}
     </div>
   );
 }

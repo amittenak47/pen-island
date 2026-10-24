@@ -418,6 +418,7 @@ describe("a live local page's own folder", () => {
   it("opens the live page once, after its folder is known, with relative names pointed there", async () => {
     let answer!: (access: unknown) => void;
     mocks.openFolder.mockReturnValue(new Promise(resolve => { answer = resolve; }));
+    localStorage.setItem("lc-live-page-storage:linked-ready", JSON.stringify({ "bbt-page": "problems" }));
     await mountLinked("linked-ready");
     expect(mocks.openFolder).toHaveBeenCalledWith("uri", location);
     // The still copy shows while the folder is looked up; the live page is not loaded twice.
@@ -425,6 +426,8 @@ describe("a live local page's own folder", () => {
     await act(async () => answer({ status: "ready", token: "tok" }));
     await settle();
     expect(liveFrame()?.srcdoc).toContain('<base href="http://lcasset.localhost/tok/">');
+    // The page's localStorage is the one kept for this document.
+    expect(liveFrame()?.srcdoc).toContain('const seeded = {"bbt-page":"problems"};');
     expect(dialog("Load this page's videos and pictures?")).toBeNull();
   });
 
