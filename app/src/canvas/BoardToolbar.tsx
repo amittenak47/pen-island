@@ -879,10 +879,10 @@ export function BoardToolbar({
 
   const shapeHoldHint =
     shapeSlot === "shapes"
-      ? "Shapes — tap for stamps · hold to switch to import photo"
+      ? "Shapes: tap for stamps, hold to switch to import photo"
       : shapeSlot === "photos"
-        ? "Import photo — tap to pick · hold to switch to screenshot"
-        : "Screenshot — tap for entire board or region · hold to switch to shapes";
+        ? "Import photo: tap to pick, hold to switch to screenshot"
+        : "Screenshot: tap for the entire board or a region, hold to switch to shapes";
 
   const renderToolButton = (tool: ToolName, label: string, hint: string) => (
     <button
