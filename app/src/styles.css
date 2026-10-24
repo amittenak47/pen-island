@@ -24,6 +24,19 @@
   font-display: swap;
 }
 
+/*
+ * Inter SemiBold, Latin only (OFL, @fontsource/inter 5.1.0; fonts/Inter-OFL.txt):
+ * the footnote panel's tiny all-caps titles, the same on every device.
+ */
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter-SemiBold-latin.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   /* One shape for the blocky chrome: Agent panel, its sessions and turns, Home tiles. */
   --lc-r-block: 2px;
@@ -20790,14 +20803,14 @@ button.lc-row-selected:hover:not(:disabled) {
 }
 
 /*
- * The footnote's tiny all-caps titles use the bundled DINish, not the first
+ * The footnote's tiny all-caps titles use the bundled Inter, not the first
  * sans the device has: an installed Helvetica Neue drew its S out of step
  * with the other capitals at this size, and only on that PC.
  */
 .lc-footnote-overview .lc-agent-turn-role,
 .lc-footnote-bubble .lc-agent-turn-role {
-  font-family: "DINish", var(--lc-sans);
-  font-weight: 700;
+  font-family: "Inter", var(--lc-sans);
+  font-weight: 600;
 }
 
 .lc-footnote-overview-section {
