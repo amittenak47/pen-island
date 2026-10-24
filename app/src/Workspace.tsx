@@ -905,7 +905,10 @@ export const Workspace = memo(function Workspace({
         setHtmlFolderError(null);
         setHtmlFolderAsk({ id: annotateDocId, name, location, folder: access.folder });
       }
-    }).catch(() => { /* The page still runs; only its folder's files stay out of reach. */ });
+    }).catch((cause) => {
+      // The page still runs; only its folder's files stay out of reach. Say why in the log.
+      console.warn("Cannot reach the live page's folder:", cause);
+    });
     return () => { stale = true; };
     // The linked file, not the ref object: it is read fresh on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
