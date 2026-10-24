@@ -1611,6 +1611,23 @@ html[data-theme="dark"] .lc-web-doc {
 }
 
 /*
+ * A live page's own video and audio players, in Scroll mode only.
+ *
+ * The frame never takes the pointer, except here: with players on the page
+ * it does, and the catcher above it (LiveHtmlFrame) hands everything but the
+ * players' boxes back to the board, so drags still pan the page.
+ */
+.lc-live-html-frame,
+.lc-live-html-catcher {
+  pointer-events: none;
+}
+
+.lc-board-reading .lc-page-content-slot .lc-live-html-frame.has-players,
+.lc-board-reading .lc-page-content-slot .lc-live-html-catcher {
+  pointer-events: auto;
+}
+
+/*
  * The board scrolls a web page, never the browser.
  *
  * `touch-action` stops at a scroll container: the board's `none` reaches no

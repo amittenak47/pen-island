@@ -396,3 +396,85 @@ describe("local HTML freeze and identity", () => {
     );
   });
 });
+
+describe("live HTML with its file's folder", () => {
+  const base = "http://lcasset.localhost/0123abcd/";
+  const page = `<base href="file:///elsewhere/"><img src="official/p-1.png">
+    <details><summary>Video</summary><video controls src="3.7.mp4"></video></details>
+    <a href="#w5">Week 5</a><a href="https://example.com/">Out</a><p id="w5">Week 5</p>`;
+
+  it("keeps relative names and points them at the folder, opening only that address", () => {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc(page, "n", base), "text/html");
+    const policy = doc.head.firstElementChild as HTMLMetaElement;
+    expect(policy.content).toBe(LIVE_HTML_CSP
+      .replace("img-src https: data: blob:", `img-src https: data: blob: ${base}`)
+      .replace("base-uri 'none'", `media-src ${base} blob: data:; base-uri ${base}`));
+    expect([...doc.querySelectorAll("base")].map(node => node.getAttribute("href"))).toEqual([base]);
+    expect(doc.querySelector("img")?.getAttribute("src")).toBe("official/p-1.png");
+    expect(doc.querySelector("video")?.getAttribute("src")).toBe("3.7.mp4");
+  });
+
+  it("still strips relative names when the folder is not available", () => {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc(page, "n", null), "text/html");
+    expect(doc.querySelector("base")).toBeNull();
+    expect(doc.querySelector("video")?.hasAttribute("src")).toBe(false);
+    expect((doc.head.firstElementChild as HTMLMetaElement).content).toBe(LIVE_HTML_CSP);
+  });
+
+  function run(assetBase: string | null) {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc(page, "n", assetBase), "text/html");
+    let onMessage!: (event: { source: unknown; data: unknown }) => void;
+    let onLoad!: () => Promise<void>;
+    const parent = { postMessage: vi.fn() };
+    const fakeWindow = { open: () => ({}), addEventListener: vi.fn((type, callback) => {
+      if (type === "message") onMessage = callback;
+      if (type === "load") onLoad = callback;
+    }) };
+    const location = { hash: "" };
+    const bridge = [...doc.head.querySelectorAll("script")].find(node => node.textContent?.includes("const assets"))!;
+    new Function("window", "document", "parent", "ResizeObserver", "MutationObserver", "PointerEvent", "location", bridge.textContent!)(
+      fakeWindow, doc, parent, class { observe() {} }, class { observe() {} }, MouseEvent, location,
+    );
+    const video = doc.querySelector("video")!;
+    Object.defineProperty(video, "currentSrc", { value: assetBase ? `${assetBase}3.7.mp4` : "" });
+    Object.defineProperty(video, "currentTime", { value: 42.5 });
+    const pause = vi.fn();
+    Object.defineProperty(video, "pause", { value: pause });
+    const tapOn = (el: Element) => {
+      Object.defineProperty(doc, "elementFromPoint", { value: () => el, configurable: true });
+      onMessage({ source: parent, data: { type: LIVE_HTML_MESSAGE, nonce: "n", tap: { x: 1, y: 1 } } });
+    };
+    return { doc, parent, location, video, pause, tapOn, load: () => onLoad() };
+  }
+
+  it("reports where the page's players sit, once per change", async () => {
+    vi.useFakeTimers();
+    const { doc, parent, video, load } = run(base);
+    Object.defineProperty(doc, "fonts", { value: { ready: Promise.resolve() } });
+    vi.spyOn(video, "getBoundingClientRect").mockReturnValue({ left: 10.4, top: 300, width: 640, height: 360 } as DOMRect);
+    const pending = load();
+    await vi.advanceTimersByTimeAsync(300);
+    await pending;
+    const holes = parent.postMessage.mock.calls.filter(([data]) => "holes" in data);
+    expect(holes).toEqual([[{ type: LIVE_HTML_MESSAGE, nonce: "n", holes: [[10, 300, 640, 360]] }, "*"]]);
+  });
+
+  it("hands a tapped video from the folder to the app, at its time, and pauses it", () => {
+    const { parent, video, pause, tapOn } = run(base);
+    tapOn(video);
+    expect(parent.postMessage).toHaveBeenCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n",
+      media: { src: `${base}3.7.mp4`, time: 42.5, video: true } }, "*");
+    expect(pause).toHaveBeenCalled();
+  });
+
+  it("keeps a page's own # links in the page instead of loading the folder", () => {
+    const { doc, location } = run(base);
+    const [inside, outside] = doc.querySelectorAll("a");
+    const insideClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+    const outsideClick = new MouseEvent("click", { bubbles: true, cancelable: true });
+    inside.dispatchEvent(insideClick); outside.dispatchEvent(outsideClick);
+    expect(insideClick.defaultPrevented).toBe(true);
+    expect(location.hash).toBe("#w5");
+    expect(outsideClick.defaultPrevented).toBe(true);
+  });
+});

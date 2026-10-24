@@ -101,17 +101,46 @@ export function localHtmlSrcdoc(original: string, nonce: string): string {
   return doctype + "\n" + doc.documentElement.outerHTML;
 }
 
-export function liveHtmlSrcdoc(original: string, nonce: string): string {
+/**
+ * The live page's policy, opened to the folder its file sits in when there is one.
+ *
+ * Only that folder's own address: images, video and audio, and the `<base>`
+ * that points relative names there. Scripts and styles stay as they were.
+ */
+export function liveHtmlCsp(assetBase?: string | null): string {
+  if (!assetBase) return LIVE_HTML_CSP;
+  return LIVE_HTML_CSP
+    .replace("img-src https: data: blob:", `img-src https: data: blob: ${assetBase}`)
+    .replace("base-uri 'none'", `media-src ${assetBase} blob: data:; base-uri ${assetBase}`);
+}
+
+/**
+ * The live page, ready for its sandboxed frame.
+ *
+ * `assetBase` is the address of the folder beside the file (`lcasset`, see
+ * htmlAssets.ts). With it, relative names such as `3.7.mp4` load from there,
+ * including the ones the page's own scripts write later. Without it they are
+ * stripped, as the app has nothing to resolve them against.
+ */
+export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: string | null): string {
   const doc = new DOMParser().parseFromString(original, "text/html");
-  removeRelativeResources(doc);
+  if (assetBase) doc.querySelectorAll("base").forEach((node) => node.remove());
+  else removeRelativeResources(doc);
   const policy = doc.createElement("meta");
   policy.httpEquiv = "Content-Security-Policy";
-  policy.content = LIVE_HTML_CSP;
+  policy.content = liveHtmlCsp(assetBase);
   doc.head.prepend(policy);
+  if (assetBase) {
+    const base = doc.createElement("base");
+    base.href = assetBase;
+    policy.after(base);
+  }
   const envelope = JSON.stringify({ type: LIVE_HTML_MESSAGE, nonce }).replace(/</g, "\\u003c");
+  const assets = JSON.stringify(assetBase ?? null).replace(/</g, "\\u003c");
   const bridge = doc.createElement("script");
   bridge.textContent = `(function() {
     const envelope = ${envelope};
+    const assets = ${assets};
     let ready = false;
     let lastHeight = null;
     let lastReport = -Infinity;
@@ -122,12 +151,31 @@ export function liveHtmlSrcdoc(original: string, nonce: string): string {
       ${UNROLL_SCROLL_BOXES}
       ${UNPIN_STICKY}
     }
+    // Where the page's own players sit, for the app to let taps through to
+    // their controls. Only with the file's folder: no player loads without it.
+    let lastPlayers = "[]";
+    function players() {
+      const boxes = [];
+      for (const media of document.querySelectorAll("video[controls], audio[controls]")) {
+        const box = media.getBoundingClientRect();
+        if (box.width >= 1 && box.height >= 1) boxes.push([box.left, box.top + (window.scrollY || 0), box.width, box.height].map(Math.round));
+      }
+      return boxes;
+    }
     function report() {
       lastReport = performance.now();
       const height = Math.ceil(document.documentElement.scrollHeight);
       if (lastHeight === null || Math.abs(height - lastHeight) > 1) {
         lastHeight = height;
         parent.postMessage({...envelope, height}, "*");
+      }
+      if (assets) {
+        const holes = players();
+        const key = JSON.stringify(holes);
+        if (key !== lastPlayers) {
+          lastPlayers = key;
+          parent.postMessage({...envelope, holes}, "*");
+        }
       }
     }
     function schedule() {
@@ -152,6 +200,14 @@ export function liveHtmlSrcdoc(original: string, nonce: string): string {
       const tap = data.tap;
       if (!tap || typeof tap.x !== "number" || typeof tap.y !== "number" || !Number.isFinite(tap.x) || !Number.isFinite(tap.y)) return;
       const el = document.elementFromPoint(tap.x, tap.y);
+      // A tap cannot reach a video's own controls (the frame takes no
+      // pointer): the app plays it in a player of its own, from here.
+      const media = assets && el ? el.closest("video, audio") : null;
+      if (media && typeof media.currentSrc === "string" && media.currentSrc.indexOf(assets) === 0) {
+        parent.postMessage({...envelope, media: {src: media.currentSrc, time: media.currentTime || 0, video: media.tagName === "VIDEO"}}, "*");
+        media.pause();
+        return;
+      }
       if (el) {
         const options = {bubbles: true, cancelable: true, clientX: tap.x, clientY: tap.y};
         el.dispatchEvent(new PointerEvent("pointerdown", {...options, pointerType: "touch"}));
@@ -178,7 +234,14 @@ export function liveHtmlSrcdoc(original: string, nonce: string): string {
     });
     document.addEventListener("click", function(event) {
       const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
-      if (anchor && !anchor.getAttribute("href").startsWith("#")) event.preventDefault();
+      if (!anchor) return;
+      const href = anchor.getAttribute("href");
+      if (!href.startsWith("#")) event.preventDefault();
+      // Under a <base>, "#name" would load the folder: keep it in the page.
+      else if (assets) {
+        event.preventDefault();
+        if (location.hash !== href) location.hash = href;
+      }
     }, true);
     window.open = () => null;
   })();`;

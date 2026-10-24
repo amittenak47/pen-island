@@ -1,10 +1,20 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { invoke } from "@tauri-apps/api/core";
-import { listSourceFolder, pickSourceFolder, readDocumentSource } from "./docSourceNative";
+import { listSourceFolder, pickDocumentSource, pickSourceFolder, readDocumentSource } from "./docSourceNative";
 
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 
 beforeEach(() => vi.clearAllMocks());
+
+describe("native document picking", () => {
+  it("narrows the picker to HTML pages only when asked", async () => {
+    vi.mocked(invoke).mockResolvedValue(null);
+    await pickDocumentSource();
+    expect(invoke).toHaveBeenLastCalledWith("pick_document_source");
+    await pickDocumentSource("web");
+    expect(invoke).toHaveBeenLastCalledWith("pick_document_source", { only: "web" });
+  });
+});
 
 describe("native document source folders", () => {
   it("returns a picked folder or cancellation", async () => {

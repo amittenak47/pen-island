@@ -54,26 +54,32 @@ fn path_stat(path: &std::path::Path) -> Result<Option<SourceStat>, String> {
 }
 
 #[tauri::command]
-pub async fn pick_document_source(app: AppHandle) -> Result<Option<SourcePick>, String> {
+pub async fn pick_document_source(app: AppHandle, only: Option<String>) -> Result<Option<SourcePick>, String> {
     #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     {
         use tauri_plugin_dialog::DialogExt;
-        let picked = app.dialog().file()
-            .add_filter("Documents", &[
-                "pdf", "epub", "md", "markdown", "mdown", "mkd",
-                "py", "pyi", "pyw", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts",
-                "rs", "go", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "m", "mm",
-                "java", "kt", "kts", "swift", "rb", "php", "cs", "fs", "fsx", "scala", "sc",
-                "hs", "lhs", "lua", "r", "jl", "sql", "sh", "bash", "zsh", "fish", "ps1", "psm1",
-                "bat", "cmd", "yaml", "yml", "toml", "json", "jsonc", "json5", "xml", "xsl", "xslt",
-                "svg", "css", "scss", "sass", "less", "html", "htm", "xhtml", "vue", "svelte", "astro",
-                "mdx", "graphql", "gql", "proto", "tf", "hcl", "nix", "zig", "dart", "ex", "exs",
-                "erl", "hrl", "clj", "cljs", "cljc", "edn", "lisp", "el", "scm", "rkt", "ml", "mli",
-                "sv", "vhd", "vhdl", "asm", "s", "pl", "pm", "groovy", "gradle", "cmake", "diff", "patch",
-                "ini", "cfg", "conf", "env", "properties", "gitignore", "dockerignore", "editorconfig",
-                "txt", "log", "csv", "tsv", "wat", "sol", "move", "cairo", "lean", "adb", "ads", "d",
-                "pas", "pp", "f", "f90", "f95", "for", "cob", "cbl", "nim", "cr", "v",
-            ])
+        // The Web pad's Load offers HTML pages only; the app still checks what comes back.
+        let dialog = app.dialog().file();
+        let dialog = if only.as_deref() == Some("web") {
+            dialog.add_filter("Web pages", &["html", "htm"])
+        } else {
+            dialog.add_filter("Documents", &[
+                    "pdf", "epub", "md", "markdown", "mdown", "mkd",
+                    "py", "pyi", "pyw", "js", "jsx", "mjs", "cjs", "ts", "tsx", "mts", "cts",
+                    "rs", "go", "c", "h", "cpp", "cc", "cxx", "hpp", "hh", "hxx", "m", "mm",
+                    "java", "kt", "kts", "swift", "rb", "php", "cs", "fs", "fsx", "scala", "sc",
+                    "hs", "lhs", "lua", "r", "jl", "sql", "sh", "bash", "zsh", "fish", "ps1", "psm1",
+                    "bat", "cmd", "yaml", "yml", "toml", "json", "jsonc", "json5", "xml", "xsl", "xslt",
+                    "svg", "css", "scss", "sass", "less", "html", "htm", "xhtml", "vue", "svelte", "astro",
+                    "mdx", "graphql", "gql", "proto", "tf", "hcl", "nix", "zig", "dart", "ex", "exs",
+                    "erl", "hrl", "clj", "cljs", "cljc", "edn", "lisp", "el", "scm", "rkt", "ml", "mli",
+                    "sv", "vhd", "vhdl", "asm", "s", "pl", "pm", "groovy", "gradle", "cmake", "diff", "patch",
+                    "ini", "cfg", "conf", "env", "properties", "gitignore", "dockerignore", "editorconfig",
+                    "txt", "log", "csv", "tsv", "wat", "sol", "move", "cairo", "lean", "adb", "ads", "d",
+                    "pas", "pp", "f", "f90", "f95", "for", "cob", "cbl", "nim", "cr", "v",
+                ])
+        };
+        let picked = dialog
             .add_filter("All files", &["*"])
             .blocking_pick_file();
         let Some(picked) = picked else { return Ok(None) };
@@ -88,6 +94,8 @@ pub async fn pick_document_source(app: AppHandle) -> Result<Option<SourcePick>, 
     }
     #[cfg(target_os = "android")]
     {
+        // Android providers often mislabel HTML, so the picker stays open to any file.
+        let _ = only;
         let picked = app.gallery_save().ok_or("gallery save plugin unavailable")?
             .pick_document().map_err(|err| err.to_string())?;
         if picked.uri.is_empty() { return Ok(None) }
@@ -99,7 +107,7 @@ pub async fn pick_document_source(app: AppHandle) -> Result<Option<SourcePick>, 
     }
     #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux", target_os = "android")))]
     {
-        let _ = app;
+        let _ = (app, only);
         Ok(None)
     }
 }

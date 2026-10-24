@@ -9,6 +9,7 @@ import android.provider.MediaStore
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.net.Uri
+import android.os.ParcelFileDescriptor
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
 import android.util.Base64
@@ -22,6 +23,8 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
+import java.nio.ByteBuffer
+import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -280,6 +283,173 @@ class GallerySavePlugin(private val activity: Activity) : Plugin(activity) {
                 invoke.resolve(JSObject().apply { put("data", Base64.encodeToString(bytes, Base64.NO_WRAP)) })
             } catch (error: Exception) { invoke.reject(error.message ?: "Cannot read document") }
         }.start()
+    }
+
+    /*
+     * A linked HTML file's folder, for the videos and pictures its page loads
+     * from beside it.
+     *
+     * A file picked on its own carries a grant for that file only. Its folder
+     * is reachable through a tree grant that covers it: one taken when the
+     * folder was linked, or one asked for here.
+     */
+
+    @Command
+    fun html_folder(invoke: Invoke) {
+        val args = invoke.parseArgs(DocumentSourceArgs::class.java)
+        Thread {
+            try {
+                val document = Uri.parse(args.uri)
+                if (document.scheme != "content" || !DocumentsContract.isDocumentUri(activity, document)) {
+                    invoke.resolve(JSObject()); return@Thread
+                }
+                val id = DocumentsContract.getDocumentId(document)
+                val trees = activity.contentResolver.persistedUriPermissions
+                    .filter { it.isReadPermission && it.uri.authority == document.authority && DocumentsContract.isTreeUri(it.uri) }
+                val found = trees.firstNotNullOfOrNull { folderIn(it.uri, id) }
+                invoke.resolve(found ?: JSObject().apply {
+                    put("needsAccess", true)
+                    parentPath(id)?.substringAfterLast('/')?.substringAfterLast(':')?.takeIf { it.isNotEmpty() }?.let { put("folder", it) }
+                })
+            } catch (error: Exception) { invoke.reject(error.message ?: "Cannot reach the page's folder") }
+        }.start()
+    }
+
+    /** The folder holding document `id` inside `tree`, or null when the tree does not cover it. */
+    private fun folderIn(tree: Uri, id: String): JSObject? {
+        val treeId = DocumentsContract.getTreeDocumentId(tree)
+        val found = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) runCatching {
+            // Throws when the document is not inside the tree.
+            DocumentsContract.findDocumentPath(activity.contentResolver, DocumentsContract.buildDocumentUriUsingTree(tree, id))
+                ?.path?.takeIf { it.size >= 2 }?.let { it[it.size - 2] }
+        }.getOrNull() else null
+        val dir = found ?: parentPath(id)?.takeIf {
+            it == treeId || it.startsWith(treeId.trimEnd('/') + "/") || (treeId.endsWith(":") && it.startsWith(treeId))
+        } ?: return null
+        return JSObject().apply { put("tree", tree.toString()); put("dir", dir) }
+    }
+
+    /** Parent of a path-like document id ("primary:Documents/read/page.html"), as external storage writes them. */
+    private fun parentPath(id: String): String? = when {
+        id.contains('/') -> id.substringBeforeLast('/')
+        id.contains(':') && id.substringAfter(':').isNotEmpty() -> id.substringBefore(':') + ":"
+        else -> null
+    }
+
+    @Command
+    fun grant_html_folder(invoke: Invoke) {
+        try {
+            val document = Uri.parse(invoke.parseArgs(DocumentSourceArgs::class.java).uri)
+            val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+                // Open on the file's own folder, so allowing it is one tap.
+                val parent = runCatching { parentPath(DocumentsContract.getDocumentId(document)) }.getOrNull()
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && parent != null && document.authority != null) {
+                    putExtra(DocumentsContract.EXTRA_INITIAL_URI, DocumentsContract.buildDocumentUri(document.authority, parent))
+                }
+            }
+            startActivityForResult(invoke, intent, "htmlFolderResult")
+        } catch (error: Exception) { invoke.reject(error.message ?: "Folder picker unavailable") }
+    }
+
+    @ActivityCallback
+    fun htmlFolderResult(invoke: Invoke, result: ActivityResult) {
+        val tree = result.data?.data
+        if (result.resultCode != Activity.RESULT_OK || tree == null) { invoke.resolve(JSObject()); return }
+        Thread {
+            try {
+                val document = Uri.parse(invoke.parseArgs(DocumentSourceArgs::class.java).uri)
+                val resolver = activity.contentResolver
+                val held = resolver.persistedUriPermissions.any { it.uri == tree && it.isReadPermission }
+                resolver.takePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                val found = folderIn(tree, DocumentsContract.getDocumentId(document))
+                if (found == null) {
+                    // A folder that does not hold the page: give back a grant taken just now.
+                    if (!held) runCatching { resolver.releasePersistableUriPermission(tree, Intent.FLAG_GRANT_READ_URI_PERMISSION) }
+                    invoke.resolve(JSObject().apply { put("wrongFolder", true) })
+                } else invoke.resolve(found)
+            } catch (error: Exception) { invoke.reject(error.message ?: "Folder permission failed") }
+        }.start()
+    }
+
+    @InvokeArg
+    class AssetArgs {
+        var tree: String = ""
+        var dir: String = ""
+        var path: String = ""
+        var offset: Long = 0
+        var length: Long = 0
+    }
+
+    /** Children found by name, per tree folder: a page asks for the same few files again and again. */
+    private val assetIds = ConcurrentHashMap<String, String>()
+
+    /** `length` bytes from `offset` of `path` below the folder `dir`; length 0 answers the size only. */
+    @Command
+    fun read_asset(invoke: Invoke) {
+        val args = invoke.parseArgs(AssetArgs::class.java)
+        Thread {
+            try {
+                val tree = Uri.parse(args.tree)
+                val uri = assetUri(tree, args.dir, args.path, true)
+                if (uri == null) { invoke.resolve(JSObject().apply { put("found", false) }); return@Thread }
+                val read = try { readAsset(uri, args.offset, args.length) } catch (error: FileNotFoundException) {
+                    // Renamed or replaced since it was found: look it up by name once more.
+                    readAsset(assetUri(tree, args.dir, args.path, false) ?: throw error, args.offset, args.length)
+                }
+                invoke.resolve(read)
+            } catch (error: FileNotFoundException) {
+                invoke.resolve(JSObject().apply { put("found", false) })
+            } catch (error: Exception) { invoke.reject(error.message ?: "Cannot read file") }
+        }.start()
+    }
+
+    /** Walks down from `dir` by name only, so nothing above the folder is reachable. */
+    private fun assetUri(tree: Uri, dir: String, path: String, cached: Boolean): Uri? {
+        var id = dir
+        for (name in path.split('/')) {
+            if (name.isEmpty() || name == "." || name == "..") return null
+            val key = "$tree|$id|$name"
+            id = (if (cached) assetIds[key] else null) ?: childId(tree, id, name)?.also { assetIds[key] = it } ?: return null
+        }
+        return DocumentsContract.buildDocumentUriUsingTree(tree, id)
+    }
+
+    private fun childId(tree: Uri, parent: String, name: String): String? {
+        val children = DocumentsContract.buildChildDocumentsUriUsingTree(tree, parent)
+        val columns = arrayOf(DocumentsContract.Document.COLUMN_DOCUMENT_ID, DocumentsContract.Document.COLUMN_DISPLAY_NAME)
+        activity.contentResolver.query(children, columns, null, null, null).use { cursor ->
+            if (cursor == null) return null
+            while (cursor.moveToNext()) if (cursor.getString(1) == name) return cursor.getString(0)
+        }
+        return null
+    }
+
+    private fun readAsset(uri: Uri, offset: Long, length: Long): JSObject {
+        val descriptor = activity.contentResolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException("File is unavailable")
+        val known = descriptor.statSize
+        // The stream owns the descriptor and closes it.
+        ParcelFileDescriptor.AutoCloseInputStream(descriptor).channel.use { channel ->
+            val size = if (known >= 0) known else channel.size()
+            val count = length.coerceAtMost((size - offset).coerceAtLeast(0)).coerceAtMost(MAX_ASSET_READ).toInt()
+            val buffer = ByteBuffer.allocate(count)
+            var position = offset
+            while (buffer.hasRemaining()) {
+                val read = channel.read(buffer, position)
+                if (read <= 0) break
+                position += read
+            }
+            return JSObject().apply {
+                put("found", true)
+                put("size", size)
+                put("data", Base64.encodeToString(buffer.array(), 0, buffer.position(), Base64.NO_WRAP))
+            }
+        }
+    }
+
+    private companion object {
+        /** Above the Rust side's slice, so its slices are never cut short here. */
+        const val MAX_ASSET_READ = 8L * 1024 * 1024
     }
 
     private fun insertDocument(bytes: ByteArray, name: String, directory: String?): String {

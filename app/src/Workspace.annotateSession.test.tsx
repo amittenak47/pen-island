@@ -87,6 +87,7 @@ vi.mock("./util/docSourceUpdate", () => ({
   linkDocSource: (...args: unknown[]) => mocks.sourceLink(...args),
   justLinkDocSource: (...args: unknown[]) => mocks.sourceJustLink(...args),
   unlinkDocSource: (...args: unknown[]) => mocks.sourceUnlink(...args),
+  sourceLinkable: (source: { docType: string; localFileHash?: string }) => source.docType !== "web" || Boolean(source.localFileHash),
 }));
 vi.mock("./util/docSourceNative", async original => ({
   ...await original<typeof import("./util/docSourceNative")>(), nativeSourcePickerAvailable: () => true,
