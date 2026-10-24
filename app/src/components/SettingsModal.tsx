@@ -2000,26 +2000,25 @@ export function SettingsModal({
               </>}
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">When you capture</div>
-              <p className="lc-settings-hint">What happens when you capture the board or part of it.</p>
+<div className="lc-settings-subhead">What should happen after a screenshot?</div>
               <SettingsChoices
                 className="lc-settings-choice"
                 role="radiogroup"
-                aria-label="What a capture does"
+                aria-label="What happens after a screenshot"
               >
                 {(
                   [
                     [
                       "board",
-                      "The picture is placed on the board.",
+                      "Placed on your board.",
                     ],
                     [
                       "board-save",
-                      "Also saves it as an image file.",
+                      "Also saved as an image file.",
                     ],
                     [
                       "save",
-                      "Saves an image file and leaves the board as it was.",
+                      "The board stays as it was.",
                     ],
                   ] as Array<[CaptureMode, string]>
                 ).map(([mode, blurb]) => (
@@ -2043,11 +2042,11 @@ export function SettingsModal({
 
               {captureWritesFile(captureMode) && (
                 <>
-                  <div className="lc-settings-subhead">Save to</div>
+                  <div className="lc-settings-subhead">Where should screenshots be saved?</div>
                   <SettingsChoices
                     className="lc-settings-choice"
                     role="radiogroup"
-                    aria-label="Capture save location"
+                    aria-label="Screenshot save location"
                   >
                     <button
                       type="button"
@@ -2116,7 +2115,7 @@ export function SettingsModal({
                   {captureDestination === "folder" && (
                     <>
                       <p className="lc-settings-hint">
-                        On Android, choose a folder to grant access. On desktop, enter an absolute path (<code>~</code> works). Save failures are reported.
+                        On Android, choose a folder to grant access. On desktop, enter an absolute path to the save location. Failed saves will prompt a notification.
                       </p>
                       <input
                         type="text"
@@ -2126,7 +2125,7 @@ export function SettingsModal({
                         autoCapitalize="off"
                         autoCorrect="off"
                         placeholder="~/Pictures/lc-board"
-                        aria-label="Capture folder"
+                        aria-label="Screenshot folder"
                         onChange={(event) => setCaptureFolder(event.target.value)}
                       />
                       {/Android/i.test(navigator.userAgent) && <button type="button" onClick={async () => {
@@ -2140,7 +2139,7 @@ export function SettingsModal({
               )}
                   </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Countdown</div>
+<div className="lc-settings-subhead">How long should the countdown before a screenshot be?</div>
               <p className="lc-settings-hint">Tap the countdown to skip it.</p>
                   <SettingsChoices
                     className="lc-settings-choice lc-settings-choice-compact"

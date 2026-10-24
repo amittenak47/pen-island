@@ -70,7 +70,7 @@ export const CaptureFeedback = forwardRef<CaptureFeedbackHandle, Record<never, n
     useImperativeHandle(
       ref,
       (): CaptureFeedbackHandle => ({
-        countdown(seconds, label = "Capturing") {
+        countdown(seconds, label = "Taking a screenshot") {
           // A previous countdown still up would otherwise resolve twice.
           if (settleRef.current) endCountdown(false);
           if (seconds <= 0) return Promise.resolve(true);
@@ -145,7 +145,7 @@ export const CaptureFeedback = forwardRef<CaptureFeedbackHandle, Record<never, n
               <span className="lc-capture-countdown-number">{phase.remaining}</span>
             </div>
             <div className="lc-capture-countdown-label">{phase.label}</div>
-            <div className="lc-capture-countdown-hint">Tap to capture. Press Esc to cancel.</div>
+            <div className="lc-capture-countdown-hint">Tap to take it now. Press Esc to cancel.</div>
           </div>
         )}
         {phase.kind === "flash" && <div className="lc-capture-flash" aria-hidden />}

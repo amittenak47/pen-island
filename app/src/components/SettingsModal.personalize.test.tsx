@@ -155,7 +155,7 @@ it("resets one changed section without losing another section's drafts", async()
 it("keeps capture in Annotate and places all debug controls in Diagnostics", async()=>{
   await show(client());
   await act(async()=>button('Annotate').click());
-  expect(host.querySelector('[aria-label="What a capture does"]')).not.toBeNull();
+  expect(host.querySelector('[aria-label="What happens after a screenshot"]')).not.toBeNull();
   expect(host.querySelector('[aria-label="Measurement refresh rate"]')).toBeNull();
   await act(async()=>button('Troubleshooting').click());
   for(const label of ['Measurement refresh rate','Speed overlay','Drawing speed bar','Page preview while flicking','Floating Sync button','Activity log'])

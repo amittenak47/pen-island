@@ -10,7 +10,7 @@
  * One island, one row, always the same height, is what is left.
  *
  * Everything that is not a tool hides behind a press: the hex hold-cycles
- * shapes / import photo / screencap, colour fans out of one dot
+ * shapes / import photo / screenshot, colour fans out of one dot
  * ({@link ColorRadial}), pen / highlighter / eraser live on the ink wheel
  * (hold the preset chip).
  *
@@ -881,8 +881,8 @@ export function BoardToolbar({
     shapeSlot === "shapes"
       ? "Shapes — tap for stamps · hold to switch to import photo"
       : shapeSlot === "photos"
-        ? "Import photo — tap to pick · hold to switch to screencap"
-        : "Screencap — tap for entire board or region · hold to switch to shapes";
+        ? "Import photo — tap to pick · hold to switch to screenshot"
+        : "Screenshot — tap for entire board or region · hold to switch to shapes";
 
   const renderToolButton = (tool: ToolName, label: string, hint: string) => (
     <button
@@ -1085,7 +1085,7 @@ export function BoardToolbar({
                 ? "Shapes"
                 : shapeSlot === "photos"
                   ? "Import photo"
-                  : "Screencap"
+                  : "Screenshot"
             }
             ariaLabel={shapeHoldHint}
             className={[
@@ -1141,7 +1141,7 @@ export function BoardToolbar({
               className="lc-shape-flyout"
               axis="height"
               role="menu"
-              aria-label={shapeFlyout === "capture" ? "Screencap" : "Shapes"}
+              aria-label={shapeFlyout === "capture" ? "Screenshot" : "Shapes"}
             >
               <div data-morph-id="shapes">
                 {SHAPE_TOOLS.map(({ tool, label, glyph }) => (
