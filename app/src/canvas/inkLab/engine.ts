@@ -20,8 +20,7 @@ import {
   emptyAabb,
   expandAabb,
   type SpineDot,
-  type StrokeAabb,
-} from "./instance";
+  type StrokeAabb, POOL_SEEDS } from "./instance";
 import { stampLiveSamples } from "./sampleTime";
 import {
   capillaryRelax,
@@ -69,6 +68,8 @@ export type InkLabHalt = {
   grow: number;
   p?: number;
   slow?: number;
+  /** The pool's texture seed (see poolSeed). */
+  seed?: number;
 };
 
 export type InkLabSnapPatch = {
@@ -119,6 +120,12 @@ export type InkLabEngine = {
   liftRaw(s?: InkLabSample): InkLabRawLiftResult;
   paint(): InkLabPaintStats;
   /**
+   * The pen is down, still and silent, and a blot could start: paint even
+   * with no new input. A still nib sends no samples, so a loop that paints
+   * only on input never let the pool begin.
+   */
+  restingPen(): boolean;
+  /**
    * Copy the in-DOM host into the committed snap. Call once at pointerdown;
    * live composite is that snap plus the live stroke until lift.
    */
@@ -151,6 +158,8 @@ export type InkLabEngine = {
   replaceLastStroke(patch: InkLabSnapPatch, points: SpineDot[]): InkLabSnapPatch | null;
   /** Stamp highlighter / eraser onto the committed snap without clearing it. */
   paintOntoSnap(paint: (ctx: CanvasRenderingContext2D) => void): void;
+  /** Host-pixel box of the stroke being drawn, or null with none. */
+  liveBounds(): StrokeAabb | null;
   /** Drop the live stroke. Keep the committed snap. */
   cancelStroke(): void;
   clear(): void;
@@ -174,6 +183,33 @@ export function labStampGatePx(radiusPx: number, dpr: number): number {
   return Math.min(cap, byNib);
 }
 const HOLD_TICK_MS = 32;
+/**
+ * No sample for this long with the pen down means it is resting: some
+ * digitisers send nothing while the nib is still, so a hold is armed from
+ * the paint loop too.
+ */
+const HOLD_IDLE_MS = 50;
+/**
+ * A growing pool holds against hand drift: it breaks only once the nib is
+ * this share of the pool's growth past the stamp gate. Breaking at the gate
+ * (a few px) re-armed a fresh, pale pool beside the first, again and again
+ * during one hold: a ring inside the blot, a second blot like 3/4 of a circle.
+ */
+const HOLD_BREAK_GROWTH = 0.5;
+/**
+ * A pool starts growing only after the nib has rested this long. At 240 Hz
+ * an ordinary stroke lands every other sample inside the stamp gate, and
+ * growing on the first one sprinkled small pools (and blot halts) all along
+ * the line.
+ */
+const HOLD_START_MS = 64;
+/**
+ * Resting means staying within this many CSS px. Slow writing also lands
+ * inside the stamp gate, so "inside the gate" grew a small pool every few px
+ * (a row of dots, like a colon); a hand slowing to a stop stays put, and
+ * tremor or drift moves far less than this in {@link HOLD_START_MS}.
+ */
+const REST_RADIUS_CSS = 1;
 /**
  * Smallest undo-patch canvas side. Chrome keeps a 2D canvas under ~130x130
  * on the CPU, and drawing the GPU snap into one reads the whole snap back:
@@ -200,6 +236,8 @@ function cloneDot(d: SpineDot): SpineDot {
     a: d.a,
     p: d.p,
     slow: d.slow,
+    pool: d.pool,
+    seed: d.seed,
   };
 }
 
@@ -285,6 +323,12 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
   let holdTicks = 0;
   let holdBase: SpineDot | null = null;
   let lastHoldWall = 0;
+  /** Where the nib last moved more than the rest radius, and that sample's time. */
+  let restX = 0;
+  let restY = 0;
+  let restT = 0;
+  /** Time of the latest sample. */
+  let lastSampleT = 0;
   /** Pool reached cap; do not re-arm until the pen hops. */
   let holdPlateau = false;
   let blotTipGrow = 0;
@@ -382,6 +426,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       if (at.slow != null) {
         last.slow = last.slow != null ? Math.max(last.slow, at.slow) : at.slow;
       }
+      last.seed ??= at.seed;
       return;
     }
     blotHalts.push({
@@ -390,14 +435,21 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       grow,
       p: at.p,
       slow: at.slow,
+      ...(at.seed != null ? { seed: at.seed } : {}),
     });
   };
+
+  /** Down, still, silent for {@link HOLD_IDLE_MS}, with no hold yet: one may start. */
+  const resting = () =>
+    drawing && pen != null && pen.speedBlotBlend > 1e-3 && !holding && !holdPlateau &&
+    spine.length > 0 && lastWall > 0 && wallNow() - lastWall > HOLD_IDLE_MS;
 
   const armHold = (at: SpineDot, now: number) => {
     if (holding || holdPlateau) return;
     holding = true;
     holdTicks = 0;
-    holdBase = cloneDot(at);
+    // Each blot gets its own rim and grain, kept with the stroke.
+    holdBase = { ...cloneDot(at), seed: at.seed ?? Math.floor(Math.random() * POOL_SEEDS) };
     lastHoldWall = now;
   };
 
@@ -408,6 +460,10 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
 
   const applyHoldGrow = (now: number) => {
     if (!holding || !pen || !holdBase || !tip) return;
+    // Only a nib that has come to rest pools; a slow one keeps writing.
+    // Rest is sample time inside the rest radius, plus any quiet since.
+    const rested = lastSampleT - restT + Math.max(0, wallNow() - lastWall);
+    if (rested < HOLD_START_MS) return;
     const dt = now - lastHoldWall;
     if (dt < HOLD_TICK_MS && holdTicks > 0) return;
     const extra = Math.max(1, Math.floor(Math.max(dt, HOLD_TICK_MS) / HOLD_TICK_MS));
@@ -432,6 +488,8 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       rgb: styled.rgb,
       a: styled.a,
       slow: styled.slow,
+      pool: blotTipGrow,
+      seed: holdBase.seed,
     };
     const last = spine[spine.length - 1];
     if (last) {
@@ -439,6 +497,8 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       last.rgb = styled.rgb;
       last.a = styled.a;
       last.slow = styled.slow;
+      last.pool = blotTipGrow;
+      last.seed = holdBase.seed;
     }
     expandAabb(aabb, { ...tip, r: tip.r * 2 });
     if (grown >= holdCapRadius(holdBase.r, pen.speedBlotBlend) - HOLD_PLATEAU_EPS) {
@@ -481,7 +541,15 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     lastEkfMs = performance.now() - t0;
     const dist = Math.hypot(dot.x - last.x, dot.y - last.y);
     const gate = labStampGatePx(last.r, dpr);
-    if (dist < gate) {
+    lastSampleT = s.t;
+    if (Math.hypot(dot.x - restX, dot.y - restY) > REST_RADIUS_CSS * dpr) {
+      restX = dot.x;
+      restY = dot.y;
+      restT = s.t;
+    }
+    const held = (holding || holdPlateau) && holdBase && tip;
+    const breakAt = held ? gate + Math.max(0, tip!.r - holdBase!.r) * HOLD_BREAK_GROWTH : gate;
+    if (dist < breakAt) {
       const now = typeof performance !== "undefined" ? performance.now() : s.t;
       if (pen) {
         if (pen.speedBlotBlend > 1e-3) {
@@ -522,8 +590,9 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       blotTipGrow = 0;
     }
     // First sample is planted at rest. Speed ink would leave a standstill
-    // disc; borrow this hop's heading so the start matches the body.
-    if (spine.length === 1) {
+    // disc; borrow this hop's heading so the start matches the body. A pool
+    // grown there stays: restyling it erased the contact blot on the first hop.
+    if (spine.length === 1 && !((spine[0]!.pool ?? 0) > 1e-3)) {
       const origin = spine[0]!;
       const headed = styledDot(
         origin.x,
@@ -1006,10 +1075,14 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       );
       return { ...result, bakeInput: state.raw, bakeOptions: state.options };
     },
+    restingPen: () => resting(),
     paint() {
       const t0 = performance.now();
       // A lost context restarts WebGL2, or drops to the 2D strip.
       if (host && gpu?.isLost()) this.attach(host);
+      // A resting nib that sends no samples still grows its pool.
+      // It has rested since the last sample, so that is when the hold began.
+      if (resting()) armHold(spine[spine.length - 1]!, t0 - (wallNow() - lastWall));
       if (drawing && holding && pen) applyHoldGrow(t0);
       syncSize();
       const tDraw = performance.now();
@@ -1100,6 +1173,13 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       const sctx = snap.getContext("2d");
       if (!sctx) return;
       paint(sctx);
+    },
+    liveBounds() {
+      if (!drawing) return null;
+      const box = { ...aabb };
+      // The blot's texture rim reaches past its radius.
+      if (tip) expandAabb(box, { ...tip, r: tip.r * 1.1 });
+      return Number.isFinite(box.minX) && box.maxX > box.minX && box.maxY > box.minY ? box : null;
     },
     cancelStroke() {
       resetLive();

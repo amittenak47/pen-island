@@ -249,7 +249,8 @@ function outline(
   }
   for (const [from, to] of spans) {
     for (let i = Math.max(1, from); i <= Math.min(spine.length - 2, to); i++) {
-      if (sharpJoint(spine, i) || discs.has(i)) circle(ctx, spine[i]!);
+      // A held pool is a whole disc, not a bulge in the strip.
+      if (sharpJoint(spine, i) || discs.has(i) || (spine[i]!.pool ?? 0) > 1e-3) circle(ctx, spine[i]!);
     }
   }
   const head = spine[0];
@@ -397,6 +398,18 @@ function fillLayered(
       for (let k = i + 1; k <= j; k++) s.lineTo(dev[k]!.x, dev[k]!.y);
       s.stroke();
       i = j;
+    }
+  }
+  // Held pools last, in their own colour: the line's round caps had painted
+  // a paler disc over them.
+  for (const [from, to] of spans) {
+    for (let i = from; i <= to; i++) {
+      const p = dev[i]!;
+      if ((p.pool ?? 0) <= 1e-3) continue;
+      s.fillStyle = cssRgb(p.rgb ?? rgb);
+      s.beginPath();
+      s.arc(p.x, p.y, p.r + 0.5, 0, Math.PI * 2);
+      s.fill();
     }
   }
   const end = dev[last];

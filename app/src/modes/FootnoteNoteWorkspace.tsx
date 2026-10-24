@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CloseNoteIcon, PictureInPictureIcon } from "../components/NoteWindowIcons";
+import { CloseNoteIcon, OpenDocumentIcon, PictureInPictureIcon } from "../components/NoteWindowIcons";
 import { NO_CHROME, useShell } from "../shellContext";
 import { ANNOTATE_LIBRARY_EVENT, getAnnotateDoc, type AnnotateDoc } from "../util/annotateStore";
 import { noteById, numberFootnotes } from "../util/docFootnotes";
@@ -97,14 +97,16 @@ export function FootnoteNoteWorkspace({ tab, active, showing, splitRole }: {
     style={theme ? footnoteThemeVars(theme.color, theme.palette) : undefined}>
     <header className="lc-footnote-note-head">
       <div><strong>{title}</strong><span className="lc-footnote-note-parent">{doc?.label || doc?.name}</span></div>
+      {/* The mini note's header, one size of button: icons with tooltips. */}
       <div className="lc-footnote-note-actions">
-        {doc && <button type="button" className="lc-secondary" onClick={openParent}>Open document</button>}
-        {doc && note && <button type="button" className="lc-secondary lc-footnote-note-restore" aria-label="Restore mini note"
-          title="Return to the document, reopen this mini note, and close this tab" onClick={() => {
+        {doc && <button type="button" className="lc-footnote-mark-tool" aria-label="Open document"
+          title={`Open ${doc.label || doc.name}`} onClick={openParent}><OpenDocumentIcon /></button>}
+        {doc && note && <button type="button" className="lc-footnote-mark-tool lc-footnote-note-restore" aria-label="Restore mini note"
+          title="Back to the document as a mini note (closes this tab)" onClick={() => {
             requestMiniNoteRestore(ref);
             openParent();
             closeTab(tab.id);
-          }}><PictureInPictureIcon /><span>Restore mini note</span></button>}
+          }}><PictureInPictureIcon /></button>}
         <button type="button" className="lc-footnote-mark-tool" aria-label="Close note tab" title="Close note tab"
           onClick={() => closeTab(tab.id)}><CloseNoteIcon /></button>
       </div>

@@ -127,14 +127,27 @@ describe("FootnoteOverview panel", () => {
     };
     mount({ ...MARK, ...entries }, { onChange });
     if (field === "subMarks") act(() => document.querySelector<HTMLButtonElement>('[aria-label="Remove underline"]')!.click());
-    else confirmHold(document.querySelector<HTMLButtonElement>(field === "whiteboards" ? '[aria-label^="Scratch —"]' : '[aria-label^="Conversation. Tap"]')!);
+    else confirmHold(document.querySelector<HTMLButtonElement>(field === "whiteboards" ? '[aria-label^="Scratch. Tap"]' : '[aria-label^="Conversation. Tap"]')!);
     expect(onChange.mock.calls.at(-1)![0][field]).toEqual([]);
+  });
+
+  it("opens a website in the Web tab or the browser from its row's buttons", () => {
+    const onOpenWebTab = vi.fn();
+    const onOpenExternal = vi.fn();
+    mount({ ...MARK, userLinks: [{ title: "My link", url: "https://example.com" }] }, { onOpenWebTab, onOpenExternal });
+    expect(document.querySelector('section[aria-label="Websites"] .lc-footnote-overview-add')?.getAttribute("aria-label")).toBe("Add a website");
+    act(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.includes("My link"))!.click());
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open My link in the Web tab"]')!.click());
+    expect(onOpenWebTab).toHaveBeenCalledWith("https://example.com");
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open My link in your browser"]')!.click());
+    expect(onOpenExternal).toHaveBeenCalledWith("https://example.com");
   });
 
   it("saves [] when the last user link is removed", async () => {
     const onChange = vi.fn();
     mount({ ...MARK, userLinks: [{ title: "My link", url: "https://example.com" }] }, { onChange });
     act(() => [...document.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.includes("My link"))!.click());
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Edit My link"]')!.click());
     await vi.waitFor(() => expect(document.querySelector('[aria-label="Remove link"]')).not.toBeNull());
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="Remove link"]')!.click());
     expect(onChange.mock.calls.at(-1)![0].userLinks).toEqual([]);
@@ -306,7 +319,7 @@ describe("FootnoteOverview panel", () => {
     act(() => toggle().click());
     expect(fold().hasAttribute("data-open")).toBe(false);
     // An empty section has nothing to fold: just its title.
-    const links = document.querySelector<HTMLElement>('section[aria-label="Links"]')!;
+    const links = document.querySelector<HTMLElement>('section[aria-label="Websites"]')!;
     expect(links.querySelector(".lc-footnote-overview-section-toggle")).toBeNull();
     expect(links.querySelector(".lc-footnote-overview-section-fold")!.hasAttribute("data-open")).toBe(true);
   });

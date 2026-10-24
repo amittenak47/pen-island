@@ -24,6 +24,19 @@
   font-display: swap;
 }
 
+/*
+ * Inter SemiBold, Latin only (OFL, @fontsource/inter 5.1.0; fonts/Inter-OFL.txt):
+ * the footnote panel's tiny all-caps titles, the same on every device.
+ */
+@font-face {
+  font-family: "Inter";
+  src: url("./fonts/Inter-SemiBold-latin.woff2") format("woff2");
+  font-weight: 600;
+  font-style: normal;
+  font-display: swap;
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+
 :root {
   /* One shape for the blocky chrome: Agent panel, its sessions and turns, Home tiles. */
   --lc-r-block: 2px;
@@ -5860,6 +5873,37 @@ body[data-lc-sash-drag="horizontal"] {
   position: absolute;
   inset: 0;
   transform-origin: 50% 50%;
+  transition:
+    opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * The pen that held for the wheel is still down: a hint, not a dialog. The
+ * stroke under it stays live, so nothing here takes the pointer.
+ */
+.lc-ink-wheel-layer.is-peek,
+.lc-ink-wheel.is-peek {
+  pointer-events: none;
+}
+
+.lc-ink-wheel.is-peek .lc-ink-wheel-dial {
+  opacity: 0.3;
+  transform: scale(0.9);
+}
+
+/* A dropped stroke fading out over the page; see WhiteboardInkLab. */
+.lc-ink-ghost {
+  position: fixed;
+  z-index: 95;
+  pointer-events: none;
+  animation: lc-ink-ghost-out 200ms ease-out forwards;
+}
+
+@keyframes lc-ink-ghost-out {
+  to {
+    opacity: 0;
+  }
 }
 
 .lc-ink-wheel-tool {
@@ -16981,6 +17025,14 @@ button.lc-row-selected:hover:not(:disabled) {
    * half above nothing.
    */
   --lc-map-drop: calc(1.5 * var(--touch));
+  /*
+   * The lowest the row goes. The drop above lands it on `--lc-safe-bottom`,
+   * which with gesture navigation is the gesture bar (the row sat a little
+   * above it) but with 3-button navigation is 0: the nav bar sits outside the
+   * webview, and the row went flat on the bottom edge with the view stack's
+   * last control off it. About a gesture bar's height, so both look alike.
+   */
+  --lc-chrome-foot: 24px;
 }
 
 @media (pointer: coarse) and (min-width: 768px) {
@@ -17095,9 +17147,11 @@ button.lc-row-selected:hover:not(:disabled) {
  */
 .lc-mobile .lc-map-controls {
   /* Room for the parked coach peek handle under the chrome. */
-  /* Never into the gesture bar: `--lc-safe-bottom` is the floor. */
+  /* Never into the gesture bar: `--lc-safe-bottom` is the floor, and never
+     on the screen's last pixel either (`--lc-chrome-foot`). */
   bottom: max(
     var(--lc-safe-bottom),
+    var(--lc-chrome-foot),
     calc(
       4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
         var(--lc-map-above-coach) - var(--lc-map-drop, 0px)
@@ -17473,9 +17527,11 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-mobile .lc-map-controls {
   left: 4px;
   right: 4px;
-  /* Never into the gesture bar: `--lc-safe-bottom` is the floor. */
+  /* Never into the gesture bar: `--lc-safe-bottom` is the floor, and never
+     on the screen's last pixel either (`--lc-chrome-foot`). */
   bottom: max(
     var(--lc-safe-bottom),
+    var(--lc-chrome-foot),
     calc(
       4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
         var(--lc-map-above-coach) - var(--lc-map-drop, 0px)
@@ -20746,6 +20802,17 @@ button.lc-row-selected:hover:not(:disabled) {
   letter-spacing: 0.05em;
 }
 
+/*
+ * The footnote's tiny all-caps titles use the bundled Inter, not the first
+ * sans the device has: an installed Helvetica Neue drew its S out of step
+ * with the other capitals at this size, and only on that PC.
+ */
+.lc-footnote-overview .lc-agent-turn-role,
+.lc-footnote-bubble .lc-agent-turn-role {
+  font-family: "Inter", var(--lc-sans);
+  font-weight: 600;
+}
+
 .lc-footnote-overview-section {
   display: flex;
   flex-direction: column;
@@ -23409,7 +23476,10 @@ html[data-corners="rounded"] {
   line-height: 1.7;
   padding: 14px 0;
 }
-.lc-footnote-note-workspace > .lc-footnote-note-head { flex-wrap: wrap; }
+/* A reading column: a note's lines stay readable and its buttons stay by its title on a wide screen. */
+.lc-footnote-note-workspace > * { width: 100%; max-width: 880px; margin-inline: auto; }
+.lc-footnote-note-workspace > .lc-footnote-note-head { flex-wrap: nowrap; }
+.lc-footnote-note-workspace > .lc-footnote-note-head > .lc-footnote-note-actions { flex: 0 0 auto; gap: 4px; }
 .lc-footnote-note-workspace > .lc-footnote-note-head > div:first-child { flex: 1 1 160px; min-width: 0; }
 .lc-footnote-note-workspace > .lc-footnote-note-head > div:first-child > strong,
 .lc-footnote-note-workspace .lc-footnote-note-parent { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

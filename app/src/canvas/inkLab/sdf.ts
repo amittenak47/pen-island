@@ -34,6 +34,7 @@ layout(location=4) in float a_r1;
 layout(location=5) in vec3 a_c0;
 layout(location=6) in vec3 a_c1;
 layout(location=7) in float a_pools;
+layout(location=8) in vec2 a_seeds;
 uniform vec2 u_view;
 uniform vec2 u_origin;
 out vec2 v_p;
@@ -44,8 +45,10 @@ out float v_r1;
 out vec3 v_c0;
 out vec3 v_c1;
 flat out float v_pools;
+flat out vec2 v_seeds;
 void main() {
-  float rad = max(a_r0, a_r1) + 2.5;
+  // A pool's rim bulges up to RIM_BULGE past its radius.
+  float rad = max(a_r0, a_r1) * (a_pools > 0.5 ? 1.05 : 1.0) + 2.5;
   vec2 mn = min(a_p0, a_p1) - vec2(rad);
   vec2 mx = max(a_p0, a_p1) + vec2(rad);
   vec2 pos = mix(mn, mx, a_unit);
@@ -57,6 +60,7 @@ void main() {
   v_c0 = a_c0;
   v_c1 = a_c1;
   v_pools = a_pools;
+  v_seeds = a_seeds;
   // Positions stay absolute (fwidth and the SDF see host pixels); the surface
   // can be a small window onto the host starting at u_origin.
   vec2 clip = ((pos - u_origin) / u_view) * 2.0 - 1.0;
@@ -74,18 +78,95 @@ in float v_r1;
 in vec3 v_c0;
 in vec3 v_c1;
 flat in float v_pools;
+flat in vec2 v_seeds;
 uniform int u_pass;
-out vec4 frag;
+layout(location=0) out vec4 frag;
+// Pass 2 only: pool weight, and pooled-ring strength x pool weight.
+layout(location=1) out vec4 poolSum;
 // A pool's disc against the line under it (whose weights add to about 2).
 const float POOL_WEIGHT = 4.0;
 
+// Blot texture, in the pool's own unit disc so it scales with the pool and
+// any zoom, and seeded per blot (see poolSeed):
+// - an uneven rim, bulging up to RIM_BULGE of the radius, like ink spreading;
+// - soft grain, a few broad cells across the pool, so it blends, no specks;
+// - a pooled edge, a thin darker ring at the rim, like a dried drop, only
+//   where the pool's own ink reaches the rim (the resolve hides it where the
+//   lighter line blends in) and only once the pool has grown dark.
+const float RIM_BULGE = 0.03;
+const float GRAIN = 0.07;
+const float GRAIN_CELLS = 3.5;
+const float RING_DARK = 0.12;
+
+float hash21(vec2 p, float s) {
+  // Seeds run to 4095: keep sin's argument small for highp precision.
+  return fract(sin(dot(p, vec2(127.1, 311.7)) + s * 1.618) * 43758.5453);
+}
+
+float vnoise(vec2 p, float s) {
+  vec2 i = floor(p);
+  vec2 f = fract(p);
+  vec2 u = f * f * (3.0 - 2.0 * f);
+  float a = hash21(i, s), b = hash21(i + vec2(1.0, 0.0), s);
+  float c = hash21(i + vec2(0.0, 1.0), s), d = hash21(i + vec2(1.0, 1.0), s);
+  return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// The pool's radius in the direction of p: its rim, with the bulges.
+float poolRim(vec2 p, vec2 c, float r, float s) {
+  vec2 o = p - c;
+  float l = length(o);
+  vec2 dir = l > 1e-4 ? o / l : vec2(1.0, 0.0);
+  float n = 0.85 * vnoise(dir * 3.0 + 5.0, s) + 0.15 * vnoise(dir * 7.0 + 9.0, s + 3.0);
+  return r * (1.0 + RIM_BULGE * n);
+}
+
+// x: grain factor on the pool colour, y: how much of the pooled ring is here.
+vec2 poolLook(vec2 p, vec2 c, float rim, float s) {
+  vec2 q = (p - c) / rim;
+  float e = 1.0 - length(q);
+  float fade = clamp(e / 0.3, 0.0, 1.0);
+  float grain = 1.0 + (vnoise(q * GRAIN_CELLS + s * 0.37, s) - 0.5) * 2.0 * GRAIN * fade;
+  float ring = exp(-pow((e - 0.03) / 0.035, 2.0));
+  return vec2(grain, ring);
+}
+
+// Exact tapered capsule: the hull of the two end discs. The cheaper
+// length(p - a - ba*h) - mix(ra, rb, h) shrinks the radius along the hop,
+// so a wide pool next to a narrow dot lost the half of its disc facing the
+// dot: a "D" at a held start, a pool missing a wedge where the pen turned.
+float sdTaper(vec2 p, vec2 a, vec2 b, float ra, float rb) {
+  vec2 ba = b - a;
+  float l = length(ba);
+  // One disc holds the other (or a lone dot): the bigger disc is the shape.
+  if (l <= abs(ra - rb) + 1e-4) return min(length(p - a) - ra, length(p - b) - rb);
+  vec2 dir = ba / l;
+  vec2 q = vec2(abs(dot(p - a, vec2(-dir.y, dir.x))), dot(p - a, dir));
+  float s = (ra - rb) / l;
+  float c = sqrt(1.0 - s * s);
+  float k = dot(q, vec2(-s, c));
+  if (k < 0.0) return length(q) - ra;
+  if (k > c * l) return length(q - vec2(0.0, l)) - rb;
+  return dot(q, vec2(c, s)) - ra;
+}
+
 void main() {
-  // sdRoundCone (tapered capsule), keeping the radius at the closest point.
+  // Position along the hop and the radius there, for colour and weight.
   vec2 ba = v_p1 - v_p0;
   float l2 = dot(ba, ba);
   float h = l2 < 1e-8 ? 0.0 : clamp(dot(v_p - v_p0, ba) / l2, 0.0, 1.0);
   float r = mix(v_r0, v_r1, h);
-  float d = length(v_p - v_p0 - ba * h) - r;
+  float d = sdTaper(v_p, v_p0, v_p1, v_r0, v_r1);
+  bool poolA = v_pools > 0.5 && mod(v_pools, 2.0) > 0.5;
+  bool poolB = v_pools > 1.5;
+  vec2 seed = floor(v_seeds);
+  // How far each pool has grown, 0-1: a pale dab gets no pooled edge.
+  vec2 grown = smoothstep(0.25, 0.75, fract(v_seeds));
+  float rimA = poolA ? poolRim(v_p, v_p0, max(v_r0, 0.5), seed.x) : 0.0;
+  float rimB = poolB ? poolRim(v_p, v_p1, max(v_r1, 0.5), seed.y) : 0.0;
+  // The bulges only add to the capsule: its own disc is the rim's floor.
+  if (poolA) d = min(d, length(v_p - v_p0) - rimA);
+  if (poolB) d = min(d, length(v_p - v_p1) - rimB);
   float rad = max(v_r0, v_r1);
   float aa = max(fwidth(d), clamp(rad * 0.4, 0.18, 0.75));
   float alpha = 1.0 - smoothstep(-aa, aa, d);
@@ -96,11 +177,20 @@ void main() {
   // pass 2 adds colour and weight to the float buffer. The weight is near 0
   // at the edge, so a capsule's outline adds no step to the mix, and scales
   // with the hop's length, so slow dense dots do not outvote fast ones.
+  poolSum = vec4(0.0);
   if (u_pass == 0) {
     frag = vec4(0.0, 0.0, 0.0, alpha);
     return;
   }
   if (u_pass == 1) {
+    // Without the float blend a pool is its own colour inside its rim.
+    vec2 pc = poolB ? v_p1 : v_p0;
+    float pRim = poolB ? rimB : rimA;
+    if ((poolA || poolB) && length(v_p - pc) < pRim) {
+      vec2 look = poolLook(v_p, pc, pRim, poolB ? seed.y : seed.x);
+      float ring = look.y * (poolB ? grown.y : grown.x);
+      rgb = (poolB ? v_c1 : v_c0) / 255.0 * look.x * (1.0 - RING_DARK * ring);
+    }
     frag = vec4(rgb, 1.0);
     return;
   }
@@ -109,16 +199,20 @@ void main() {
   vec4 sum = vec4(rgb * w, w);
   // A blot pool at either end: its own disc, weighted to win at its centre
   // and fade into the line toward its rim, so it reads as a pool, not a ring.
-  if (v_pools > 0.5) {
-    bool atA = mod(v_pools, 2.0) > 0.5;
-    vec2 c = atA ? v_p0 : v_p1;
-    float pr = max(atA ? v_r0 : v_r1, 0.5);
-    float pw = alpha * POOL_WEIGHT * smoothstep(0.0, 1.0, clamp(1.0 - length(v_p - c) / pr, 0.0, 1.0));
-    sum += vec4((atA ? v_c0 : v_c1) / 255.0 * pw, pw);
-    if (v_pools > 2.5) {
-      float qw = alpha * POOL_WEIGHT * smoothstep(0.0, 1.0, clamp(1.0 - length(v_p - v_p1) / max(v_r1, 0.5), 0.0, 1.0));
-      sum += vec4(v_c1 / 255.0 * qw, qw);
-    }
+  // Its pooled ring goes to the second buffer with the pool's weight, so the
+  // resolve can show it only where the pool, not the line, colours the rim.
+  for (int k = 0; k < 2; k++) {
+    bool on = k == 0 ? poolA : poolB;
+    if (!on) continue;
+    vec2 c = k == 0 ? v_p0 : v_p1;
+    float rim = k == 0 ? rimA : rimB;
+    vec3 ink = (k == 0 ? v_c0 : v_c1) / 255.0;
+    vec2 look = poolLook(v_p, c, rim, k == 0 ? seed.x : seed.y);
+    // The weight stays above zero right up to the rim, so the share there is
+    // the pool's, not nothing.
+    float pw = alpha * POOL_WEIGHT * (0.02 + smoothstep(0.0, 1.0, clamp(1.0 - length(v_p - c) / rim, 0.0, 1.0)));
+    sum += vec4(ink * look.x * pw, pw);
+    poolSum += vec4(pw, look.y * (k == 0 ? grown.x : grown.y) * pw, 0.0, 0.0);
   }
   frag = sum;
 }
@@ -134,12 +228,22 @@ void main() {
 const RESOLVE_FRAG = `#version 300 es
 precision highp float;
 uniform sampler2D u_acc;
+uniform sampler2D u_pool;
 // Rows the float buffer sits above the surface (see accShift).
 uniform int u_shift;
 out vec4 frag;
+const float RING_DARK = 0.12;
 void main() {
-  vec4 acc = texelFetch(u_acc, ivec2(gl_FragCoord.xy) + ivec2(0, u_shift), 0);
-  frag = vec4(acc.a > 1e-6 ? acc.rgb / acc.a : vec3(0.0), 1.0);
+  ivec2 at = ivec2(gl_FragCoord.xy) + ivec2(0, u_shift);
+  vec4 acc = texelFetch(u_acc, at, 0);
+  vec2 pool = texelFetch(u_pool, at, 0).rg;
+  vec3 rgb = acc.a > 1e-6 ? acc.rgb / acc.a : vec3(0.0);
+  // The pooled ring shows where the pool's own ink colours the rim, and
+  // fades where the lighter line blends in (where a stroke enters or leaves).
+  float share = acc.a > 1e-6 ? pool.r / acc.a : 0.0;
+  float ring = pool.r > 1e-6 ? pool.g / pool.r : 0.0;
+  rgb *= 1.0 - RING_DARK * ring * smoothstep(0.45, 0.9, share);
+  frag = vec4(rgb, 1.0);
 }
 `;
 
@@ -213,16 +317,20 @@ function createAccumulator(gl: WebGL2RenderingContext) {
   const linked = link(gl, RESOLVE_VERT, RESOLVE_FRAG);
   if (!linked) return null;
   const tex = gl.createTexture();
+  // Pool weight and pooled-ring strength, for the resolve.
+  const poolTex = gl.createTexture();
   const fbo = gl.createFramebuffer();
   const vao = gl.createVertexArray();
   const unit = gl.createBuffer();
-  if (!tex || !fbo || !vao || !unit) return null;
+  if (!tex || !poolTex || !fbo || !vao || !unit) return null;
   let w = 0, h = 0;
   const size = (nw: number, nh: number) => {
     w = nw;
     h = nh;
     gl.bindTexture(gl.TEXTURE_2D, tex);
     gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA32F, w, h, 0, gl.RGBA, gl.FLOAT, null);
+    gl.bindTexture(gl.TEXTURE_2D, poolTex);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RG32F, w, h, 0, gl.RG, gl.FLOAT, null);
   };
   /**
    * Grow (never shrink) to cover surface pixels [0, x1) x [0, y1). The live
@@ -234,17 +342,22 @@ function createAccumulator(gl: WebGL2RenderingContext) {
     if (x1 <= w && y1 <= h) return;
     size(Math.max(w, x1), Math.max(h, y1));
   };
-  gl.bindTexture(gl.TEXTURE_2D, tex);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  for (const t of [tex, poolTex]) {
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+  }
   size(1, 1);
   gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
   gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, tex, 0);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, poolTex, 0);
+  gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
   const complete = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
   gl.bindFramebuffer(gl.FRAMEBUFFER, null);
   if (!complete) {
     gl.deleteFramebuffer(fbo);
     gl.deleteTexture(tex);
+    gl.deleteTexture(poolTex);
     gl.deleteVertexArray(vao);
     gl.deleteBuffer(unit);
     gl.deleteProgram(linked.prog);
@@ -259,17 +372,19 @@ function createAccumulator(gl: WebGL2RenderingContext) {
   gl.bindVertexArray(null);
   gl.useProgram(linked.prog);
   gl.uniform1i(gl.getUniformLocation(linked.prog, "u_acc"), 0);
+  gl.uniform1i(gl.getUniformLocation(linked.prog, "u_pool"), 1);
   const uShift = gl.getUniformLocation(linked.prog, "u_shift");
   const destroy = () => {
     gl.deleteFramebuffer(fbo);
     gl.deleteTexture(tex);
+    gl.deleteTexture(poolTex);
     gl.deleteVertexArray(vao);
     gl.deleteBuffer(unit);
     gl.deleteProgram(linked.prog);
     gl.deleteShader(linked.vs);
     gl.deleteShader(linked.fs);
   };
-  return { prog: linked.prog, tex, fbo, vao, uShift, cover, height: () => h, destroy };
+  return { prog: linked.prog, tex, poolTex, fbo, vao, uShift, cover, height: () => h, destroy };
 }
 
 function makeGlCanvas(
@@ -341,6 +456,7 @@ export function tryCreateSdfRenderer(
     [5, 3, 6],
     [6, 3, 9],
     [7, 1, 12],
+    [8, 2, 13],
   ];
   for (const [loc, size, offsetFloats] of specs) {
     gl.enableVertexAttribArray(loc);
@@ -392,6 +508,8 @@ export function tryCreateSdfRenderer(
     g.useProgram(acc!.prog);
     g.uniform1i(acc!.uShift, accShift());
     g.bindVertexArray(acc!.vao);
+    g.activeTexture(g.TEXTURE1);
+    g.bindTexture(g.TEXTURE_2D, acc!.poolTex);
     g.activeTexture(g.TEXTURE0);
     g.bindTexture(g.TEXTURE_2D, acc!.tex);
     g.drawArrays(g.TRIANGLES, 0, 6);

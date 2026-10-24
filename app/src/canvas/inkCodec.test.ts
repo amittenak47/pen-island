@@ -85,6 +85,17 @@ function roundTrip(ops: InkOp[]): InkOp[] {
 }
 
 describe("encodeInkOps / decodeInkOps", () => {
+  it("keeps a blot's texture seed with its halt", () => {
+    const op: InkDrawOp = {
+      kind: "draw", color: "#1d4fd8", baseWidth: 4, maxFullness: 1, pressureClip: 1,
+      pressureSensitive: true,
+      points: [{ x: 1, y: 2, pressure: 0.5 }, { x: 9, y: 2, pressure: 0.5 }],
+      blotHalts: [{ x: 9, y: 2, grow: 0.8, seed: 3071 }, { x: 1, y: 2, grow: 0.4 }],
+    };
+    const [back] = decodeInkOps(encodeInkOps([op])) as InkDrawOp[];
+    expect(back!.blotHalts).toEqual([{ x: 9, y: 2, grow: 0.8, seed: 3071 }, { x: 1, y: 2, grow: 0.4 }]);
+  });
+
   it("round-trips geometry within half a tenth of a scene unit", () => {
     const original = stampChain(60);
     const [back] = roundTrip([original]) as [InkDrawOp];

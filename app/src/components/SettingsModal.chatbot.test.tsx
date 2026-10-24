@@ -51,7 +51,7 @@ it("shows three modes and saves app mode with settings on the desktop", async ()
   const api = client(); await open(api);
   const select = host.querySelector<HTMLSelectElement>('[aria-label="ChatBot answer mode"]')!;
   expect([...select.options].map(option => [option.value, option.textContent])).toEqual([
-    ["llm", "Your AI model"], ["bot", "An assistant bot"], ["app", "An assistant app on this PC"],
+    ["llm", "Your AI model"], ["bot", "An AI assistant bot"], ["app", "An assistant app on this PC"],
   ]);
   await change("ChatBot answer mode", "app");
   expect(host.querySelector<HTMLInputElement>('[aria-label="Assistant app model"]')!.value).toBe("desktop-model");

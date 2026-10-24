@@ -124,9 +124,9 @@ it("offers PC Whisper separately from Android dictation and saves its endpoint a
   const api = await openVoice();
   await act(async () => radio("Whisper on your PC").click());
   const voice = fold("Voice typing");
-  expect(voice.textContent).toContain("The Whisper app must be running on your PC");
+  expect(voice.textContent).toContain("Use a free, private Whisper local server.");
   const input = (label: string) => [...voice.querySelectorAll("label")].find(l => l.querySelector("span")?.textContent === label)!.querySelector("input")!;
-  await fill(input("Whisper server URL"), "http://192.168.1.20:8000/v1");
+  await fill(input("Whisper server address"), "http://192.168.1.20:8000/v1");
   await fill(input("Model"), "Systran/faster-whisper-small");
   await act(async () => save().click());
   expect(api.putConfig).toHaveBeenCalledWith(expect.objectContaining({ voice: expect.objectContaining({
@@ -153,7 +153,7 @@ it("saves the regular-LLM answer mode and hides external bot setup", async () =>
   expect(select.value).toBe("bot");
   await act(async () => { select.value = "llm"; select.dispatchEvent(new Event("change", { bubbles: true })); });
   expect(fold("ChatBot").querySelector('[aria-label="ChatBot assistant"]')).toBeNull();
-  expect(fold("ChatBot").textContent).toContain("A local model or a cloud API key. Quick; fine for single footnotes.");
+  expect(fold("ChatBot").textContent).toContain("The AI model set up under AI model, local or cloud, writes the footnotes.");
   await act(async () => save().click());
   expect(localStorage.getItem("whiteboard.chatBotAnswerMode.v1")).toBe("llm");
   expect(api.putConfig).not.toHaveBeenCalled();

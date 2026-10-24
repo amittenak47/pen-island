@@ -55,7 +55,7 @@ describe("ink colour smoothing", () => {
 
   it("leaves a blot pool its own colour and keeps it out of the line's", () => {
     const line = noisy(200).map((d) => ({ ...d, rgb: [100, 120, 220] as [number, number, number] }));
-    line[100] = { ...line[100]!, r: 30, rgb: [40, 60, 180] };
+    line[100] = { ...line[100]!, r: 30, rgb: [40, 60, 180], pool: 0.8 };
     const out = smoothSpineRgb(line);
     expect(isPoolDot(line, 100)).toBe(true);
     expect(isPoolDot(line, 99)).toBe(false);

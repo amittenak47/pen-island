@@ -16,7 +16,7 @@ import { WHEEL_OPEN_MS } from "../util/gesture";
 import { sashDragActive } from "../util/splitResize";
 import { isLoadingDoodleActive } from "../util/loadingDoodleActivity";
 import { yieldToInput } from "../util/cameraBusy";
-import { wheelHoldIsDrawingHop, wheelHoldOutcome, wheelHoldTurn } from "../util/inkToolPresets";
+import { wheelHoldIsDrawingHop, wheelHoldIsStroke, wheelHoldOutcome, wheelHoldTurn } from "../util/inkToolPresets";
 import { thinInkPointsForStorage } from "./inkSmoothing";
 import { InkPageBook } from "./inkPageCache";
 import { HostInkRasterCache, InkGeometrySnapshot } from "./inkLab/hostRaster";
@@ -197,7 +197,17 @@ export interface WhiteboardInkLabProps {
   onChange?: () => void;
   onStylusAccessory?: (event: PointerEvent) => boolean;
   wheelHoldEnabled?: boolean;
+  /** Open the wheel at the pen-down point. With a peek, this comes on lift. */
   onWheelHold?: (clientX: number, clientY: number) => void;
+  /**
+   * The pen has held still long enough for the wheel, but is still down.
+   * Show it faintly; the stroke stays live under it. A move then calls
+   * {@link onWheelPeekEnd} and the stroke goes on; a lift calls
+   * {@link onWheelHold} and the stroke is dropped. Without it the wheel opens
+   * on the hold and the stroke is dropped then.
+   */
+  onWheelPeek?: (clientX: number, clientY: number) => void;
+  onWheelPeekEnd?: () => void;
   /** Pixel rub vs drop whole strokes. Default matches the writer pref. */
   partialErase?: boolean;
   perfOverlay?: boolean;
@@ -374,6 +384,7 @@ function opFromBake(
         grow: h.grow,
         ...(h.p != null ? { pressure: h.p } : {}),
         ...(h.slow != null ? { slowness: h.slow } : {}),
+        ...(h.seed != null ? { seed: h.seed } : {}),
       };
     });
   }
@@ -408,6 +419,8 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
       onStylusAccessory,
       wheelHoldEnabled = false,
       onWheelHold,
+      onWheelPeek,
+      onWheelPeekEnd,
       partialErase = true,
       perfOverlay = false,
       perfBar = false,
@@ -460,6 +473,8 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
       pointerId: number;
       down: PointerEvent;
       opened: boolean;
+      /** The wheel shows faintly over a stroke that is still live. */
+      peeking: boolean;
       decided: boolean;
       pathPx: number;
       moves: number;
@@ -525,6 +540,10 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
     wheelHoldEnabledRef.current = wheelHoldEnabled;
     const onWheelHoldRef = useRef(onWheelHold);
     onWheelHoldRef.current = onWheelHold;
+    const onWheelPeekRef = useRef(onWheelPeek);
+    onWheelPeekRef.current = onWheelPeek;
+    const onWheelPeekEndRef = useRef(onWheelPeekEnd);
+    onWheelPeekEndRef.current = onWheelPeekEnd;
     const perfOverlayRef = useRef(perfOverlay);
     perfOverlayRef.current = perfOverlay;
     const perfBarRef = useRef(perfBar);
@@ -1709,7 +1728,10 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
         const stride = livePresentStride(hz, matchDisplayRef.current);
         const tick = liveTick;
         liveTick += 1;
-        if (live && !shouldCompositeLive(liveDirty, liveHold, tick, stride)) {
+        // A still pen sends nothing; it still has to reach the engine so a
+        // blot can start under it.
+        const rest = live && !liveHold && engine.restingPen?.() === true;
+        if (live && !shouldCompositeLive(liveDirty, liveHold || rest, tick, stride)) {
           if (perfOverlayRef.current && rafMs > 0) hudStatsRef.current.noteRaf(rafMs);
           return;
         }
@@ -1749,41 +1771,89 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
             return;
           }
           pending.decided = true;
+          const peek = onWheelPeekRef.current;
+          if (peek) {
+            // The stroke stays live: a move dismisses the peek, a lift opens it.
+            pending.peeking = true;
+            peek(pending.down.clientX, pending.down.clientY);
+            return;
+          }
           pending.opened = true;
-          holdNestedScroll();
-          drawingRef.current = false;
-          strokePointerId = null;
-          lastStrokeAtRef.current = performance.now();
-          scheduleIdleRemesh();
-          highlightPtsRef.current = null;
-          pendingStampPatchRef.current = null;
-          erasePtsRef.current = null;
-          strokeHostRef.current = null;
-          strokeHostElRef.current = null;
-          stopPaintPump();
-          engine.cancelStroke();
-          /*
-           * The snap still has the page. sizeToHost + presentCommitted here
-           * remeshed every overlay spine on the hold timer — "Whiteboard
-           * isn't responding" on a dense Exam page.
-           */
-          if (skipReplayOnWheelAbort()) {
-            engine.paint();
-          } else {
-            sizeToHost();
-            presentCommitted();
-          }
-          if (wantMeter()) {
-            loadMeterRef.current.end();
-            loadBarRef.current?.freeze();
-          }
-          try {
-            canvas.releasePointerCapture(pending.pointerId);
-          } catch {
-            /* ignore */
-          }
+          dropStrokeForWheel(pending.pointerId);
           onWheelHoldRef.current?.(pending.down.clientX, pending.down.clientY);
         }, WHEEL_OPEN_MS);
+      };
+
+      /*
+       * Cross-fade the dropped stroke out instead of cutting it in one frame:
+       * a copy of its box sits over the canvas and fades while the canvas
+       * underneath already shows the page without it.
+       */
+      const fadeOutLiveStroke = () => {
+        if (toolRef.current !== "pen") return;
+        const box = engine.liveBounds();
+        if (!box) return;
+        const x = Math.max(0, Math.floor(box.minX));
+        const y = Math.max(0, Math.floor(box.minY));
+        const w = Math.min(canvas.width, Math.ceil(box.maxX)) - x;
+        const h = Math.min(canvas.height, Math.ceil(box.maxY)) - y;
+        if (w <= 0 || h <= 0) return;
+        const rect = canvas.getBoundingClientRect();
+        if (rect.width < 1 || rect.height < 1) return;
+        const ghost = document.createElement("canvas");
+        ghost.width = w;
+        ghost.height = h;
+        const gctx = ghost.getContext("2d");
+        if (!gctx) return;
+        gctx.drawImage(canvas, x, y, w, h, 0, 0, w, h);
+        const sx = rect.width / canvas.width;
+        const sy = rect.height / canvas.height;
+        ghost.className = "lc-ink-ghost";
+        ghost.setAttribute("aria-hidden", "true");
+        ghost.style.left = `${rect.left + x * sx}px`;
+        ghost.style.top = `${rect.top + y * sy}px`;
+        ghost.style.width = `${w * sx}px`;
+        ghost.style.height = `${h * sy}px`;
+        document.body.appendChild(ghost);
+        const done = () => ghost.remove();
+        ghost.addEventListener("animationend", done, { once: true });
+        window.setTimeout(done, 600);
+      };
+
+      /** Drop the stroke under a hold that became the wheel. */
+      const dropStrokeForWheel = (pointerId: number) => {
+        holdNestedScroll();
+        drawingRef.current = false;
+        strokePointerId = null;
+        lastStrokeAtRef.current = performance.now();
+        scheduleIdleRemesh();
+        highlightPtsRef.current = null;
+        pendingStampPatchRef.current = null;
+        erasePtsRef.current = null;
+        strokeHostRef.current = null;
+        strokeHostElRef.current = null;
+        stopPaintPump();
+        engine.cancelStroke();
+        /*
+         * The snap still has the page. sizeToHost + presentCommitted here
+         * remeshed every overlay spine on the hold timer — "Whiteboard
+         * isn't responding" on a dense Exam page.
+         */
+        if (skipReplayOnWheelAbort()) {
+          engine.paint();
+        } else {
+          sizeToHost();
+          presentCommitted();
+        }
+        if (wantMeter()) {
+          loadMeterRef.current.end();
+          loadBarRef.current?.freeze();
+        }
+        try {
+          canvas.releasePointerCapture(pointerId);
+        } catch {
+          /* ignore */
+        }
       };
 
       const paintLiveHighlight = () => {
@@ -1929,6 +1999,7 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
             pointerId: event.pointerId,
             down: event,
             opened: false,
+            peeking: false,
             decided: false,
             pathPx: 0,
             moves: 0,
@@ -2008,6 +2079,7 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
             event.clientY - pending.lastY,
           );
           if (
+            !pending.peeking &&
             wheelHoldIsDrawingHop(
               pending.lastStepX,
               pending.lastStepY,
@@ -2021,6 +2093,20 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
           pending.lastStepY = event.clientY - pending.lastY;
           pending.lastX = event.clientX;
           pending.lastY = event.clientY;
+          // Moving on under the peek, the same way a stroke would have
+          // before it: the wheel goes and the stroke keeps drawing.
+          if (
+            pending.peeking &&
+            wheelHoldIsStroke(
+              Math.hypot(pending.lastX - pending.down.clientX, pending.lastY - pending.down.clientY),
+              pending.pathPx,
+              pending.moves,
+              pending.windRad,
+            )
+          ) {
+            pendingHoldRef.current = null;
+            onWheelPeekEndRef.current?.();
+          }
         }
         if (!drawingRef.current || event.pointerId !== strokePointerId) return;
         if (strokeHostPinRef.current || lastHostScrollRef.current.length > 0) {
@@ -2061,6 +2147,18 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
             holdTimerRef.current = null;
           }
           pendingHoldRef.current = null;
+          if (pending.peeking) {
+            if (event.type === "pointerup") {
+              // Lifted without moving: the hold was for the wheel.
+              event.preventDefault();
+              fadeOutLiveStroke();
+              dropStrokeForWheel(event.pointerId);
+              onWheelHoldRef.current?.(pending.down.clientX, pending.down.clientY);
+              return;
+            }
+            // Cancelled or capture lost: the wheel goes, the stroke commits.
+            onWheelPeekEndRef.current?.();
+          }
           if (pending.opened) {
             event.preventDefault();
             try {

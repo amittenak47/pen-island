@@ -1512,7 +1512,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const [presetStore, setPresetStore] = useState(() => loadInkToolPresets());
   const presetStoreRef = useLatest(presetStore);
   const [inkWheel, setInkWheel] = useState<
-    { x: number; y: number } | "canvas" | null
+    | { x: number; y: number; peek?: boolean; dismissed?: boolean }
+    | "canvas"
+    | null
   >(null);
   const [presetEditor, setPresetEditor] = useState<{
     kind: "pen" | "highlighter" | "eraser";
@@ -8269,7 +8271,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const feedback = captureFeedbackRef.current;
     // Countdown first, so whatever is mid-thought has a moment to settle and the
     // shot is not a surprise. Zero seconds shoots straight through.
-    if (feedback && !(await feedback.countdown(loadCaptureCountdown(), "Capturing board"))) {
+    if (feedback && !(await feedback.countdown(loadCaptureCountdown(), "Screenshot of the board"))) {
       return;
     }
     feedback?.flash();
@@ -8281,7 +8283,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       pageExportLayers(),
     );
     if (!blob || blob.size === 0) {
-      feedback?.toast("Nothing to capture", "error");
+      feedback?.toast("Nothing on the board to screenshot", "error");
       return;
     }
     // "Save only" leaves the page alone: a shot taken to keep is not always a
@@ -8328,13 +8330,13 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       const width = Math.abs(b.x - a.x);
       const height = Math.abs(b.y - a.y);
       if (width < 8 || height < 8) {
-        captureFeedbackRef.current?.toast("Region too small to capture", "error");
+        captureFeedbackRef.current?.toast("That region is too small for a screenshot", "error");
         return;
       }
       const feedback = captureFeedbackRef.current;
       // Same ceremony as the full board: the region is already drawn, so the
       // countdown is the cue that the shot is coming.
-      if (feedback && !(await feedback.countdown(loadCaptureCountdown(), "Capturing region"))) {
+      if (feedback && !(await feedback.countdown(loadCaptureCountdown(), "Screenshot of the region"))) {
         return;
       }
       feedback?.flash();
@@ -8347,7 +8349,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         pageExportLayers(),
       );
       if (!blob || blob.size === 0) {
-        feedback?.toast("Nothing to capture", "error");
+        feedback?.toast("Nothing on the board to screenshot", "error");
         return;
       }
       if (captureInserts(mode)) {
@@ -11350,6 +11352,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           open
           locked={!!presetEditor}
           anchor={inkWheel}
+          peek={inkWheel !== "canvas" && inkWheel.peek === true}
+          dismissed={inkWheel !== "canvas" && inkWheel.dismissed === true}
           host={boardRef.current}
           handedness={inkHandedness}
           store={presetStore}
@@ -11469,6 +11473,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           interactive && inkToolActive && !presetStore.wheelLocked
         }
         onWheelHold={(x, y) => setInkWheel({ x, y })}
+        onWheelPeek={(x, y) => setInkWheel({ x, y, peek: true })}
+        onWheelPeekEnd={() =>
+          setInkWheel((cur) =>
+            cur && cur !== "canvas" && cur.peek ? { ...cur, dismissed: true } : cur,
+          )
+        }
         perfOverlay={perfOverlay && isDrawPageRegion(mobileRegion ?? null)}
         perfBar={perfBar && isDrawPageRegion(mobileRegion ?? null)}
         displayHz={displayHz}
@@ -11604,7 +11614,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       {interactive && captureArmed && (
         <div
           className="lc-capture-overlay"
-          aria-label="Drag to capture a region"
+          aria-label="Drag to screenshot a region"
           onPointerDown={(event) => {
             event.preventDefault();
             event.stopPropagation();
@@ -11648,7 +11658,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
             setCaptureRegion(null);
           }}
         >
-          <div className="lc-capture-hint">Drag to capture. Press Esc to cancel.</div>
+          <div className="lc-capture-hint">Drag over the part to screenshot. Press Esc to cancel.</div>
           {captureRegion && (() => {
             const board = boardBoxOf(boardRef.current);
             if (!board) return null;

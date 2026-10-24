@@ -6,6 +6,7 @@
 import { fillMiterStroke } from "./fallback";
 import { paintSdfSpines } from "./sdfPaint";
 import { labDepositAmt, labDotWashRgb, labMixDepositRgb, labNibRadius } from "./style";
+import { blotPoolRgb, inkBlotPoolT, type InkBlotHalt } from "../rasterInk";
 import type { SpineDot } from "./instance";
 import {
   dryWashRgb,
@@ -43,6 +44,26 @@ function fallbackSceneRadius(op: InkDrawOp, pressure: number): number {
   return labNibRadius(0, 0, 1, pressure, size);
 }
 
+/**
+ * The pool grown at a stored point, from the op's blot halts: the live pen
+ * stamps a halt where it was held. A lift bake can move the point a little.
+ */
+function poolAt(
+  halts: readonly InkBlotHalt[] | undefined, x: number, y: number, r: number,
+): { grow: number; seed?: number } {
+  if (!halts) return { grow: 0 };
+  const reach = Math.max(2, r * 0.15);
+  let grow = 0;
+  let seed: number | undefined;
+  for (const h of halts) {
+    if (Math.abs(h.x - x) <= reach && Math.abs(h.y - y) <= reach && Math.hypot(h.x - x, h.y - y) <= reach) {
+      if (h.grow >= grow) seed = h.seed ?? seed;
+      grow = Math.max(grow, h.grow);
+    }
+  }
+  return { grow, seed };
+}
+
 /** Append a bounded point range while preserving distance-dependent deposit. */
 export function appendLabSpineRange(
   op: InkDrawOp,
@@ -72,11 +93,18 @@ export function appendLabSpineRange(
       p.slowness != null && fade > 1e-6
         ? labDotWashRgb(op.color, p.slowness, fade)
         : dryWashRgb(op.color, 1);
+    const r = p.radius != null && p.radius > 0 ? p.radius : fallbackSceneRadius(op, p.pressure);
+    // A held pool darkens as the live pen drew it (wash, pool, deposit).
+    const { grow: pool, seed } = poolAt(op.blotHalts, p.x, p.y, r);
+    const poolT = inkBlotPoolT(pool, op.speedBlotBlend ?? 0);
+    if (poolT > 1e-3) washed = blotPoolRgb(`rgb(${washed.r}, ${washed.g}, ${washed.b})`, poolT);
     washed = labMixDepositRgb(washed, labDepositAmt(depositPen, p.pressure, consumed));
     out.push({
       x: p.x,
       y: p.y,
-      r: p.radius != null && p.radius > 0 ? p.radius : fallbackSceneRadius(op, p.pressure),
+      r,
+      ...(pool > 1e-3 ? { pool } : {}),
+      ...(pool > 1e-3 && seed != null ? { seed } : {}),
       rgb: [washed.r, washed.g, washed.b] as [number, number, number],
       a: 1,
       p: p.pressure,

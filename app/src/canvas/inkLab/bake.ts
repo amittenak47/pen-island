@@ -74,12 +74,56 @@ export function liveSmoothFrom(cache: LiveSmoothCache | null): number {
 
 type LiveRadii = {
   acc: number[];
+  /** Per baked point: arc walked along the baked path, and the src hop it maps into. */
   walked: number[];
   indices: number[];
+  /** Per baked point: the next src dot still to place, and `out.length` after it. */
+  nextSrc: number[];
+  ends: number[];
   points: SpineDot[];
 };
 const liveRadii = new WeakMap<LiveSmoothCache, LiveRadii>();
 
+/** Width, colour and the rest of `a` -> `b` at `t`, at a baked position. */
+function styleBetween(x: number, y: number, a: SpineDot, b: SpineDot, t: number): SpineDot {
+  const rgbA = a.rgb;
+  const rgbB = b.rgb;
+  const rgb =
+    rgbA && rgbB
+      ? ([
+          rgbA[0] + (rgbB[0] - rgbA[0]) * t,
+          rgbA[1] + (rgbB[1] - rgbA[1]) * t,
+          rgbA[2] + (rgbB[2] - rgbA[2]) * t,
+        ] as [number, number, number])
+      : rgbA ?? rgbB;
+  const p0 = a.p ?? 0.5;
+  const p1 = b.p ?? p0;
+  const s0 = a.slow;
+  const s1 = b.slow;
+  return {
+    x,
+    y,
+    r: a.r + (b.r - a.r) * t,
+    rgb,
+    a: (a.a ?? 1) + ((b.a ?? 1) - (a.a ?? 1)) * t,
+    p: p0 + (p1 - p0) * t,
+    slow: s0 != null && s1 != null ? s0 + (s1 - s0) * t : s0 ?? s1,
+  };
+}
+
+/** A src dot's own style, moved onto the baked path. */
+function placed(d: SpineDot, x: number, y: number): SpineDot {
+  return { ...d, x, y, rgb: d.rgb ? [d.rgb[0], d.rgb[1], d.rgb[2]] : undefined };
+}
+
+/**
+ * The smoothed path with the stroke's own dots on it. Smoothing simplifies:
+ * a straight run keeps two points, and styling those two from the dots they
+ * map to spread a held pool or a pressure swell along the whole run as one
+ * taper. So every src dot is also placed on the baked path, at its arc
+ * position, with its own width, colour and pool, and the baked points
+ * between them take the style in between.
+ */
 function radiiAlong(
   src: readonly SpineDot[],
   baked: readonly ScenePoint[],
@@ -96,57 +140,57 @@ function radiiAlong(
   }
   acc.length = src.length;
   const total = acc[acc.length - 1]! || 1;
-  const start = memo ? Math.min(frozen, memo.points.length, baked.length) : 0;
+  const last = baked.length - 1;
+  // The last baked point is the pen: it always moves, so it is never frozen.
+  const start = memo ? Math.min(frozen, memo.ends.length, last) : 0;
   const out: SpineDot[] = memo ? memo.points : [];
-  out.length = start;
+  out.length = start > 0 ? memo!.ends[start - 1]! : 0;
   let j = start > 0 ? memo!.indices[start - 1]! : 0;
   let walked = start > 0 ? memo!.walked[start - 1]! : 0;
+  let next = start > 0 ? memo!.nextSrc[start - 1]! : 1;
+  let prevTarget = start > 0 ? Math.min(walked, total) : 0;
   for (let i = start; i < baked.length; i++) {
     const p = baked[i]!;
     if (i > 0) walked += Math.hypot(p.x - baked[i - 1]!.x, p.y - baked[i - 1]!.y);
-    const u = Math.min(1, walked / Math.max(total, 1e-6));
-    const target = u * total;
+    // Arc walked on the baked path is arc on the stroke, so a frozen prefix
+    // keeps its mapping; the pen end takes the rest of the stroke.
+    const target = i === last ? total : Math.min(walked, total);
+    if (i > 0) {
+      const q = baked[i - 1]!;
+      const span = target - prevTarget;
+      // The stroke's own dots that fall on this baked hop.
+      while (next < src.length - 1 && acc[next]! < target) {
+        const f = span > 1e-6 ? (acc[next]! - prevTarget) / span : 0;
+        out.push(placed(src[next]!, q.x + (p.x - q.x) * f, q.y + (p.y - q.y) * f));
+        next += 1;
+      }
+    }
     while (j + 1 < acc.length && acc[j + 1]! < target) j += 1;
+    let dot: SpineDot;
+    if (i === 0) dot = placed(src[0]!, p.x, p.y);
+    else if (i === last) dot = placed(src[src.length - 1]!, p.x, p.y);
+    else {
+      const a = src[Math.min(j, src.length - 1)]!;
+      const b = src[Math.min(j + 1, src.length - 1)]!;
+      const span = (acc[j + 1] ?? acc[j]!) - acc[j]!;
+      dot = styleBetween(p.x, p.y, a, b, span > 1e-6 ? (target - acc[j]!) / span : 0);
+    }
+    out.push(dot);
+    prevTarget = target;
     if (memo) {
       memo.walked[i] = walked;
       memo.indices[i] = j;
+      memo.nextSrc[i] = next;
+      memo.ends[i] = out.length;
     }
-    const a = src[Math.min(j, src.length - 1)]!;
-    const b = src[Math.min(j + 1, src.length - 1)]!;
-    const span = (acc[j + 1] ?? acc[j]!) - acc[j]!;
-    const t = span > 1e-6 ? (target - acc[j]!) / span : 0;
-    const rgbA = a.rgb;
-    const rgbB = b.rgb;
-    const rgb =
-      rgbA && rgbB
-        ? ([
-            rgbA[0] + (rgbB[0] - rgbA[0]) * t,
-            rgbA[1] + (rgbB[1] - rgbA[1]) * t,
-            rgbA[2] + (rgbB[2] - rgbA[2]) * t,
-          ] as [number, number, number])
-        : rgbA ?? rgbB;
-    const p0 = a.p ?? 0.5;
-    const p1 = b.p ?? p0;
-    const s0 = a.slow;
-    const s1 = b.slow;
-    out.push({
-      x: p.x,
-      y: p.y,
-      r: a.r + (b.r - a.r) * t,
-      rgb,
-      a: (a.a ?? 1) + ((b.a ?? 1) - (a.a ?? 1)) * t,
-      p: p0 + (p1 - p0) * t,
-      slow:
-        s0 != null && s1 != null
-          ? s0 + (s1 - s0) * t
-          : s0 ?? s1,
-    });
   }
   if (memo) {
     memo.acc = acc;
     memo.points = out;
-    memo.walked.length = out.length;
-    memo.indices.length = out.length;
+    memo.walked.length = baked.length;
+    memo.indices.length = baked.length;
+    memo.nextSrc.length = baked.length;
+    memo.ends.length = baked.length;
   }
   return out;
 }
@@ -313,12 +357,16 @@ export function reshapeLiveSpine(
   // and RGB values each frame made long strokes slower despite tail-only GPU work.
   const frozen = memo ? frozenBefore : 0;
   if (!memo && live.cache) {
-    memo = { acc: [0], walked: [], indices: [], points: [] };
+    memo = { acc: [0], walked: [], indices: [], nextSrc: [], ends: [], points: [] };
     liveRadii.set(live.cache, memo);
   }
+  const points = radiiAlong(spine, live.points, memo, frozen);
+  // `from` counts baked points; the painter counts output dots, and each
+  // baked point may now carry the stroke's own dots before it.
+  const fromDot = from > 0 && memo ? memo.ends[from - 1]! - 1 : 0;
   return {
-    points: radiiAlong(spine, live.points, memo, frozen),
+    points,
     cache: live.cache,
-    from,
+    from: fromDot,
   };
 }

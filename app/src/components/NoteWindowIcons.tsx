@@ -17,6 +17,16 @@ export function ExpandNoteIcon() {
   </svg>;
 }
 
+/** A page with a folded corner: the document a note belongs to. */
+export function OpenDocumentIcon() {
+  return <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden>
+    <g fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M4 1.5h5.5l3 3v10H4z" />
+      <path d="M9.5 1.5v3h3M6.5 8h4M6.5 10.5h4" />
+    </g>
+  </svg>;
+}
+
 export function CloseNoteIcon() {
   return <svg viewBox="0 0 16 16" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" aria-hidden>
     <path d="m4 4 8 8M12 4l-8 8" />
