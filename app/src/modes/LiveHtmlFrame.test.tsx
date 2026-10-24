@@ -247,3 +247,31 @@ it("ignores player boxes from a page without a folder", async () => {
     data: { type: LIVE_HTML_MESSAGE, nonce, holes: [[0, 0, 100, 100]] } })));
   expect(host.querySelector(".lc-live-html-catcher")).toBeNull();
 });
+
+it("seeds the page's localStorage from its document and keeps each change it reports", async () => {
+  localStorage.setItem("lc-live-page-storage:doc-1", JSON.stringify({ "bbt-page": "tracer" }));
+  await act(async () => root.render(<LiveHtmlFrame original="<p>Live original</p>" onHeight={vi.fn()} storageId="doc-1" />));
+  const frame = host.querySelector("iframe")!;
+  expect(frame.srcdoc).toContain('const seeded = {"bbt-page":"tracer"};');
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  const send = (storage: unknown, source: Window | null = frame.contentWindow) =>
+    act(() => window.dispatchEvent(new MessageEvent("message", { source, data: { type: LIVE_HTML_MESSAGE, nonce, storage } })));
+  send({ "bbt-page": "problems" }, window);
+  send([1, 2]);
+  expect(JSON.parse(localStorage.getItem("lc-live-page-storage:doc-1")!)).toEqual({ "bbt-page": "tracer" });
+  const srcdoc = frame.srcdoc;
+  send({ "bbt-page": "problems", "bbt-last": "{}" });
+  expect(JSON.parse(localStorage.getItem("lc-live-page-storage:doc-1")!)).toEqual({ "bbt-page": "problems", "bbt-last": "{}" });
+  // A save never rebuilds the page.
+  expect(host.querySelector("iframe")!.srcdoc).toBe(srcdoc);
+  localStorage.clear();
+});
+
+it("gives a page with no document no storage of its own", async () => {
+  await act(async () => root.render(<LiveHtmlFrame original="<p>Live original</p>" onHeight={vi.fn()} />));
+  const frame = host.querySelector("iframe")!;
+  expect(frame.srcdoc).toContain("const seeded = null;");
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: LIVE_HTML_MESSAGE, nonce, storage: { a: "1" } } })));
+  expect(localStorage.length).toBe(0);
+});

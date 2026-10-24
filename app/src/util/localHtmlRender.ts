@@ -1,5 +1,6 @@
 import { PAGE_MAX_BYTES, pageFromCapturedHtml, webPageWidthForViewport } from "./webPage";
 import { liveOriginalKey, putLiveOriginal } from "./liveHtmlStore";
+import { LIVE_PAGE_STORAGE_LIMIT, type LivePageStorage } from "./livePageStorage";
 
 export const LOCAL_HTML_CSP = "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline' https:; font-src https: data:; img-src https: data: blob:; connect-src 'none'; frame-src 'none'; form-action 'none'; base-uri 'none'";
 export const LOCAL_HTML_MESSAGE = "lc-local-html-render";
@@ -121,8 +122,12 @@ export function liveHtmlCsp(assetBase?: string | null): string {
  * htmlAssets.ts). With it, relative names such as `3.7.mp4` load from there,
  * including the ones the page's own scripts write later. Without it they are
  * stripped, as the app has nothing to resolve them against.
+ *
+ * `storage` is what the page last kept in its `localStorage` (livePageStorage.ts).
+ * With it the page gets a working one, seeded from that and reporting each
+ * change back; without it, `localStorage` throws there as it always did.
  */
-export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: string | null): string {
+export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: string | null, storage?: LivePageStorage | null): string {
   const doc = new DOMParser().parseFromString(original, "text/html");
   if (assetBase) doc.querySelectorAll("base").forEach((node) => node.remove());
   else removeRelativeResources(doc);
@@ -137,10 +142,68 @@ export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: stri
   }
   const envelope = JSON.stringify({ type: LIVE_HTML_MESSAGE, nonce }).replace(/</g, "\\u003c");
   const assets = JSON.stringify(assetBase ?? null).replace(/</g, "\\u003c");
+  const seeded = JSON.stringify(storage ?? null).replace(/</g, "\\u003c");
   const bridge = doc.createElement("script");
   bridge.textContent = `(function() {
     const envelope = ${envelope};
     const assets = ${assets};
+    // The page's localStorage. The real one throws in this sandbox (its
+    // origin is opaque), so a page lost every save. This one starts from
+    // what the app kept for the document and hands each change back.
+    const seeded = ${seeded};
+    if (seeded) {
+      const items = new Map(Object.entries(seeded));
+      let pending = false;
+      const changed = function() {
+        if (pending) return;
+        pending = true;
+        queueMicrotask(function() {
+          pending = false;
+          parent.postMessage({...envelope, storage: Object.fromEntries(items)}, "*");
+        });
+      };
+      const sizeWithout = function(skip) {
+        let size = 0;
+        for (const [key, value] of items) if (key !== skip) size += key.length + value.length;
+        return size;
+      };
+      const store = {
+        get length() { return items.size; },
+        key: function(index) { const keys = [...items.keys()]; return index >= 0 && index < keys.length ? keys[index] : null; },
+        getItem: function(key) { key = String(key); return items.has(key) ? items.get(key) : null; },
+        setItem: function(key, value) {
+          key = String(key); value = String(value);
+          if (sizeWithout(key) + key.length + value.length > ${LIVE_PAGE_STORAGE_LIMIT}) {
+            throw new DOMException("This page's storage is full.", "QuotaExceededError");
+          }
+          if (items.get(key) !== value) { items.set(key, value); changed(); }
+        },
+        removeItem: function(key) { if (items.delete(String(key))) changed(); },
+        clear: function() { if (items.size) { items.clear(); changed(); } },
+      };
+      const methods = new Set(Object.keys(store));
+      // localStorage.name = value and delete localStorage.name work as they do on the real one.
+      const facade = new Proxy(store, {
+        get: function(target, name) {
+          if (typeof name !== "string" || methods.has(name)) return Reflect.get(target, name);
+          return items.has(name) ? items.get(name) : undefined;
+        },
+        set: function(target, name, value) {
+          if (typeof name !== "string" || methods.has(name)) return false;
+          store.setItem(name, value);
+          return true;
+        },
+        deleteProperty: function(target, name) { if (typeof name === "string") store.removeItem(name); return true; },
+        has: function(target, name) { return methods.has(name) || items.has(name); },
+        ownKeys: function() { return [...items.keys()]; },
+        getOwnPropertyDescriptor: function(target, name) {
+          return items.has(name) ? {value: items.get(name), writable: true, enumerable: true, configurable: true} : undefined;
+        },
+      });
+      try {
+        Object.defineProperty(window, "localStorage", {configurable: true, enumerable: true, get: function() { return facade; }});
+      } catch (_) {}
+    }
     // Nothing of a video or sound loads until it is played. A page's
     // preload="metadata" is free in a browser, but a video whose index sits
     // at its end is read whole to find it, and the page's load (which the app

@@ -11055,6 +11055,7 @@ export const Workspace = memo(function Workspace({
                       localFile={Boolean(annotateSource.localFileHash)}
                       live={liveOn && liveAssetKnown ? liveOriginal : null}
                       assetBase={liveAssetBase}
+                      storageId={annotateSource.localFileHash ? annotateDocId : null}
                       onAnchor={onWebAnchor}
                       source={webHtmlSource ?? undefined}
                       note={webHtmlNote ?? undefined}
