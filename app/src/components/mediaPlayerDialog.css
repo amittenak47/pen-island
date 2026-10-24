@@ -1,0 +1,4 @@
+.lc-settings-modal.lc-dialog-frame.lc-media-player { width: min(960px, 100%); padding: 0; max-height: 92dvh; }
+.lc-media-player-body { padding-bottom: 16px; }
+.lc-media-player-body video { display: block; width: 100%; max-height: 74dvh; border-radius: 8px; background: #000; }
+.lc-media-player-body audio { display: block; width: 100%; }

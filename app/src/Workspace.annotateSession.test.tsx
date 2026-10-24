@@ -87,6 +87,7 @@ vi.mock("./util/docSourceUpdate", () => ({
   linkDocSource: (...args: unknown[]) => mocks.sourceLink(...args),
   justLinkDocSource: (...args: unknown[]) => mocks.sourceJustLink(...args),
   unlinkDocSource: (...args: unknown[]) => mocks.sourceUnlink(...args),
+  sourceLinkable: (source: { docType: string; localFileHash?: string }) => source.docType !== "web" || Boolean(source.localFileHash),
 }));
 vi.mock("./util/docSourceNative", async original => ({
   ...await original<typeof import("./util/docSourceNative")>(), nativeSourcePickerAvailable: () => true,
@@ -394,17 +395,17 @@ it("links an existing document from the menu's Link and keeps picker cancellatio
   expect((await linkHalf()).getAttribute("aria-label")).toBe(linkedLabel);
 });
 
-it("offers differing files with Cancel, Just link, and a held update", async () => {
+it("offers differing files with Cancel, Keep current version, and a held update", async () => {
   await mount();
   const content = { status: "newer", text: "# Different", ref: { ...sourceRef, hash: hashMarkdown("# Different") } };
   mocks.pickSource.mockResolvedValue(sourceRef);
   mocks.sourceLink.mockResolvedValue({ status: "differs", content });
   await clickLink();
-  expect(document.querySelector('[role="dialog"][aria-label="This file is different"]')).not.toBeNull();
-  expect(document.body.textContent).toContain("“First.md” doesn't match the app's copy of “First.md”.");
+  expect(document.querySelector('[role="dialog"][aria-label="Update from this file?"]')).not.toBeNull();
+  expect(document.body.textContent).toContain("“First.md” has different text from the app's copy of “First.md”.");
   await click("Cancel");
   expect(getDocSource("first")).toBeNull();
-  await clickLink(); await click("Just link");
+  await clickLink(); await click("Keep current version");
   expect(mocks.sourceJustLink).toHaveBeenCalledWith("first", content.ref);
   expect(getDocSource("first")?.hash).toBe(mocks.docs.get("first")!.hash);
   expect(mocks.sourceUpdate).not.toHaveBeenCalled();
@@ -413,9 +414,9 @@ it("offers differing files with Cancel, Just link, and a held update", async () 
   await advance(HOLD_FILL_MS + 50);
   await act(async () => { trigger.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });
   await click("Link to a different file…");
-  await click("Hold to confirm: Update to this file");
+  await click("Hold to confirm: Update from file");
   expect(mocks.sourceUpdate).not.toHaveBeenCalled();
-  const update = button("Hold to confirm: Update to this file");
+  const update = button("Hold to confirm: Update from file");
   await act(async () => { update.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true })); });
   await advance(HOLD_FILL_MS + 50);
   await act(async () => { update.dispatchEvent(new KeyboardEvent("keyup", { key: "Enter", bubbles: true })); });

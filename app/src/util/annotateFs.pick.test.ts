@@ -5,6 +5,7 @@ import {
   FILE_PICKER_GIVE_UP_MS,
   FILE_PICKER_POINTER_MS,
   FILE_PICKER_RESUME_MS,
+  HTML_ACCEPT,
   pickDocumentFile,
 } from "./annotateFs";
 
@@ -196,4 +197,25 @@ it("picks local HTML through the sandbox freeze and keys both renders by the ori
   expect(freeze).toHaveBeenNthCalledWith(2, original);
   expect(results[0]).toEqual({ name: "guide.html", docType: "web", localFileHash: hashMarkdown(original), text: "<p>First render</p>" });
   expect(results[1]).toEqual({ name: "guide.html", docType: "web", localFileHash: hashMarkdown(original), text: "<p>Second render</p>" });
+});
+
+describe("pickDocumentFile for the Web pad", () => {
+  it("offers HTML pages on desktop and refuses any other file that comes back", async () => {
+    const pending = pickDocumentFile("web");
+    const input = fileInput();
+    expect(input.accept).toBe(HTML_ACCEPT);
+    setFiles(input, new File(["# notes"], "notes.md"));
+    input.dispatchEvent(new Event("change"));
+    await expect(pending).rejects.toThrow("is not an HTML page");
+  });
+
+  it("keeps Android's picker open to any file and opens a picked page", async () => {
+    vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 (Linux; Android 14; SM-X910)");
+    const pending = pickDocumentFile("web");
+    const input = fileInput();
+    expect(input.accept).toBe("*/*");
+    setFiles(input, new File(["<p>hub</p>"], "hub.htm"));
+    input.dispatchEvent(new Event("change"));
+    expect(await pending).toMatchObject({ docType: "web", name: "hub.htm" });
+  });
 });

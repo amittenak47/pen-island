@@ -851,9 +851,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                     {allowSave && <MainMenuRow label="Save" description={isWeb ? undefined : "Save ink to the annotation library"} disabled={locked} onConfirm={beginSave} />}
                     {isWeb && <MainMenuRow label="New" description="Start a blank page" disabled={locked} onConfirm={() => props.onChoose("page")} />}
                     {!allowSave && !isWeb && <MainMenuRow label="New" disabled={locked} onConfirm={() => setSection("new")} />}
-                    {isWeb
-                      ? <MainMenuRow label="Recent" description="Reopen a page you were on" disabled={locked || (!visibleDocs.length && !archived.length && !orphans.length)} onConfirm={() => setPickingRecent(true)} />
-                      : <MainMenuRow label="Open" description="Load ink from a saved file" disabled={locked} onConfirm={() => setSection("open")} />}
+                    <MainMenuRow label="Open" description={isWeb ? "Load an HTML file or reopen a page" : "Load ink from a saved file"} disabled={locked} onConfirm={() => setSection("open")} />
                     {allowSave && !isWeb && <>
                       <MainMenuRow label="Export" description="Share the document with your ink on it" disabled={locked} onConfirm={() => setSection("export")} />
                       <MainMenuRow label="Restore" description="Bring back ink from an earlier save" disabled={locked || !snapshotKey} onConfirm={openSnapshots} />
@@ -862,7 +860,7 @@ export function AnnotateDialog(props: AnnotateDialogProps) {
                   {section === "open" && <>
                     <LibraryMenuRow label="Load" disabled={locked} onConfirm={() => props.onChoose("open")} />
                     <LibraryMenuRow label="Recents" disabled={locked || (!visibleDocs.length && !archived.length && !orphans.length)} onConfirm={() => setPickingRecent(true)} />
-                    {allowSave && <LibraryMenuRow label="Annotations" disabled={locked} onConfirm={() => setSection("sets")} />}
+                    {allowSave && !isWeb && <LibraryMenuRow label="Annotations" disabled={locked} onConfirm={() => setSection("sets")} />}
                   </>}
                   {section === "new" && <LibraryMenuRow label="Markdown file" disabled={locked} onConfirm={() => setNewTitle("")} />}
                   {section === "sets" && allowSave && <>

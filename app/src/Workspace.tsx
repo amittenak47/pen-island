@@ -65,9 +65,11 @@ import { collectExploreGraph } from "./util/exploreGraphExport";
 import { HubSyncControl, padTabSync, tabOffersHubSync } from "./components/HubSyncControl";
 import { LibrarySyncControl } from "./components/LibrarySyncControl";
 import { DocSourceLinkDialog } from "./components/DocSourceLinkDialog";
+import { HtmlFolderDialog } from "./components/HtmlFolderDialog";
+import { grantHtmlFolder, htmlAssetBase, openHtmlFolder } from "./util/htmlAssets";
 import type { DocLinkState, DocSyncLinkPairProps } from "./components/DocSyncLinkPair";
 import { getDocSource, setDocSource, type DocSourceRef } from "./util/docSourceStore";
-import { checkDocSource, justLinkDocSource, linkDocSource, unlinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
+import { checkDocSource, justLinkDocSource, linkDocSource, sourceLinkable, unlinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
 import { nativeSourcePickerAvailable, pickDocumentSource } from "./util/docSourceNative";
 import { getCachedBookMeta } from "./util/localBookStore";
 import { LoadingDoodle } from "./components/LoadingDoodle";
@@ -720,6 +722,9 @@ function cssEscape(value: string): string {
  * record that keeps its identity until patched, and flags; context changes
  * still reach every workspace, which is what they are for.
  */
+/** Documents whose folder was asked for this run: Not now holds until the app starts again. */
+const htmlFolderAsked = new Set<string>();
+
 export const Workspace = memo(function Workspace({
   tab,
   active,
@@ -876,6 +881,54 @@ export const Workspace = memo(function Workspace({
     return () => { stale = true; };
   }, [annotateSource]);
   const liveOn = Boolean(liveOriginal) && liveChoice !== "off";
+  /*
+   * The live page's own folder, for the videos and pictures it loads by
+   * relative name. Served from the file the document is linked to; Android
+   * asks once a run for a folder it only has the file of.
+   */
+  const [liveAssetBase, setLiveAssetBase] = useState<string | null>(null);
+  const [htmlFolderAsk, setHtmlFolderAsk] = useState<{ id: string; name: string; location: string; folder: string | null } | null>(null);
+  const [htmlFolderPending, setHtmlFolderPending] = useState(false);
+  const [htmlFolderError, setHtmlFolderError] = useState<string | null>(null);
+  const liveSource = liveOn && annotateDocId && annotateSource?.localFileHash && nativeSourcePickerAvailable()
+    ? getDocSource(annotateDocId) : null;
+  useEffect(() => {
+    setLiveAssetBase(null);
+    if (!annotateDocId || !liveSource) return;
+    let stale = false;
+    const { kind, location, name } = liveSource;
+    void openHtmlFolder(kind, location).then((access) => {
+      if (stale) return;
+      if (access.status === "ready") setLiveAssetBase(htmlAssetBase(access.token));
+      else if (access.status === "needsAccess" && active && !htmlFolderAsked.has(annotateDocId)) {
+        htmlFolderAsked.add(annotateDocId);
+        setHtmlFolderError(null);
+        setHtmlFolderAsk({ id: annotateDocId, name, location, folder: access.folder });
+      }
+    }).catch(() => { /* The page still runs; only its folder's files stay out of reach. */ });
+    return () => { stale = true; };
+    // The linked file, not the ref object: it is read fresh on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active, annotateDocId, liveSource?.kind, liveSource?.location]);
+  const allowHtmlFolder = useCallback(async () => {
+    const ask = htmlFolderAsk;
+    if (!ask || htmlFolderPending) return;
+    setHtmlFolderPending(true);
+    setHtmlFolderError(null);
+    try {
+      const access = await grantHtmlFolder(ask.location);
+      if (access.status === "ready") {
+        if (annotateDocIdRef.current === ask.id) setLiveAssetBase(htmlAssetBase(access.token));
+        setHtmlFolderAsk(null);
+      } else if (access.status === "wrongFolder") {
+        setHtmlFolderError(`That folder doesn't hold “${ask.name}”. Choose the folder it's in.`);
+      }
+    } catch (cause) {
+      setHtmlFolderError(messageOf(cause));
+    } finally {
+      setHtmlFolderPending(false);
+    }
+  }, [annotateDocIdRef, htmlFolderAsk, htmlFolderPending]);
   /** An HTML page's own `#` link: glide its target to just under the top of the board. */
   const onWebAnchor = useCallback((clientY: number) => {
     const board = document.querySelector(`[data-lc-tab="${cssEscape(tab.id)}"] .lc-board`);
@@ -5209,7 +5262,8 @@ export const Workspace = memo(function Workspace({
   /** A picked note whose pictures sit beside it on disk, waiting on whether to bring them. */
   const [figurePrompt, setFigurePrompt] = useState<{ picked: OpenedDocument; refs: string[] } | null>(null);
 
-  const pickAndOpenAnnotate = useCallback(async () => {
+  /** `only: "web"` is the Web pad's Load: HTML pages, opened as web documents. */
+  const pickAndOpenAnnotate = useCallback(async (only?: "web") => {
     if (busy !== null) return;
     beginPadOpen();
     /*
@@ -5223,7 +5277,7 @@ export const Workspace = memo(function Workspace({
     const fromBrowse = !problem;
     let handedOff = false;
     try {
-      const picked = await pickDocumentFile();
+      const picked = await pickDocumentFile(only);
       if (!picked) return;
       // Figures beside the note can come with it, where a folder can be picked.
       if (picked.docType === "markdown" && picked.text && folderPickSupported()) {
@@ -9287,7 +9341,7 @@ export const Workspace = memo(function Workspace({
     sourceChecks.current.add(id);
     setSourceChecking(true);
     try {
-      const pick = await pickDocumentSource();
+      const pick = await pickDocumentSource(getAnnotateDocMeta(id)?.docType === "web" ? "web" : undefined);
       if (!pick) return;
       if (annotateDocIdRef.current === id && !getAnnotateDocMeta(id)) {
         if (!await saveAnnotateSession({ throwOnError: true })) throw new Error("The app's copy could not be saved before linking its source.");
@@ -9374,7 +9428,7 @@ export const Workspace = memo(function Workspace({
   const linkedSourceName = annotateDocId ? getDocSource(annotateDocId)?.name ?? null : null;
   const linkNewer = annotateDocId ? Boolean(sourceNewer[annotateDocId]) : false;
   const annotateLink = useMemo<DocLinkState | null>(() =>
-    annotateDocId && annotateSource && annotateSource.docType !== "web" && !footnoteBoardSession && nativeSourcePickerAvailable() ? {
+    annotateDocId && annotateSource && sourceLinkable(annotateSource) && !footnoteBoardSession && nativeSourcePickerAvailable() ? {
       name: linkedSourceName,
       checking: sourceChecking,
       newer: linkNewer,
@@ -9383,7 +9437,8 @@ export const Workspace = memo(function Workspace({
       onUnlink: () => unlinkSourceFor(annotateDocId),
     } : null,
   [annotateDocId, annotateSource, footnoteBoardSession, linkedSourceName, sourceChecking, linkNewer, checkSourceFor, linkSourceFor, unlinkSourceFor]);
-  const annotateSyncPair = menuSyncPair(entryKind !== "web" ? annotateLink : null);
+  // The Link half sits beside the open document's name, which each pad's menu shows only for its own kind.
+  const annotateSyncPair = menuSyncPair((entryKind === "web") === (annotateSource?.docType === "web") ? annotateLink : null);
 
   /** Import a whiteboard backup, or export the open notebook (backup file or picture). */
   const runWhiteboardTransfer = (choice: "import" | "export" | "export-png") => {
@@ -10987,6 +11042,7 @@ export const Workspace = memo(function Workspace({
                       url={annotateSource.name}
                       localFile={Boolean(annotateSource.localFileHash)}
                       live={liveOn ? liveOriginal : null}
+                      assetBase={liveAssetBase}
                       onAnchor={onWebAnchor}
                       source={webHtmlSource ?? undefined}
                       note={webHtmlNote ?? undefined}
@@ -11831,10 +11887,15 @@ export const Workspace = memo(function Workspace({
               return;
             }
             setAnnotateEntryOpen(false);
-            void pickAndOpenAnnotate();
+            void pickAndOpenAnnotate(entryKind === "web" ? "web" : undefined);
           }}
           onCancel={() => setAnnotateEntryOpen(false)}
         />
+      )}</DialogPresence>
+
+      <DialogPresence>{htmlFolderAsk && active && (
+        <HtmlFolderDialog fileName={htmlFolderAsk.name} folder={htmlFolderAsk.folder} pending={htmlFolderPending} error={htmlFolderError}
+          onAllow={() => void allowHtmlFolder()} onCancel={() => { if (!htmlFolderPending) setHtmlFolderAsk(null); }} />
       )}</DialogPresence>
 
       <DialogPresence>{sourceUpdatePrompt && !sourceUpdatePrompt.linking && (

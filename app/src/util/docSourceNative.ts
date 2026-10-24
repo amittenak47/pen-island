@@ -13,8 +13,9 @@ export function nativeSourcePickerAvailable(): boolean {
   return !/iphone|ipad|ipod/i.test(ua) && !(/macintosh/i.test(ua) && navigator.maxTouchPoints > 1);
 }
 
-export function pickDocumentSource(): Promise<SourcePick | null> {
-  return invoke("pick_document_source");
+/** `only: "web"` narrows the desktop picker to HTML pages. */
+export function pickDocumentSource(only?: "web"): Promise<SourcePick | null> {
+  return only ? invoke("pick_document_source", { only }) : invoke("pick_document_source");
 }
 
 export function pickSourceFolder(): Promise<FolderPick | null> {

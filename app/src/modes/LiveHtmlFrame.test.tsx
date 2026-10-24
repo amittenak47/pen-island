@@ -184,3 +184,66 @@ it("reports an in-page link's target at its client y, scaled from the page's own
   send({ nonce, anchor: 600 });
   expect(onAnchor).toHaveBeenCalledWith(350);
 });
+
+it("plays a video from the page's folder in a player over the app, and ignores any other address", async () => {
+  const base = "http://lcasset.localhost/0123abcd/";
+  await act(async () => root.render(<LiveHtmlFrame original="<p>Live original</p>" onHeight={vi.fn()} assetBase={base} />));
+  const frame = host.querySelector("iframe")!;
+  expect(frame.srcdoc).toContain(`<base href="${base}">`);
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  const send = (media: object) =>
+    act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: LIVE_HTML_MESSAGE, nonce, media } })));
+  send({ src: "https://example.com/3.7.mp4", time: 3, video: true });
+  send({ src: "http://lcasset.localhost/other/3.7.mp4", time: 3, video: true });
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  send({ src: `${base}3.7.mp4`, time: 42.5, video: true });
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"]')!;
+  expect(dialog.getAttribute("aria-label")).toBe("3.7.mp4");
+  const video = dialog.querySelector("video")!;
+  expect(video.getAttribute("src")).toBe(`${base}3.7.mp4`);
+  expect(video.controls).toBe(true);
+  act(() => { video.dispatchEvent(new Event("loadedmetadata")); });
+  expect(video.currentTime).toBe(42.5);
+  await act(async () => { (dialog.querySelector('[aria-label="Close 3.7.mp4"]') as HTMLButtonElement).click(); });
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)); });
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("never opens a player for a page without a folder", async () => {
+  await act(async () => root.render(<LiveHtmlFrame original="<p>Live original</p>" onHeight={vi.fn()} />));
+  const frame = host.querySelector("iframe")!;
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow,
+    data: { type: LIVE_HTML_MESSAGE, nonce, media: { src: "http://lcasset.localhost/x/3.7.mp4", time: 0, video: true } } })));
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+});
+
+it("lets taps through to the page's players only, and only with the page's folder", async () => {
+  const base = "http://lcasset.localhost/0123abcd/";
+  await act(async () => root.render(<LiveHtmlFrame original="<p>Live original</p>" onHeight={vi.fn()} assetBase={base} />));
+  const frame = host.querySelector("iframe")!;
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  const send = (holes: unknown) =>
+    act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: LIVE_HTML_MESSAGE, nonce, holes } })));
+  expect(host.querySelector(".lc-live-html-catcher")).toBeNull();
+  expect(frame.classList.contains("has-players")).toBe(false);
+  send([[10, 300, 640, 360]]);
+  expect(frame.classList.contains("has-players")).toBe(true);
+  const catcher = host.querySelector<HTMLElement>(".lc-live-html-catcher")!;
+  expect(catcher.getAttribute("style")).toContain('path(evenodd, "M-1 -1H1000000V100000000H-1ZM10 300h640v360h-640Z")');
+  send([[10, 300, "640", 360]]);
+  send([[10, 300, 0, 360]]);
+  expect(host.querySelector<HTMLElement>(".lc-live-html-catcher")!.getAttribute("style")).toContain("M10 300h640v360h-640Z");
+  send([]);
+  expect(host.querySelector(".lc-live-html-catcher")).toBeNull();
+  expect(frame.classList.contains("has-players")).toBe(false);
+});
+
+it("ignores player boxes from a page without a folder", async () => {
+  await act(async () => root.render(<LiveHtmlFrame original="<p>Live original</p>" onHeight={vi.fn()} />));
+  const frame = host.querySelector("iframe")!;
+  const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
+  act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow,
+    data: { type: LIVE_HTML_MESSAGE, nonce, holes: [[0, 0, 100, 100]] } })));
+  expect(host.querySelector(".lc-live-html-catcher")).toBeNull();
+});
