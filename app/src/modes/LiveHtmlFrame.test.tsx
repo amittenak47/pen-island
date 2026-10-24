@@ -3,7 +3,7 @@ import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { LIVE_HTML_MESSAGE } from "../util/localHtmlRender";
-import { LiveHtmlFrame } from "./LiveHtmlFrame";
+import { LiveHtmlFrame, liveFrameIn, selectInLivePage } from "./LiveHtmlFrame";
 
 let root: Root;
 let host: HTMLDivElement;
@@ -274,4 +274,47 @@ it("gives a page with no document no storage of its own", async () => {
   const nonce = frame.srcdoc.match(/"nonce":"([^"]+)"/)![1];
   act(() => window.dispatchEvent(new MessageEvent("message", { source: frame.contentWindow, data: { type: LIVE_HTML_MESSAGE, nonce, storage: { a: "1" } } })));
   expect(localStorage.length).toBe(0);
+});
+
+it("asks the page for the words under a band or a hold, in its own px, and answers in the viewport's", async () => {
+  const { frame, nonce } = await mount();
+  const post = tapHarness(frame);
+  expect(liveFrameIn(host)).toBe(frame);
+  const reply = (selected: object, source: Window | null = frame.contentWindow) =>
+    act(() => window.dispatchEvent(new MessageEvent("message", { source, data: { type: LIVE_HTML_MESSAGE, nonce, selected } })));
+  // Frame drawn at 100,200 and 200x300; the page is 800x1200: four times over.
+  const band = selectInLivePage(frame, { band: new DOMRect(110, 210, 50, 25) });
+  expect(post).toHaveBeenLastCalledWith({ type: LIVE_HTML_MESSAGE, nonce, select: { id: 1, band: [40, 40, 200, 100] } }, "*");
+  reply({ id: 1, text: "Words", rects: [[40, 40, 200, 100]] }, window);
+  reply({ id: 9, text: "Other", rects: [[0, 0, 4, 4]] });
+  reply({ id: 1, text: "Words", rects: [[40, 40, 200, 100]] });
+  const found = await band;
+  expect(found?.text).toBe("Words");
+  expect(found?.rects.map(r => [r.left, r.top, r.width, r.height])).toEqual([[110, 210, 50, 25]]);
+  const word = selectInLivePage(frame, { point: { x: 150, y: 250 } });
+  expect(post).toHaveBeenLastCalledWith({ type: LIVE_HTML_MESSAGE, nonce, select: { id: 2, point: [200, 200] } }, "*");
+  // Nothing there, or a malformed box: no selection.
+  reply({ id: 2, text: "", rects: [] });
+  expect(await word).toBeNull();
+  const bad = selectInLivePage(frame, { point: { x: 150, y: 250 } });
+  reply({ id: 3, text: "Words", rects: [[1, 2, "3", 4]] });
+  expect(await bad).toBeNull();
+});
+
+it("gives up on a page that does not answer, and on one that has gone", async () => {
+  vi.useFakeTimers();
+  try {
+    const { frame } = await mount();
+    tapHarness(frame);
+    const waiting = selectInLivePage(frame, { point: { x: 150, y: 250 } });
+    await act(async () => { vi.advanceTimersByTime(1500); });
+    expect(await waiting).toBeNull();
+    const unanswered = selectInLivePage(frame, { point: { x: 150, y: 250 } });
+    act(() => root.unmount());
+    expect(await unanswered).toBeNull();
+    expect(await selectInLivePage(frame, { point: { x: 150, y: 250 } })).toBeNull();
+    root = createRoot(host);
+  } finally {
+    vi.useRealTimers();
+  }
 });

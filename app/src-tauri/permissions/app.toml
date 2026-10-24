@@ -117,8 +117,8 @@ commands.allow = ["webview_eval_json"]
 
 [[permission]]
 identifier = "allow-webview-capture-png"
-description = "Photograph the live page and attach that picture to Ask"
-commands.allow = ["webview_capture_png"]
+description = "Photograph the live page, or a region of the app's own view, for Ask and Screenshot"
+commands.allow = ["webview_capture_png", "capture_app_region"]
 
 # App commands the page calls that had no permission: every call failed as
 # "not allowed. Command not found", and each caller swallowed it.

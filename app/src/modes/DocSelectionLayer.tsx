@@ -26,6 +26,7 @@ import {
   isRegionAnchor,
   isTextAnchor,
   rangeFromAnchor,
+  regionAnchorFromRect,
   scopeRootIn,
   scopeRootsIn,
   snapToWords,
@@ -116,6 +117,7 @@ import {
   subscribePageSurfaceMove,
   viewportBoxesOverlap,
 } from "./sheetAnchor";
+import { liveFrameIn, selectInLivePage } from "./LiveHtmlFrame";
 
 /** Space between squares that share a row. */
 const SQUARE_ROW_GAP = 4;
@@ -265,6 +267,11 @@ export interface DocSelectionResult {
   anchor: DocAnchor;
   /** Content-block boxes under the marquee (body-local). */
   hitRects: LocalRect[];
+  /**
+   * Words read from a live page (LiveHtmlFrame), not this layer's own text.
+   * No mark can hold them, and only the screen can picture them.
+   */
+  live?: boolean;
 }
 
 export interface DocSelectionLayerProps {
@@ -742,12 +749,7 @@ export function DocSelectionLayer({
 
   /** Enter confirm: keep paragraph chrome, fade the rubber-band away. */
   const confirmMarquee = useCallback(
-    (done: {
-      text: string;
-      excerpt: string;
-      anchor: DocAnchor;
-      hitRects: LocalRect[];
-    }, rect: LocalRect) => {
+    (done: DocSelectionResult, rect: LocalRect) => {
       if (bandFadeTimerRef.current != null) {
         window.clearTimeout(bandFadeTimerRef.current);
         bandFadeTimerRef.current = null;
@@ -758,6 +760,7 @@ export function DocSelectionLayer({
         excerpt: done.excerpt,
         anchor: done.anchor,
         hitRects: done.hitRects,
+        ...(done.live ? { live: true } : {}),
       });
       setBand(rect);
       setBandFading(true);
@@ -1161,6 +1164,7 @@ export function DocSelectionLayer({
       const hold = holdRef.current;
       if (!hold || hold.pointerId !== event.pointerId) return;
       const held = hold.held;
+      const armed = hold.armed;
       const body = bodyRef.current;
       const root = hold.root;
       const scope = hold.scope;
@@ -1173,6 +1177,28 @@ export function DocSelectionLayer({
         /* already released */
       }
       clearGesture();
+      const liveFrame = body ? liveFrameIn(body) : null;
+      // A live page has no words out here: a hold that did not move takes
+      // the word under it, as a long press does on a still page.
+      if (liveFrame && body && !held && armed && confirm) {
+        const request = selectionRequest;
+        void selectInLivePage(liveFrame, { point: { x: lastX, y: lastY } }).then((found) => {
+          if (!found || !body.isConnected || selectionRequest !== request) return;
+          const box = unionViewportBoxes(found.rects);
+          const at = scopeRootAtPoint(body, lastX, lastY);
+          const anchor = box ? regionAnchorFromRect(at.root, box, at.scope, scaleOf(body) || 1) : null;
+          if (!anchor) return;
+          const local = unionRectsIntoBlocks(clientRectsToLocal(body, found.rects));
+          selectionScreenBoxRef.current = box;
+          setRects(local);
+          setHitRects([]);
+          setBand(null);
+          setActionsVia("native");
+          setSelection({ text: found.text, excerpt: excerptOf(found.text), anchor, hitRects: local, live: true });
+          setPhase("actions");
+        });
+        return;
+      }
       if (!held || !confirm || !body || !root || !startLocal) return;
       const end = viewportToLocal(body, lastX, lastY);
       const rect = bandFromLocalPoints(body, startLocal, end);
@@ -1183,6 +1209,23 @@ export function DocSelectionLayer({
       }
       const page = pdfPageNumberOf(root);
       const request = selectionRequest;
+      if (liveFrame) {
+        const scale = scaleOf(body) || 1;
+        const bodyBox = body.getBoundingClientRect();
+        const viewportBand = new DOMRect(bodyBox.left + rect.left * scale, bodyBox.top + rect.top * scale, rect.width * scale, rect.height * scale);
+        void selectInLivePage(liveFrame, { band: viewportBand }).then((found) => {
+          if (!body.isConnected || selectionRequest !== request) return;
+          const anchor = found ? regionAnchorFromRect(root, viewportBand, scope, scale) : null;
+          if (!found || !anchor) {
+            setBand(null);
+            setHitRects([]);
+            return;
+          }
+          const hits = unionRectsIntoBlocks(clientRectsToLocal(body, found.rects));
+          confirmMarquee({ text: found.text, excerpt: excerptOf(found.text), anchor, hitRects: hits.length > 0 ? hits : [rect], live: true }, rect);
+        });
+        return;
+      }
       const finish = () => {
         if (!body.isConnected || selectionRequest !== request) return;
         const done = finalizeMarquee(body, rect, root, scope);
@@ -3164,7 +3207,7 @@ export function DocSelectionLayer({
                       {actionFailure && <p role="alert" className="lc-warning">{actionFailure.result.error}</p>}
                       {actionFailure?.result.continueTextOnly && <button type="button" role="menuitem" className="lc-doc-sheet-action" disabled={actionBusy}
                         onClick={() => void finishAction(actionFailure.result.continueTextOnly!, actionFailure.context)}>Continue with text only</button>}
-                      {onMark && (
+                      {onMark && !selection?.live && (
                         <button
                           type="button"
                           role="menuitem"
@@ -3198,7 +3241,8 @@ export function DocSelectionLayer({
                             <CopyActionIcon />
                             <span>{copied ? "Copied" : "Copy"}</span>
                           </button>
-                          <button
+                          {/* Google and ChatBot leave a mark, and a live page's words have no place for one. */}
+                          {!selection.live && <button
                             type="button"
                             role="menuitem"
                             className="lc-doc-sheet-action"
@@ -3206,8 +3250,8 @@ export function DocSelectionLayer({
                           >
                             <SearchActionIcon />
                             <span>Google</span>
-                          </button>
-                          {onAskChatBot && (
+                          </button>}
+                          {onAskChatBot && !selection.live && (
                             <button
                               type="button"
                               role="menuitem"
@@ -3230,7 +3274,7 @@ export function DocSelectionLayer({
                       )}
                       {/* Annotate = make a mark. Desktop: hold-marquee only.
                           Android: native quote too — native handles are broken. */}
-                      {(isAndroidDevice() || actionsVia === "marquee") && onAnnotate && (
+                      {(isAndroidDevice() || actionsVia === "marquee") && onAnnotate && !selection?.live && (
                         <button
                           type="button"
                           role="menuitem"

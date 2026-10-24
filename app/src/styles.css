@@ -1627,6 +1627,13 @@ html[data-theme="dark"] .lc-web-doc {
   pointer-events: auto;
 }
 
+/* A live page's selection is pictured from the screen (screenRegionCapture.ts): its own chrome stays out of it. */
+.lc-screen-capturing .lc-doc-select-overlay,
+.lc-screen-capturing .lc-doc-selection-chrome,
+.lc-screen-capturing .lc-doc-sheet-backdrop {
+  visibility: hidden !important;
+}
+
 /*
  * The board scrolls a web page, never the browser.
  *

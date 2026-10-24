@@ -90,7 +90,7 @@ pub async fn webview_capture_png(app: AppHandle, label: String) -> Result<String
         let (tx, rx) = tokio::sync::oneshot::channel();
         webview
             .with_webview(move |platform| {
-                start_preview(&platform, tx);
+                start_preview(&platform, "{\"format\":\"png\",\"fromSurface\":true}", tx);
             })
             .map_err(|err| err.to_string())?;
         let png = tokio::time::timeout(std::time::Duration::from_secs(8), rx)
@@ -104,9 +104,81 @@ pub async fn webview_capture_png(app: AppHandle, label: String) -> Result<String
     }
 }
 
+/// A rectangle of the app's own view, in the CSS px `getBoundingClientRect` gives.
+#[derive(Debug, Clone, Copy, serde::Deserialize)]
+pub struct ViewRegion {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+}
+
+/// PNG of a region of the app's own view, as the screen shows it.
+///
+/// A local page that runs live is a sandboxed frame in a process of its own.
+/// A board export pictures the app's DOM, where that frame is nothing, so a
+/// selection's screenshot came out blank. The screen has the page, its videos
+/// and the ink over it. `density` is `devicePixelRatio`, for Android.
+#[tauri::command]
+pub async fn capture_app_region(
+    app: AppHandle,
+    webview: tauri::Webview,
+    region: ViewRegion,
+    density: f64,
+) -> Result<tauri::ipc::Response, String> {
+    let ViewRegion { x, y, width, height } = region;
+    if !(x.is_finite() && y.is_finite() && width >= 1.0 && height >= 1.0 && width.is_finite() && height.is_finite()) {
+        return Err("there is nothing there to picture".into());
+    }
+    #[cfg(windows)]
+    {
+        let _ = (app, density);
+        let params = serde_json::json!({
+            "format": "png",
+            "fromSurface": true,
+            "clip": { "x": x, "y": y, "width": width, "height": height, "scale": 1 },
+        })
+        .to_string();
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        webview
+            .with_webview(move |platform| {
+                start_preview(&platform, &params, tx);
+            })
+            .map_err(|err| err.to_string())?;
+        let png = tokio::time::timeout(std::time::Duration::from_secs(8), rx)
+            .await
+            .map_err(|_| "the screen capture timed out".to_string())?
+            .map_err(|_| "the screen capture did not return".to_string())??;
+        Ok(tauri::ipc::Response::new(png))
+    }
+    #[cfg(target_os = "android")]
+    {
+        use tauri_plugin_livewebview::{LiveRect, LiveWebViewExt};
+        let _ = webview;
+        // PixelCopy answers on the UI thread; this one waits for it.
+        let png = tauri::async_runtime::spawn_blocking(move || {
+            let plugin = app.live_webview().ok_or("the screen capture is unavailable")?;
+            plugin
+                .capture(LiveRect { x, y, width, height }, density)
+                .map_err(|err| err.to_string())
+        })
+        .await
+        .map_err(|_| "the screen capture did not return".to_string())??;
+        let bytes = base64::Engine::decode(&base64::engine::general_purpose::STANDARD, png)
+            .map_err(|_| "the screen capture was not a picture".to_string())?;
+        Ok(tauri::ipc::Response::new(bytes))
+    }
+    #[cfg(not(any(windows, target_os = "android")))]
+    {
+        let _ = (app, webview, density);
+        Err("picturing the screen is only available on Windows and Android".into())
+    }
+}
+
 #[cfg(windows)]
 fn start_preview(
     webview: &tauri::webview::PlatformWebview,
+    params: &str,
     tx: tokio::sync::oneshot::Sender<Result<Vec<u8>, String>>,
 ) {
     use std::sync::{Arc, Mutex};
@@ -140,7 +212,7 @@ fn start_preview(
         Ok(())
     }));
     let method = HSTRING::from("Page.captureScreenshot");
-    let params = HSTRING::from("{\"format\":\"png\",\"fromSurface\":true}");
+    let params = HSTRING::from(params);
     if let Err(err) = unsafe { core.CallDevToolsProtocolMethod(&method, &params, &handler) } {
         fail(&slot, err.to_string());
     }

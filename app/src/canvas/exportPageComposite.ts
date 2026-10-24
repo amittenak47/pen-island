@@ -314,6 +314,9 @@ async function drawDomSlot(
 
   const clone = slot.cloneNode(true) as HTMLElement;
   hollowOutside(slot, clone, overlap.minY - pageBounds.minY, overlap.maxY - pageBounds.minY);
+  // A live page's frame pictures as nothing in an SVG image, and its srcdoc
+  // (megabytes) made the picture take seconds to decode. Only the screen has it.
+  clone.querySelectorAll("iframe").forEach((frame) => frame.remove());
   clone.style.transform = "none";
   clone.style.left = "0";
   clone.style.top = "0";
@@ -641,5 +644,8 @@ function copyBand(slot: HTMLElement, host: Element, top: number, bottom: number)
     }
   };
   fill(slot, copy, 0);
+  // Out before the copy is mounted: a live page's frame would load and run
+  // the whole page again.
+  copy.querySelectorAll("iframe").forEach((frame) => frame.remove());
   return outer;
 }

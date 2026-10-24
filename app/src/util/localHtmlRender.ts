@@ -282,9 +282,77 @@ export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: stri
       new ResizeObserver(schedule).observe(document.body);
       new MutationObserver(schedule).observe(document.body, {childList: true, subtree: true, attributes: true});
     }, {once: true});
+    // The app's own text selection, answered from in here. The frame takes no
+    // pointer, so a hold on the page is the app's gesture, but only this side
+    // knows which words lie under it. Boxes go back in the page's own px.
+    function readable(node) {
+      const el = node.parentElement;
+      return Boolean(el && node.data.trim() && !el.closest("script, style, noscript, template")
+        && getComputedStyle(el).visibility !== "hidden");
+    }
+    function wordAt(x, y) {
+      let node = null, offset = 0;
+      if (document.caretPositionFromPoint) {
+        const at = document.caretPositionFromPoint(x, y);
+        if (at) { node = at.offsetNode; offset = at.offset; }
+      } else if (document.caretRangeFromPoint) {
+        const at = document.caretRangeFromPoint(x, y);
+        if (at) { node = at.startContainer; offset = at.startOffset; }
+      }
+      if (!node || node.nodeType !== 3 || !readable(node)) return null;
+      const text = node.data;
+      const letter = /[\\p{L}\\p{N}_'\\u2019-]/u;
+      let start = offset, end = offset;
+      while (start > 0 && letter.test(text[start - 1])) start--;
+      while (end < text.length && letter.test(text[end])) end++;
+      if (start === end) return null;
+      const range = document.createRange();
+      range.setStart(node, start);
+      range.setEnd(node, end);
+      const rects = [...range.getClientRects()];
+      // The caret snaps to the nearest text: a hold on blank space is no word.
+      if (!rects.some(r => x >= r.left - 4 && x <= r.right + 4 && y >= r.top - 4 && y <= r.bottom + 4)) return null;
+      return {text: text.slice(start, end), rects};
+    }
+    // Every text the band touches, as the app's own band reads a still page (textUnder).
+    function textInBand(left, top, width, height) {
+      const right = left + width, bottom = top + height;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      const parts = [], rects = [];
+      let code = false;
+      for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+        if (!node.data.trim()) continue;
+        range.selectNodeContents(node);
+        const box = range.getBoundingClientRect();
+        if ((!box.width && !box.height) || box.left >= right || box.right <= left || box.top >= bottom || box.bottom <= top) continue;
+        if (!readable(node)) continue;
+        if (node.parentElement.closest("pre, code")) code = true;
+        parts.push(node.data);
+        for (const r of range.getClientRects()) {
+          if (rects.length < 400 && r.width > 0.5 && r.height > 0.5 && r.left < right && r.right > left && r.top < bottom && r.bottom > top) rects.push(r);
+        }
+      }
+      const text = code
+        ? parts.join("").replace(/\\n{3,}/g, "\\n\\n").replace(/[ \\t]+\\n/g, "\\n").trimEnd()
+        : parts.join(" ").replace(/\\s+/g, " ").trim();
+      return text ? {text, rects} : null;
+    }
+    function answerSelect(ask) {
+      const finite = function(n) { return typeof n === "number" && Number.isFinite(n); };
+      let found = null;
+      if (Array.isArray(ask.band) && ask.band.length === 4 && ask.band.every(finite)) found = textInBand(...ask.band);
+      else if (Array.isArray(ask.point) && ask.point.length === 2 && ask.point.every(finite)) found = wordAt(...ask.point);
+      parent.postMessage({...envelope, selected: {
+        id: ask.id,
+        text: found ? found.text : "",
+        rects: found ? found.rects.map(r => [r.left, r.top, r.width, r.height]) : [],
+      }}, "*");
+    }
     window.addEventListener("message", function(event) {
       const data = event.data;
       if (event.source !== parent || !data || data.type !== envelope.type || data.nonce !== envelope.nonce) return;
+      if (data.select && typeof data.select === "object") { answerSelect(data.select); return; }
       const tap = data.tap;
       if (!tap || typeof tap.x !== "number" || typeof tap.y !== "number" || !Number.isFinite(tap.x) || !Number.isFinite(tap.y)) return;
       const el = document.elementFromPoint(tap.x, tap.y);
