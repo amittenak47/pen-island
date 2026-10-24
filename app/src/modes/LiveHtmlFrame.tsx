@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { LIVE_HTML_MESSAGE, liveHtmlSrcdoc } from "../util/localHtmlRender";
 import { DialogPresence } from "../components/DialogMotion";
 import { MediaPlayerDialog } from "../components/MediaPlayerDialog";
+import { readLivePageStorage, writeLivePageStorage } from "../util/livePageStorage";
 
 const TAP_EXCLUSIONS = "button, a, input, textarea, select, [role='button'], [role='menu'], [role='dialog'], .lc-board-chrome-slot, .lc-map-controls, .lc-doc-footnote, .lc-doc-footnote-pack, .lc-footnote-bubble, .lc-doc-select-overlay, .lc-doc-sheet, .lc-doc-confirm, .lc-toolbar";
 
@@ -13,6 +14,8 @@ interface LiveHtmlFrameProps {
   onAnchor?: (clientY: number) => void;
   /** Where the file's own folder is served, for its relative names (see htmlAssets.ts). */
   assetBase?: string | null;
+  /** The document whose page this is: its `localStorage` is kept under this id (livePageStorage.ts). */
+  storageId?: string | null;
 }
 
 interface PlayingMedia { src: string; start: number; video: boolean }
@@ -32,15 +35,18 @@ function catcherClip(boxes: PlayerBox[]): string {
   return `path(evenodd, "M-1 -1H1000000V100000000H-1Z${holes}")`;
 }
 
-export function LiveHtmlFrame({ original, onHeight, onAnchor, assetBase = null }: LiveHtmlFrameProps) {
-  // A new original or folder starts with a fresh nonce, measurement and growth guard.
-  return <LiveHtmlFrameContent key={`${assetBase ?? ""}\n${original}`} original={original} onHeight={onHeight} onAnchor={onAnchor} assetBase={assetBase} />;
+export function LiveHtmlFrame({ original, onHeight, onAnchor, assetBase = null, storageId = null }: LiveHtmlFrameProps) {
+  // A new original, folder or document starts with a fresh nonce, measurement and growth guard.
+  return <LiveHtmlFrameContent key={`${storageId ?? ""}\n${assetBase ?? ""}\n${original}`} original={original} onHeight={onHeight}
+    onAnchor={onAnchor} assetBase={assetBase} storageId={storageId} />;
 }
 
-function LiveHtmlFrameContent({ original, onHeight, onAnchor, assetBase = null }: LiveHtmlFrameProps) {
+function LiveHtmlFrameContent({ original, onHeight, onAnchor, assetBase = null, storageId = null }: LiveHtmlFrameProps) {
   const frameRef = useRef<HTMLIFrameElement | null>(null);
   const [nonce] = useState(() => crypto.getRandomValues(new Uint32Array(4)).join("-"));
-  const srcdoc = useMemo(() => liveHtmlSrcdoc(original, nonce, assetBase), [original, nonce, assetBase]);
+  // Read once: the page's own saves must not rebuild (and so reload) the page.
+  const [storage] = useState(() => storageId ? readLivePageStorage(storageId) : null);
+  const srcdoc = useMemo(() => liveHtmlSrcdoc(original, nonce, assetBase, storage), [original, nonce, assetBase, storage]);
   const [height, setHeight] = useState(0);
   const [playing, setPlaying] = useState<PlayingMedia | null>(null);
   const [players, setPlayers] = useState<PlayerBox[]>([]);
@@ -63,6 +69,10 @@ function LiveHtmlFrameContent({ original, onHeight, onAnchor, assetBase = null }
       if (event.source !== frame.contentWindow || !data || typeof data !== "object") return;
       const reply = data as { type?: unknown; nonce?: unknown; height?: unknown; anchor?: unknown; media?: unknown; holes?: unknown };
       if (reply.type !== LIVE_HTML_MESSAGE || reply.nonce !== nonce) return;
+      if ("storage" in reply) {
+        if (storageId) writeLivePageStorage(storageId, (reply as { storage?: unknown }).storage);
+        return;
+      }
       if ("holes" in reply) {
         const boxes = assetBase ? playerBoxes(reply.holes) : null;
         if (boxes) setPlayers(boxes);
@@ -143,7 +153,7 @@ function LiveHtmlFrameContent({ original, onHeight, onAnchor, assetBase = null }
       window.removeEventListener("pointerup", onUp, options);
       window.removeEventListener("pointercancel", onCancel, options);
     };
-  }, [nonce, assetBase]);
+  }, [nonce, assetBase, storageId]);
 
   return <>
     <iframe

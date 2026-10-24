@@ -4,6 +4,7 @@ import { PAGE_MAX_BYTES, webPageWidthForViewport } from "./webPage";
 import { docIdentityHash, hashMarkdown } from "./annotateStore";
 import { IDBFactory } from "fake-indexeddb";
 import { getLiveOriginal, liveOriginalKey } from "./liveHtmlStore";
+import { LIVE_PAGE_STORAGE_LIMIT } from "./livePageStorage";
 import {
   freezeLocalHtml, localHtmlSrcdoc, renderLocalHtml, LOCAL_HTML_CSP,
   LOCAL_HTML_MESSAGE, LOCAL_HTML_TIMEOUT_MS, UNPIN_STICKY, UNROLL_SCROLL_BOXES,
@@ -511,5 +512,56 @@ describe("live HTML with its file's folder", () => {
     expect(insideClick.defaultPrevented).toBe(true);
     expect(location.hash).toBe("#w5");
     expect(outsideClick.defaultPrevented).toBe(true);
+  });
+});
+
+describe("a live page's localStorage", () => {
+  function page(seed: Record<string, string> | null) {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc("<p>Page</p>", "n", null, seed), "text/html");
+    const parent = { postMessage: vi.fn() };
+    const fakeWindow = { open: () => ({}), addEventListener: vi.fn() } as Record<string, unknown>;
+    const bridge = [...doc.head.querySelectorAll("script")].find(node => node.textContent?.includes("const seeded"))!;
+    new Function("window", "document", "parent", "ResizeObserver", "MutationObserver", "PointerEvent", bridge.textContent!)(
+      fakeWindow, doc, parent, class { observe() {} }, class { observe() {} }, MouseEvent,
+    );
+    return { storage: fakeWindow.localStorage as Storage, parent, fakeWindow };
+  }
+  const saves = (parent: { postMessage: ReturnType<typeof vi.fn> }) =>
+    parent.postMessage.mock.calls.map(([data]) => data).filter(data => "storage" in data).map(data => data.storage);
+
+  it("starts from what the app kept and works like the real one", async () => {
+    const { storage, parent } = page({ "bbt-page": "tracer" });
+    expect(storage.getItem("bbt-page")).toBe("tracer");
+    expect(storage.getItem("missing")).toBeNull();
+    storage.setItem("bbt-last", JSON.stringify({ k: "dfs", ex: 1, i: 4 }));
+    storage.setItem("bbt-speed", 2 as unknown as string);
+    expect(storage.length).toBe(3);
+    expect(storage.key(1)).toBe("bbt-last");
+    expect(storage.key(9)).toBeNull();
+    expect(storage.getItem("bbt-speed")).toBe("2");
+    expect((storage as unknown as Record<string, string>)["bbt-page"]).toBe("tracer");
+    (storage as unknown as Record<string, string>)["bbt-view"] = "grid";
+    expect(Object.keys(storage)).toEqual(["bbt-page", "bbt-last", "bbt-speed", "bbt-view"]);
+    expect("bbt-view" in storage).toBe(true);
+    storage.removeItem("bbt-speed");
+    await Promise.resolve();
+    // One message per change burst, carrying the whole map.
+    expect(saves(parent)).toEqual([{ "bbt-page": "tracer", "bbt-last": '{"k":"dfs","ex":1,"i":4}', "bbt-view": "grid" }]);
+    storage.clear();
+    await Promise.resolve();
+    expect(saves(parent).at(-1)).toEqual({});
+  });
+
+  it("says when it is full, as the real one does, and keeps what it had", () => {
+    const { storage } = page({});
+    storage.setItem("small", "1");
+    expect(() => storage.setItem("big", "x".repeat(LIVE_PAGE_STORAGE_LIMIT))).toThrow(expect.objectContaining({ name: "QuotaExceededError" }));
+    expect(storage.getItem("big")).toBeNull();
+    expect(storage.getItem("small")).toBe("1");
+  });
+
+  it("stays out of the way without a document to keep it for", () => {
+    const { fakeWindow } = page(null);
+    expect("localStorage" in fakeWindow).toBe(false);
   });
 });
