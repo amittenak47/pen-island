@@ -65,13 +65,12 @@ pub struct HtmlFolder {
     pub wrong_folder: bool,
 }
 
+/// A file below a tree folder, opened for reading. The descriptor is the caller's to close.
 #[derive(Debug, Deserialize)]
-pub struct AssetRead {
+pub struct AssetOpen {
     pub found: bool,
     #[serde(default)]
-    pub size: Option<u64>,
-    #[serde(default)]
-    pub data: Option<String>,
+    pub fd: Option<i32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -79,8 +78,6 @@ struct AssetArgs<'a> {
     tree: &'a str,
     dir: &'a str,
     path: &'a str,
-    offset: u64,
-    length: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -119,9 +116,9 @@ impl<R: Runtime> GallerySave<R> {
         Ok(self.0.run_mobile_plugin("grant_html_folder", DocumentSourceArgs { uri: uri.into() })?)
     }
 
-    /// `length` bytes from `offset` of `path` inside the tree folder `dir`; 0 reads only its size.
-    pub fn read_asset(&self, tree: &str, dir: &str, path: &str, offset: u64, length: u64) -> Result<AssetRead> {
-        Ok(self.0.run_mobile_plugin("read_asset", AssetArgs { tree, dir, path, offset, length })?)
+    /// Open `path` below the tree folder `dir` and hand over its file descriptor.
+    pub fn open_asset(&self, tree: &str, dir: &str, path: &str) -> Result<AssetOpen> {
+        Ok(self.0.run_mobile_plugin("open_asset", AssetArgs { tree, dir, path })?)
     }
 
     pub fn read_document(&self, uri: &str) -> Result<String> {

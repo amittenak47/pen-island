@@ -141,6 +141,21 @@ export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: stri
   bridge.textContent = `(function() {
     const envelope = ${envelope};
     const assets = ${assets};
+    // Nothing of a video or sound loads until it is played. A page's
+    // preload="metadata" is free in a browser, but a video whose index sits
+    // at its end is read whole to find it, and the page's load (which the app
+    // waits on to show it) waits for that too.
+    function holdMedia(root) {
+      const found = root.matches && root.matches("video, audio") ? [root] : [];
+      if (root.querySelectorAll) found.push(...root.querySelectorAll("video, audio"));
+      for (const media of found) if (media.getAttribute("preload") !== "none") media.setAttribute("preload", "none");
+    }
+    if (assets) {
+      holdMedia(document);
+      new MutationObserver(function(records) {
+        for (const record of records) for (const node of record.addedNodes) holdMedia(node);
+      }).observe(document, {childList: true, subtree: true});
+    }
     let ready = false;
     let lastHeight = null;
     let lastReport = -Infinity;
@@ -203,8 +218,10 @@ export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: stri
       // A tap cannot reach a video's own controls (the frame takes no
       // pointer): the app plays it in a player of its own, from here.
       const media = assets && el ? el.closest("video, audio") : null;
-      if (media && typeof media.currentSrc === "string" && media.currentSrc.indexOf(assets) === 0) {
-        parent.postMessage({...envelope, media: {src: media.currentSrc, time: media.currentTime || 0, video: media.tagName === "VIDEO"}}, "*");
+      // Never loaded (see holdMedia), it may have no currentSrc yet: its own src says which file.
+      const source = media ? media.currentSrc || media.src || (media.querySelector("source[src]") || {}).src || "" : "";
+      if (media && typeof source === "string" && source.indexOf(assets) === 0) {
+        parent.postMessage({...envelope, media: {src: source, time: media.currentTime || 0, video: media.tagName === "VIDEO"}}, "*");
         media.pause();
         return;
       }
