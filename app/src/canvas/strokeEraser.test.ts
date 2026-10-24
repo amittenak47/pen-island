@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { NO_PRESSURE, type InkDrawOp, type InkEraseOp, type InkOp } from "./rasterInk";
+import { inkLineWidth, NO_PRESSURE, type InkDrawOp, type InkEraseOp, type InkOp } from "./rasterInk";
 import {
   appendErasePathPoint,
   eraseTouchesStroke,
@@ -140,5 +140,48 @@ describe("opsWithErasesBaked", () => {
     expect(draws.every((op) => op.kind === "draw" && !op.points.some((p) => Math.abs(p.x - 50) < 2))).toBe(
       true,
     );
+  });
+});
+
+describe("partial erase against a sampled reference", () => {
+  // A rub only cuts the stretch of a stroke within its reach: every sample of
+  // the original stroke outside every disc survives, every one well inside goes.
+  const segDistSq = (px: number, py: number, a: { x: number; y: number }, b: { x: number; y: number }) => {
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = dx * dx + dy * dy;
+    const t = len === 0 ? 0 : Math.max(0, Math.min(1, ((px - a.x) * dx + (py - a.y) * dy) / len));
+    return (px - a.x - t * dx) ** 2 + (py - a.y - t * dy) ** 2;
+  };
+
+  it("keeps exactly the parts of each stroke outside the rub", () => {
+    let seed = 7;
+    const rand = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648);
+    for (let trial = 0; trial < 20; trial++) {
+      const pairs: Array<[number, number]> = [];
+      for (let i = 0; i < 30; i++) pairs.push([i * 10, 50 + Math.sin(i / 3 + trial) * 20]);
+      const line = stroke("ink", ...pairs);
+      const rubPairs: Array<[number, number]> = [];
+      const x0 = rand() * 300;
+      for (let i = 0; i < 40; i++) rubPairs.push([x0 + (rand() - 0.5) * 120, rand() * 100]);
+      const erase = rub(4 + rand() * 6, ...rubPairs);
+      const reach = erase.radius + inkLineWidth(line.baseWidth, 0, false) / 2;
+      const out = (opsAfterPartialErase([line], erase) ?? [line]).filter(
+        (op): op is InkDrawOp => op.kind === "draw",
+      );
+      for (let i = 1; i < line.points.length; i++) {
+        const a = line.points[i - 1]!;
+        const b = line.points[i]!;
+        for (let s = 0; s <= 20; s++) {
+          const x = a.x + ((b.x - a.x) * s) / 20;
+          const y = a.y + ((b.y - a.y) * s) / 20;
+          const nearest = Math.min(...erase.points.map((p) => Math.hypot(p.x - x, p.y - y)));
+          const onOutput = out.some((op) =>
+            op.points.some((p, k) => k > 0 && segDistSq(x, y, op.points[k - 1]!, p) < 1e-8));
+          if (nearest > reach + 1e-3) expect(onOutput).toBe(true);
+          if (nearest < reach - 1e-3) expect(onOutput).toBe(false);
+        }
+      }
+    }
   });
 });
