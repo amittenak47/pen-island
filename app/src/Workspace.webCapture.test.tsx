@@ -415,10 +415,15 @@ describe("a live local page's own folder", () => {
   }
   const liveFrame = () => document.querySelector<HTMLIFrameElement>("iframe.lc-live-html-frame");
 
-  it("points the live page's relative names at the folder of its linked file", async () => {
-    mocks.openFolder.mockResolvedValue({ status: "ready", token: "tok" });
+  it("opens the live page once, after its folder is known, with relative names pointed there", async () => {
+    let answer!: (access: unknown) => void;
+    mocks.openFolder.mockReturnValue(new Promise(resolve => { answer = resolve; }));
     await mountLinked("linked-ready");
     expect(mocks.openFolder).toHaveBeenCalledWith("uri", location);
+    // The still copy shows while the folder is looked up; the live page is not loaded twice.
+    expect(liveFrame()).toBeNull();
+    await act(async () => answer({ status: "ready", token: "tok" }));
+    await settle();
     expect(liveFrame()?.srcdoc).toContain('<base href="http://lcasset.localhost/tok/">');
     expect(dialog("Load this page's videos and pictures?")).toBeNull();
   });

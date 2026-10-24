@@ -885,34 +885,43 @@ export const Workspace = memo(function Workspace({
    * The live page's own folder, for the videos and pictures it loads by
    * relative name. Served from the file the document is linked to; Android
    * asks once a run for a folder it only has the file of.
+   *
+   * The live page waits for the answer (the still copy shows meanwhile), so
+   * it loads once, with its folder, rather than once without and again with.
    */
-  const [liveAssetBase, setLiveAssetBase] = useState<string | null>(null);
-  const [htmlFolderAsk, setHtmlFolderAsk] = useState<{ id: string; name: string; location: string; folder: string | null } | null>(null);
+  const [liveAsset, setLiveAsset] = useState<{ key: string; base: string | null } | null>(null);
+  const [htmlFolderAsk, setHtmlFolderAsk] = useState<{ key: string; name: string; location: string; folder: string | null } | null>(null);
   const [htmlFolderPending, setHtmlFolderPending] = useState(false);
   const [htmlFolderError, setHtmlFolderError] = useState<string | null>(null);
   const liveSource = liveOn && annotateDocId && annotateSource?.localFileHash && nativeSourcePickerAvailable()
     ? getDocSource(annotateDocId) : null;
+  const liveSourceKey = liveSource ? `${annotateDocId}\n${liveSource.kind}\n${liveSource.location}` : null;
+  const liveAssetKnown = !liveSourceKey || liveAsset?.key === liveSourceKey;
+  const liveAssetBase = liveSourceKey && liveAsset?.key === liveSourceKey ? liveAsset.base : null;
   useEffect(() => {
-    setLiveAssetBase(null);
-    if (!annotateDocId || !liveSource) return;
+    if (!annotateDocId || !liveSource || !liveSourceKey) return;
     let stale = false;
+    const key = liveSourceKey;
     const { kind, location, name } = liveSource;
+    // A lookup that never answers must not keep the page from going live.
+    const giveUp = window.setTimeout(() => setLiveAsset(known => known?.key === key ? known : { key, base: null }), 4000);
     void openHtmlFolder(kind, location).then((access) => {
       if (stale) return;
-      if (access.status === "ready") setLiveAssetBase(htmlAssetBase(access.token));
-      else if (access.status === "needsAccess" && active && !htmlFolderAsked.has(annotateDocId)) {
+      setLiveAsset({ key, base: access.status === "ready" ? htmlAssetBase(access.token) : null });
+      if (access.status === "needsAccess" && active && !htmlFolderAsked.has(annotateDocId)) {
         htmlFolderAsked.add(annotateDocId);
         setHtmlFolderError(null);
-        setHtmlFolderAsk({ id: annotateDocId, name, location, folder: access.folder });
+        setHtmlFolderAsk({ key, name, location, folder: access.folder });
       }
     }).catch((cause) => {
       // The page still runs; only its folder's files stay out of reach. Say why in the log.
       console.warn("Cannot reach the live page's folder:", cause);
-    });
-    return () => { stale = true; };
+      if (!stale) setLiveAsset({ key, base: null });
+    }).finally(() => window.clearTimeout(giveUp));
+    return () => { stale = true; window.clearTimeout(giveUp); };
     // The linked file, not the ref object: it is read fresh on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [active, annotateDocId, liveSource?.kind, liveSource?.location]);
+  }, [active, annotateDocId, liveSourceKey]);
   const allowHtmlFolder = useCallback(async () => {
     const ask = htmlFolderAsk;
     if (!ask || htmlFolderPending) return;
@@ -921,7 +930,7 @@ export const Workspace = memo(function Workspace({
     try {
       const access = await grantHtmlFolder(ask.location);
       if (access.status === "ready") {
-        if (annotateDocIdRef.current === ask.id) setLiveAssetBase(htmlAssetBase(access.token));
+        setLiveAsset({ key: ask.key, base: htmlAssetBase(access.token) });
         setHtmlFolderAsk(null);
       } else if (access.status === "wrongFolder") {
         setHtmlFolderError(`That folder doesn't hold “${ask.name}”. Choose the folder it's in.`);
@@ -931,7 +940,7 @@ export const Workspace = memo(function Workspace({
     } finally {
       setHtmlFolderPending(false);
     }
-  }, [annotateDocIdRef, htmlFolderAsk, htmlFolderPending]);
+  }, [htmlFolderAsk, htmlFolderPending]);
   /** An HTML page's own `#` link: glide its target to just under the top of the board. */
   const onWebAnchor = useCallback((clientY: number) => {
     const board = document.querySelector(`[data-lc-tab="${cssEscape(tab.id)}"] .lc-board`);
@@ -11044,7 +11053,7 @@ export const Workspace = memo(function Workspace({
                       html={annotateSource.text}
                       url={annotateSource.name}
                       localFile={Boolean(annotateSource.localFileHash)}
-                      live={liveOn ? liveOriginal : null}
+                      live={liveOn && liveAssetKnown ? liveOriginal : null}
                       assetBase={liveAssetBase}
                       onAnchor={onWebAnchor}
                       source={webHtmlSource ?? undefined}

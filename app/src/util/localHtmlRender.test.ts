@@ -421,7 +421,7 @@ describe("live HTML with its file's folder", () => {
     expect((doc.head.firstElementChild as HTMLMetaElement).content).toBe(LIVE_HTML_CSP);
   });
 
-  function run(assetBase: string | null) {
+  function run(assetBase: string | null, observers: { Mutation: unknown } = { Mutation: class { observe() {} } }) {
     const doc = new DOMParser().parseFromString(liveHtmlSrcdoc(page, "n", assetBase), "text/html");
     let onMessage!: (event: { source: unknown; data: unknown }) => void;
     let onLoad!: () => Promise<void>;
@@ -433,10 +433,10 @@ describe("live HTML with its file's folder", () => {
     const location = { hash: "" };
     const bridge = [...doc.head.querySelectorAll("script")].find(node => node.textContent?.includes("const assets"))!;
     new Function("window", "document", "parent", "ResizeObserver", "MutationObserver", "PointerEvent", "location", bridge.textContent!)(
-      fakeWindow, doc, parent, class { observe() {} }, class { observe() {} }, MouseEvent, location,
+      fakeWindow, doc, parent, class { observe() {} }, observers.Mutation, MouseEvent, location,
     );
     const video = doc.querySelector("video")!;
-    Object.defineProperty(video, "currentSrc", { value: assetBase ? `${assetBase}3.7.mp4` : "" });
+    Object.defineProperty(video, "currentSrc", { value: assetBase ? `${assetBase}3.7.mp4` : "", configurable: true });
     Object.defineProperty(video, "currentTime", { value: 42.5 });
     const pause = vi.fn();
     Object.defineProperty(video, "pause", { value: pause });
@@ -457,6 +457,28 @@ describe("live HTML with its file's folder", () => {
     await pending;
     const holes = parent.postMessage.mock.calls.filter(([data]) => "holes" in data);
     expect(holes).toEqual([[{ type: LIVE_HTML_MESSAGE, nonce: "n", holes: [[10, 300, 640, 360]] }, "*"]]);
+  });
+
+  it("holds every video and sound until it is played, including ones the page adds later", async () => {
+    const { doc, video } = run(base, { Mutation: MutationObserver });
+    expect(video.getAttribute("preload")).toBe("none");
+    doc.body.insertAdjacentHTML("beforeend", '<div><video controls preload="metadata" src="4.12.mp4"></video><audio src="a.mp3"></audio></div>');
+    await Promise.resolve();
+    expect([...doc.querySelectorAll("video, audio")].map(media => media.getAttribute("preload"))).toEqual(["none", "none", "none"]);
+  });
+
+  it("leaves media alone without the folder", () => {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc('<video controls preload="metadata"></video>', "n", null), "text/html");
+    expect(doc.querySelector("video")?.getAttribute("preload")).toBe("metadata");
+  });
+
+  it("hands over a video that never loaded by its own src", () => {
+    const { parent, video, tapOn } = run(base);
+    Object.defineProperty(video, "currentSrc", { value: "" });
+    Object.defineProperty(video, "src", { value: `${base}3.7.mp4` });
+    tapOn(video);
+    expect(parent.postMessage).toHaveBeenCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n",
+      media: { src: `${base}3.7.mp4`, time: 42.5, video: true } }, "*");
   });
 
   it("hands a tapped video from the folder to the app, at its time, and pauses it", () => {
