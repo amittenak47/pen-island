@@ -99,6 +99,18 @@ struct EvalArgs {
     script: String,
 }
 
+#[derive(Debug, Serialize)]
+struct CaptureArgs {
+    rect: LiveRect,
+    density: f64,
+}
+
+#[derive(Debug, Deserialize)]
+struct CaptureResponse {
+    /// The PNG, base64.
+    png: String,
+}
+
 #[derive(Debug, Deserialize)]
 struct OkResponse {
     #[allow(dead_code)]
@@ -255,6 +267,26 @@ impl<R: Runtime> LiveWebView<R> {
         #[cfg(not(target_os = "android"))]
         {
             let _ = (label, script);
+            Err(Error::Unsupported)
+        }
+    }
+
+    /// PNG (base64) of a rectangle of the app's own view, as the screen shows it.
+    ///
+    /// Not one of the labeled views: the Tauri WebView itself, which is where
+    /// a local page runs live in a frame the DOM cannot picture. Blocks like
+    /// `eval`, so call it off the main thread.
+    pub fn capture(&self, rect: LiveRect, density: f64) -> Result<String> {
+        #[cfg(target_os = "android")]
+        {
+            let response = self
+                .0
+                .run_mobile_plugin::<CaptureResponse>("capture", CaptureArgs { rect, density })?;
+            Ok(response.png)
+        }
+        #[cfg(not(target_os = "android"))]
+        {
+            let _ = (rect, density);
             Err(Error::Unsupported)
         }
     }

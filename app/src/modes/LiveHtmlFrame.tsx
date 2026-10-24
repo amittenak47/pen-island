@@ -29,6 +29,41 @@ function playerBoxes(value: unknown): PlayerBox[] | null {
   return boxes.length === value.length ? boxes : null;
 }
 
+/** Words on a live page and their boxes in viewport px, for the app's own selection. */
+export interface LivePageSelection {
+  text: string;
+  rects: DOMRect[];
+}
+
+/** A band swept over the page, or the point of a hold that did not move. */
+export type LivePageSelect = { band: DOMRectReadOnly } | { point: { x: number; y: number } };
+
+const LIVE_SELECT_TIMEOUT_MS = 1500;
+const selectors = new WeakMap<HTMLIFrameElement, (request: LivePageSelect) => Promise<LivePageSelection | null>>();
+
+/** The live page inside `root`, when the document is showing one. */
+export function liveFrameIn(root: ParentNode): HTMLIFrameElement | null {
+  return root.querySelector<HTMLIFrameElement>("iframe.lc-live-html-frame");
+}
+
+/**
+ * The words under a band or a hold on a live page.
+ *
+ * The frame takes no pointer and runs in an origin of its own, so the app's
+ * selection gesture happens outside it and only the page can read its text.
+ * Null when there is nothing there or the page does not answer.
+ */
+export function selectInLivePage(frame: HTMLIFrameElement, request: LivePageSelect): Promise<LivePageSelection | null> {
+  return selectors.get(frame)?.(request) ?? Promise.resolve(null);
+}
+
+function selectedRects(value: unknown): Array<[number, number, number, number]> | null {
+  if (!Array.isArray(value) || value.length > 400) return null;
+  const rects = value.filter((rect): rect is [number, number, number, number] => Array.isArray(rect) && rect.length === 4
+    && rect.every((n) => typeof n === "number" && Number.isFinite(n)));
+  return rects.length === value.length ? rects : null;
+}
+
 /** The whole page but the players: what the catcher keeps for the board. */
 function catcherClip(boxes: PlayerBox[]): string {
   const holes = boxes.map(([x, y, w, h]) => `M${x} ${y}h${w}v${h}h${-w}Z`).join("");
@@ -64,11 +99,45 @@ function LiveHtmlFrameContent({ original, onHeight, onAnchor, assetBase = null, 
     let down: { id: number; x: number; y: number; time: number } | null = null;
     const tapPointer = (event: PointerEvent) => event.isPrimary &&
       (event.pointerType === "touch" || (event.pointerType === "mouse" && event.button === 0));
+    // The page's px against the viewport's: the board scales the frame.
+    const frameScale = () => {
+      const rect = frame.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0 && frame.offsetWidth > 0 && frame.offsetHeight > 0
+        ? { rect, x: frame.offsetWidth / rect.width, y: frame.offsetHeight / rect.height } : null;
+    };
+    let asked = 0;
+    const waiting = new Map<number, (found: LivePageSelection | null) => void>();
+    selectors.set(frame, (request) => new Promise((resolve) => {
+      const at = frameScale();
+      if (!at || !frame.contentWindow) { resolve(null); return; }
+      const { rect, x, y } = at;
+      const id = ++asked;
+      const select = "band" in request
+        ? { id, band: [(request.band.left - rect.left) * x, (request.band.top - rect.top) * y, request.band.width * x, request.band.height * y] }
+        : { id, point: [(request.point.x - rect.left) * x, (request.point.y - rect.top) * y] };
+      const timer = window.setTimeout(() => { waiting.delete(id); resolve(null); }, LIVE_SELECT_TIMEOUT_MS);
+      waiting.set(id, (found) => { window.clearTimeout(timer); waiting.delete(id); resolve(found); });
+      frame.contentWindow.postMessage({ type: LIVE_HTML_MESSAGE, nonce, select }, "*");
+    }));
     const onMessage = (event: MessageEvent) => {
       const data: unknown = event.data;
       if (event.source !== frame.contentWindow || !data || typeof data !== "object") return;
       const reply = data as { type?: unknown; nonce?: unknown; height?: unknown; anchor?: unknown; media?: unknown; holes?: unknown };
       if (reply.type !== LIVE_HTML_MESSAGE || reply.nonce !== nonce) return;
+      if ("selected" in reply) {
+        const selected = (reply as { selected?: { id?: unknown; text?: unknown; rects?: unknown } }).selected;
+        const answer = typeof selected?.id === "number" ? waiting.get(selected.id) : undefined;
+        if (!answer) return;
+        const rects = selectedRects(selected?.rects);
+        const at = frameScale();
+        if (typeof selected?.text !== "string" || !selected.text.trim() || !rects?.length || !at) { answer(null); return; }
+        answer({
+          text: selected.text,
+          rects: rects.map(([left, top, width, height]) =>
+            new DOMRect(at.rect.left + left / at.x, at.rect.top + top / at.y, width / at.x, height / at.y)),
+        });
+        return;
+      }
       if ("storage" in reply) {
         if (storageId) writeLivePageStorage(storageId, (reply as { storage?: unknown }).storage);
         return;
@@ -147,6 +216,8 @@ function LiveHtmlFrameContent({ original, onHeight, onAnchor, assetBase = null, 
     window.addEventListener("pointerup", onUp, options);
     window.addEventListener("pointercancel", onCancel, options);
     return () => {
+      selectors.delete(frame);
+      for (const answer of [...waiting.values()]) answer(null);
       window.removeEventListener("message", onMessage);
       window.removeEventListener("pointerdown", onDown, options);
       window.removeEventListener("pointermove", onMove, options);

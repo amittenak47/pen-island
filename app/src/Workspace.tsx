@@ -464,6 +464,7 @@ import { useOpenStatus } from "./util/openStatus";
 import { loadChromeFate, mayClearParkedPreparing, BOOT_DONE_HOLD_MS, LOAD_FADE_MS, LOAD_SLIDE_MS } from "./util/workspaceLoad";
 
 import { saveCaptureToDevice, describeCaptureResult } from "./util/capturePrefs";
+import { captureScreenRegion } from "./util/screenRegionCapture";
 import { photoFromFile } from "./util/photoAttach";
 import { thumbnailFromPng } from "./util/photoAttach";
 import { documentAskFields, documentImageContext, hasDocumentCapture, livePadStillOpen, sameDocumentView, type DocumentViewContext } from "./modes/documentView";
@@ -8081,7 +8082,9 @@ export const Workspace = memo(function Workspace({
       const snapshot = board.captureDocumentView();
       frozenView = structuredClone({ ...snapshot, document_hash: source.hash, title: source.name, format: source.docType });
       if (!rect) throw new Error("Selection image has no visible capture bounds.");
-      const blob = await withTimeout(board.exportSelectionCapture(rect), THUMB_EXPORT_TIMEOUT_MS, "Selection capture timed out");
+      // A live page is a frame the board's export cannot picture: take it from the screen.
+      const capture = selected.live ? captureScreenRegion(rect) : board.exportSelectionCapture(rect);
+      const blob = await withTimeout(capture, THUMB_EXPORT_TIMEOUT_MS, "Selection capture timed out");
       if (!context.isCurrent()) return false;
       const liveBoard = boardRef.current;
       if (!liveBoard || liveBoard.instanceId !== board.instanceId || annotateSourceRef.current?.hash !== source.hash ||
