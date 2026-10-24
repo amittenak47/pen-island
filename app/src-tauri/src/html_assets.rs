@@ -19,9 +19,15 @@ use tauri_plugin_gallerysave::GallerySaveExt;
 pub const SCHEME: &str = "lcasset";
 
 /// A whole file is sent only up to this size; past it, as if `bytes=0-` was asked.
-const WHOLE_LIMIT: u64 = 32 * 1024 * 1024;
-/// Largest slice per ranged response. The media stack asks again for the rest.
-const CHUNK: u64 = 8 * 1024 * 1024;
+const WHOLE_LIMIT: u64 = 64 * 1024 * 1024;
+/// Largest slice per ranged response.
+///
+/// Large on purpose: the WebView's media loader asks for `bytes=N-` and takes
+/// a shorter answer for a dropped connection. It waits 250 ms, plus 50 ms
+/// more each try, before asking again, and gives up after about 30 tries: the
+/// page's "can't play" note. So a range is answered to its end, a lecture video
+/// whole; only past this is it cut (it then streams slowly rather than fails).
+const CHUNK: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, Eq)]
 enum Root {
