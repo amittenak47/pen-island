@@ -16981,6 +16981,14 @@ button.lc-row-selected:hover:not(:disabled) {
    * half above nothing.
    */
   --lc-map-drop: calc(1.5 * var(--touch));
+  /*
+   * The lowest the row goes. The drop above lands it on `--lc-safe-bottom`,
+   * which with gesture navigation is the gesture bar (the row sat a little
+   * above it) but with 3-button navigation is 0: the nav bar sits outside the
+   * webview, and the row went flat on the bottom edge with the view stack's
+   * last control off it. About a gesture bar's height, so both look alike.
+   */
+  --lc-chrome-foot: 24px;
 }
 
 @media (pointer: coarse) and (min-width: 768px) {
@@ -17095,9 +17103,11 @@ button.lc-row-selected:hover:not(:disabled) {
  */
 .lc-mobile .lc-map-controls {
   /* Room for the parked coach peek handle under the chrome. */
-  /* Never into the gesture bar: `--lc-safe-bottom` is the floor. */
+  /* Never into the gesture bar: `--lc-safe-bottom` is the floor, and never
+     on the screen's last pixel either (`--lc-chrome-foot`). */
   bottom: max(
     var(--lc-safe-bottom),
+    var(--lc-chrome-foot),
     calc(
       4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
         var(--lc-map-above-coach) - var(--lc-map-drop, 0px)
@@ -17473,9 +17483,11 @@ button.lc-row-selected:hover:not(:disabled) {
 .lc-mobile .lc-map-controls {
   left: 4px;
   right: 4px;
-  /* Never into the gesture bar: `--lc-safe-bottom` is the floor. */
+  /* Never into the gesture bar: `--lc-safe-bottom` is the floor, and never
+     on the screen's last pixel either (`--lc-chrome-foot`). */
   bottom: max(
     var(--lc-safe-bottom),
+    var(--lc-chrome-foot),
     calc(
       4px + var(--lc-agent-peek) + var(--lc-agent-sheet-lift) + var(--lc-safe-bottom) +
         var(--lc-map-above-coach) - var(--lc-map-drop, 0px)
