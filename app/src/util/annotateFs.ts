@@ -26,6 +26,8 @@ export { CODE_SOURCE_MAX_CHARS, languageForName } from "./codeLanguages";
 
 /** Extensions the picker offers, and what we accept when one is dropped in. */
 export const MARKDOWN_ACCEPT = ".md,.markdown,.mdown,.mkd,text/markdown";
+/** HTML pages, and the Web pad Load's whole filter. */
+export const HTML_ACCEPT = "text/html,.html,.htm";
 
 const MARKDOWN_EXTENSIONS = [".md", ".markdown", ".mdown", ".mkd"];
 
@@ -43,7 +45,7 @@ export const DOCUMENT_ACCEPT = [
   "application/epub+zip,.epub",
   MARKDOWN_ACCEPT,
   CODE_ACCEPT,
-  "text/html,.html,.htm",
+  HTML_ACCEPT,
   "text/plain",
 ].join(",");
 
@@ -535,13 +537,25 @@ export function exportMarkdownNote(name: string, source: string): void {
 /**
  * Ask for a document of any kind the pad understands, and read it.
  *
+ * `only: "web"` is the Web pad's Load: the picker offers HTML pages, and any
+ * other file that still comes back (Android's picker cannot be narrowed
+ * reliably) is refused rather than opened in the wrong pad.
+ *
  * Same dismiss contract as {@link pickMarkdownFile}.
  */
-export function pickDocumentFile(): Promise<OpenedDocument | null> {
+export async function pickDocumentFile(only?: "web"): Promise<OpenedDocument | null> {
+  const picked = await pickAnyDocumentFile(only);
+  if (picked && only === "web" && picked.docType !== "web") {
+    throw new Error(`“${picked.name}” is not an HTML page. Pick a .html or .htm file.`);
+  }
+  return picked;
+}
+
+function pickAnyDocumentFile(only?: "web"): Promise<OpenedDocument | null> {
   if (nativeSourcePickerAvailable()) {
     return (async () => {
       try {
-        const picked = await pickDocumentSource();
+        const picked = await pickDocumentSource(only);
         if (!picked) return null;
         const bytes = await readDocumentSource(picked.kind, picked.location);
         const docType = docTypeForPicked(picked, bytes);
@@ -556,15 +570,17 @@ export function pickDocumentFile(): Promise<OpenedDocument | null> {
         }
         return { name, docType, ...(text !== undefined ? { text } : { bytes }), source };
       } catch {
-        return pickDocumentFromInput();
+        return pickDocumentFromInput(only);
       }
     })();
   }
-  return pickDocumentFromInput();
+  return pickDocumentFromInput(only);
 }
 
-function pickDocumentFromInput(): Promise<OpenedDocument | null> {
-  return pickFromHiddenInput(documentPickerAccept(), async (file) => {
+function pickDocumentFromInput(only?: "web"): Promise<OpenedDocument | null> {
+  const accept = documentPickerAccept();
+  // Android keeps `*/*` here too, for the reason on documentPickerAccept.
+  return pickFromHiddenInput(only === "web" && accept !== "*/*" ? HTML_ACCEPT : accept, async (file) => {
     const bytes = await readBlobBytes(file);
     const docType = docTypeForPicked(file, bytes);
     const name = file.name || fallbackPickedName(docType);

@@ -37,6 +37,16 @@ export interface DocSourceCheck {
   ref?: DocSourceRef;
 }
 
+/**
+ * Whether an open document can have a file on this device behind it.
+ *
+ * Every document opened from a file can; a web page frozen from a URL cannot.
+ * Local HTML is a web document too, told apart by the original file's hash.
+ */
+export function sourceLinkable(source: { docType: DocType; localFileHash?: string }): boolean {
+  return source.docType !== "web" || Boolean(source.localFileHash);
+}
+
 export type DocSourceLink = { status: "linked" } | { status: "differs"; content: DocSourceCheck & { ref: DocSourceRef } };
 
 export async function linkDocSource(id: string, pick: SourcePick): Promise<DocSourceLink> {

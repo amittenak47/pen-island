@@ -34,6 +34,19 @@ describe("native document picking", () => {
     expect(await result).toMatchObject({ text: "new notes", docType: "markdown" });
     expect(native.pickDocumentSource).toHaveBeenCalledTimes(1);
   });
+  it("asks for HTML only for the Web pad and opens a picked page as a web document", async () => {
+    const html = "<p>study hub</p>";
+    vi.mocked(native.pickDocumentSource).mockResolvedValue({ kind: "path", location: "C:/hub/black_box_tracer.html", name: "black_box_tracer.html", size: 16, modified: 1 });
+    vi.mocked(native.readDocumentSource).mockResolvedValue(Uint8Array.from(html, c => c.charCodeAt(0)).buffer);
+    expect(await pickDocumentFile("web")).toMatchObject({ docType: "web", name: "black_box_tracer.html", localFileHash: expect.any(String), source: { location: "C:/hub/black_box_tracer.html" } });
+    expect(native.pickDocumentSource).toHaveBeenCalledWith("web");
+  });
+  it("refuses a file that is not HTML from the Web pad's Load without falling back", async () => {
+    vi.mocked(native.pickDocumentSource).mockResolvedValue({ kind: "uri", location: "content://notes", name: "notes.md", size: 7, modified: null });
+    vi.mocked(native.readDocumentSource).mockResolvedValue(Uint8Array.from("# notes", c => c.charCodeAt(0)).buffer);
+    await expect(pickDocumentFile("web")).rejects.toThrow("“notes.md” is not an HTML page. Pick a .html or .htm file.");
+    expect(document.querySelector("input")).toBeNull();
+  });
   it("treats native cancellation as cancellation", async () => {
     vi.mocked(native.pickDocumentSource).mockResolvedValue(null);
     expect(await pickDocumentFile()).toBeNull(); expect(document.querySelector("input")).toBeNull();

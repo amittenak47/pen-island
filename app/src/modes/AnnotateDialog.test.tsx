@@ -259,6 +259,15 @@ describe("AnnotateDialog", () => {
     expect(opened.onChoose).toHaveBeenLastCalledWith("import");
     opened.unmount();
   });
+  it("offers the Web pad Open with Load and Recents, without annotation sets", async () => {
+    const view=mount({kind:"web",allowSave:true,snapshotKey:"w1",docType:"web"});
+    await click("Open",view.host);
+    expect(view.host.textContent).toContain("Recents");
+    expect(view.host.textContent).not.toContain("Annotations");
+    await click("Load",view.host);
+    expect(view.onChoose).toHaveBeenLastCalledWith("open");
+    view.unmount();
+  });
   it("filters saved files by filename or annotation-set name", async () => {
     live.rows.push({id:"d2",name:"book.pdf",label:"Exam notes",hash:"h3",docType:"pdf",updatedAt:3});
     const view=mount();

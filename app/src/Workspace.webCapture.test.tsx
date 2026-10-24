@@ -150,6 +150,9 @@ vi.mock("./api/nativeHttp", async original => ({
   ...await original<typeof import("./api/nativeHttp")>(), isTauriRuntime: () => mocks.native,
 }));
 vi.mock("./util/liveWebviewSupport", () => ({ liveWebviewSupported: () => true }));
+vi.mock("./util/docSourceNative", async original => ({
+  ...await original<typeof import("./util/docSourceNative")>(), nativeSourcePickerAvailable: () => true,
+}));
 vi.mock("./util/webPage", async original => ({
   ...await original<typeof import("./util/webPage")>(),
   fetchWebPage: (...args: unknown[]) => mocks.fetch(...args),
@@ -189,6 +192,11 @@ async function navigate(next: string) {
   await act(async () => document.querySelector(".lc-web-omnibox")!.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true })));
 }
 function live() { return document.querySelector('[aria-label="Live page"]'); }
+/** The toolbar chip's linked-file half, as last handed to the shell. */
+function chromeLink() {
+  const calls = vi.mocked(mocks.shell.setChrome).mock.calls;
+  return (calls.at(-1)![0] as { docIndex: { link: unknown } }).docIndex.link;
+}
 function freezeDialog() { return dialog("What kind of page is this?"); }
 function withMarks() {
   mocks.existing = {
@@ -365,6 +373,8 @@ it("a local web file restores its original identity without touching the address
   expect(document.querySelector('[aria-label="Freeze this page"]')).toBeNull();
   expect(document.querySelector('[aria-label="Reload page"]')).toBeNull();
   expect(mocks.shell.patchTab).toHaveBeenCalledWith(fileTab.id, expect.objectContaining({ hash: localFileHash, docType: "web" }));
+  // Opened from a file, so the chip offers to link it and check for a newer version.
+  expect(chromeLink()).toMatchObject({ name: null, newer: false });
 });
 
 it("an address web document still sets its URL and offers live browsing and reload", async () => {
@@ -374,4 +384,6 @@ it("an address web document still sets its URL and offers live browsing and relo
   expect(live()).toBeTruthy();
   expect(button("Freeze this page")).toBeTruthy();
   expect(button("Reload page")).toBeTruthy();
+  // A page from an address has no file behind it.
+  expect(chromeLink()).toBeNull();
 });

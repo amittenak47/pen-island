@@ -6,7 +6,7 @@ import { resetBookCoordinatorForTests } from "./bookCoordinator";
 import { resetLocalBookStoreForTests } from "./localBookStore";
 import { docIdentityHash, getAnnotateDoc, hashMarkdown, saveAnnotateDoc } from "./annotateStore";
 import { clearDocSource, getDocSource, setDocSource, type DocSourceRef } from "./docSourceStore";
-import { checkDocSource, justLinkDocSource, linkDocSource, unlinkDocSource, updateDocFromSource, DOC_SOURCE_UPDATING_EVENT } from "./docSourceUpdate";
+import { checkDocSource, justLinkDocSource, linkDocSource, sourceLinkable, unlinkDocSource, updateDocFromSource, DOC_SOURCE_UPDATING_EVENT } from "./docSourceUpdate";
 import { captureBook } from "./bookSnapshot";
 import { clearDocBytes, deleteDocBytes, getDocBytes, hashBytes, putDocBytes } from "./docBytes";
 import { encodeInkOps } from "../canvas/inkCodec";
@@ -37,6 +37,15 @@ beforeEach(async () => {
   localStorage.clear(); resetBookCoordinatorForTests(); resetLocalBookStoreForTests(); vi.clearAllMocks();
 });
 afterEach(async () => { await closeDbForTests(); vi.restoreAllMocks(); vi.unstubAllGlobals(); });
+
+describe("which documents can link a source", () => {
+  it("links files, local HTML included, but not pages frozen from an address", () => {
+    expect(sourceLinkable({ docType: "markdown" })).toBe(true);
+    expect(sourceLinkable({ docType: "pdf" })).toBe(true);
+    expect(sourceLinkable({ docType: "web", localFileHash: "original-file-hash" })).toBe(true);
+    expect(sourceLinkable({ docType: "web" })).toBe(false);
+  });
+});
 
 describe("checking a document source", () => {
   it("does nothing without a device reference", async () => {

@@ -67,7 +67,7 @@ import { LibrarySyncControl } from "./components/LibrarySyncControl";
 import { DocSourceLinkDialog } from "./components/DocSourceLinkDialog";
 import type { DocLinkState, DocSyncLinkPairProps } from "./components/DocSyncLinkPair";
 import { getDocSource, setDocSource, type DocSourceRef } from "./util/docSourceStore";
-import { checkDocSource, justLinkDocSource, linkDocSource, unlinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
+import { checkDocSource, justLinkDocSource, linkDocSource, sourceLinkable, unlinkDocSource, updateDocFromSource, DOC_SOURCE_CHECKED_EVENT, DOC_SOURCE_UPDATED_EVENT, DOC_SOURCE_UPDATING_EVENT, type DocSourceLiveCapture } from "./util/docSourceUpdate";
 import { nativeSourcePickerAvailable, pickDocumentSource } from "./util/docSourceNative";
 import { getCachedBookMeta } from "./util/localBookStore";
 import { LoadingDoodle } from "./components/LoadingDoodle";
@@ -5209,7 +5209,8 @@ export const Workspace = memo(function Workspace({
   /** A picked note whose pictures sit beside it on disk, waiting on whether to bring them. */
   const [figurePrompt, setFigurePrompt] = useState<{ picked: OpenedDocument; refs: string[] } | null>(null);
 
-  const pickAndOpenAnnotate = useCallback(async () => {
+  /** `only: "web"` is the Web pad's Load: HTML pages, opened as web documents. */
+  const pickAndOpenAnnotate = useCallback(async (only?: "web") => {
     if (busy !== null) return;
     beginPadOpen();
     /*
@@ -5223,7 +5224,7 @@ export const Workspace = memo(function Workspace({
     const fromBrowse = !problem;
     let handedOff = false;
     try {
-      const picked = await pickDocumentFile();
+      const picked = await pickDocumentFile(only);
       if (!picked) return;
       // Figures beside the note can come with it, where a folder can be picked.
       if (picked.docType === "markdown" && picked.text && folderPickSupported()) {
@@ -9287,7 +9288,7 @@ export const Workspace = memo(function Workspace({
     sourceChecks.current.add(id);
     setSourceChecking(true);
     try {
-      const pick = await pickDocumentSource();
+      const pick = await pickDocumentSource(getAnnotateDocMeta(id)?.docType === "web" ? "web" : undefined);
       if (!pick) return;
       if (annotateDocIdRef.current === id && !getAnnotateDocMeta(id)) {
         if (!await saveAnnotateSession({ throwOnError: true })) throw new Error("The app's copy could not be saved before linking its source.");
@@ -9374,7 +9375,7 @@ export const Workspace = memo(function Workspace({
   const linkedSourceName = annotateDocId ? getDocSource(annotateDocId)?.name ?? null : null;
   const linkNewer = annotateDocId ? Boolean(sourceNewer[annotateDocId]) : false;
   const annotateLink = useMemo<DocLinkState | null>(() =>
-    annotateDocId && annotateSource && annotateSource.docType !== "web" && !footnoteBoardSession && nativeSourcePickerAvailable() ? {
+    annotateDocId && annotateSource && sourceLinkable(annotateSource) && !footnoteBoardSession && nativeSourcePickerAvailable() ? {
       name: linkedSourceName,
       checking: sourceChecking,
       newer: linkNewer,
@@ -9383,7 +9384,8 @@ export const Workspace = memo(function Workspace({
       onUnlink: () => unlinkSourceFor(annotateDocId),
     } : null,
   [annotateDocId, annotateSource, footnoteBoardSession, linkedSourceName, sourceChecking, linkNewer, checkSourceFor, linkSourceFor, unlinkSourceFor]);
-  const annotateSyncPair = menuSyncPair(entryKind !== "web" ? annotateLink : null);
+  // The Link half sits beside the open document's name, which each pad's menu shows only for its own kind.
+  const annotateSyncPair = menuSyncPair((entryKind === "web") === (annotateSource?.docType === "web") ? annotateLink : null);
 
   /** Import a whiteboard backup, or export the open notebook (backup file or picture). */
   const runWhiteboardTransfer = (choice: "import" | "export" | "export-png") => {
@@ -11831,7 +11833,7 @@ export const Workspace = memo(function Workspace({
               return;
             }
             setAnnotateEntryOpen(false);
-            void pickAndOpenAnnotate();
+            void pickAndOpenAnnotate(entryKind === "web" ? "web" : undefined);
           }}
           onCancel={() => setAnnotateEntryOpen(false)}
         />
