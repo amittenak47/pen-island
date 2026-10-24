@@ -20,13 +20,8 @@ pub const SCHEME: &str = "lcasset";
 
 /// A whole file is sent only up to this size; past it, as if `bytes=0-` was asked.
 const WHOLE_LIMIT: u64 = 64 * 1024 * 1024;
-/// Largest slice per ranged response.
-///
-/// Large on purpose: the WebView's media loader asks for `bytes=N-` and takes
-/// a shorter answer for a dropped connection. It waits 250 ms, plus 50 ms
-/// more each try, before asking again, and gives up after about 30 tries: the
-/// page's "can't play" note. So a range is answered to its end, a lecture video
-/// whole; only past this is it cut (it then streams slowly rather than fails).
+/// Largest slice per ranged response: a media loader's `bytes=N-` is answered
+/// to its end, a lecture video in one go, rather than over many requests.
 const CHUNK: u64 = 64 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, Eq)]
@@ -304,6 +299,21 @@ fn open(app: &AppHandle, token: &str, root: &Root, segments: &[String]) -> Resul
     Ok(FileSource { file, size })
 }
 
+/// The body for a ranged answer.
+///
+/// Android's WebView applies the request's Range itself to the stream it is
+/// handed: it skips `start` bytes, then reads on. Handed the range alone, it
+/// skipped past its end and failed every request that did not start at 0, so
+/// a video's index at the end of the file never loaded and the player gave up.
+/// There the body starts at byte 0; what is skipped is zero-filled, never read.
+fn range_body(start: u64, bytes: Vec<u8>, from_zero: bool) -> Vec<u8> {
+    if !from_zero || start == 0 { return bytes }
+    let mut body = Vec::with_capacity(start as usize + bytes.len());
+    body.resize(start as usize, 0);
+    body.extend_from_slice(&bytes);
+    body
+}
+
 /// Answer one `lcasset` request: `/<token>/<path inside the folder>`.
 pub fn respond(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> {
     let path = request.uri().path().trim_start_matches('/');
@@ -340,7 +350,7 @@ pub fn respond(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> 
                 read => read.map(|bytes| builder
                     .status(StatusCode::PARTIAL_CONTENT)
                     .header(header::CONTENT_RANGE, format!("bytes {start}-{}/{size}", start + bytes.len() as u64 - 1))
-                    .body(bytes)),
+                    .body(range_body(start, bytes, cfg!(target_os = "android")))),
             },
         },
     };
@@ -372,6 +382,13 @@ mod tests {
         assert_eq!(parse_range("bytes=5-1"), None);
         assert_eq!(parse_range("bytes=0-1,4-5"), None);
         assert_eq!(parse_range("items=0-1"), None);
+    }
+
+    #[test]
+    fn starts_the_android_body_at_byte_zero() {
+        assert_eq!(range_body(3, vec![7, 8], true), vec![0, 0, 0, 7, 8]);
+        assert_eq!(range_body(0, vec![7, 8], true), vec![7, 8]);
+        assert_eq!(range_body(3, vec![7, 8], false), vec![7, 8]);
     }
 
     #[test]
