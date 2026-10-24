@@ -2,11 +2,14 @@ package dev.lc.whiteboard.livewebview
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Rect
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.util.Base64
+import android.view.PixelCopy
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -18,6 +21,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import androidx.annotation.RequiresApi
 import app.tauri.annotation.Command
 import app.tauri.annotation.InvokeArg
 import app.tauri.annotation.TauriPlugin
@@ -25,6 +29,7 @@ import app.tauri.plugin.Invoke
 import app.tauri.plugin.JSObject
 import app.tauri.plugin.Plugin
 import org.json.JSONObject
+import java.io.ByteArrayOutputStream
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -111,6 +116,12 @@ class LiveWebViewPlugin(private val activity: Activity) : Plugin(activity) {
     class EvalArgs {
         var label: String = ""
         var script: String = ""
+    }
+
+    @InvokeArg
+    class CaptureArgs {
+        var rect: RectArg = RectArg()
+        var density: Double = 1.0
     }
 
     @InvokeArg
@@ -260,6 +271,57 @@ class LiveWebViewPlugin(private val activity: Activity) : Plugin(activity) {
                 }
             }
         }
+    }
+
+    /**
+     * A picture of part of the app's own view, as the screen shows it.
+     *
+     * Not one of ours: the Tauri WebView, where a local page runs live in a
+     * sandboxed frame that the app's DOM cannot picture. The window's surface
+     * has it, with its videos and the ink over it. The rectangle is CSS px
+     * from the view's top left, like `place`; PNG goes back base64.
+     */
+    @Command
+    fun capture(invoke: Invoke) {
+        val args = invoke.parseArgs(CaptureArgs::class.java)
+        activity.runOnUiThread {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) captureOnUiThread(invoke, args)
+            else invoke.reject("picturing the screen needs Android 8 or later")
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun captureOnUiThread(invoke: Invoke, args: CaptureArgs) {
+        rememberAppWebView()
+        val window = activity.window
+        val view = appWebView
+        if (window == null || view == null) {
+            invoke.reject("the app's view is not ready")
+            return
+        }
+        val origin = IntArray(2)
+        view.getLocationInWindow(origin)
+        val area = cssViewportToScreen(args.rect, if (args.density > 0) args.density else 1.0, origin)
+        val decor = window.decorView
+        if (!area.intersect(0, 0, decor.width, decor.height) || area.isEmpty) {
+            invoke.reject("that part of the page is off the screen")
+            return
+        }
+        val bitmap = Bitmap.createBitmap(area.width(), area.height(), Bitmap.Config.ARGB_8888)
+        PixelCopy.request(window, area, bitmap, { result ->
+            if (result != PixelCopy.SUCCESS) {
+                bitmap.recycle()
+                invoke.reject("the screen could not be pictured ($result)")
+            } else {
+                // Off the UI thread: a full-screen PNG is a few hundred ms.
+                Thread {
+                    val out = ByteArrayOutputStream()
+                    bitmap.compress(Bitmap.CompressFormat.PNG, 100, out)
+                    bitmap.recycle()
+                    invoke.resolve(JSObject().apply { put("png", Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP)) })
+                }.start()
+            }
+        }, Handler(Looper.getMainLooper()))
     }
 
     // ---- views -------------------------------------------------------------

@@ -177,8 +177,8 @@ describe("live HTML sandbox", () => {
     expect(doc.querySelectorAll("script")[3].textContent).toBe("window.inlineScript = true");
   });
 
-  function bridgeHarness() {
-    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc('<button><span>Tap</span></button><a href="https://example.com/next">Next</a><a href="#inside">Inside</a>', "n"), "text/html");
+  function bridgeHarness(body = '<button><span>Tap</span></button><a href="https://example.com/next">Next</a><a href="#inside">Inside</a>') {
+    const doc = new DOMParser().parseFromString(liveHtmlSrcdoc(body, "n"), "text/html");
     let onLoad!: () => Promise<void>;
     let onMessage!: (event: { source: unknown; data: unknown }) => void;
     let onResize!: () => void;
@@ -267,6 +267,63 @@ describe("live HTML sandbox", () => {
     expect(outside.defaultPrevented).toBe(true);
     expect(inside.defaultPrevented).toBe(false);
     expect(fakeWindow.open()).toBeNull();
+  });
+
+  /** Lays the page's text out at these boxes: jsdom has no layout. */
+  function layOut(doc: Document, boxes: Map<string, DOMRect[]>) {
+    let node: Node | null = null;
+    let start = 0, end = 0;
+    const rectsOf = () => {
+      const rects = boxes.get(node?.textContent ?? "") ?? [];
+      // A word inside one box: the same box, as wide as the share it has of the text.
+      if (!node?.textContent || (start === 0 && end === node.textContent.length)) return rects;
+      const box = rects[0];
+      if (!box) return [];
+      const step = box.width / node.textContent.length;
+      return [new DOMRect(box.left + start * step, box.top, (end - start) * step, box.height)];
+    };
+    Object.defineProperty(doc, "createRange", { value: () => ({
+      selectNodeContents(target: Node) { node = target; start = 0; end = target.textContent?.length ?? 0; },
+      setStart(target: Node, offset: number) { node = target; start = offset; },
+      setEnd(_target: Node, offset: number) { end = offset; },
+      getClientRects: () => rectsOf(),
+      getBoundingClientRect: () => {
+        const rects = rectsOf();
+        if (!rects.length) return new DOMRect();
+        const left = Math.min(...rects.map(r => r.left)), top = Math.min(...rects.map(r => r.top));
+        return new DOMRect(left, top, Math.max(...rects.map(r => r.right)) - left, Math.max(...rects.map(r => r.bottom)) - top);
+      },
+    }) });
+  }
+
+  it("answers a band with the words it touches and their boxes inside it", () => {
+    const { doc, parent, message } = bridgeHarness("<p>First line here</p><p>Second</p><p>Far below</p><script>var hidden = 1</script>");
+    layOut(doc, new Map([
+      ["First line here", [new DOMRect(10, 10, 200, 20)]],
+      ["Second", [new DOMRect(10, 40, 80, 20)]],
+      ["Far below", [new DOMRect(10, 400, 90, 20)]],
+      ["var hidden = 1", [new DOMRect(10, 10, 50, 20)]],
+    ]));
+    message(parent, { type: LIVE_HTML_MESSAGE, nonce: "n", select: { id: 7, band: [0, 0, 300, 70] } });
+    expect(parent.postMessage).toHaveBeenLastCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n", selected: {
+      id: 7, text: "First line here Second", rects: [[10, 10, 200, 20], [10, 40, 80, 20]],
+    } }, "*");
+  });
+
+  it("answers a hold with the word under it, and nothing on blank space", () => {
+    const { doc, parent, message } = bridgeHarness("<p>alpha beta</p>");
+    layOut(doc, new Map([["alpha beta", [new DOMRect(0, 0, 100, 20)]]]));
+    const text = doc.querySelector("p")!.firstChild!;
+    Object.defineProperty(doc, "caretPositionFromPoint", { value: (x: number) => ({ offsetNode: text, offset: Math.round(x / 10) }) });
+    message(parent, { type: LIVE_HTML_MESSAGE, nonce: "n", select: { id: 1, point: [75, 10] } });
+    expect(parent.postMessage).toHaveBeenLastCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n", selected: {
+      id: 1, text: "beta", rects: [[60, 0, 40, 20]],
+    } }, "*");
+    // The caret snaps to the nearest letter even from far below it.
+    message(parent, { type: LIVE_HTML_MESSAGE, nonce: "n", select: { id: 2, point: [75, 300] } });
+    expect(parent.postMessage).toHaveBeenLastCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n", selected: { id: 2, text: "", rects: [] } }, "*");
+    message(parent, { type: LIVE_HTML_MESSAGE, nonce: "n", select: { id: 3, point: ["75", 10] } });
+    expect(parent.postMessage).toHaveBeenLastCalledWith({ type: LIVE_HTML_MESSAGE, nonce: "n", selected: { id: 3, text: "", rects: [] } }, "*");
   });
 });
 
