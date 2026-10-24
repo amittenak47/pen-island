@@ -11,8 +11,9 @@ import {
 import { createPortal } from "react-dom";
 import { AnimatePresence, motion, useReducedMotion } from "motion/react";
 import type { AgentChatMessage } from "./AgentSidePanel";
-import type { ArtifactRef } from "../util/padArtifacts";
-import { ArtifactCards } from "./ArtifactCards";
+import { artifactRefKey, type ArtifactRef } from "../util/padArtifacts";
+import { ARTIFACTS_CHANGED, readArtifact } from "../util/artifactRepository";
+import { artifactKindLabel } from "./ArtifactKindIcon";
 import {
   freshNoteId,
   type DocFootnote,
@@ -77,6 +78,8 @@ export interface FootnoteOverviewProps {
    */
   onOpenCoachThread?: (rootId: string) => void;
   onOpenExternal: (url: string) => void;
+  /** Open a website in the app's Web tab. Absent: websites open only outside. */
+  onOpenWebTab?: (url: string) => void;
   anchorRect?: DOMRect | null;
   subMarkMode: DocFootnoteSubMarkKind | null;
   onSubMarkModeChange: (mode: DocFootnoteSubMarkKind | null) => void;
@@ -410,6 +413,7 @@ export function FootnoteOverview({
   onAttachCoach,
   onOpenCoachThread,
   onOpenExternal,
+  onOpenWebTab,
   workspaceLinks = [],
   onAddWorkspaceLink,
   onOpenWorkspaceLink,
@@ -840,6 +844,13 @@ export function FootnoteOverview({
     if (subMarkMode) onSubMarkModeChange(null);
     setTask(next);
   };
+  /** A website opens in the Web tab or outside the app; the writer picks each time. */
+  const websiteActions = (url: string, name: string): HubRowAction[] => [
+    ...(onOpenWebTab ? [{ key: "tab", label: `Open ${name} in the Web tab`, title: "Open in Web tab",
+      icon: <ExpandNoteIcon />, onClick: () => onOpenWebTab(url) }] : []),
+    { key: "external", label: `Open ${name} in your browser`, title: "Open in browser",
+      icon: <ShareIcon />, onClick: () => onOpenExternal(url) },
+  ];
   const removeSubMark = (id: string) => {
     onHoverSubMark?.(null);
     if (activeSubMarkId === id) onActiveSubMarkIdChange?.(null);
@@ -1255,19 +1266,14 @@ export function FootnoteOverview({
                 {whiteboards.length > 0 && (
                   <ul className={listClass(whiteboards.length)}>
                     {whiteboards.map((board) => (
-                      <li key={board.id}>
-                        <HoldButton
-                          label={board.title || "Whiteboard"}
-                          className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
-                          ariaLabel={`${board.title || "Whiteboard"} — tap to open, hold to delete`}
-                          holdMs={HOLD_SENSITIVE_MS}
-                          holdThrough
-                          onTap={() => onOpenWhiteboard?.(board.id)}
-                          onConfirm={() => removeWhiteboard(board.id)}
-                        >
-                          <span className="lc-footnote-item-chip" data-type="whiteboard">{board.title || "Whiteboard"}</span>
-                        </HoldButton>
-                      </li>
+                      <HubRow key={board.id} name={board.title || "Whiteboard"}
+                        hold={{ verb: "delete", onConfirm: () => removeWhiteboard(board.id) }}
+                        actions={[
+                          onOpenWhiteboard && { key: "tab", label: `Open ${board.title || "whiteboard"} in a tab`,
+                            title: "Open in tab", icon: <ExpandNoteIcon />, onClick: () => onOpenWhiteboard(board.id) },
+                        ]}>
+                        <span className="lc-footnote-item-chip" data-type="whiteboard">{board.title || "Whiteboard"}</span>
+                      </HubRow>
                     ))}
                   </ul>
                 )}
@@ -1288,68 +1294,60 @@ export function FootnoteOverview({
                 {threads.length > 0 && (
                   <ul className={listClass(threads.length)}>
                     {threads.map((thread) => (
-                      <li key={thread.rootId}>
-                        <HoldButton
-                          label={thread.title}
-                          ariaLabel={`${thread.title}. Tap to open, hold to unlink. Conversation stays saved`}
-                          holdMs={HOLD_SENSITIVE_MS}
-                          className="lc-agent-scope-option"
-                          disabled={readOnly}
-                          onConfirm={() => removeThread(thread.rootId)}
-                          onTap={() => {
-                            if (onOpenCoachThread) {
-                              onOpenCoachThread(thread.rootId);
-                              return;
-                            }
-                            openTask({ kind: "thread", rootId: thread.rootId });
-                          }}
-                        >
-                          <span className="lc-footnote-item-chip" data-type="thread">{chipTitle(thread.title) || thread.title}</span>
-                        </HoldButton>
-                      </li>
+                      // Unlinking keeps the conversation saved.
+                      <HubRow key={thread.rootId} name={thread.title}
+                        hold={readOnly ? undefined : { verb: "unlink", onConfirm: () => removeThread(thread.rootId) }}
+                        actions={[
+                          { key: "tab", label: `Open ${thread.title}`, title: "Open thread",
+                            icon: <ExpandNoteIcon />, onClick: () => {
+                              if (onOpenCoachThread) {
+                                onOpenCoachThread(thread.rootId);
+                                return;
+                              }
+                              openTask({ kind: "thread", rootId: thread.rootId });
+                            } },
+                        ]}>
+                        <span className="lc-footnote-item-chip" data-type="thread">{chipTitle(thread.title) || thread.title}</span>
+                      </HubRow>
                     ))}
                   </ul>
                 )}
               </HubSection>
               {!rowsAreReadOnly && (
               <HubSection title="Attachments" count={footnote.artifacts?.length ?? 0} onAdd={onManageArtifacts}>
-                {onOpenArtifact && <ArtifactCards references={footnote.artifacts} onOpen={onOpenArtifact} />}
+                {onOpenArtifact && (footnote.artifacts?.length ?? 0) > 0 && (
+                  <ul className={listClass(footnote.artifacts!.length)}>
+                    {footnote.artifacts!.map((reference) => (
+                      <AttachmentRow key={artifactRefKey(reference)} reference={reference} onOpen={onOpenArtifact} />
+                    ))}
+                  </ul>
+                )}
               </HubSection>
               )}
               <HubSection
-                title="Links"
+                title="Websites"
                 count={userLinks.length + (searchLink ? 1 : 0)}
+                addLabel="Add a website"
                 onAdd={readOnly ? undefined : () => openTask({ kind: "link", index: null })}
               >
                 {(searchLink || userLinks.length > 0) && (
                   <ul className={listClass(userLinks.length + (searchLink ? 1 : 0))}>
                     {searchLink && (
-                      <li>
-                        <button
-                          type="button"
-                          className="lc-agent-scope-option"
-                          onClick={() => onOpenExternal(searchLink.url)}
-                        >
-                          <span className="lc-footnote-item-chip" data-type="url">{searchLink.title}</span>
-                          <span className="lc-muted">{searchLink.url}</span>
-                        </button>
-                      </li>
+                      <HubRow name={searchLink.title} actions={websiteActions(searchLink.url, searchLink.title)}>
+                        <span className="lc-footnote-item-chip" data-type="url">{searchLink.title}</span>
+                        <span className="lc-muted">{searchLink.url}</span>
+                      </HubRow>
                     )}
                     {userLinks.map((link, index) => (
-                      <li key={`user-${index}-${link.url}`}>
-                        <button
-                          type="button"
-                          className="lc-agent-scope-option"
-                          onClick={() =>
-                            readOnly
-                              ? onOpenExternal(link.url)
-                              : openTask({ kind: "link", index })
-                          }
-                        >
-                          <span className="lc-footnote-item-chip" data-type="url">{link.title || link.url}</span>
-                          {link.title ? <span className="lc-muted">{link.url}</span> : null}
-                        </button>
-                      </li>
+                      <HubRow key={`user-${index}-${link.url}`} name={link.title || link.url}
+                        actions={[
+                          !readOnly && { key: "edit", label: `Edit ${link.title || link.url}`, title: "Edit website",
+                            icon: <PenToolIcon />, onClick: () => openTask({ kind: "link", index }) },
+                          ...websiteActions(link.url, link.title || link.url),
+                        ]}>
+                        <span className="lc-footnote-item-chip" data-type="url">{link.title || link.url}</span>
+                        {link.title ? <span className="lc-muted">{link.url}</span> : null}
+                      </HubRow>
                     ))}
                   </ul>
                 )}
@@ -1363,23 +1361,18 @@ export function FootnoteOverview({
                   {workspaceLinks.length > 0 && (
                     <ul className={listClass(workspaceLinks.length)}>
                       {workspaceLinks.map((link) => (
-                        <li key={link.edgeId}>
-                          <HoldButton
-                            label={link.title}
-                            className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
-                            ariaLabel={`${link.title} — tap to open, hold to unlink`}
-                            holdMs={HOLD_SENSITIVE_MS}
-                            holdThrough
-                            onTap={() => onOpenWorkspaceLink?.(link.edgeId)}
-                            // Holding removes the *link*, never the thing it
-                            // points at — the notebook on the other end is not
-                            // this card's to delete.
-                            onConfirm={() => history.removeLink(link.edgeId)}
-                          >
-                            <span className="lc-footnote-item-chip" data-type="file">{link.title}</span>
-                            <span className="lc-muted">{link.kindLabel}</span>
-                          </HoldButton>
-                        </li>
+                        <HubRow key={link.edgeId} name={link.title}
+                          // Holding removes the *link*, never the thing it
+                          // points at — the notebook on the other end is not
+                          // this card's to delete.
+                          hold={readOnly ? undefined : { verb: "unlink", onConfirm: () => history.removeLink(link.edgeId) }}
+                          actions={[
+                            onOpenWorkspaceLink && { key: "tab", label: `Open ${link.title} in a tab`, title: "Open in tab",
+                              icon: <ExpandNoteIcon />, onClick: () => onOpenWorkspaceLink(link.edgeId) },
+                          ]}>
+                          <span className="lc-footnote-item-chip" data-type="file">{link.title}</span>
+                          <span className="lc-muted">{link.kindLabel}</span>
+                        </HubRow>
                       ))}
                     </ul>
                   )}
@@ -1529,6 +1522,65 @@ function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini,
   onEdit?: () => void;
   onDelete: () => void;
 }) {
+  const field = chipText ? null : fieldChip(note);
+  const chip = <>
+    {note.text ? <span className="lc-footnote-item-chip" data-type={ai ? "ai-note" : "note"}>
+      {field ? <><span className="lc-footnote-field-tag">{field.tag}</span>{field.text}</> : chipText ?? (chipTitle(note.text) || plainPreview(note.text))}
+    </span> : null}
+    <NoteImages images={note.images} />
+  </>;
+  const n = index + 1;
+  return (
+    <HubRow
+      className={ai ? "is-ai" : undefined}
+      lead={ai ? (
+        <span className="lc-footnote-note-ai" title="Written by ChatBot" aria-label="Written by ChatBot">
+          <span aria-hidden>✦</span>
+          <span aria-hidden>AI</span>
+        </span>
+      ) : null}
+      name={readOnly ? `${name ?? `Note ${n}`}: ${chipText ?? plainPreview(note.text)}` : `Note ${n}: ${note.text ? plainPreview(note.text) : "picture"}`}
+      holdLabel={note.text || "Picture"}
+      hold={readOnly ? undefined : { verb: "delete", onConfirm: onDelete }}
+      actions={[
+        { key: "mini", label: `Open mini note ${n}`, icon: <PictureInPictureIcon />, onClick: onShowMini,
+          disabled: !canOpenMini, pressed: miniOpen,
+          title: canOpenMini ? "Open mini note" : "Close a mini note to open another (3 maximum)" },
+        onOpenFull && { key: "tab", label: `Open full note ${n}`, title: "Open note in tab", icon: <ExpandNoteIcon />, onClick: onOpenFull },
+        onEdit && { key: "edit", label: `Edit note ${n}`, title: "Edit note", icon: <PenToolIcon />, onClick: onEdit },
+      ]}
+    >{chip}</HubRow>
+  );
+}
+
+type HubRowAction = {
+  key: string;
+  /** Spoken name, e.g. "Open full note 2". */
+  label: string;
+  /** Tooltip. */
+  title: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  pressed?: boolean;
+};
+
+/**
+ * One item in a hub list: its chip, and on a tap its buttons sliding out
+ * beside it (open in a tab, open outside, edit...). Every section's items
+ * work the same way, so tapping a row never does something different from
+ * one section to the next. Holding still deletes or unlinks where the
+ * section allows it.
+ */
+function HubRow({ name, holdLabel, hold, actions, lead, className, children }: {
+  name: string;
+  holdLabel?: string;
+  hold?: { verb: "delete" | "unlink"; onConfirm: () => void };
+  actions: (HubRowAction | false | null | undefined)[];
+  lead?: ReactNode;
+  className?: string;
+  children: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const idle = useRef(0);
   const reduce = useReducedMotion();
@@ -1541,53 +1593,86 @@ function NoteRow({ note, index, ai, readOnly, canOpenMini, miniOpen, onShowMini,
     if (value) window.clearTimeout(idle.current); else keepOpen();
     return !value;
   });
-  const field = chipText ? null : fieldChip(note);
-  const chip = <>
-    {note.text ? <span className="lc-footnote-item-chip" data-type={ai ? "ai-note" : "note"}>
-      {field ? <><span className="lc-footnote-field-tag">{field.tag}</span>{field.text}</> : chipText ?? (chipTitle(note.text) || plainPreview(note.text))}
-    </span> : null}
-    <NoteImages images={note.images} />
-  </>;
+  const shown = actions.filter((action): action is HubRowAction => Boolean(action));
   return (
-    <li className={`lc-footnote-note-row${ai ? " is-ai" : ""}${open ? " is-open" : ""}`}
+    <li className={`lc-footnote-note-row lc-footnote-hub-row${className ? ` ${className}` : ""}${open ? " is-open" : ""}`}
       onPointerDownCapture={open ? keepOpen : undefined} onFocusCapture={open ? keepOpen : undefined}>
-      {ai ? (
-        <span className="lc-footnote-note-ai" title="Written by ChatBot" aria-label="Written by ChatBot">
-          <span aria-hidden>✦</span>
-          <span aria-hidden>AI</span>
-        </span>
-      ) : null}
-      {readOnly ? (
-        <button type="button" className="lc-agent-scope-option lc-footnote-note-mini" aria-expanded={open}
-          aria-label={`${name ?? `Note ${index + 1}`}: ${chipText ?? plainPreview(note.text)}. Tap for its buttons`} onClick={toggle}>{chip}</button>
-      ) : (
+      {lead}
+      {hold ? (
         <HoldButton
-          label={note.text || "Picture"}
+          label={holdLabel ?? name}
           className="lc-agent-scope-option lc-footnote-overview-entry-hold lc-hold-danger"
-          ariaLabel={`Note ${index + 1}: ${note.text ? plainPreview(note.text) : "picture"}. Tap for its buttons, hold to delete`}
+          ariaLabel={`${name}. Tap for its buttons, hold to ${hold.verb}`}
           holdMs={HOLD_SENSITIVE_MS}
           holdThrough
           onTap={toggle}
-          onConfirm={onDelete}
-        >{chip}</HoldButton>
+          onConfirm={hold.onConfirm}
+        >{children}</HoldButton>
+      ) : (
+        <button type="button" className="lc-agent-scope-option lc-footnote-note-mini" aria-expanded={open}
+          aria-label={`${name}. Tap for its buttons`} onClick={toggle}>{children}</button>
       )}
       <AnimatePresence initial={false}>
-        {open ? (
+        {open && shown.length > 0 ? (
           <motion.div key="actions" className="lc-footnote-note-actions"
             initial={{ width: 0, opacity: 0 }} animate={{ width: "auto", opacity: 1 }} exit={{ width: 0, opacity: 0 }}
             transition={reduce ? { duration: 0 } : { type: "spring", stiffness: 520, damping: 40, mass: 0.7 }}>
-            <button type="button" className="lc-footnote-mark-tool" aria-label={`Open mini note ${index + 1}`}
-              disabled={!canOpenMini} aria-pressed={miniOpen}
-              title={canOpenMini ? "Open mini note" : "Close a mini note to open another (3 maximum)"}
-              onClick={onShowMini}><PictureInPictureIcon /></button>
-            {onOpenFull ? <button type="button" className="lc-footnote-mark-tool" aria-label={`Open full note ${index + 1}`}
-              title="Open note in tab" onClick={onOpenFull}><ExpandNoteIcon /></button> : null}
-            {onEdit ? <button type="button" className="lc-footnote-mark-tool" aria-label={`Edit note ${index + 1}`}
-              title="Edit note" onClick={onEdit}><PenToolIcon /></button> : null}
+            {shown.map((action) => (
+              <button key={action.key} type="button" className="lc-footnote-mark-tool" aria-label={action.label}
+                title={action.title} disabled={action.disabled}
+                aria-pressed={action.pressed === undefined ? undefined : action.pressed}
+                onClick={action.onClick}>{action.icon}</button>
+            ))}
           </motion.div>
         ) : null}
       </AnimatePresence>
     </li>
+  );
+}
+
+/** An attachment row: its saved title, once read, and a button to open it. */
+function AttachmentRow({ reference, onOpen }: { reference: ArtifactRef; onOpen: (ref: ArtifactRef) => void }) {
+  const kind = artifactKindLabel(reference.kind);
+  const [title, setTitle] = useState<string | null>(null);
+  const [failed, setFailed] = useState(false);
+  const key = artifactRefKey(reference);
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      void readArtifact(reference)
+        .then((result) => { if (!cancelled) { setTitle(result.item.title); setFailed(false); } })
+        .catch(() => { if (!cancelled) setFailed(true); });
+    };
+    refresh();
+    window.addEventListener(ARTIFACTS_CHANGED, refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener(ARTIFACTS_CHANGED, refresh);
+    };
+    // The key names the attachment; a new object for the same one is no change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+  const name = title?.trim() || kind;
+  return (
+    <HubRow name={name} actions={[
+      !failed && { key: "tab", label: `Open ${name} in a tab`, title: "Open in tab",
+        icon: <ExpandNoteIcon />, onClick: () => onOpen(reference) },
+    ]}>
+      <span className="lc-footnote-item-chip" data-type="attachment">{name}</span>
+      <span className="lc-muted">{failed ? `${kind} could not be read` : kind}</span>
+    </HubRow>
+  );
+}
+
+/** Open outside the app: a page in the system browser. */
+function ShareIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden focusable="false">
+      <g fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M8 10V2.5M5 5.5l3-3 3 3" />
+        <path d="M5.5 7.5h-2v6h9v-6h-2" />
+      </g>
+    </svg>
   );
 }
 

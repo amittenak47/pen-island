@@ -11488,6 +11488,7 @@ export const Workspace = memo(function Workspace({
                 setError("could not hand the link to a browser on this device");
               });
             }}
+            onOpenWebTab={(url) => { void openWebPage(url, { newTab: true }); }}
           />
         )}
         <FootnoteMiniNotes key={miniPlacementDocId ?? tab.id} entries={miniNoteEntries} getBounds={miniNoteBounds}

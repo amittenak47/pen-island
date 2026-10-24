@@ -60,7 +60,7 @@ describe("FootnoteOverview threads", () => {
     expect(document.querySelector('[aria-label="Threads"] .lc-footnote-overview-section-fold')?.hasAttribute("data-open")).toBe(true);
     expect(change).toHaveBeenCalledWith(expect.objectContaining({threads: [MARK.threads![0], expect.objectContaining({rootId: "other"})]}));
     expect(document.querySelector('[aria-label="Forget thread"]')).toBeNull();
-    const unlink = document.querySelector<HTMLButtonElement>('[aria-label*="Tap to open, hold to unlink"]')!;
+    const unlink = document.querySelector<HTMLButtonElement>('[aria-label*="Tap for its buttons, hold to unlink"]')!;
     const count = change.mock.calls.length;
     act(() => unlink.click());
     expect(change).toHaveBeenCalledTimes(count);
@@ -73,9 +73,12 @@ describe("FootnoteOverview threads", () => {
       (button.textContent ?? "").includes("How they align SNOWY"),
     );
     expect(row).toBeTruthy();
+    // A tap shows the row's buttons, the same in every section; Open thread opens it.
     act(() => {
       row!.click();
     });
+    expect(onOpenCoachThread).not.toHaveBeenCalled();
+    act(() => document.querySelector<HTMLButtonElement>('[aria-label="Open How they align SNOWY"]')!.click());
     expect(onOpenCoachThread).toHaveBeenCalledWith("thread-1");
     expect(document.querySelector(".lc-footnote-overview-task-thread")).toBeNull();
   });

@@ -23452,7 +23452,10 @@ html[data-corners="rounded"] {
   line-height: 1.7;
   padding: 14px 0;
 }
-.lc-footnote-note-workspace > .lc-footnote-note-head { flex-wrap: wrap; }
+/* A reading column: a note's lines stay readable and its buttons stay by its title on a wide screen. */
+.lc-footnote-note-workspace > * { width: 100%; max-width: 880px; margin-inline: auto; }
+.lc-footnote-note-workspace > .lc-footnote-note-head { flex-wrap: nowrap; }
+.lc-footnote-note-workspace > .lc-footnote-note-head > .lc-footnote-note-actions { flex: 0 0 auto; gap: 4px; }
 .lc-footnote-note-workspace > .lc-footnote-note-head > div:first-child { flex: 1 1 160px; min-width: 0; }
 .lc-footnote-note-workspace > .lc-footnote-note-head > div:first-child > strong,
 .lc-footnote-note-workspace .lc-footnote-note-parent { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
