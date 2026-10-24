@@ -9,7 +9,6 @@ import android.provider.MediaStore
 import android.provider.DocumentsContract
 import android.provider.OpenableColumns
 import android.net.Uri
-import android.os.ParcelFileDescriptor
 import androidx.activity.result.ActivityResult
 import app.tauri.annotation.ActivityCallback
 import android.util.Base64
@@ -23,7 +22,6 @@ import app.tauri.plugin.Plugin
 import java.io.File
 import java.io.FileNotFoundException
 import java.io.IOException
-import java.nio.ByteBuffer
 import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
@@ -377,32 +375,38 @@ class GallerySavePlugin(private val activity: Activity) : Plugin(activity) {
         var tree: String = ""
         var dir: String = ""
         var path: String = ""
-        var offset: Long = 0
-        var length: Long = 0
     }
 
     /** Children found by name, per tree folder: a page asks for the same few files again and again. */
     private val assetIds = ConcurrentHashMap<String, String>()
 
-    /** `length` bytes from `offset` of `path` below the folder `dir`; length 0 answers the size only. */
+    /**
+     * Open `path` below the folder `dir` and hand its descriptor to Rust, which
+     * owns and closes it and reads every range itself from then on. Bytes
+     * through this bridge (base64, by way of the main thread) took a video
+     * seconds per few megabytes.
+     */
     @Command
-    fun read_asset(invoke: Invoke) {
+    fun open_asset(invoke: Invoke) {
         val args = invoke.parseArgs(AssetArgs::class.java)
         Thread {
             try {
                 val tree = Uri.parse(args.tree)
                 val uri = assetUri(tree, args.dir, args.path, true)
                 if (uri == null) { invoke.resolve(JSObject().apply { put("found", false) }); return@Thread }
-                val read = try { readAsset(uri, args.offset, args.length) } catch (error: FileNotFoundException) {
+                val descriptor = try { openAsset(uri) } catch (error: FileNotFoundException) {
                     // Renamed or replaced since it was found: look it up by name once more.
-                    readAsset(assetUri(tree, args.dir, args.path, false) ?: throw error, args.offset, args.length)
+                    openAsset(assetUri(tree, args.dir, args.path, false) ?: throw error)
                 }
-                invoke.resolve(read)
+                invoke.resolve(JSObject().apply { put("found", true); put("fd", descriptor.detachFd()) })
             } catch (error: FileNotFoundException) {
                 invoke.resolve(JSObject().apply { put("found", false) })
-            } catch (error: Exception) { invoke.reject(error.message ?: "Cannot read file") }
+            } catch (error: Exception) { invoke.reject(error.message ?: "Cannot open file") }
         }.start()
     }
+
+    private fun openAsset(uri: Uri) =
+        activity.contentResolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException("File is unavailable")
 
     /** Walks down from `dir` by name only, so nothing above the folder is reachable. */
     private fun assetUri(tree: Uri, dir: String, path: String, cached: Boolean): Uri? {
@@ -423,33 +427,6 @@ class GallerySavePlugin(private val activity: Activity) : Plugin(activity) {
             while (cursor.moveToNext()) if (cursor.getString(1) == name) return cursor.getString(0)
         }
         return null
-    }
-
-    private fun readAsset(uri: Uri, offset: Long, length: Long): JSObject {
-        val descriptor = activity.contentResolver.openFileDescriptor(uri, "r") ?: throw FileNotFoundException("File is unavailable")
-        val known = descriptor.statSize
-        // The stream owns the descriptor and closes it.
-        ParcelFileDescriptor.AutoCloseInputStream(descriptor).channel.use { channel ->
-            val size = if (known >= 0) known else channel.size()
-            val count = length.coerceAtMost((size - offset).coerceAtLeast(0)).coerceAtMost(MAX_ASSET_READ).toInt()
-            val buffer = ByteBuffer.allocate(count)
-            var position = offset
-            while (buffer.hasRemaining()) {
-                val read = channel.read(buffer, position)
-                if (read <= 0) break
-                position += read
-            }
-            return JSObject().apply {
-                put("found", true)
-                put("size", size)
-                put("data", Base64.encodeToString(buffer.array(), 0, buffer.position(), Base64.NO_WRAP))
-            }
-        }
-    }
-
-    private companion object {
-        /** Above the Rust side's slice, so its slices are never cut short here. */
-        const val MAX_ASSET_READ = 8L * 1024 * 1024
     }
 
     private fun insertDocument(bytes: ByteArray, name: String, directory: String?): String {

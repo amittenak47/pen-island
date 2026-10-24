@@ -21,11 +21,7 @@ pub const SCHEME: &str = "lcasset";
 /// A whole file is sent only up to this size; past it, as if `bytes=0-` was asked.
 const WHOLE_LIMIT: u64 = 32 * 1024 * 1024;
 /// Largest slice per ranged response. The media stack asks again for the rest.
-#[cfg(not(target_os = "android"))]
 const CHUNK: u64 = 8 * 1024 * 1024;
-/// Smaller on Android: each slice crosses the plugin bridge as base64.
-#[cfg(target_os = "android")]
-const CHUNK: u64 = 2 * 1024 * 1024;
 
 #[derive(Clone, PartialEq, Eq)]
 enum Root {
@@ -38,12 +34,17 @@ enum Root {
 }
 
 #[derive(Default)]
-pub struct HtmlAssets(Mutex<HashMap<String, Root>>);
+pub struct HtmlAssets {
+    roots: Mutex<HashMap<String, Root>>,
+    /// Android: files the plugin opened, by `<token>/<path>`, read here from then on.
+    #[cfg(target_os = "android")]
+    files: Mutex<HashMap<String, std::sync::Arc<std::fs::File>>>,
+}
 
 impl HtmlAssets {
     /// One token per folder for the life of the app; opening again reuses it.
     fn register(&self, root: Root) -> String {
-        let mut roots = self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+        let mut roots = self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
         if let Some((token, _)) = roots.iter().find(|(_, known)| **known == root) {
             return token.clone();
         }
@@ -53,7 +54,7 @@ impl HtmlAssets {
     }
 
     fn root(&self, token: &str) -> Option<Root> {
-        self.0.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(token).cloned()
+        self.roots.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(token).cloned()
     }
 }
 
@@ -250,31 +251,51 @@ fn open(root: &Root, segments: &[String]) -> Result<PathSource, StatusCode> {
 }
 
 #[cfg(target_os = "android")]
-struct TreeSource<'a> { app: &'a AppHandle, tree: String, dir: String, path: String, size: u64 }
+struct FileSource { file: std::sync::Arc<std::fs::File>, size: u64 }
 
 #[cfg(target_os = "android")]
-impl Source for TreeSource<'_> {
+impl Source for FileSource {
     fn size(&self) -> u64 { self.size }
     fn read(&mut self, start: u64, length: u64) -> Result<Vec<u8>, StatusCode> {
-        use base64::Engine as _;
-        let read = self.app.gallery_save().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
-            .read_asset(&self.tree, &self.dir, &self.path, start, length)
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-        if !read.found { return Err(StatusCode::NOT_FOUND) }
-        base64::engine::general_purpose::STANDARD.decode(read.data.unwrap_or_default().as_bytes())
-            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+        use std::os::unix::fs::FileExt;
+        let mut bytes = vec![0; length as usize];
+        let mut filled = 0;
+        while filled < bytes.len() {
+            match self.file.read_at(&mut bytes[filled..], start + filled as u64) {
+                Ok(0) => break,
+                Ok(read) => filled += read,
+                Err(err) if err.kind() == std::io::ErrorKind::Interrupted => {}
+                Err(_) => return Err(StatusCode::INTERNAL_SERVER_ERROR),
+            }
+        }
+        bytes.truncate(filled);
+        Ok(bytes)
     }
 }
 
+/// The plugin finds and opens a file once and hands its descriptor over; every
+/// read after that is a plain file read here, with nothing crossing the bridge.
 #[cfg(target_os = "android")]
-fn open<'a>(app: &'a AppHandle, root: &Root, segments: &[String]) -> Result<TreeSource<'a>, StatusCode> {
+fn open(app: &AppHandle, token: &str, root: &Root, segments: &[String]) -> Result<FileSource, StatusCode> {
+    use std::os::fd::FromRawFd;
     let Root::Tree { tree, dir } = root;
     let path = segments.join("/");
-    // A zero-length read finds the file and its size.
-    let found = app.gallery_save().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
-        .read_asset(tree, dir, &path, 0, 0).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
-    let size = found.size.filter(|_| found.found).ok_or(StatusCode::NOT_FOUND)?;
-    Ok(TreeSource { app, tree: tree.clone(), dir: dir.clone(), path, size })
+    let key = format!("{token}/{path}");
+    let assets = app.state::<HtmlAssets>();
+    let cached = assets.files.lock().unwrap_or_else(|poisoned| poisoned.into_inner()).get(&key).cloned();
+    if let Some(file) = cached {
+        if let Ok(meta) = file.metadata() { return Ok(FileSource { file, size: meta.len() }) }
+    }
+    let opened = app.gallery_save().ok_or(StatusCode::INTERNAL_SERVER_ERROR)?
+        .open_asset(tree, dir, &path).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let fd = opened.fd.filter(|_| opened.found).ok_or(StatusCode::NOT_FOUND)?;
+    // SAFETY: the plugin detached this descriptor for this call; nothing else owns or closes it.
+    let file = std::sync::Arc::new(unsafe { std::fs::File::from_raw_fd(fd) });
+    let size = file.metadata().map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?.len();
+    let mut files = assets.files.lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    if files.len() >= 64 { files.clear() }
+    files.insert(key, file.clone());
+    Ok(FileSource { file, size })
 }
 
 /// Answer one `lcasset` request: `/<token>/<path inside the folder>`.
@@ -287,7 +308,7 @@ pub fn respond(app: &AppHandle, request: Request<Vec<u8>>) -> Response<Vec<u8>> 
     #[cfg(not(target_os = "android"))]
     let source = open(&root, &segments);
     #[cfg(target_os = "android")]
-    let source = open(app, &root, &segments);
+    let source = open(app, token, &root, &segments);
     let mut source = match source { Ok(source) => source, Err(code) => return status(code) };
     let size = source.size();
     let asked = request.headers().get(header::RANGE).and_then(|value| value.to_str().ok());
