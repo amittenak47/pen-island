@@ -20789,6 +20789,17 @@ button.lc-row-selected:hover:not(:disabled) {
   letter-spacing: 0.05em;
 }
 
+/*
+ * The footnote's tiny all-caps titles use the bundled DINish, not the first
+ * sans the device has: an installed Helvetica Neue drew its S out of step
+ * with the other capitals at this size, and only on that PC.
+ */
+.lc-footnote-overview .lc-agent-turn-role,
+.lc-footnote-bubble .lc-agent-turn-role {
+  font-family: "DINish", var(--lc-sans);
+  font-weight: 700;
+}
+
 .lc-footnote-overview-section {
   display: flex;
   flex-direction: column;
