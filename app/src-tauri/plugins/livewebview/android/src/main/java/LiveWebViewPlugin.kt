@@ -9,11 +9,13 @@ import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.util.Base64
+import android.view.Choreographer
 import android.view.PixelCopy
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.Window
 import android.webkit.CookieManager
 import android.webkit.WebChromeClient
 import android.webkit.WebView
@@ -307,6 +309,22 @@ class LiveWebViewPlugin(private val activity: Activity) : Plugin(activity) {
             invoke.reject("that part of the page is off the screen")
             return
         }
+        /*
+         * PixelCopy reads the last frame the window queued, and the page has
+         * only just hidden the selection's band and menu. Wait until the
+         * WebView has that state ready to draw, then two frames for it to be
+         * drawn and queued, or the band is in the picture.
+         */
+        view.postVisualStateCallback(0, object : WebView.VisualStateCallback() {
+            override fun onComplete(requestId: Long) {
+                val frames = Choreographer.getInstance()
+                frames.postFrameCallback { frames.postFrameCallback { copyWindow(invoke, window, area) } }
+            }
+        })
+    }
+
+    @RequiresApi(Build.VERSION_CODES.O)
+    private fun copyWindow(invoke: Invoke, window: Window, area: Rect) {
         val bitmap = Bitmap.createBitmap(area.width(), area.height(), Bitmap.Config.ARGB_8888)
         PixelCopy.request(window, area, bitmap, { result ->
             if (result != PixelCopy.SUCCESS) {
