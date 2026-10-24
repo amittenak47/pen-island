@@ -53,8 +53,9 @@ export function writeInstance(
   data[o + 10] = c1[1];
   data[o + 11] = c1[2];
   data[o + 12] = pools;
-  data[o + 13] = poolSeed(a);
-  data[o + 14] = poolSeed(b);
+  // Seed in the integer part, the pool's growth (0-1) in the fraction.
+  data[o + 13] = poolSeed(a) + Math.min(0.999, Math.max(0, a.pool ?? 0));
+  data[o + 14] = poolSeed(b) + Math.min(0.999, Math.max(0, b.pool ?? 0));
 }
 
 export type StrokeAabb = {
