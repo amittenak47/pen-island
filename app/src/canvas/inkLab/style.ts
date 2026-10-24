@@ -508,12 +508,18 @@ export function growTipRadius(base: number, current: number): number {
   return Math.min(cap, current + (cap - base) * 0.05);
 }
 
+/**
+ * Share of a pool's full growth added each hold tick (32 ms): a full blot in
+ * about a second. 0.05 felt rushed; this is 40% slower.
+ */
+export const HOLD_GROW_STEP = 0.03;
+
 /** Hold-grow knob: 0 stays nib-sized, 1 is the pad's {@link TIP_GROW}. */
 export function labHoldGrow(base: number, current: number, blot: number): number {
   const t = Math.max(0, Math.min(1, blot));
   if (t < 1e-3) return base;
   const cap = base * (1 + (TIP_GROW - 1) * t);
-  return Math.min(cap, current + (cap - base) * 0.05);
+  return Math.min(cap, current + (cap - base) * HOLD_GROW_STEP);
 }
 
 /**
