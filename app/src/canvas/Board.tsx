@@ -1512,7 +1512,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const [presetStore, setPresetStore] = useState(() => loadInkToolPresets());
   const presetStoreRef = useLatest(presetStore);
   const [inkWheel, setInkWheel] = useState<
-    { x: number; y: number } | "canvas" | null
+    | { x: number; y: number; peek?: boolean; dismissed?: boolean }
+    | "canvas"
+    | null
   >(null);
   const [presetEditor, setPresetEditor] = useState<{
     kind: "pen" | "highlighter" | "eraser";
@@ -11350,6 +11352,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           open
           locked={!!presetEditor}
           anchor={inkWheel}
+          peek={inkWheel !== "canvas" && inkWheel.peek === true}
+          dismissed={inkWheel !== "canvas" && inkWheel.dismissed === true}
           host={boardRef.current}
           handedness={inkHandedness}
           store={presetStore}
@@ -11469,6 +11473,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           interactive && inkToolActive && !presetStore.wheelLocked
         }
         onWheelHold={(x, y) => setInkWheel({ x, y })}
+        onWheelPeek={(x, y) => setInkWheel({ x, y, peek: true })}
+        onWheelPeekEnd={() =>
+          setInkWheel((cur) =>
+            cur && cur !== "canvas" && cur.peek ? { ...cur, dismissed: true } : cur,
+          )
+        }
         perfOverlay={perfOverlay && isDrawPageRegion(mobileRegion ?? null)}
         perfBar={perfBar && isDrawPageRegion(mobileRegion ?? null)}
         displayHz={displayHz}

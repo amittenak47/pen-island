@@ -158,6 +158,8 @@ export type InkLabEngine = {
   replaceLastStroke(patch: InkLabSnapPatch, points: SpineDot[]): InkLabSnapPatch | null;
   /** Stamp highlighter / eraser onto the committed snap without clearing it. */
   paintOntoSnap(paint: (ctx: CanvasRenderingContext2D) => void): void;
+  /** Host-pixel box of the stroke being drawn, or null with none. */
+  liveBounds(): StrokeAabb | null;
   /** Drop the live stroke. Keep the committed snap. */
   cancelStroke(): void;
   clear(): void;
@@ -1171,6 +1173,13 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       const sctx = snap.getContext("2d");
       if (!sctx) return;
       paint(sctx);
+    },
+    liveBounds() {
+      if (!drawing) return null;
+      const box = { ...aabb };
+      // The blot's texture rim reaches past its radius.
+      if (tip) expandAabb(box, { ...tip, r: tip.r * 1.1 });
+      return Number.isFinite(box.minX) && box.maxX > box.minX && box.maxY > box.minY ? box : null;
     },
     cancelStroke() {
       resetLive();

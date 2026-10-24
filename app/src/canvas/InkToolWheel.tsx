@@ -251,6 +251,13 @@ export interface InkToolWheelProps {
   onEdit: (kind: InkPresetKind, wedge: number, from: DOMRect) => void;
   /** Editor is up — keep the dial mounted but ignore Escape / backdrop. */
   locked?: boolean;
+  /**
+   * Faint and untouchable while the pen that held for it is still down.
+   * Turning it off brings the dial up to full in place.
+   */
+  peek?: boolean;
+  /** The pen moved on under the peek: close it the usual way. */
+  dismissed?: boolean;
 }
 
 export function InkToolWheel({
@@ -264,6 +271,8 @@ export function InkToolWheel({
   onConfirm,
   onEdit,
   locked = false,
+  peek = false,
+  dismissed = false,
 }: InkToolWheelProps) {
   const quickId = useId().replace(/:/g, "");
   const [closing, setClosing] = useState(false);
@@ -450,13 +459,17 @@ export function InkToolWheel({
   }, [onClose, stopHold]);
 
   useEffect(() => {
-    if (!open || locked) return;
+    if (open && dismissed) close();
+  }, [open, dismissed, close]);
+
+  useEffect(() => {
+    if (!open || locked || peek) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") close();
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, locked, close]);
+  }, [open, locked, peek, close]);
 
   const [placed, setPlaced] = useState(() =>
     anchor === "canvas"
@@ -521,13 +534,14 @@ export function InkToolWheel({
 
   return createPortal(
     <div
-      className="lc-ink-wheel-layer"
+      className={peek ? "lc-ink-wheel-layer is-peek" : "lc-ink-wheel-layer"}
       onPointerDown={onBackdrop}
     >
       <div
         ref={rootRef}
         className={
-          closing ? "lc-ink-wheel is-closing" : "lc-ink-wheel is-open"
+          (closing ? "lc-ink-wheel is-closing" : "lc-ink-wheel is-open") +
+          (peek ? " is-peek" : "")
         }
         style={{
           left: placed.x - WHEEL_R,

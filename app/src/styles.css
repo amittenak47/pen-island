@@ -5860,6 +5860,37 @@ body[data-lc-sash-drag="horizontal"] {
   position: absolute;
   inset: 0;
   transform-origin: 50% 50%;
+  transition:
+    opacity 200ms cubic-bezier(0.22, 1, 0.36, 1),
+    transform 200ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+/*
+ * The pen that held for the wheel is still down: a hint, not a dialog. The
+ * stroke under it stays live, so nothing here takes the pointer.
+ */
+.lc-ink-wheel-layer.is-peek,
+.lc-ink-wheel.is-peek {
+  pointer-events: none;
+}
+
+.lc-ink-wheel.is-peek .lc-ink-wheel-dial {
+  opacity: 0.3;
+  transform: scale(0.9);
+}
+
+/* A dropped stroke fading out over the page; see WhiteboardInkLab. */
+.lc-ink-ghost {
+  position: fixed;
+  z-index: 95;
+  pointer-events: none;
+  animation: lc-ink-ghost-out 200ms ease-out forwards;
+}
+
+@keyframes lc-ink-ghost-out {
+  to {
+    opacity: 0;
+  }
 }
 
 .lc-ink-wheel-tool {
