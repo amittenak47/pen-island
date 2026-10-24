@@ -99,7 +99,8 @@ const float GRAIN_CELLS = 3.5;
 const float RING_DARK = 0.12;
 
 float hash21(vec2 p, float s) {
-  return fract(sin(dot(p, vec2(127.1, 311.7)) + s * 74.7) * 43758.5453);
+  // Seeds run to 4095: keep sin's argument small for highp precision.
+  return fract(sin(dot(p, vec2(127.1, 311.7)) + s * 1.618) * 43758.5453);
 }
 
 float vnoise(vec2 p, float s) {

@@ -2,11 +2,19 @@
 
 export const INSTANCE_FLOATS = 15;
 
+/** Texture seeds run 0..POOL_SEEDS-1; the shader keeps the growth in the fraction. */
+export const POOL_SEEDS = 4096;
+
 /**
- * A blot's texture seed: its starting pressure as the byte the stroke store
- * keeps, so live, saved and every zoom draw the same rim and grain.
+ * A blot's texture seed: random per blot, picked when the hold began and
+ * stored with the stroke's halts, so live, saved and every zoom draw the same
+ * rim and grain. Strokes saved before seeds fall back to the starting
+ * pressure, as the byte the stroke store keeps.
  */
 export function poolSeed(d: SpineDot): number {
+  if (d.seed != null && Number.isFinite(d.seed)) {
+    return Math.max(0, Math.min(POOL_SEEDS - 1, Math.round(d.seed)));
+  }
   const p = d.p ?? 0.5;
   return Math.round(Math.max(0, Math.min(1, Number.isFinite(p) ? p : 0.5)) * 255);
 }
@@ -27,6 +35,8 @@ export type SpineDot = {
    * own colour and blend it in as a pool (see ./inkSmooth.ts).
    */
   pool?: number;
+  /** The pool's texture seed, picked at random when the hold began (0-4095). */
+  seed?: number;
 };
 
 export function writeInstance(

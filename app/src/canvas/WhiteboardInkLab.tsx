@@ -374,6 +374,7 @@ function opFromBake(
         grow: h.grow,
         ...(h.p != null ? { pressure: h.p } : {}),
         ...(h.slow != null ? { slowness: h.slow } : {}),
+        ...(h.seed != null ? { seed: h.seed } : {}),
       };
     });
   }

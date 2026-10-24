@@ -476,6 +476,8 @@ export interface InkBlotHalt {
   grow: number;
   pressure?: number;
   slowness?: number;
+  /** Blot texture seed (see inkLab poolSeed); absent on strokes saved before it. */
+  seed?: number;
 }
 
 export interface InkDrawOp {

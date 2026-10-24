@@ -684,7 +684,11 @@ describe("Ink lab live path", () => {
       }
       const lifted = engine.up();
       expect(lifted.blotHalts.length).toBe(1);
-      expect(lifted.points.filter((d) => (d.pool ?? 0) > 1e-3)).toHaveLength(1);
+      const pools = lifted.points.filter((d) => (d.pool ?? 0) > 1e-3);
+      expect(pools).toHaveLength(1);
+      // One random texture seed per blot, on the dot and on the saved halt.
+      expect(pools[0]!.seed).toBeGreaterThanOrEqual(0);
+      expect(lifted.blotHalts[0]!.seed).toBe(pools[0]!.seed);
     } finally {
       nowSpy.mockRestore();
       engine.destroy();

@@ -79,8 +79,8 @@ export interface EncodedOp {
   sbb?: number;
   /** Hold-pool amount at the tip (0–1); absent → derive from dwell samples. */
   btg?: number;
-  /** Mid-stroke pooling stamps: x, y, grow, optional pressure, optional slowness. */
-  bh?: { x: number; y: number; g: number; p?: number; s?: number }[];
+  /** Mid-stroke pooling stamps: x, y, grow, optional pressure, slowness and texture seed. */
+  bh?: { x: number; y: number; g: number; p?: number; s?: number; sd?: number }[];
   /** Pace wash toward pencil (0–1); absent on older speed-ink → full wash. */
   sf?: number;
   /** Nib material (0–1); absent → hard disc. */
@@ -261,6 +261,7 @@ export function encodeInkOps(ops: readonly InkOp[]): EncodedInk {
           g: halt.grow,
           ...(halt.pressure != null ? { p: halt.pressure } : {}),
           ...(halt.slowness != null ? { s: halt.slowness } : {}),
+          ...(halt.seed != null ? { sd: halt.seed } : {}),
         }));
       }
       if (op.speedFade !== undefined) record.sf = op.speedFade;
@@ -453,6 +454,7 @@ export function decodeInkOps(encoded: EncodedInk): InkOp[] {
           grow: halt.g,
           ...(halt.p != null ? { pressure: halt.p } : {}),
           ...(halt.s != null ? { slowness: halt.s } : {}),
+          ...(halt.sd != null ? { seed: halt.sd } : {}),
         }));
       }
       if (record.sf !== undefined) op.speedFade = record.sf;

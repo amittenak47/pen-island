@@ -38,4 +38,14 @@ describe("replayed blot pools", () => {
       expect(poolSeed({ x: 0, y: 0, r: 1, p: stored })).toBe(poolSeed({ x: 0, y: 0, r: 1, p }));
     }
   });
+
+  it("draws a blot with the random seed its halt was saved with", () => {
+    const held = labSpineFromDrawOp(op([{ x: 60, y: 40, grow: 1, seed: 1234 }]));
+    expect(held[10]!.seed).toBe(1234);
+    expect(poolSeed(held[10]!)).toBe(1234);
+    // Strokes saved before seeds keep the pressure fallback.
+    const old = labSpineFromDrawOp(op([{ x: 60, y: 40, grow: 1 }]));
+    expect(old[10]!.seed).toBeUndefined();
+    expect(poolSeed(old[10]!)).toBe(Math.round(0.5 * 255));
+  });
 });

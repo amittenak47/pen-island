@@ -20,8 +20,7 @@ import {
   emptyAabb,
   expandAabb,
   type SpineDot,
-  type StrokeAabb,
-} from "./instance";
+  type StrokeAabb, POOL_SEEDS } from "./instance";
 import { stampLiveSamples } from "./sampleTime";
 import {
   capillaryRelax,
@@ -69,6 +68,8 @@ export type InkLabHalt = {
   grow: number;
   p?: number;
   slow?: number;
+  /** The pool's texture seed (see poolSeed). */
+  seed?: number;
 };
 
 export type InkLabSnapPatch = {
@@ -234,6 +235,7 @@ function cloneDot(d: SpineDot): SpineDot {
     p: d.p,
     slow: d.slow,
     pool: d.pool,
+    seed: d.seed,
   };
 }
 
@@ -422,6 +424,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       if (at.slow != null) {
         last.slow = last.slow != null ? Math.max(last.slow, at.slow) : at.slow;
       }
+      last.seed ??= at.seed;
       return;
     }
     blotHalts.push({
@@ -430,6 +433,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       grow,
       p: at.p,
       slow: at.slow,
+      ...(at.seed != null ? { seed: at.seed } : {}),
     });
   };
 
@@ -442,7 +446,8 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
     if (holding || holdPlateau) return;
     holding = true;
     holdTicks = 0;
-    holdBase = cloneDot(at);
+    // Each blot gets its own rim and grain, kept with the stroke.
+    holdBase = { ...cloneDot(at), seed: at.seed ?? Math.floor(Math.random() * POOL_SEEDS) };
     lastHoldWall = now;
   };
 
@@ -482,6 +487,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       a: styled.a,
       slow: styled.slow,
       pool: blotTipGrow,
+      seed: holdBase.seed,
     };
     const last = spine[spine.length - 1];
     if (last) {
@@ -490,6 +496,7 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       last.a = styled.a;
       last.slow = styled.slow;
       last.pool = blotTipGrow;
+      last.seed = holdBase.seed;
     }
     expandAabb(aabb, { ...tip, r: tip.r * 2 });
     if (grown >= holdCapRadius(holdBase.r, pen.speedBlotBlend) - HOLD_PLATEAU_EPS) {
