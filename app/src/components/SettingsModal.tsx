@@ -232,7 +232,7 @@ function SettingsFold({id,title,children}: {id:string;title:string;children:Reac
       {changed > 0 && <span className="lc-settings-group-changes">{changed} changed</span>}
       <span className="lc-settings-fold-chevron" aria-hidden/>
     </button>
-    {changed > 0 && <button type="button" className="lc-settings-group-reset" aria-label={`Reset ${title}`} title={`Reset ${title}`} disabled={saving} onClick={()=>reset(id)}><SettingsIcon id="reset"/></button>}
+    {changed > 0 && <button type="button" className="lc-settings-group-reset" aria-label={`Undo changes to ${title}`} title={`Undo changes to ${title}`} disabled={saving} onClick={()=>reset(id)}><SettingsIcon id="reset"/></button>}
     </div>
     <AnimatedDisclosure open={expanded}><div id={`lc-settings-group-${id}`} className="lc-settings-fold-body" inert={!expanded}>{children}</div></AnimatedDisclosure>
   </section>;
@@ -241,16 +241,16 @@ function SettingsFold({id,title,children}: {id:string;title:string;children:Reac
 const PROVIDERS = ["local", "ollama", "openai", "groq"] as const;
 const COACH_PROVIDERS = [...PROVIDERS, "app", "bot"] as const;
 const AGENT_PROVIDER_HINTS = {
-  app: "Uses the app chosen for ChatBot on this PC",
-  bot: "Answered by the assistant chosen for ChatBot; can take a few minutes",
+  app: "Uses the assistant app chosen under ChatBot on this PC",
+  bot: "Uses the AI assistant chosen under ChatBot, which can take a few minutes",
 };
 
 const VOICE_ENGINES: { id: VoiceConfig["engine"]; label: string; blurb: string }[] = [
-  { id: "android", label: "Android", blurb: "Built into the tablet. Text appears as you speak." },
-  { id: "local", label: "Whisper on your PC", blurb: "Free and private. The Whisper app must be running on your PC." },
-  { id: "openai", label: "OpenAI", blurb: "Online. Needs an API key." },
-  { id: "groq", label: "Groq", blurb: "Online. Needs an API key." },
-  { id: "deepgram", label: "Deepgram", blurb: "Online. Needs an API key." },
+  { id: "android", label: "Android", blurb: "On-device voice dictation." },
+  { id: "local", label: "Whisper on your PC", blurb: "Use a free, private Whisper local server." },
+  { id: "openai", label: "OpenAI", blurb: "Use an online API key." },
+  { id: "groq", label: "Groq", blurb: "Use an online API key." },
+  { id: "deepgram", label: "Deepgram", blurb: "Use an online API key." },
 ];
 
 const VOICE_CLEANUP: { id: VoiceConfig["cleanup"]; label: string }[] = [
@@ -301,24 +301,24 @@ const COACH_FLAG_GROUPS: Array<{
     id: "coach-knows",
     title: "Planning",
     blurb:
-      "Optional. Uses one extra AI request per problem.",
+      "Uses one extra AI request per problem.",
     flags: [
       [
         "planner_enabled",
         "Plan approaches first",
-        "Before reading your board, the assistant lists the ways the problem can be solved. It uses only the problem description and examples, never a solution.",
+        "Before reading your board, the AI assistant lists the ways to solve the problem, from the description and examples only. It never sees a solution.",
       ],
     ],
   },
   {
     id: "coach-reads",
     title: "Approach",
-    blurb: "What the assistant does when your board points to one way of solving the problem.",
+    blurb: "What the AI assistant does when your board points to one way of solving the problem.",
     flags: [
       [
         "approach_commitment",
         "Stick to one approach",
-        "Follows the approach on your board and tells you if a change on the board changes it.",
+        "The AI assistant follows the approach on your board, and tells you if a change on the board switches to another one.",
       ],
     ],
   },
@@ -332,19 +332,19 @@ const SHARED_AGENT_FLAGS: Array<[CoachToggle, string, string]> = [
       ],
       [
         "process_events_ui",
-        "Show what the assistant is doing",
+        "Show what the AI assistant is doing",
         "Shows its thinking steps and the tools it uses.",
       ],
-      ["draw_review_enabled", "Check drawn diagrams", "The assistant checks each diagram it draws and fixes it once if needed. Needs a model that can read images, and takes a little longer."],
+      ["draw_review_enabled", "Check drawn diagrams", "The AI assistant checks each diagram it draws and fixes it once if needed. This needs a model that can read images, and takes a little longer."],
 ];
 
 /** What each coach mode is for, shown under its provider picker. */
 const MODE_HINTS: Record<(typeof MODES)[number], string> = {
-  ambient: "Glances at the board every 2 minutes.",
-  review: "Staged reviews and Ask.",
-  bridge: "The step-by-step path shown after you choose Reveal.",
-  viz: "Draws diagrams and animations.",
-  planner: "Lists the approaches each problem allows. A larger model works best; it never sees or writes a solution.",
+  ambient: "The model will glance at your board every 2 minutes to see how you’re doing.",
+  review: "The model will answer your questions, and review your board step by step when you turn on Review.",
+  bridge: "The model will write the step-by-step walkthrough you see after you choose Reveal.",
+  viz: "The model will draw the diagrams and animations the AI assistant shows you.",
+  planner: "The model will list the ways each problem can be solved before you start. A larger model works best, and it never sees or writes a solution.",
 };
 
 /** Display names for the agent modes and providers (their ids stay in config). */
@@ -360,7 +360,7 @@ const PROVIDER_LABELS: Record<(typeof COACH_PROVIDERS)[number], string> = {
   ollama: "Ollama",
   openai: "OpenAI",
   groq: "Groq",
-  app: "AI application",
+  app: "Assistant app",
   bot: "AI assistant",
 };
 
@@ -377,8 +377,8 @@ function modelHint(
   typed: string,
   selected: ModelEntry | undefined,
 ): string {
-  if (busy) return "Reading the model list…";
-  if (!catalog) return "Couldn’t load the model list. Type the model name instead.";
+  if (busy) return "Retrieving model list…";
+  if (!catalog) return "Couldn’t get the model list. Type the model’s name instead.";
 
   const onServer = catalog.models.filter((entry) => entry.source === "server").length;
   const onDisk = catalog.models.length - onServer;
@@ -391,10 +391,10 @@ function modelHint(
   // A typed id the server has never heard of is the failure worth catching
   // here rather than on the first Review, where it arrives as a bare 404.
   if (typed.length > 0 && selected === undefined && onServer > 0) {
-    lines.push(`The server did not list “${typed}”, so a chat call may fail.`);
+    lines.push(`The server didn’t list “${typed}”, so chats may fail.`);
   }
   if (catalog.notes[0]) lines.push(catalog.notes[0]);
-  return lines.join(" ") || "No models listed — type the id by hand.";
+  return lines.join(" ") || "No models listed. Type the model’s name.";
 }
 
 /**
@@ -414,33 +414,33 @@ function visionEvidence(
 ): string {
   if (!catalog || !selected) {
     return ticked
-      ? "Images will be sent. This couldn’t be checked automatically."
-      : "Choose Yes if this model can read images. It couldn’t be checked automatically.";
+      ? "Pictures will be sent. This couldn’t be checked automatically."
+      : "Couldn’t check this automatically. Choose Yes if it can.";
   }
   if (selected.advertises_vision === true) {
     return ticked
-      ? "The server reports this model accepts images. ✓"
-      : "The server reports this model accepts images — answer Yes to let Draw and board review use them.";
+      ? "Yes, the server says it reads images."
+      : "The server says it reads images. Choose Yes so Draw and board review can use them.";
   }
   if (selected.has_mmproj) {
     return ticked
-      ? "A projector file (mmproj) sits beside these weights, so images should work if the server was started with it."
-      : "A projector file (mmproj) sits beside these weights, so this model can read images if the server was started with it. The server does not advertise it, so this one is your call.";
+      ? "An image file for this model sits beside it, so pictures should work if the server loaded that file."
+      : "An image file for this model sits beside it, so it can read pictures if the server loaded that file. The server doesn’t say so itself, so it’s your call.";
   }
   return ticked
-    ? "This endpoint does not report image support. Images will still be sent — answer No if Draw starts failing."
-    : "This endpoint does not report image support. That is not the same as “no”: OpenAI and Groq never say. Answer Yes only if you know the model reads images.";
+    ? "This server doesn’t say whether the model reads images. Pictures will still be sent, so choose No if Draw starts failing."
+    : "This server doesn’t say whether the model reads images. OpenAI and Groq never do, so choose Yes only if you know it can.";
 }
 
 function llmServerHint(provider: "local" | "ollama" | "openai" | "groq"): string {
   switch (provider) {
     case "local":
     case "ollama":
-      return "Where the AI server is running. For Ollama on this computer it’s usually http://localhost:11434/v1.";
+      return "The address of your AI server. For Ollama on this computer, use the address it shows when it starts.";
     case "openai":
-      return "OpenAI's cloud API. Requests leave from this app; the API key lives here too.";
+      return "OpenAI’s cloud. Requests go straight from this app, and the API key is kept here.";
     case "groq":
-      return "Groq's cloud API. Requests leave from this app; the API key lives here too.";
+      return "Groq’s cloud. Requests go straight from this app, and the API key is kept here.";
   }
 }
 
@@ -693,9 +693,9 @@ export interface SettingsModalProps {
  */
 function padHubProblem(result: Extract<PadHubCheck, { ok: false }>): string {
   if (result.reason === "code") {
-    return "The PC didn’t accept this code. Check the 6-digit code in Settings → Personalize → Storage → Sync with your PC on the PC.";
+    return "Your PC didn’t accept that code. Check it on the PC, in Settings under Personalize, Storage, Sync with your PC.";
   }
-  return `Nothing answered (${result.detail}). Check the URL, and that both devices are on the same Wi-Fi.`;
+  return `Nothing answered (${result.detail}). Check the address, and that both devices are on the same Wi-Fi.`;
 }
 
 export function SettingsModal({
@@ -764,9 +764,9 @@ export function SettingsModal({
       const report = await auditInkDuplicates({ remove });
       const strokes = (n: number) => `${n.toLocaleString()} ${n === 1 ? "stroke" : "strokes"}`;
       const facts: SettingsFact[] = report.duplicates === 0
-        ? [{ value: "No duplicate strokes.", tone: "ok" }]
+        ? [{ value: "No strokes are saved twice.", tone: "ok" }]
         : remove
-          ? [{ value: `Removed ${strokes(report.duplicates)} from ${report.pages} ${report.pages === 1 ? "page" : "pages"}. The pages look the same; the change syncs.`, tone: "ok" }]
+          ? [{ value: `Removed ${strokes(report.duplicates)} from ${report.pages} ${report.pages === 1 ? "page" : "pages"}. The pages will appear the same and the changes will sync.`, tone: "ok" }]
           : [{ value: `${strokes(report.duplicates)} of ${report.strokes.toLocaleString()} are copies, on ${report.pages} ${report.pages === 1 ? "page" : "pages"} in ${report.books} ${report.books === 1 ? "document" : "documents"}.`, tone: "warn" }];
       setInkDupes({ kind: "done", facts });
     } catch (cause) {
@@ -788,7 +788,7 @@ export function SettingsModal({
           setDocCache({
             kind: "failed",
             facts: factsFromMessage(
-              `The document store could not be opened: ${cause instanceof Error ? cause.message : String(cause)}`,
+              `Couldn’t open the document store (${cause instanceof Error ? cause.message : String(cause)}).`,
             ),
           });
         }
@@ -805,7 +805,7 @@ export function SettingsModal({
           setDocCache({
             kind: "done",
             facts: factsFromMessage(
-              `Cleared ${held}, freeing ${formatBytes(audit.freed)}. Pick each document again to bring it back.`,
+              `Removed ${held} and freed ${formatBytes(audit.freed)}. Open each document again to bring it back.`,
             ),
           });
         } else if (audit.rows === 0) {
@@ -814,7 +814,7 @@ export function SettingsModal({
           setDocCache({
             kind: "failed",
             facts: factsFromMessage(
-              "No stored copies at all. If you have opened documents on this device, saving them is failing — run Diagnose.",
+              "No stored copies. If you’ve opened documents on this device, saving them is failing. Run Diagnose.",
             ),
           });
         } else if (audit.bad === 0) {
@@ -826,7 +826,7 @@ export function SettingsModal({
           setDocCache({
             kind: "done",
             facts: factsFromMessage(
-              `Dropped ${audit.removed} bad ${audit.removed === 1 ? "copy" : "copies"} of ${held}, freeing ${formatBytes(audit.freed)}. Pick those documents again — the rest are untouched.`,
+              `Removed ${audit.removed} broken ${audit.removed === 1 ? "copy" : "copies"} of ${held} and freed ${formatBytes(audit.freed)}. Open those documents again. The rest are untouched.`,
             ),
           });
         } else {
@@ -916,7 +916,7 @@ export function SettingsModal({
       setIndexWipe({
         kind: "done",
         facts: factsFromMessage(
-          `Cleared ${report.documents} ${report.documents === 1 ? "document" : "documents"} (${report.chunks} chunks). Ask rebuilds the index as documents are opened again.`,
+          `Removed ${report.documents} ${report.documents === 1 ? "document" : "documents"} from the search index. It’s rebuilt as you open them, so the AI assistant can search them again.`,
         ),
       });
     } catch (cause) {
@@ -1010,7 +1010,7 @@ export function SettingsModal({
   const [showFootnoteTitles, setShowFootnoteTitles] = useState(loadShowFootnoteTitles);
   const [llmAskAtStartup, setLlmAskAtStartup] = useState(loadLlmAskAtStartup);
   const [booktabPosition, setBooktabPosition] = useState(loadBooktabPosition);
-  // "Same row as footnote" needs the margin; edge to edge the tabs sit on top.
+  // "Beside the footnote" needs the margin; edge to edge the tabs sit on top.
   const shownPosition = booktabPosition === "beside" && pageFit !== "margin" ? "top" : booktabPosition;
   const [booktabFootnotes, setBooktabFootnotes] = useState(loadBooktabFootnotes);
   const [agentDisplay, setAgentDisplay] = useState(loadAgentDisplayPrefs);
@@ -1482,16 +1482,16 @@ export function SettingsModal({
   const voice = { ...DEFAULT_VOICE_CONFIG, ...draft.voice };
   const voiceLabel = VOICE_ENGINES.find((engine) => engine.id === voice.engine)?.label ?? "Android";
   const summaries: Record<string,string> = {
-    writing: `${handedness === "left" ? "Left hand" : "Right hand"} · ${chromeWake === "off" ? "No marker" : chromeWake === "pulse" ? "Pulsing squares" : "Faint smudge"}`,
+    writing: `${handedness === "left" ? "Left-handed" : "Right-handed"} · ${chromeWake === "off" ? "No marker" : chromeWake === "pulse" ? "Squares" : "Smudge"}`,
     "ink-tools": `${palettePrefs.tags.map(paletteTagLabel).join(", ")}${palettePrefs.mixColours ? " · Mix colors" : ""}`,
     reading: `Momentum ${pdfFlickMomentum}`,
-    storage: `${autosaveMs ? `Autosave ${autosaveMs/1000}s` : "Autosave off"} / ${hubAutoSync === "off" ? "Manual sync" : "Auto sync"}`,
-    ui: `${uiHandedness === "left" ? "Left hand" : "Right hand"} · ${readingMode === "pages" ? "Pages" : "Scroll"}`,
+    storage: `${autosaveMs ? `Autosave every ${autosaveMs/1000} s` : "Autosave off"} · ${hubAutoSync === "off" ? "Sync when you tap" : "Automatic sync"}`,
+    ui: `${uiHandedness === "left" ? "Left-handed" : "Right-handed"} · ${readingMode === "pages" ? "Page by page" : "Scroll"}`,
     diagnostics: [inkPerfOverlay && "Speed overlay", inkPerfBar && "Speed bar", pdfFlickHud && "Page preview", hubSyncWindowPill && "Sync button", debugLog && "Activity log"].filter(Boolean).join(" · ") || "Off", paths: draft.workspace_dir,
-    datasets: `${datasets.length} datasets`, tests: draft.stop_on_first_failure ? "Stop at first failure" : "Run all cases",
+    datasets: `${datasets.length} datasets`, tests: draft.stop_on_first_failure ? "Stop at the first failure" : "Run every test",
     llm: `${PROVIDER_LABELS[draft.default_provider as (typeof PROVIDERS)[number]] ?? draft.default_provider} · ${draft[draft.default_provider as keyof Pick<LcConfig,"local"|"ollama"|"openai"|"groq">]?.model || "No model selected"}`,
     chatbot: chatBotAnswerMode === "app" ? runnerConfig?.app === "claude" ? "Claude Code on your PC" : "Codex on your PC"
-      : chatBotAnswerMode === "llm" ? "Your AI model" : CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.label ?? "Other assistant",
+      : chatBotAnswerMode === "llm" ? "Your AI model" : CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.label ?? "Other AI assistant",
     voice: `${voice.engine === "android" ? voiceLabel : `${voiceLabel} · ${voiceClipModel(voice)}`}${voice.cleanup !== "off" ? ` · tidy: ${voice.cleanup}` : ""}`,
     ...Object.fromEntries(COACH_FLAG_GROUPS.map(group=>[group.id, `${group.flags.filter(([key])=>(draft.coach ?? DEFAULT_COACH_FLAGS)[key]).length} of ${group.flags.length} on`])),
   };
@@ -1610,7 +1610,7 @@ export function SettingsModal({
         const url = hubUrl.trim();
         const token = hubToken.trim();
         if (Boolean(url) !== Boolean(token) || (token && !/^\d{6}$/.test(token))) {
-          throw new Error("Enter both the PC address and the 6-digit code.");
+          throw new Error("Enter your PC’s address and its 6-digit code.");
         }
         savePadHub(url && token ? { url, token } : null);
         setBaselineHubUrl(url);
@@ -1622,7 +1622,7 @@ export function SettingsModal({
           // pass in silence: a hub that was never reached looks exactly like a
           // hub that was, until the day a file fails to arrive.
           const result = await runHubCheck({ url, token });
-          if (!result.ok) throw new Error(`Saved, but not connected. ${padHubProblem(result)}`);
+          if (!result.ok) throw new Error(`Saved, but couldn’t connect. ${padHubProblem(result)}`);
         } else {
           setHubCheck({ kind: "idle" });
         }
@@ -1671,7 +1671,7 @@ export function SettingsModal({
         ? {
             kind: "ok",
             message: result.version
-              ? `Connected — this PC is running Pen Island ${result.version}.`
+              ? `Connected. This PC runs Pen Island ${result.version}.`
               : "Connected.",
           }
         : { kind: "bad", message: padHubProblem(result) },
@@ -1680,7 +1680,7 @@ export function SettingsModal({
   };
 
   const startLlm = async () => {
-    setBusy("starting local LLM…");
+    setBusy("starting Ollama…");
     setError(null);
     try {
       setLlmStatus(await client.llmStart());
@@ -1692,7 +1692,7 @@ export function SettingsModal({
   };
 
   const stopLlm = async () => {
-    setBusy("stopping local LLM…");
+    setBusy("stopping Ollama…");
     setError(null);
     try {
       setLlmStatus(await client.llmStop());
@@ -1711,25 +1711,25 @@ export function SettingsModal({
   /** App, model, effort and Test for the assistant app on this PC. */
   const renderRunnerFields = (config: AssistantRunnerConfig) => (
     <div className="lc-settings-fields">
-        <p className="lc-settings-hint">These settings are saved on your PC.</p>
+        <p className="lc-settings-hint">These are saved on your PC.</p>
         <label><span>App</span><select aria-label="Assistant app" value={config.app}
           onChange={event => setRunnerConfig({ ...config, app: event.target.value as AssistantRunnerConfig["app"] })}>
           <option value="codex">Codex</option><option value="claude">Claude Code</option>
         </select></label>
         <label><span>Model (optional)</span><input aria-label="Assistant app model" value={config.model} maxLength={200}
-          placeholder="Use the app's default" onChange={event => setRunnerConfig({ ...config, model: event.target.value })} /></label>
+          placeholder="The app’s default" onChange={event => setRunnerConfig({ ...config, model: event.target.value })} /></label>
         {config.app === "codex" ? <label><span>Effort</span><select aria-label="Assistant app effort" value={config.effort}
           onChange={event => setRunnerConfig({ ...config, effort: event.target.value as AssistantRunnerConfig["effort"] })}>
-          <option value="low">Low</option><option value="medium">Medium</option><option value="high">High</option>
+          <option value="low">Light</option><option value="medium">Normal</option><option value="high">Thorough</option>
         </select></label> : null}
         <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" disabled={runnerTesting || saving}
           onClick={() => {
             setRunnerTesting(true); setRunnerError(null);
             void client.testAssistantRunner(config).then(setRunnerStatus).catch(() => {
-              setRunnerError("The assistant app couldn't finish its check. Make sure it is installed and signed in on your PC.");
+              setRunnerError("The assistant app couldn’t finish the check. Make sure it’s installed and signed in on your PC.");
             }).finally(() => setRunnerTesting(false));
           }}>{runnerTesting ? "Testing…" : "Test"}</button></div>
-        <p className="lc-settings-hint">Test checks the connection without answering requests.</p>
+        <p className="lc-settings-hint">Test only checks the connection. It won’t answer any requests.</p>
       </div>
   );
 
@@ -1738,11 +1738,11 @@ export function SettingsModal({
       onPointerDown={e=>{backdropDown.current=e.target===e.currentTarget;}}
       onPointerCancel={()=>{backdropDown.current=false;}}
       onClick={e=>{const started=backdropDown.current;backdropDown.current=false;if(shouldDismissBackdrop(started,e.target,e.currentTarget))cancel();}}>
-      <DialogFrame className="lc-settings-dialog" titleId="lc-settings-dialog-title" title="Settings" subtitle="Every tab · Every workspace" shape="blocky" onClose={cancel} closeDisabled={saving}
+      <DialogFrame className="lc-settings-dialog" titleId="lc-settings-dialog-title" title="Settings" subtitle="Applies to every tab and workspace" shape="blocky" onClose={cancel} closeDisabled={saving}
         icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="M5 3v18M12 3v18M19 3v18M2 8h6m1 8h6m1-8h6"/></svg>}>
         <div className="lc-dialog-context"><label className="lc-settings-command">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 6 6"/></svg>
-          <input type="search" aria-label="Search settings" placeholder="Search settings..." value={settingsQuery} onChange={event=>setSettingsQuery(event.target.value)}/>
+          <input type="search" aria-label="Search settings" placeholder="Search settings" value={settingsQuery} onChange={event=>setSettingsQuery(event.target.value)}/>
         </label></div>
         <SettingsPageCtx.Provider value={{page,open:setPage,query:settingsQuery,summaries,changes,reset:resetGroup,saving}}>
         <div className="lc-settings-tabs" role="tablist">
@@ -1784,7 +1784,7 @@ export function SettingsModal({
                       data_json_dir: e.target.value.trim() ? e.target.value : null,
                     }))
                   }
-                  placeholder="path to JSON corpus"
+                  placeholder="The folder with your practice problems"
                 />
                 <p className="lc-settings-hint">
                   The folder of practice problems on this computer.
@@ -1810,7 +1810,7 @@ export function SettingsModal({
               </p>
               <div className="lc-setting-row">
 <div className="lc-settings-subhead">Available problem sets</div>
-              <p className="lc-settings-hint">Install a problem set to download it. KodCode is about 1 GB.</p>
+              <p className="lc-settings-hint">Installing a set downloads it. KodCode is about 1 GB.</p>
               {(Array.isArray(dlcRows) ? dlcRows : []).map((row) => {
                 const working = ["starting", "downloading", "unpacking", "indexing"].includes(row.phase);
                 const pct = row.progress >= 0 ? Math.round(row.progress * 100) : null;
@@ -1854,7 +1854,7 @@ export function SettingsModal({
               })}
               {datasets.length === 0 && (
                 <p className="lc-muted">
-                  This build does not report datasets — rebuild with Practice support (the <code>leetcode</code> Cargo feature).
+                  This build can’t list problem sets. Rebuild it with Practice support turned on.
                 </p>
               )}
               {datasets.map((entry) => (
@@ -1893,7 +1893,7 @@ export function SettingsModal({
               <SettingsFold id="writing" title="Annotate">
               <div className="lc-setting-row">
 <div className="lc-settings-subhead">Writing hand</div>
-              <p className="lc-settings-hint">Which side the pen tools appear on.</p>
+              <p className="lc-settings-hint">Puts the pen tools on the left or right side, for left-handed or right-handed writing.</p>
               <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Writing hand">
                 <button
                   type="button"
@@ -1906,7 +1906,7 @@ export function SettingsModal({
                   }
                   onClick={() => setHandedness("right")}
                 >
-                  <strong>Right hand</strong>
+                  <strong>Right-handed</strong>
                 </button>
                 <button
                   type="button"
@@ -1919,14 +1919,14 @@ export function SettingsModal({
                   }
                   onClick={() => setHandedness("left")}
                 >
-                  <strong>Left hand</strong>
+                  <strong>Left-handed</strong>
                 </button>
               </SettingsChoices>
 
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Hidden-tools marker</div>
-              <p className="lc-settings-hint">Marks the corner where the hidden tools are.</p>
+<div className="lc-settings-subhead">Hidden pen tools marker</div>
+              <p className="lc-settings-hint">When the pen tools are hidden, a small mark shows where to tap to bring them back.</p>
               <SettingsChoices
                 className="lc-settings-choice"
                 role="radiogroup"
@@ -1936,15 +1936,15 @@ export function SettingsModal({
                   [
                     [
                       "smear",
-                      "A light gray mark.",
+                      "A faint gray smudge marks where the hidden pen tools are.",
                     ],
                     [
                       "pulse",
-                      "A small checkerboard that pulses gently.",
+                      "A small checkerboard pulses gently where the hidden pen tools are.",
                     ],
                     [
                       "off",
-                      "No mark. Tapping the corner still opens the tools.",
+                      "No mark is shown, but tapping that spot still brings the tools back.",
                     ],
                   ] as Array<[ChromeWakeMarker, string]>
                 ).map(([marker, blurb]) => (
@@ -1960,7 +1960,7 @@ export function SettingsModal({
                     }
                     onClick={() => setChromeWake(marker)}
                   >
-                    <strong>{marker === "off" ? "None" : marker === "pulse" ? "Pulsing squares" : "Faint smudge"}</strong>
+                    <strong>{marker === "off" ? "None" : marker === "pulse" ? "Squares" : "Smudge"}</strong>
                     {blurb && <span className="lc-muted">{blurb}</span>}
                   </button>
                 ))}
@@ -1968,6 +1968,7 @@ export function SettingsModal({
 
               {chromeWake !== "off" && <>
               <div className="lc-settings-subhead">Marker color</div>
+              <p className="lc-settings-hint">The color of that mark.</p>
               <SettingsChoices
                 className="lc-settings-choice"
                 role="radiogroup"
@@ -2000,7 +2001,8 @@ export function SettingsModal({
               </>}
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">What should happen after a screenshot?</div>
+<div className="lc-settings-subhead">After a screenshot</div>
+              <p className="lc-settings-hint">What the app does with each screenshot.</p>
               <SettingsChoices
                 className="lc-settings-choice"
                 role="radiogroup"
@@ -2010,15 +2012,15 @@ export function SettingsModal({
                   [
                     [
                       "board",
-                      "Placed on your board.",
+                      "The screenshot is placed on your board.",
                     ],
                     [
                       "board-save",
-                      "Also saved as an image file.",
+                      "The screenshot is placed on your board and also saved as an image file.",
                     ],
                     [
                       "save",
-                      "The board stays as it was.",
+                      "The screenshot is saved as an image file, and your board stays as it was.",
                     ],
                   ] as Array<[CaptureMode, string]>
                 ).map(([mode, blurb]) => (
@@ -2042,7 +2044,7 @@ export function SettingsModal({
 
               {captureWritesFile(captureMode) && (
                 <>
-                  <div className="lc-settings-subhead">Where should screenshots be saved?</div>
+                  <div className="lc-settings-subhead">Screenshot location</div>
                   <SettingsChoices
                     className="lc-settings-choice"
                     role="radiogroup"
@@ -2061,7 +2063,7 @@ export function SettingsModal({
                     >
                       <strong>Photos (default)</strong>
                       <span className="lc-muted">
-                        Pictures/lc.
+                        Saves to the lc folder in your Pictures.
                       </span>
                     </button>
                     <button
@@ -2076,7 +2078,7 @@ export function SettingsModal({
                       onClick={() => setCaptureDestination("downloads")}
                     >
                       <strong>Downloads</strong>
-                      <span className="lc-muted"></span>
+                      <span className="lc-muted">Saves to your Downloads folder.</span>
                     </button>
                     <button
                       type="button"
@@ -2091,7 +2093,7 @@ export function SettingsModal({
                     >
                       <strong>A folder</strong>
                       <span className="lc-muted">
-                        Pick one on Android; type a path on desktop.
+                        Saves to a folder you choose.
                       </span>
                     </button>
                     <button
@@ -2107,7 +2109,7 @@ export function SettingsModal({
                     >
                       <strong>Share sheet</strong>
                       <span className="lc-muted">
-                        Android. Elsewhere it saves to Photos.
+                        Opens the Android share menu so you can send it to another app. On other devices it saves to Photos.
                       </span>
                     </button>
                   </SettingsChoices>
@@ -2130,8 +2132,8 @@ export function SettingsModal({
                       />
                       {/Android/i.test(navigator.userAgent) && <button type="button" onClick={async () => {
                         try { const folder = await pickCaptureFolder(); if (folder) setCaptureFolder(folder); }
-                        catch (error) { window.alert(`Could not choose folder: ${String(error)}`); }
-                      }}>Choose folder…</button>}
+                        catch (error) { window.alert(`Couldn’t open that folder (${String(error)}). Try another one.`); }
+                      }}>Choose folder</button>}
                     </>
                   )}
 
@@ -2139,8 +2141,8 @@ export function SettingsModal({
               )}
                   </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">How long should the countdown before a screenshot be?</div>
-              <p className="lc-settings-hint">Tap the countdown to skip it.</p>
+<div className="lc-settings-subhead">Screenshot countdown</div>
+              <p className="lc-settings-hint">The wait before a screenshot is taken. Tap the countdown to skip it.</p>
                   <SettingsChoices
                     className="lc-settings-choice lc-settings-choice-compact"
                     role="radiogroup"
@@ -2167,8 +2169,8 @@ export function SettingsModal({
 
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Smoother motion</div>
-              <p className="lc-settings-hint">Uses your screen’s highest refresh rate. Uses a little more battery.</p>
+<div className="lc-settings-subhead">Smooth motion by matching the screen refresh rate</div>
+              <p className="lc-settings-hint">May use more battery.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
@@ -2241,8 +2243,8 @@ export function SettingsModal({
               </SettingsChoices>
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Color wheel on the toolbar</div>
-              <p className="lc-settings-hint">Pick a one-off color without changing your saved colors.</p>
+<div className="lc-settings-subhead">Show a color wheel on the toolbar</div>
+              <p className="lc-settings-hint">For a one-off color. Your saved colors stay the same.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
@@ -2286,8 +2288,8 @@ export function SettingsModal({
               */}
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">New palettes</div>
-              <p className="lc-settings-hint">Styles to use when you ask for a new set of colors. Without internet, a built-in list is used.</p>
+<div className="lc-settings-subhead">New palette styles</div>
+              <p className="lc-settings-hint">The styles used when you ask for new colors. Without internet, a built-in list is used.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-wrap"
                 role="group"
@@ -2316,12 +2318,12 @@ export function SettingsModal({
                   disabled={palettePrefs.tags.length < 2}
                   className={palettePrefs.matchAll ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                   onClick={() => setPalettePrefs(prefs => ({ ...prefs, matchAll: !prefs.matchAll }))}>
-                  <strong>Match every style</strong><span className="lc-muted">Only use palettes that fit all the styles you picked.</span>
+                  <strong>Match every style</strong><span className="lc-muted">Only shows palettes that fit every style you picked.</span>
                 </button>
                 <button type="button" role="switch" aria-checked={palettePrefs.mixColours}
                   className={palettePrefs.mixColours ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                   onClick={() => setPalettePrefs(prefs => ({ ...prefs, mixColours: !prefs.mixColours }))}>
-                  <strong>Mix colors</strong><span className="lc-muted">Make four distinct colors that stand out on the page.</span>
+                  <strong>Mix colors</strong><span className="lc-muted">Makes four distinct colors that stand out on the page.</span>
                 </button>
               </SettingsChoices>
 
@@ -2350,7 +2352,7 @@ export function SettingsModal({
               <div className="lc-setting-row">
 <div className="lc-settings-subhead">Devices</div>
               <p className="lc-settings-hint">
-                Personalize settings are saved separately on each device.
+                These settings are saved on this device only.
               </p>
               <ul className="lc-settings-hint">
                 <li>
@@ -2369,7 +2371,7 @@ export function SettingsModal({
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Sync with your PC</div>
               <p className="lc-settings-hint">
-                Keep documents, whiteboards and handwriting in sync with the Pen Island app on your PC, over your home Wi-Fi.
+                Keeps your documents, whiteboards and handwriting the same here and on your PC, over your home Wi-Fi.
               </p>
               {draft.serve_token ? (
                 <>
@@ -2379,7 +2381,7 @@ export function SettingsModal({
                   </p>
                   <dl className="lc-pad-hub-card">
                     <div>
-                      <dt>PC URL</dt>
+                      <dt>This PC’s address</dt>
                       <dd>
                         {lanUrl ? (
                           <code className="lc-pad-hub-url">{lanUrl}</code>
@@ -2400,7 +2402,7 @@ export function SettingsModal({
                 </>
               ) : (
                 <p className="lc-settings-hint">
-                  To find the PC address and 6-digit code, open Settings in the Pen Island app on your PC.
+                  You’ll find it and the 6-digit code in Settings in the Pen Island app on your PC.
                 </p>
               )}
               <label className="lc-md-new-title">
@@ -2414,7 +2416,7 @@ export function SettingsModal({
                    * so the code went in, the URL stayed empty, and Save
                    * answered with a complaint about a field that looked full.
                    */
-                  placeholder="e.g. http://192.168.1.10:7878"
+                  placeholder="For example: http://192.168.1.10:7878"
                   onChange={(event) => {
                     setHubUrl(event.target.value);
                     setHubCheck({ kind: "idle" });
@@ -2430,7 +2432,7 @@ export function SettingsModal({
                   spellCheck={false}
                   maxLength={6}
                   pattern="[0-9]{6}"
-                  placeholder="e.g. 000000"
+                  placeholder="For example: 000000"
                   value={hubToken}
                   onChange={(event) => {
                     setHubToken(event.target.value.replace(/\D/g, "").slice(0, 6));
@@ -2465,7 +2467,7 @@ export function SettingsModal({
 <div className="lc-settings-subhead">Autosave</div>
               <p className="lc-settings-hint">
                 How often your work is saved automatically, so nothing is lost if the
-                app closes unexpectedly. Discard still undoes everything since you
+                app closes. Discard still undoes everything since you
                 opened the document.
               </p>
               <SettingsChoices
@@ -2491,7 +2493,7 @@ export function SettingsModal({
                 ))}
               </SettingsChoices>
               <p className="lc-settings-hint">
-                Saving always happens; this only controls the Saved message.
+                Saving always happens. This only controls the Saved message.
               </p>
               <SettingsChoices
                 className="lc-settings-choice"
@@ -2519,10 +2521,9 @@ export function SettingsModal({
 
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Automatic sync</div>
+<div className="lc-settings-subhead">Sync with your PC automatically</div>
               <p className="lc-settings-hint">
-                Sync with your PC in the background. When off, changes stay on this
-                device until you tap Sync.
+                When off, changes stay on this device until you tap Sync.
               </p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
@@ -2552,8 +2553,7 @@ export function SettingsModal({
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Storage on this device</div>
               <p className="lc-settings-hint">
-                Documents, whiteboards and handwriting share the space available to the
-                app. Handwriting takes the most space.
+                Handwriting takes up the most space.
               </p>
               {storage ? (
                 <>
@@ -2576,14 +2576,14 @@ export function SettingsModal({
                   </p>
                 </>
               ) : (
-                <p className="lc-muted">This browser does not report a storage estimate.</p>
+                <p className="lc-muted">This browser doesn’t say how much space is used.</p>
               )}
 
               </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Saved document copies</div>
               <p className="lc-settings-hint">
-                Finds saved copies that no longer match their original file. Repair removes them; open the file again to get it back.
+                Finds saved copies that no longer match their original file. Repair removes them, and you can open the file again to get it back.
               </p>
               <div className="lc-pad-hub-check">
                 <button aria-label="Check stored copies" title="Check stored copies"
@@ -2610,7 +2610,7 @@ export function SettingsModal({
                     void runDocCache("repair");
                   }}
                 ><SettingsIcon id="repair"/></button>
-                <HoldButton label="Clear all stored copies" ariaLabel="Hold to clear all stored copies" dataTip="Clear all stored copies"
+                <HoldButton label="Remove all stored copies" ariaLabel="Hold to clear all stored copies" dataTip="Remove all stored copies"
                   className="lc-secondary lc-settings-icon-action lc-hold-danger" disabled={docCache.kind === "busy"}
                   onConfirm={() => void runDocCache("clear")}><SettingsIcon id="delete"/></HoldButton>
               </div>
@@ -2621,7 +2621,7 @@ export function SettingsModal({
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Duplicate strokes</div>
               <p className="lc-settings-hint">
-                Older versions sometimes saved the same pen stroke twice. Removing the extras doesn’t change how pages look.
+                Older versions sometimes saved a stroke twice. Removing the extras doesn’t change your pages.
               </p>
               <div className="lc-pad-hub-check">
                 <button aria-label="Check for duplicate strokes" title="Check for duplicate strokes"
@@ -2640,7 +2640,7 @@ export function SettingsModal({
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Search index</div>
               <p className="lc-settings-hint">
-                Lets Ask find text in your documents. If answers seem out of date, clear it. Your documents aren’t affected.
+                Lets the AI assistant find text in your documents when you ask it something. If its answers seem out of date, remove the index. Your documents aren’t affected.
               </p>
               <div className="lc-pad-hub-check">
                 <button aria-label="Check search index" title="Check search index"
@@ -2659,7 +2659,7 @@ export function SettingsModal({
                     void runIndexInspect(true);
                   }}
                 ><SettingsIcon id="diagnose"/></button>
-                <HoldButton label="Clear local search index" ariaLabel="Hold to clear local search index" dataTip="Clear local search index"
+                <HoldButton label="Remove local search index" ariaLabel="Hold to clear local search index" dataTip="Remove local search index"
                   className="lc-secondary lc-settings-icon-action lc-hold-danger" disabled={indexWipe.kind === "busy"}
                   onConfirm={() => void runIndexWipe()}><SettingsIcon id="delete"/></HoldButton>
               </div>
@@ -2669,8 +2669,8 @@ export function SettingsModal({
 </SettingsFold>
               <SettingsFold id="ui" title="Display">
                 <div className="lc-setting-row">
-                  <div className="lc-settings-subhead">Top bar buttons</div>
-                  <p className="lc-settings-hint">Choose which shortcuts appear at the top. Everything stays available from Home.</p>
+                  <div className="lc-settings-subhead">Top bar shortcuts</div>
+                  <p className="lc-settings-hint">The shortcuts shown in the top bar. Everything stays available from Home.</p>
                   <SettingsChoices className="lc-settings-choice" aria-label="Top bar buttons">
                     {HEADER_MODES_SHOWN.map(([mode, label]) => <button key={mode} type="button" role="switch"
                       aria-label={`Show ${label} in header`} aria-checked={headerModes[mode]}
@@ -2682,15 +2682,16 @@ export function SettingsModal({
                 </div>
                 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Menu side</div>
-              <p className="lc-settings-hint">Puts the top bar, assistant panel and menus on the side that suits your hand.</p>
+              <p className="lc-settings-hint">Puts the top bar, the AI assistant’s panel and the menus on the left or right, for left-handed or right-handed use.</p>
                 <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Menu side">
                   {(["right", "left"] as const).map(hand => <button key={hand} type="button" role="radio"
                     aria-checked={uiHandedness === hand} className={uiHandedness === hand ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
-                    onClick={() => setUiHandedness(hand)}><strong>{hand === "right" ? "Right hand" : "Left hand"}</strong></button>)}
+                    onClick={() => setUiHandedness(hand)}><strong>{hand === "right" ? "Right-handed" : "Left-handed"}</strong></button>)}
                 </SettingsChoices>
                 </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Corners</div>
+                <p className="lc-settings-hint">Square or rounded corners across the app.</p>
                 <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Corners">
                   {(["blocky", "rounded"] as const).map(style => <button key={style} type="button" role="radio"
                     aria-checked={uiCorners === style} className={uiCorners === style ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
@@ -2698,26 +2699,28 @@ export function SettingsModal({
                 </SettingsChoices>
                 </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">When the app opens</div>
+<div className="lc-settings-subhead">Tabs on launch</div>
+                <p className="lc-settings-hint">What the app opens to.</p>
                 <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Tabs on launch">
                   {([
-                    ["restore", "Reopen last session", "Opens where you left off. Can be slow with large documents."],
-                    ["home", "Keep tabs, start on Home", "Your tabs stay, but nothing loads until you tap one."],
-                    ["fresh", "Start fresh", "Opens Home with no tabs. Your documents are kept."],
+                    ["restore", "Reopen last session", "Opens where you left off, which can be slow with large documents."],
+                    ["home", "Keep tabs, start on Home", "Keeps your tabs but opens Home, and nothing loads until you tap a tab."],
+                    ["fresh", "Start fresh", "Opens Home with no tabs, and your documents are kept."],
                   ] as const).map(([value, label, hint]) => <button key={value} type="button" role="radio"
                     aria-checked={startupTabs === value} className={startupTabs === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                     onClick={() => setStartupTabs(value)}>
                     <strong>{label}</strong>{hint && <span className="lc-muted">{hint}</span>}
                   </button>)}
                 </SettingsChoices>
-                <p className="lc-settings-hint">Takes effect the next time you open the app.</p>
+                <p className="lc-settings-hint">You’ll see a change the next time you open the app.</p>
                 </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Reading</div>
+<div className="lc-settings-subhead">Reading layout</div>
+                <p className="lc-settings-hint">How documents are shown on screen.</p>
                 <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Reading">
                   {([
-                    ["scroll", "Scroll", "Pages in one continuous column."],
-                    ["pages", "Pages", "One page at a time; swipe sideways to turn."],
+                    ["scroll", "Scroll", "Shows the pages in one continuous column."],
+                    ["pages", "Page by page", "Shows one page at a time, and you swipe sideways to turn."],
                   ] as const).map(([value, label, hint]) => <button key={value} type="button" role="radio"
                     aria-checked={readingMode === value} className={readingMode === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                     onClick={() => setReadingMode(value)}>
@@ -2725,9 +2728,10 @@ export function SettingsModal({
                   </button>)}
                 </SettingsChoices>
                 <div className="lc-settings-subhead">Page size</div>
+                <p className="lc-settings-hint">How big pages appear.</p>
                   <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Page size">
                     {([
-                      ["full", "Full screen", ""],
+                      ["full", "Full screen", "Pages fill the screen."],
                       ["margin", "Slightly zoomed out", "Leaves a margin around the page, with room for booktabs beside their footnotes."],
                     ] as const).map(([value, label, hint]) => <button key={value} type="button" role="radio"
                       aria-checked={pageFit === value} className={pageFit === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
@@ -2738,31 +2742,31 @@ export function SettingsModal({
                 </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Booktabs</div>
-                <p className="lc-settings-hint">Numbered tabs match each footnote's color and mark its place on the page.</p>
+                <p className="lc-settings-hint">Colored, numbered tabs that mark each footnote’s place on the page.</p>
                 <SettingsChoices className="lc-settings-choice" aria-label="Booktabs">
                   <button type="button" role="switch" aria-checked={showBooktabs}
                     className={showBooktabs ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                     onClick={() => setShowBooktabs(!showBooktabs)}><strong>Show booktabs</strong></button>
                 </SettingsChoices>
                 {showBooktabs && <>
-                  <div className="lc-settings-subhead">Position</div>
+                  <div className="lc-settings-subhead">Booktab position</div>
                   <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Booktab position">
-                    {([["beside", "Same row as footnote"], ["top", "Top edge"], ["bottom", "Bottom edge"]] as const)
+                    {([["beside", "Beside the footnote"], ["top", "Along the top"], ["bottom", "Along the bottom"]] as const)
                       .filter(([value]) => value !== "beside" || pageFit === "margin").map(([value, label]) =>
                       <button key={value} type="button" role="radio" aria-checked={shownPosition === value}
                         className={shownPosition === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                         onClick={() => setBooktabPosition(value)}><strong>{label}</strong></button>)}
                   </SettingsChoices>
-                  <div className="lc-settings-subhead">Which footnotes</div>
+                  <div className="lc-settings-subhead">Booktab footnotes</div>
                   <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Booktab footnotes">
-                    {([["chatbot", "ChatBot footnotes"], ["all", "All footnotes"]] as const).map(([value, label]) =>
+                    {([["chatbot", "Only ChatBot footnotes"], ["all", "All footnotes"]] as const).map(([value, label]) =>
                       <button key={value} type="button" role="radio" aria-checked={booktabFootnotes === value}
                         className={booktabFootnotes === value ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                         onClick={() => setBooktabFootnotes(value)}><strong>{label}</strong></button>)}
                   </SettingsChoices>
                 </>}
                 <div className="lc-settings-subhead">Footnote titles</div>
-                <p className="lc-settings-hint">A footnote's title beside its square, kept in the margin so it never covers the page's text. Where the margin is too narrow it is left off; the footnote panel always shows it.</p>
+                <p className="lc-settings-hint">Shown in the margin beside the footnote’s square, never over the text. If the margin is too narrow, it’s left off. The footnote panel always shows it.</p>
                 <SettingsChoices className="lc-settings-choice" aria-label="Footnote titles">
                   <button type="button" role="switch" aria-checked={showFootnoteTitles}
                     className={showFootnoteTitles ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
@@ -2770,7 +2774,7 @@ export function SettingsModal({
                 </SettingsChoices>
                 </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Assistant replies</div>
+<div className="lc-settings-subhead">AI assistant replies</div>
                 <SettingsChoices className="lc-settings-choice" aria-label="Thinking display">
                   {([
                     ["autoCollapseThinking", "Collapse steps when the answer arrives", ""],
@@ -2782,7 +2786,7 @@ export function SettingsModal({
                     <strong>{label}</strong>{hint && <span className="lc-muted">{hint}</span>}
                   </button>)}
                 </SettingsChoices>
-                <p className="lc-settings-hint">How the assistant’s replies look in every chat.</p>
+                <p className="lc-settings-hint">Applies to every chat.</p>
                 <SettingsChoices className="lc-settings-choice lc-settings-coach-flags">
                   {SHARED_AGENT_FLAGS.map(([key, label, hint]) => (
                     <button key={key} type="button" role="switch"
@@ -2796,8 +2800,8 @@ export function SettingsModal({
                 </SettingsChoices>
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Notifications</div>
-              <p className="lc-settings-hint">Small notices in the corner, like “Desktop app is offline”. Turning them off doesn’t hide sync status.</p>
+<div className="lc-settings-subhead">Show notifications</div>
+              <p className="lc-settings-hint">Small notices in the corner, like “Desktop app is offline”. Sync status always shows.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
@@ -2820,9 +2824,9 @@ export function SettingsModal({
 </SettingsFold>
               <SettingsFold id="diagnostics" title="Troubleshooting">
               <div className="lc-setting-row">
-<p className="lc-settings-hint">Tools for diagnosing problems. Most people never need these.</p>
+<p className="lc-settings-hint">For tracking down problems. Most people never need these.</p>
 <div className="lc-settings-subhead">Measurement refresh rate</div>
-              <p className="lc-settings-hint">The screen speed the performance tools compare against.</p>
+              <p className="lc-settings-hint">The screen refresh rate the performance tools measure against.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
@@ -2971,7 +2975,7 @@ export function SettingsModal({
               </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Page preview while flicking</div>
-              <p className="lc-settings-hint">While flicking through a PDF, shows the page you’ll land on.</p>
+              <p className="lc-settings-hint">While you flick through a PDF, it shows the page you’ll land on.</p>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
@@ -3038,7 +3042,7 @@ export function SettingsModal({
                 >
                   <strong>Run every test</strong>
                   <span className="lc-muted">
-                    The assistant can point to a real failing example.
+                    Runs all the tests, so the AI assistant can point to a real failing example.
                   </span>
                 </button>
                 <button
@@ -3054,12 +3058,12 @@ export function SettingsModal({
                 >
                   <strong>Stop at the first failure</strong>
                   <span className="lc-muted">
-                    Faster when there are many tests.
+                    Stops at the first failed test, which is faster when there are many.
                   </span>
                 </button>
               </SettingsChoices>
               <div className="lc-settings-subhead">After tests fail</div>
-<p className="lc-settings-hint">Test results always appear in the chat.</p>
+<p className="lc-settings-hint">When the AI assistant steps in. Test results always show in the chat.</p>
               <SettingsChoices
                 className="lc-settings-choice"
                 role="radiogroup"
@@ -3078,7 +3082,7 @@ export function SettingsModal({
                 >
                   <strong>Wait</strong>
                   <span className="lc-muted">
-                    The assistant stays quiet until you ask.
+                    The AI assistant stays quiet until you ask.
                   </span>
                 </button>
                 <button
@@ -3094,7 +3098,7 @@ export function SettingsModal({
                 >
                   <strong>One reply for all failures</strong>
                   <span className="lc-muted">
-                    The assistant looks at every failed test at once.
+                    The AI assistant looks at every failed test and answers once.
                   </span>
                 </button>
                 <button
@@ -3110,7 +3114,7 @@ export function SettingsModal({
                 >
                   <strong>One reply per failure</strong>
                   <span className="lc-muted">
-                    A separate reply for each failed test.
+                    The AI assistant answers each failed test separately.
                   </span>
                 </button>
               </SettingsChoices>
@@ -3163,25 +3167,24 @@ export function SettingsModal({
           {(tab === "llm" || searching) && (
             <div className="lc-settings-fields">
               {!searching && <div className="lc-settings-callout" role="note">
-                <strong>&ldquo;localhost&rdquo; means this device</strong>
                 <p>
-                  In the addresses below, <code>localhost</code> (or <code>127.0.0.1</code>) always points to
-                  the device this app is running on{mobile ? ", not your PC" : ""}.
+                  In the addresses below, <code>localhost</code> (or <code>127.0.0.1</code>) means the
+                  device you’re using{mobile ? ", not your PC" : ""}.
                   {mobile ? " To use an AI model on your PC, enter the PC’s address instead." : ""}
                 </p>
               </div>}
 
               <SettingsFold id="llm" title="AI model">
               <div className="lc-setting-row">
-<div className="lc-settings-subhead">Status</div>
+<div className="lc-settings-subhead">{draft.default_provider === "openai" || draft.default_provider === "groq" ? "Cloud AI model status" : "Local AI model status"}</div>
               <p className="lc-agent-live" data-status={coachStatus}>
                 <span className="lc-agent-live-dot" aria-hidden />
                 <span>
                   {coachStatus === "online"
                     ? "AI model online"
                     : coachStatus === "offline"
-                      ? "Agent LLM offline"
-                      : "Agent LLM status unknown"}
+                      ? "AI model offline"
+                      : "Can’t reach the AI model. It may not be running."}
                 </span>
               </p>
               {coachDetail && <p className="lc-settings-hint">{coachDetail}</p>}
@@ -3193,7 +3196,7 @@ export function SettingsModal({
 
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Model setup</div>
+<div className="lc-settings-subhead">{draft.default_provider === "openai" || draft.default_provider === "groq" ? "Cloud AI model" : "Local AI model"}</div>
               <label>
                 <span>Provider</span>
                 <select
@@ -3252,7 +3255,7 @@ export function SettingsModal({
               </label>
               {(providerFocus === "local" || providerFocus === "ollama") && (
                 <label>
-                  <span>Models folder</span>
+                  <span>Models folder (optional)</span>
                   <input
                     value={draft.models_dir}
                     onChange={(e) =>
@@ -3261,8 +3264,8 @@ export function SettingsModal({
                     placeholder="C:\Users\you\Models"
                   />
                   <p className="lc-settings-hint">
-                    Optional. A folder of downloaded models to choose from, even when the
-                    server isn’t running. Save, then tap Refresh models.
+                    Lets you choose a model even when the server isn’t running. Save, then
+                    tap Refresh model list.
                   </p>
                 </label>
               )}
@@ -3289,19 +3292,19 @@ export function SettingsModal({
                   disabled={catalogBusy}
                   onClick={() => void refreshCatalog(providerFocus)}
                 >
-                  {catalogBusy ? "Reading…" : "Refresh models"}
+                  {catalogBusy ? "Retrieving…" : "Refresh model list"}
                 </button>
               </div>
               <label>
-                <span>Image model</span>
+                <span>Image model (optional)</span>
                 <input
                   value={provider.vision_model}
                   onChange={(e) =>
                     patchProvider(providerFocus, { vision_model: e.target.value })
                   }
-                  placeholder="(same as chat model)"
+                  placeholder="Same as the chat model"
                 />
-                <p className="lc-settings-hint">Used when the AI looks at your board or images. Leave empty to use the chat model.</p>
+                <p className="lc-settings-hint">The model that reads your board and pictures. Leave it empty to use the chat model.</p>
               </label>
               {/*
                 Embeddings, for the document index.
@@ -3313,28 +3316,28 @@ export function SettingsModal({
               {providerFocus === "local" && (
                 <>
                   <label>
-                    <span>Search model</span>
+                    <span>Search model (optional)</span>
                     <input
                       value={provider.embed_model ?? ""}
                       onChange={(e) =>
                         patchProvider(providerFocus, { embed_model: e.target.value })
                       }
                       list="lc-model-options"
-                      placeholder="(none — match on words)"
+                      placeholder="None, match words only"
                     />
-                    <p className="lc-settings-hint">Helps Ask find passages by meaning, not just exact words. Leave empty to match words only.</p>
+                    <p className="lc-settings-hint">Lets the AI assistant find passages by meaning, not just exact words.</p>
                   </label>
                   <label>
-                    <span>Search server</span>
+                    <span>Search server (optional)</span>
                     <input
                       value={provider.embed_base_url ?? ""}
                       onChange={(e) =>
                         patchProvider(providerFocus, { embed_base_url: e.target.value })
                       }
-                      placeholder="(same as base URL)"
+                      placeholder="Same as the server above"
                     />
                     <p className="lc-settings-hint">
-                      Optional. Leave empty to use the server address above.
+                      Leave it empty to use the server address above.
                     </p>
                   </label>
                 </>
@@ -3342,7 +3345,7 @@ export function SettingsModal({
 
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Can read images</div>
+<div className="lc-settings-subhead">Image support</div>
               <SettingsChoices
                 className="lc-settings-choice lc-settings-choice-compact"
                 role="radiogroup"
@@ -3394,9 +3397,9 @@ export function SettingsModal({
                           : "gsk_…"
                     }
                   />
-                  <p className="lc-settings-hint">Kept in this device&apos;s config.toml. An environment variable wins if set.</p>
+                  <p className="lc-settings-hint">Saved in this device’s config.toml. An environment variable overrides it.</p>
                   {(providerFocus === "openai" ? draft.openai_key_set : draft.groq_key_set) && (
-                    <HoldButton label="Clear stored key" ariaLabel="Hold to clear stored key" dataTip="Clear stored key"
+                    <HoldButton label="Remove stored key" ariaLabel="Hold to clear stored key" dataTip="Remove stored key"
                       className="lc-secondary lc-settings-icon-action lc-hold-danger"
                       onConfirm={() => {
                         if (providerFocus === "openai") {
@@ -3412,7 +3415,7 @@ export function SettingsModal({
                     </HoldButton>
                   )}
                   {(providerFocus === "openai" ? clearOpenaiKey : clearGroqKey) && (
-                    <p className="lc-muted">Stored key will be cleared on Save.</p>
+                    <p className="lc-muted">Your key will be removed when you save.</p>
                   )}
                 </label>
               )}
@@ -3420,7 +3423,7 @@ export function SettingsModal({
               </div>
 <div className="lc-setting-row">
 <div className="lc-settings-subhead">Model for each task</div>
-              <p className="lc-settings-hint">Use a different AI for different jobs. Most people can leave these alone.</p>
+              <p className="lc-settings-hint">Most people can leave these alone.</p>
               {MODES.map((mode) => (
                 <label key={mode}>
                   <span>{MODE_LABELS[mode]}</span>
@@ -3445,40 +3448,40 @@ export function SettingsModal({
                     <p className="lc-settings-hint">{AGENT_PROVIDER_HINTS[draft.modes[mode] as "app" | "bot"]}</p>}
                 </label>
               ))}
-              <p className="lc-settings-hint">AI application: {AGENT_PROVIDER_HINTS.app}.<br />AI assistant: {AGENT_PROVIDER_HINTS.bot}.</p>
+              <p className="lc-settings-hint">Assistant app: {AGENT_PROVIDER_HINTS.app}.<br />AI assistant: {AGENT_PROVIDER_HINTS.bot}.</p>
               <label>
-                <span>Give the assistant up to</span>
-                <select aria-label="Give the assistant up to" value={draft.coach?.agent_bot_timeout_secs ?? 600}
+                <span>AI assistant time limit</span>
+                <select aria-label="AI assistant time limit" value={draft.coach?.agent_bot_timeout_secs ?? 600}
                   onChange={e => setDraft(prev => ({ ...prev, coach: { ...DEFAULT_COACH_FLAGS, ...prev.coach,
                     agent_bot_timeout_secs: Number(e.target.value) } }))}>
                   {[1, 2, 5, 10].map(minutes => <option key={minutes} value={minutes * 60}>{minutes} {minutes === 1 ? "minute" : "minutes"}</option>)}
                 </select>
               </label>
               <button type="button" className="lc-secondary" onClick={() => { setSettingsQuery(""); setPage("chatbot"); }}>
-                Choose application or assistant in ChatBot
+                Choose the AI assistant under ChatBot
               </button>
               <button type="button" role="switch" aria-checked={draft.coach?.agent_send_board_image ?? true}
                 className={(draft.coach?.agent_send_board_image ?? true) ? "lc-settings-choice-option is-active" : "lc-settings-choice-option"}
                 onClick={() => setDraft(prev => ({ ...prev, coach: { ...DEFAULT_COACH_FLAGS, ...prev.coach,
                   agent_send_board_image: !(prev.coach?.agent_send_board_image ?? true) } }))}>
-                Send the board image to agents
+                Send the board image to the AI assistant
               </button>
               </div>
 <div className="lc-setting-row">
-<div className="lc-settings-subhead">Built-in model</div>
+<div className="lc-settings-subhead">Ollama on this PC</div>
               <p className="lc-settings-hint">
-                Start or stop the AI model that comes with the app on this computer.
+                Starts or stops Ollama on this PC so your local AI model can answer. Pen Island only stops an Ollama it started itself.
               </p>
               <p className="lc-muted">
-                {llmStatus?.detail ?? "Status unknown"}
+                {llmStatus?.detail ?? "Can’t reach the AI model. It may not be running."}
                 {llmStatus?.pid != null ? ` · pid ${llmStatus.pid}` : ""}
               </p>
               <div className="lc-settings-actions-row">
                 <button type="button" className="lc-secondary" disabled={!!busy} onClick={() => void startLlm()}>
-                  Start local LLM
+                  Start Ollama
                 </button>
                 <button type="button" className="lc-secondary" disabled={!!busy} onClick={() => void stopLlm()}>
-                  Stop local LLM
+                  Stop Ollama
                 </button>
                 <button type="button" className="lc-secondary" disabled={!!busy} onClick={() => void refreshLlm()}>
                   Refresh
@@ -3488,29 +3491,29 @@ export function SettingsModal({
 </SettingsFold>
               <SettingsFold id="chatbot" title="ChatBot">
                 <div className="lc-setting-row">
-                  <p className="lc-settings-hint">Select text in a document and tap Ask ChatBot to get an explanation added as a footnote. Keep Pen Island open on your PC so answers can be delivered.</p>
-                  <label><span>Answer with</span>
+                  <p className="lc-settings-hint">Select text and tap Ask ChatBot, and an explanation is added as a footnote. Keep Pen Island open on your PC so answers arrive.</p>
+                  <label><span>Footnotes written by</span>
                     <select aria-label="ChatBot answer mode" value={chatBotAnswerMode} onChange={event => setChatBotAnswerMode(event.target.value as ChatBotAnswerMode)}>
                       <option value="llm">Your AI model</option>
-                      <option value="bot">An assistant bot</option>
+                      <option value="bot">An AI assistant bot</option>
                       <option value="app">An assistant app on this PC</option>
                     </select>
                   </label>
-                  {chatBotAnswerMode === "llm" ? <p className="lc-settings-hint">A local model or a cloud API key. Quick; fine for single footnotes.</p>
+                  {chatBotAnswerMode === "llm" ? <p className="lc-settings-hint">The AI model set up under AI model, local or cloud, writes the footnotes.</p>
                     : chatBotAnswerMode === "app" ? <>
-                      <p className="lc-settings-hint">Codex or Claude Code. Runs automatically when you ask for a footnote, using your subscription's limits.</p>
+                      <p className="lc-settings-hint">Codex or Claude Code runs on this PC and writes each footnote automatically when you ask, using your subscription’s limits.</p>
                       {runnerConfig ? renderRunnerFields(runnerConfig) : null}
                       {runnerStatus ? <p className="lc-settings-hint" role="status">{assistantRunnerMessage(runnerStatus)}</p> : null}
                       {runnerError ? <p className="lc-settings-hint" role="alert">{runnerError}</p> : null}
                     </> : <>
-                  <p className="lc-settings-hint">Grok, Claude and others. You ask it to check, or tell it to check every few minutes.</p>
-                  <label><span>Assistant</span>
+                  <p className="lc-settings-hint">An online AI assistant such as Grok or Claude connects to Pen Island through MCP and answers your requests when you ask it to check.</p>
+                  <label><span>AI assistant</span>
                     <select aria-label="ChatBot assistant" value={chatBotClient} onChange={event => setChatBotClient(event.target.value as ChatBotClient)}>
                       {CHATBOT_CLIENTS.map(client => <option key={client.id} value={client.id}>{client.label}</option>)}
                     </select>
                   </label>
                   <p className="lc-settings-hint">{CHATBOT_CLIENTS.find(client => client.id === chatBotClient)?.help}</p>
-                  <p className="lc-settings-hint">Connect the assistant in its own app. Every connected assistant sees the same list of requests.</p>
+                  <p className="lc-settings-hint">The AI assistant you use. Connect it in its own app, and every connected AI assistant sees the same requests.</p>
                   {/* Shown greyed out while the PC is out of reach, so it can be found. */}
                   <SettingsChoices className="lc-settings-choice">
                     <button type="button" role="switch" aria-checked={Boolean(runnerConfig?.allow_bots)} disabled={!runnerConfig}
@@ -3518,30 +3521,30 @@ export function SettingsModal({
                       onClick={() => runnerConfig && setRunnerConfig({ ...runnerConfig, allow_bots: !runnerConfig.allow_bots })}>
                       <strong>Let it hand the writing to an app on this PC</strong>
                       <span className="lc-muted">{runnerConfig
-                        ? "Ask your assistant to “use Codex”, and Codex or Claude Code writes the footnotes with your subscription."
-                        : "Open Pen Island on your PC to change this. It is saved there."}</span>
+                        ? "When you tell the AI assistant to “use Codex”, Codex or Claude Code writes the footnotes on this PC, using your subscription."
+                        : "This is saved on your PC. Open Pen Island there to change it."}</span>
                     </button>
                   </SettingsChoices>
                   {runnerConfig?.allow_bots ? renderRunnerFields(runnerConfig) : null}
                   {runnerStatus && runnerConfig?.allow_bots ? <p className="lc-settings-hint" role="status">{assistantRunnerMessage(runnerStatus)}</p> : null}
                   <details className="lc-settings-advanced">
-                    <summary>Advanced: connection commands</summary>
-                    <label><span>Command for assistants on this PC</span><input readOnly value="lc mcp" /></label>
-                    <label><span>Private connection for online assistants</span><input readOnly value="lc mcp --listen 127.0.0.1:7879 --auth-token-file path-to-token.txt" /></label>
-                    <p className="lc-settings-hint">Shares only footnote requests and answers, and needs its own password file. Online assistants such as Grok Bot also need the sign-in bridge; see the setup guide (docs/AI-SETUP-GUIDE.md).</p>
+                    <summary>Advanced manual connection</summary>
+                    <label><span>Command for AI assistants on this PC</span><input readOnly value="lc mcp" /></label>
+                    <label><span>Private connection for online AI assistants</span><input readOnly value="lc mcp --listen 127.0.0.1:7879 --auth-token-file path-to-token.txt" /></label>
+                    <p className="lc-settings-hint">It shares only footnote requests and answers, and needs its own password file. Online AI assistants like Grok Bot also need the sign-in bridge, which the AI setup guide explains.</p>
                   </details>
                   {chatBotClient === "dots" && <>
-                    <p className="lc-settings-hint">You’ll need an OpenAI Platform tunnel ID and API key; a ChatGPT subscription alone isn’t enough.</p>
-                    <a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noreferrer">OpenAI connection guide</a>
+                    <p className="lc-settings-hint">You’ll need an OpenAI Platform tunnel ID and API key. A ChatGPT subscription alone won’t do.</p>
+                    <a href="https://developers.openai.com/api/docs/guides/secure-mcp-tunnels" target="_blank" rel="noreferrer">How to connect OpenAI</a>
                   </>}
-                  {chatBotClient === "grok" && <a href="https://docs.x.ai/grok-bot/team-bots" target="_blank" rel="noreferrer">Grok Bot connection guide</a>}
+                  {chatBotClient === "grok" && <a href="https://docs.x.ai/grok-bot/team-bots" target="_blank" rel="noreferrer">How to connect Grok Bot</a>}
                   </>}
                 </div>
               </SettingsFold>
               <SettingsFold id="voice" title="Voice typing">
               <div className="lc-setting-row">
-                <p className="lc-settings-hint">Choose how the microphone in the chat box turns speech into text.</p>
-                <div className="lc-settings-subhead">Engine</div>
+                <p className="lc-settings-hint">What turns your speech into text.</p>
+                <div className="lc-settings-subhead">Speech engine</div>
                 <SettingsChoices className="lc-settings-choice" role="radiogroup" aria-label="Voice typing engine">
                   {VOICE_ENGINES.map((engine) => (
                     <button
@@ -3560,12 +3563,12 @@ export function SettingsModal({
                 {voice.engine === "local" && (
                   <>
                     <label>
-                      <span>Whisper server URL</span>
+                      <span>Whisper server address</span>
                       <input
                         value={voice.local_base_url}
                         onChange={(e) => patchVoice({ local_base_url: e.target.value })}
                       />
-                      <p className="lc-settings-hint">On the tablet, use this PC&apos;s address, e.g. http://192.168.1.20:8000/v1 — localhost would be the tablet.</p>
+                      <p className="lc-settings-hint">On the tablet, use this PC’s address. Localhost would mean the tablet itself.</p>
                     </label>
                     <label>
                       <span>Model</span>
@@ -3608,9 +3611,9 @@ export function SettingsModal({
                               : "gsk_…"
                         }
                       />
-                      <p className="lc-settings-hint">Shared with the OpenAI/Groq provider under LLM.</p>
+                      <p className="lc-settings-hint">Shared with OpenAI or Groq under AI model.</p>
                       {(voice.engine === "openai" ? draft.openai_key_set : draft.groq_key_set) && (
-                        <HoldButton label="Clear stored key" ariaLabel="Hold to clear stored key" dataTip="Clear stored key"
+                        <HoldButton label="Remove stored key" ariaLabel="Hold to clear stored key" dataTip="Remove stored key"
                           className="lc-secondary lc-settings-icon-action lc-hold-danger"
                           onConfirm={() => {
                             if (voice.engine === "openai") {
@@ -3626,7 +3629,7 @@ export function SettingsModal({
                         </HoldButton>
                       )}
                       {(voice.engine === "openai" ? clearOpenaiKey : clearGroqKey) && (
-                        <p className="lc-muted">Stored key will be cleared on Save.</p>
+                        <p className="lc-muted">Your key will be removed when you save.</p>
                       )}
                     </label>
                   </>
@@ -3652,9 +3655,9 @@ export function SettingsModal({
                         }}
                         placeholder={draft.deepgram_key_set ? "leave blank to keep the stored key" : ""}
                       />
-                      <p className="lc-settings-hint">Kept in this device&apos;s config.toml. DEEPGRAM_API_KEY wins if set.</p>
+                      <p className="lc-settings-hint">Saved in this device’s config.toml. The DEEPGRAM_API_KEY environment variable overrides it.</p>
                       {draft.deepgram_key_set && (
-                        <HoldButton label="Clear stored key" ariaLabel="Hold to clear stored key" dataTip="Clear stored key"
+                        <HoldButton label="Remove stored key" ariaLabel="Hold to clear stored key" dataTip="Remove stored key"
                           className="lc-secondary lc-settings-icon-action lc-hold-danger"
                           onConfirm={() => {
                             setDeepgramKeyDraft("");
@@ -3665,7 +3668,7 @@ export function SettingsModal({
                         </HoldButton>
                       )}
                       {clearDeepgramKey && (
-                        <p className="lc-muted">Stored key will be cleared on Save.</p>
+                        <p className="lc-muted">Your key will be removed when you save.</p>
                       )}
                     </label>
                   </>
@@ -3685,9 +3688,9 @@ export function SettingsModal({
                     </button>
                   ))}
                 </SettingsChoices>
-                <p className="lc-settings-hint">After you stop talking, an AI model fixes punctuation, capital letters and filler words like “um”. It won’t change your words.</p>
+                <p className="lc-settings-hint">When you stop talking, your AI model fixes punctuation, capitals and fillers like “um”. Your words stay.</p>
                 <div className="lc-settings-subhead">Vocabulary</div>
-                <p className="lc-settings-hint">Words you want spelled correctly, like names and technical terms. Start from a list and edit it; your edits become Custom. Not used by Android voice typing.</p>
+                <p className="lc-settings-hint">Words you want spelled correctly, like names and technical terms. Start from a list and edit it, and your edits become Custom. Android voice typing doesn’t use it.</p>
                 <SettingsChoices className="lc-settings-choice lc-settings-choice-compact" role="radiogroup" aria-label="Vocabulary list">
                   {[...VOCABULARY_PRESETS.map(preset => ({ id: preset.id, label: preset.label, words: preset.words })),
                     { id: "custom", label: "Custom", words: customVocabulary }].map(choice => {
@@ -3710,23 +3713,23 @@ export function SettingsModal({
                   <textarea
                     rows={3}
                     value={voice.vocabulary}
-                    placeholder="memoization, heapq, BFS, two pointers"
+                    placeholder="For example: memoization, heapq, BFS"
                     onChange={(e) => {
                       patchVoice({ vocabulary: e.target.value });
                       if (vocabularyPresetId(e.target.value) === "custom") setCustomVocabulary(e.target.value);
                     }}
                   />
-                  <p className="lc-settings-hint">Separate words with commas or new lines.</p>
+                  <p className="lc-settings-hint">Put commas or new lines between words.</p>
                 </label>
               </div>
               </SettingsFold>
             </div>
           )}
-          {searching && <p className="lc-muted lc-settings-search-empty">No matching settings.</p>}
+          {searching && <p className="lc-muted lc-settings-search-empty">Nothing matches. Try another word.</p>}
         </div>
 
         <div className="lc-settings-foot lc-dialog-foot">
-          <span className="lc-settings-change-count" role="status" aria-live="polite" data-changed={changeCount > 0}>{changeCount ? `${changeCount} ${changeCount === 1 ? "change" : "changes"}` : "No changes"}</span>
+          <span className="lc-settings-change-count" role="status" aria-live="polite" data-changed={changeCount > 0}>{changeCount ? `${changeCount} ${changeCount === 1 ? "change" : "changes"}` : "Nothing changed yet"}</span>
           {page !== "root" && <button type="button" className="lc-secondary lc-dialog-action" disabled={saving} onClick={()=>setPage("root")}>Back</button>}
           <button type="button" className="lc-secondary lc-dialog-action" disabled={saving} onClick={cancel}>Cancel</button>
           <button type="button" className="lc-primary lc-dialog-action" disabled={!dirty || saving} onClick={()=>void save({close:true})}>{saving ? "Saving..." : "Save"}</button>
@@ -3761,7 +3764,7 @@ function DebugLogSettings({ on, saved, onChange }: {
     <>
       <div className="lc-settings-subhead">Activity log</div>
       <p className="lc-settings-hint">
-        Records what the app does on this device, to help track down problems. Off records nothing.
+        Records what the app does on this device, to help track down problems. When it’s off, nothing is recorded.
       </p>
       <SettingsChoices className="lc-settings-choice lc-settings-choice-compact" role="radiogroup" aria-label="Activity log">
         {([false, true] as const).map((value) => (
@@ -3772,7 +3775,7 @@ function DebugLogSettings({ on, saved, onChange }: {
           </button>
         ))}
       </SettingsChoices>
-      {on && !saved && <p className="lc-settings-hint">Board and client calls start next launch.</p>}
+      {on && !saved && <p className="lc-settings-hint">Board and client calls are recorded from the next launch.</p>}
       <div className="lc-settings-actions-row">
         <button type="button" className="lc-secondary" disabled={busy || !count}
           onClick={() => {
@@ -3816,17 +3819,17 @@ function LicenseSettings() {
         separate license (PolyForm Noncommercial License 1.0.0).
       </p>
       <div className="lc-settings-subhead">Open-source components</div>
-      <p className="lc-settings-hint">Pen Island includes software from other authors, used under their licenses.</p>
+      <p className="lc-settings-hint">Parts of Pen Island come from other authors, used under their licenses.</p>
       {text === null ? (
         <div className="lc-settings-actions-row">
           <button type="button" className="lc-secondary" onClick={show}>
-            <SettingsIcon id="licenses"/> Show licenses
+            <SettingsIcon id="licenses"/> Show Licenses
           </button>
         </div>
       ) : (
         <pre className="lc-settings-licenses" tabIndex={0}>{text}</pre>
       )}
-      {failed && <p className="lc-settings-hint">Couldn’t load the license list.</p>}
+      {failed && <p className="lc-settings-hint">Couldn’t load the license list. Try again later.</p>}
     </>
   );
 }

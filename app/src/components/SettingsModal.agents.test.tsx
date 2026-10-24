@@ -39,7 +39,7 @@ function client() {
 const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>("button")].find(node =>
   node.textContent?.trim() === text || node.querySelector(".lc-settings-fold-title")?.textContent === text)!;
 const picker = (mode: string) => host.querySelector<HTMLSelectElement>(`[aria-label="${mode} provider"]`)!;
-const image = () => [...host.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find(node => node.textContent?.includes("Send the board image to agents"))!;
+const image = () => [...host.querySelectorAll<HTMLButtonElement>('[role="switch"]')].find(node => node.textContent?.includes("Send the board image to the AI assistant"))!;
 async function open(api: LcClient) {
   await act(async () => root.render(<SettingsModal open client={api} onClose={() => {}} initialTab="llm" />));
   await act(async () => button("AI model").click());
@@ -58,10 +58,10 @@ async function reopen(api: LcClient) {
 it.each(["app", "bot"])("shows, saves and reloads %s for every coach mode and the board image switch", async provider => {
   const api = client(); await open(api);
   expect(image().getAttribute("aria-checked")).toBe("true");
-  expect(host.textContent).toContain("Uses the app chosen for ChatBot on this PC");
-  expect(host.textContent).toContain("Answered by the assistant chosen for ChatBot; can take a few minutes");
+  expect(host.textContent).toContain("Uses the assistant app chosen under ChatBot on this PC");
+  expect(host.textContent).toContain("Uses the AI assistant chosen under ChatBot, which can take a few minutes");
   for (const mode of modes) {
-    expect([...picker(mode).options].map(option => [option.value, option.textContent])).toContainEqual(["app", "AI application"]);
+    expect([...picker(mode).options].map(option => [option.value, option.textContent])).toContainEqual(["app", "Assistant app"]);
     expect([...picker(mode).options].map(option => [option.value, option.textContent])).toContainEqual(["bot", "AI assistant"]);
     await choose(mode, provider);
   }
@@ -84,7 +84,7 @@ it("resets and cancels agent drafts with the AI models section, and links to the
   const api = client(); await open(api);
   await choose("Review and Ask", "app"); await act(async () => image().click());
   expect(host.querySelector('.lc-settings-change-count')?.textContent).toBe("2 changes");
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Reset AI model"]')!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Undo changes to AI model"]')!.click());
   expect(picker("Review and Ask").value).toBe("local");
   expect(image().getAttribute("aria-checked")).toBe("true");
   await choose("Diagrams", "bot"); await act(async () => image().click());
@@ -92,7 +92,7 @@ it("resets and cancels agent drafts with the AI models section, and links to the
   await reopen(api);
   expect(picker("Diagrams").value).toBe("local");
   expect(image().getAttribute("aria-checked")).toBe("true");
-  await act(async () => button("Choose application or assistant in ChatBot").click());
+  await act(async () => button("Choose the AI assistant under ChatBot").click());
   expect(host.querySelector('.lc-settings-fold.is-expanded .lc-settings-fold-title')?.textContent).toBe("ChatBot");
   expect(host.querySelector('[aria-label="ChatBot answer mode"]')).not.toBeNull();
   expect(api.putConfig).not.toHaveBeenCalled();
@@ -109,7 +109,7 @@ it("keeps different providers independent across modes when saving and reloading
 
 it.each([1, 2, 5, 10])("shows, saves and reloads a %i minute assistant deadline", async minutes => {
   const api = client(); await open(api);
-  const deadline = () => host.querySelector<HTMLSelectElement>('[aria-label="Give the assistant up to"]')!;
+  const deadline = () => host.querySelector<HTMLSelectElement>('[aria-label="AI assistant time limit"]')!;
   expect(deadline().value).toBe("600");
   expect([...deadline().options].map(option => option.textContent)).toEqual(["1 minute", "2 minutes", "5 minutes", "10 minutes"]);
   await choose("Review and Ask", "bot");
@@ -128,13 +128,13 @@ it.each([1, 2, 5, 10])("shows, saves and reloads a %i minute assistant deadline"
 
 it("counts and resets the assistant deadline with AI model settings", async () => {
   const api = client(); await open(api);
-  const deadline = () => host.querySelector<HTMLSelectElement>('[aria-label="Give the assistant up to"]')!;
+  const deadline = () => host.querySelector<HTMLSelectElement>('[aria-label="AI assistant time limit"]')!;
   await act(async () => {
     Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(deadline(), "60");
     deadline().dispatchEvent(new Event("change", { bubbles: true }));
   });
   expect(host.querySelector('.lc-settings-change-count')?.textContent).toBe("1 change");
-  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Reset AI model"]')!.click());
+  await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="Undo changes to AI model"]')!.click());
   expect(deadline().value).toBe("600");
   expect(api.putConfig).not.toHaveBeenCalled();
 });
