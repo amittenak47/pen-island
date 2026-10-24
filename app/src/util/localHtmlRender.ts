@@ -155,6 +155,16 @@ export function liveHtmlSrcdoc(original: string, nonce: string, assetBase?: stri
       new MutationObserver(function(records) {
         for (const record of records) for (const node of record.addedNodes) holdMedia(node);
       }).observe(document, {childList: true, subtree: true});
+      // A page that sets src and calls load() in the same step as it adds the
+      // player starts loading before the observer runs: hold it right there.
+      const media = HTMLMediaElement.prototype;
+      if (!media.lcHeld) {
+        media.lcHeld = true;
+        const load = media.load;
+        media.load = function() { holdMedia(this); return load.call(this); };
+        const src = Object.getOwnPropertyDescriptor(media, "src");
+        if (src && src.set) Object.defineProperty(media, "src", {...src, set: function(value) { holdMedia(this); src.set.call(this, value); }});
+      }
     }
     let ready = false;
     let lastHeight = null;

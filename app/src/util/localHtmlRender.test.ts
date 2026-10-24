@@ -467,7 +467,20 @@ describe("live HTML with its file's folder", () => {
     expect([...doc.querySelectorAll("video, audio")].map(media => media.getAttribute("preload"))).toEqual(["none", "none", "none"]);
   });
 
-  it("leaves media alone without the folder", () => {
+  it("holds a player the page loads in the same step as it adds it", () => {
+    const { doc } = run(base);
+    const player = doc.createElement("video");
+    player.setAttribute("preload", "metadata");
+    doc.body.append(player);
+    player.src = "3.7.mp4";
+    expect(player.getAttribute("preload")).toBe("none");
+    player.setAttribute("preload", "metadata");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    player.load();
+    expect(player.getAttribute("preload")).toBe("none");
+  });
+
+    it("leaves media alone without the folder", () => {
     const doc = new DOMParser().parseFromString(liveHtmlSrcdoc('<video controls preload="metadata"></video>', "n", null), "text/html");
     expect(doc.querySelector("video")?.getAttribute("preload")).toBe("metadata");
   });
