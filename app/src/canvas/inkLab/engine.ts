@@ -119,6 +119,12 @@ export type InkLabEngine = {
   liftRaw(s?: InkLabSample): InkLabRawLiftResult;
   paint(): InkLabPaintStats;
   /**
+   * The pen is down, still and silent, and a blot could start: paint even
+   * with no new input. A still nib sends no samples, so a loop that paints
+   * only on input never let the pool begin.
+   */
+  restingPen(): boolean;
+  /**
    * Copy the in-DOM host into the committed snap. Call once at pointerdown;
    * live composite is that snap plus the live stroke until lift.
    */
@@ -426,6 +432,11 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       slow: at.slow,
     });
   };
+
+  /** Down, still, silent for {@link HOLD_IDLE_MS}, with no hold yet: one may start. */
+  const resting = () =>
+    drawing && pen != null && pen.speedBlotBlend > 1e-3 && !holding && !holdPlateau &&
+    spine.length > 0 && lastWall > 0 && wallNow() - lastWall > HOLD_IDLE_MS;
 
   const armHold = (at: SpineDot, now: number) => {
     if (holding || holdPlateau) return;
@@ -1055,15 +1066,14 @@ export function createInkLabEngine(opts: InkLabEngineOpts = {}): InkLabEngine {
       );
       return { ...result, bakeInput: state.raw, bakeOptions: state.options };
     },
+    restingPen: () => resting(),
     paint() {
       const t0 = performance.now();
       // A lost context restarts WebGL2, or drops to the 2D strip.
       if (host && gpu?.isLost()) this.attach(host);
       // A resting nib that sends no samples still grows its pool.
-      const resting = drawing && pen && pen.speedBlotBlend > 1e-3 && !holding && !holdPlateau &&
-        spine.length > 0 && lastWall > 0 && wallNow() - lastWall > HOLD_IDLE_MS;
       // It has rested since the last sample, so that is when the hold began.
-      if (resting) armHold(spine[spine.length - 1]!, t0 - (wallNow() - lastWall));
+      if (resting()) armHold(spine[spine.length - 1]!, t0 - (wallNow() - lastWall));
       if (drawing && holding && pen) applyHoldGrow(t0);
       syncSize();
       const tDraw = performance.now();

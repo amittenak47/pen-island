@@ -1709,7 +1709,10 @@ export const WhiteboardInkLab = forwardRef<RasterInkHandle, WhiteboardInkLabProp
         const stride = livePresentStride(hz, matchDisplayRef.current);
         const tick = liveTick;
         liveTick += 1;
-        if (live && !shouldCompositeLive(liveDirty, liveHold, tick, stride)) {
+        // A still pen sends nothing; it still has to reach the engine so a
+        // blot can start under it.
+        const rest = live && !liveHold && engine.restingPen?.() === true;
+        if (live && !shouldCompositeLive(liveDirty, liveHold || rest, tick, stride)) {
           if (perfOverlayRef.current && rafMs > 0) hudStatsRef.current.noteRaf(rafMs);
           return;
         }

@@ -597,6 +597,39 @@ describe("Ink lab live path", () => {
     }
   });
 
+  it("asks to be painted while a still, silent pen could start a blot", () => {
+    let wall = 1000;
+    const nowSpy = vi.spyOn(performance, "now").mockImplementation(() => wall);
+    const canvas = createCanvas(400, 300) as unknown as HTMLCanvasElement;
+    const engine = createInkLabEngine({ sdf: false });
+    engine.attach(canvas);
+    const pen = {
+      color: "#1a1a1a", baseWidth: 2, overlayScale: 1, dpr: 1, maxFullness: 1,
+      pressureClip: 1, pressureSensitive: false, speedInk: 0, speedBlotBlend: 1,
+      speedFade: 0, boldness: 1, smoothing: 0,
+    };
+    engine.setPen(pen);
+    try {
+      engine.down({ x: 80, y: 90, p: 0.5, t: 0 });
+      wall = 1020;
+      expect(engine.restingPen()).toBe(false);
+      wall = 1080;
+      // No sample for 80 ms: the loop must call paint so the blot can begin.
+      expect(engine.restingPen()).toBe(true);
+      expect(engine.paint().hold).toBe(true);
+      // Holding now: the hold keeps the loop going by itself.
+      expect(engine.restingPen()).toBe(false);
+      engine.up();
+      engine.setPen({ ...pen, speedBlotBlend: 0 });
+      engine.down({ x: 80, y: 90, p: 0.5, t: 100 });
+      wall = 1400;
+      expect(engine.restingPen()).toBe(false);
+    } finally {
+      nowSpy.mockRestore();
+      engine.destroy();
+    }
+  });
+
   it("grows a pool under a resting nib that sends no samples", () => {
     // Some digitisers go quiet while the nib is still: no samples, yet a hold.
     let wall = 0;
