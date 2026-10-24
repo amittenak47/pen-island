@@ -10,12 +10,13 @@
 }
 .lc-settings-modal.lc-dialog-frame.lc-chatbot-pages {
   width: min(480px, 100%);
-  height: auto;
-  max-height: min(90dvh, 720px);
+  /* A fixed height keeps the footer on screen and lets each step's pane scroll on its own. */
+  height: min(90dvh, 680px);
+  display: flex;
+  flex-direction: column;
+  position: relative;
   overflow-wrap: anywhere;
 }
-/* Let the sheet scroll; shrinking Settings blocks clips their controls. */
-.lc-chatbot-pages .lc-settings-fold { flex-shrink: 0; }
 .lc-chatbot-run-scrim { z-index: 601; }
 .lc-settings-modal.lc-dialog-frame.lc-chatbot-run-popup {
   width: min(360px, 100%);
@@ -78,3 +79,118 @@
   background: var(--input-bg, var(--bg));
   color: var(--ink);
 }
+
+/* Wizard: steps, stage, footer. Every move is a transition, in both directions. */
+.lc-chatbot-pages { --lc-chatbot-ease: cubic-bezier(0.22, 1, 0.36, 1); }
+.lc-chatbot-layers { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.lc-chatbot-slide {
+  transition: transform 280ms var(--lc-chatbot-ease), opacity 200ms ease-out, visibility 0s linear 280ms;
+}
+.lc-chatbot-slide[data-pos="before"] { transform: translateX(-36px); opacity: 0; visibility: hidden; }
+.lc-chatbot-slide[data-pos="after"] { transform: translateX(36px); opacity: 0; visibility: hidden; }
+.lc-chatbot-slide[data-pos="current"] {
+  transform: none; opacity: 1; visibility: visible;
+  transition: transform 280ms var(--lc-chatbot-ease), opacity 220ms ease-out 50ms, visibility 0s;
+}
+.lc-chatbot-layer { position: absolute; inset: 0; display: flex; flex-direction: column; min-height: 0; }
+.lc-chatbot-stage { position: relative; flex: 1 1 auto; min-height: 0; overflow: hidden; }
+.lc-chatbot-pane {
+  position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain;
+  display: flex; flex-direction: column; gap: 22px; padding: 18px 20px 20px;
+}
+.lc-chatbot-field { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.lc-chatbot-field .lc-settings-subhead { color: var(--muted); }
+.lc-chatbot-optional { margin-left: 6px; padding: 1px 6px; border: 1px solid var(--lc-dialog-line); font-size: 10px; font-weight: 400; letter-spacing: 0; text-transform: none; }
+.lc-chatbot-pages .lc-settings-hint { margin: 0; }
+.lc-chatbot-pages p.lc-chatbot-after { margin: 8px 0 0; }
+.lc-chatbot-pages div.lc-chatbot-after { margin-top: 10px; }
+
+/* Selected options show by edge and fill, no check mark. */
+.lc-chatbot-pages .lc-settings-choice-option::before { content: none !important; }
+.lc-chatbot-pages .lc-settings-choice-option { transition: border-color 160ms ease-out, background 160ms ease-out, box-shadow 160ms ease-out, transform 120ms ease-out; }
+.lc-chatbot-pages .lc-settings-choice-option:active { transform: scale(0.97); }
+.lc-chatbot-pages .lc-chatbot-fields .lc-settings-choice-option, .lc-chatbot-pages .lc-chatbot-files .lc-settings-choice-option { flex: 1 1 auto; justify-content: center; text-align: center; }
+
+/* Tabs across the top, with a sliding underline. */
+.lc-chatbot-steps { position: relative; flex: 0 0 auto; display: flex; border-bottom: 1px solid var(--lc-dialog-line); }
+.lc-chatbot-step {
+  flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 46px; padding: 0 4px; border: 0; border-radius: 0; background: transparent; color: var(--muted); font: inherit; font-size: 13px;
+  transition: color 180ms ease-out, background 160ms ease-out;
+}
+.lc-chatbot-step[aria-selected="true"] { color: var(--ink); }
+.lc-chatbot-step-n {
+  display: grid; place-items: center; width: 18px; height: 18px; border: 1px solid var(--lc-dialog-line); font-size: 11px;
+  transition: border-color 180ms ease-out, background 180ms ease-out, color 180ms ease-out;
+}
+.lc-chatbot-step[aria-selected="true"] .lc-chatbot-step-n { border-color: var(--accent); color: var(--accent); }
+.lc-chatbot-step[data-done] .lc-chatbot-step-n { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 18%, transparent); color: var(--accent); }
+.lc-chatbot-step-dot { width: 6px; height: 6px; background: var(--accent); animation: lc-chatbot-pop 240ms var(--lc-chatbot-ease); }
+.lc-chatbot-steps-thumb {
+  position: absolute; left: 0; bottom: -1px; width: 25%; height: 2px; background: var(--accent);
+  transform: translateX(calc(var(--step) * 100%)); transition: transform 280ms var(--lc-chatbot-ease);
+}
+
+/* Footer: Skip folds away on Review, so the rule above it travels down with the stage. */
+.lc-chatbot-foot { flex: 0 0 auto; padding: 0 20px 16px; border-top: 1px solid var(--lc-dialog-line); background: var(--surface); }
+.lc-chatbot-skip { display: grid; grid-template-rows: 0fr; opacity: 0; transition: grid-template-rows 280ms var(--lc-chatbot-ease), opacity 200ms ease-out; }
+.lc-chatbot-skip[data-open] { grid-template-rows: 1fr; opacity: 1; }
+.lc-chatbot-skip > div { min-height: 0; overflow: hidden; display: flex; justify-content: center; }
+.lc-chatbot-skip-link {
+  min-height: 0;
+  margin: 0; padding: 12px 18px 6px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 13px;
+  transition: opacity 160ms ease-out, transform 120ms ease-out;
+}
+.lc-chatbot-skip-link:active:not(:disabled) { transform: scale(0.96); }
+.lc-chatbot-skip-link:disabled { opacity: 0.4; }
+.lc-chatbot-nav { display: flex; align-items: stretch; padding-top: 14px; transition: padding-top 280ms var(--lc-chatbot-ease); }
+.lc-chatbot-foot:has(.lc-chatbot-skip[data-open]) .lc-chatbot-nav { padding-top: 0; }
+.lc-chatbot-back-slot { flex: 0 0 auto; width: 0; margin-right: 0; opacity: 0; overflow: hidden; transition: width 280ms var(--lc-chatbot-ease), margin-right 280ms var(--lc-chatbot-ease), opacity 200ms ease-out; }
+.lc-chatbot-back-slot[data-open] { width: 96px; margin-right: 10px; opacity: 1; }
+.lc-chatbot-back-slot button { width: 100%; height: 100%; min-height: 46px; }
+.lc-dialog-frame.lc-chatbot-pages button.lc-chatbot-primary {
+  flex: 1 1 auto; min-height: 46px; background: var(--accent); border-color: var(--accent); color: var(--bg); font-weight: 700;
+  transition: opacity 180ms ease-out, background 180ms ease-out, transform 120ms ease-out;
+}
+.lc-dialog-frame.lc-chatbot-pages button.lc-chatbot-primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 88%, var(--ink)); color: var(--bg); }
+.lc-dialog-frame.lc-chatbot-pages button.lc-chatbot-primary:disabled { opacity: 0.4; }
+.lc-dialog-frame.lc-chatbot-pages button.lc-chatbot-primary:active:not(:disabled) { transform: scale(0.98); }
+.lc-chatbot-fade { display: inline-block; animation: lc-chatbot-fade 200ms ease-out; }
+@keyframes lc-chatbot-fade { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes lc-chatbot-pop { from { opacity: 0; transform: scale(0.3); } to { opacity: 1; transform: none; } }
+
+/* Review */
+.lc-chatbot-review { display: flex; flex-direction: column; margin: 0; }
+.lc-chatbot-review-row { display: grid; grid-template-columns: 84px minmax(0, 1fr) auto; gap: 12px; align-items: baseline; padding: 9px 0; border-bottom: 1px solid var(--lc-dialog-line); font-size: 13px; }
+.lc-chatbot-review-row dt { color: var(--muted); }
+.lc-chatbot-review-row dd { margin: 0; overflow-wrap: anywhere; }
+.lc-chatbot-review-edit { min-height: 0; padding: 2px 4px; border: 0; background: transparent; color: var(--accent); font: inherit; font-size: 12px; }
+.lc-chatbot-review-note { margin: 6px 0 0; padding-top: 10px; font-size: 12px; line-height: 1.55; color: var(--muted); }
+
+/* History live in the header, opposite the close control. */
+.lc-chatbot-history-link {
+  position: absolute; top: 18px; right: 64px; z-index: 2; height: 36px; padding: 0 8px; border: 0; background: transparent;
+  color: var(--accent); font: inherit; font-size: 12px;
+}
+.lc-chatbot-history { display: flex; flex-direction: column; gap: 12px; padding: 18px 20px 20px; overflow-y: auto; min-height: 0; flex: 1 1 auto; }
+
+/* Attachments */
+.lc-chatbot-page-range-add { grid-template-columns: 1fr 1fr auto; align-items: end; }
+.lc-chatbot-attached { overflow: hidden; }
+.lc-chatbot-attached .lc-settings-hint { margin: 10px 0 0; }
+.lc-chatbot-pages textarea { min-height: 72px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .lc-chatbot-slide, .lc-chatbot-steps-thumb, .lc-chatbot-skip, .lc-chatbot-back-slot, .lc-chatbot-nav { transition: none; }
+  .lc-chatbot-fade, .lc-chatbot-step-dot { animation: none; }
+}
+
+.lc-chatbot-page-range label { display: flex; flex-direction: column; gap: 4px; min-width: 0; font-size: 12px; color: var(--muted); }
+.lc-chatbot-page-range input {
+  min-height: 40px; padding: 0 10px; font: inherit; font-size: 13.5px; color: var(--ink);
+  border: 1px solid var(--lc-dialog-line); border-radius: var(--lc-r-block); background: var(--input-bg, var(--bg));
+  transition: border-color 160ms ease-out, box-shadow 160ms ease-out;
+}
+.lc-chatbot-page-range input:focus, .lc-chatbot-pages textarea:focus, .lc-chatbot-field-add input:focus { outline: none; border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.lc-chatbot-pages textarea, .lc-chatbot-field-add input { transition: border-color 160ms ease-out, box-shadow 160ms ease-out; }
+.lc-chatbot-page-range-add button { min-height: 40px; }
