@@ -70,16 +70,37 @@ async function mount(overrides: Partial<ChatBotPagesDialogProps> = {}) {
   };
   await act(async () => { root!.render(<ChatBotPagesDialog {...props} />); });
 }
+function labelOf(node: Element): string { return (node.querySelector("[data-label]") ?? node).textContent?.trim() ?? ""; }
 function button(label: string, scope: ParentNode = host): HTMLButtonElement {
-  const found = [...scope.querySelectorAll<HTMLButtonElement>("button")].find((node) => node.textContent?.trim() === label);
+  const found = [...scope.querySelectorAll<HTMLButtonElement>("button")].find((node) => labelOf(node) === label);
   expect(found, `Missing button: ${label}`).toBeTruthy(); return found!;
 }
 async function click(label: string, scope: ParentNode = host) {
   await act(async () => { button(label, scope).click(); });
 }
-async function choose(label: string) {
-  await click(label, host.querySelector('[aria-label="Request type"]')!);
+/** Lets exit animations (folding reveals, slides) finish. */
+async function settle(ms = 500) { await act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); }); }
+async function tab(index: number) {
+  await act(async () => { host.querySelectorAll<HTMLButtonElement>('[role="tab"]')[index]!.click(); });
 }
+function pane(index: number): HTMLElement { return host.querySelector<HTMLElement>(`#lc-chatbot-pane-${index}`)!; }
+/** A radio group's chosen option, or a dropdown's shown value. */
+function current(group: string): string {
+  const radios = host.querySelector(`[role="radiogroup"][aria-label="${group}"]`);
+  if (radios) return labelOf(radios.querySelector('[aria-checked="true"]')!);
+  return host.querySelector(`button[aria-label^="${group}: "]`)!.textContent!.trim();
+}
+/** Picks from either presentation: a sliding group by its radio, a dropdown by opening it. */
+async function pick(group: string, option: string) {
+  const radios = host.querySelector(`[role="radiogroup"][aria-label="${group}"]`);
+  if (radios) { await click(option, radios); return; }
+  await act(async () => { host.querySelector<HTMLButtonElement>(`button[aria-label^="${group}: "]`)!.click(); });
+  const found = [...host.querySelectorAll<HTMLButtonElement>('[role="option"]')].find((node) => node.textContent === option);
+  expect(found, `Missing option: ${option}`).toBeTruthy();
+  await act(async () => { found!.click(); });
+  await settle(350);
+}
+async function choose(label: string) { await pick("Request type", label); }
 function input(label: string): HTMLInputElement {
   const found = [...host.querySelectorAll("label")].find((node) => node.firstChild?.textContent === label)?.querySelector("input");
   expect(found, `Missing input: ${label}`).toBeTruthy(); return found!;
@@ -97,7 +118,10 @@ async function openHistory() {
   expect(popup()).toBeTruthy();
 }
 
-beforeAll(() => { (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true; });
+beforeAll(() => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  window.scrollTo = () => {}; // Motion measures keyframes with it; jsdom does not implement it.
+});
 beforeEach(() => {
   localStorage.clear(); fixture.jobs = [];
   // Most tests are about other choices: start them from a remembered type.
@@ -118,38 +142,39 @@ afterEach(async () => {
 describe("ChatBot requests", () => {
   it("needs a type on the first request, then starts from the last one", async () => {
     localStorage.clear(); await mount();
+    await tab(3);
     expect(button("Start").disabled).toBe(true);
-    expect(host.querySelector('[aria-label="Notes"]')).toBeNull();
-    await click("Story");
-    expect(button("Start").disabled).toBe(false);
-    expect(button("Free-form").getAttribute("aria-checked")).toBe("true");
-    await click("Reading companion");
+    expect(host.querySelector('[aria-label^="Notes"]')).toBeNull();
+    await tab(1); await pick("Kind of text", "Story");
+    await tab(3); expect(button("Start").disabled).toBe(false);
+    await tab(1); expect(current("Notes")).toBe("Free-form");
+    await pick("Notes", "Reading companion");
     expect(host.textContent).toContain("Context · Character · Word or phrase · Theme · Think about it · Helps with");
-    await click("All fields"); await click("Start");
+    await click("All fields"); await tab(3); await click("Start");
     expect(fixture.create.mock.calls[0]![0]).toMatchObject({ reading: {
       kind: "story", preset: "Reading companion", fill: "all",
       fields: ["Context", "Character", "Word or phrase", "Theme", "Think about it", "Helps with"],
     } });
     expect(loadReadingChoice()).toMatchObject({ kind: "story", notes: "companion", fill: "all" });
     await act(async () => root!.unmount()); host.remove(); await mount();
-    expect(button("Story").getAttribute("aria-checked")).toBe("true");
-    expect(button("Reading companion").getAttribute("aria-checked")).toBe("true");
+    expect(current("Kind of text")).toBe("Story");
+    expect(current("Notes")).toBe("Reading companion");
     // Still changeable: another kind keeps Free-form and Custom, and moves off a preset it lacks.
-    await click("Code");
-    expect(button("Code reading").getAttribute("aria-checked")).toBe("true");
+    await pick("Kind of text", "Code");
+    expect(current("Notes")).toBe("Code reading");
   });
 
   it("builds a custom preset from the kind's fields and the reader's own", async () => {
     const onSelectionRequest = vi.fn(async (_settings: SelectionRequestSettings) => ({ id: "fr-selected", page: 7 }));
     await mount({ selection, onSelectionRequest });
-    await click("Custom");
-    expect(button("Start").disabled).toBe(true);
+    await tab(1); await pick("Notes", "Custom");
+    await tab(3); expect(button("Start").disabled).toBe(true);
     expect(host.querySelector('[role="alert"]')!.textContent).toContain("Pick at least one field");
-    await click("Common mistake");
+    await tab(1); await click("Common mistake");
     const own = host.querySelector<HTMLInputElement>('input[aria-label="Name your own field"]')!;
     await fill(own, "Proof sketch"); await click("Add");
     expect(button("Proof sketch").getAttribute("aria-pressed")).toBe("true");
-    await click("Start");
+    await tab(3); await click("Start");
     expect(onSelectionRequest.mock.calls[0]![0].reading).toEqual({
       kind: "textbook", preset: "Custom", fill: "best", fields: ["Common mistake", "Proof sketch"],
     });
@@ -157,15 +182,15 @@ describe("ChatBot requests", () => {
   });
 
   it("sends a free-form request with only its kind", async () => {
-    await mount(); await click("Start");
+    await mount(); await tab(3); await click("Start");
     expect(fixture.create.mock.calls[0]![0]).toMatchObject({ reading: { kind: "textbook" } });
     expect((fixture.create.mock.calls[0]![0] as NewAnnotationJobDto).reading).toEqual({ kind: "textbook" });
   });
 
   it("sends the selected answer mode on page jobs and explains the single-footnote model limit", async () => {
-    saveChatBotAnswerMode("app"); await mount(); await click("Start");
+    saveChatBotAnswerMode("app"); await mount(); await tab(3); await click("Start");
     expect(fixture.create.mock.calls[0]![0]).toMatchObject({ answer_mode: "app" });
-    expect(host.textContent).toContain("Your PC starts the assistant automatically");
+    expect(host.textContent).not.toContain("Your AI model answers single footnotes");
     saveChatBotAnswerMode("llm");
     await act(async () => root!.render(<ChatBotPagesDialog {...props} />));
     expect(host.textContent).toContain("Your AI model answers single footnotes; page runs need an assistant.");
@@ -174,42 +199,42 @@ describe("ChatBot requests", () => {
   it("offers Selection only while nonempty text is selected", async () => {
     const onSelectionRequest = vi.fn(async () => ({ id: "fr-selected", page: 7 }));
     await mount({ onSelectionRequest });
-    const labels = () => [...host.querySelectorAll('[aria-label="Request type"] button')].map((node) => node.textContent);
-    expect(labels()).toEqual(["This page", "Pages"]);
+    const labels = () => [...host.querySelectorAll('[aria-label="Request type"] button')].map(labelOf);
+    expect(labels()).toEqual(["This page", "Page range"]);
     await act(async () => { root!.render(<ChatBotPagesDialog {...props} selection={{ ...selection, text: "  " }} />); });
-    expect(labels()).toEqual(["This page", "Pages"]);
+    expect(labels()).toEqual(["This page", "Page range"]);
     await act(async () => { root!.render(<ChatBotPagesDialog {...props} selection={selection} />); });
-    expect(labels()).toEqual(["Selection", "This page", "Pages"]);
+    expect(labels()).toEqual(["Selection", "This page", "Page range"]);
     await choose("Selection");
     expect(host.textContent).toContain(selection.text);
     await act(async () => { root!.render(<ChatBotPagesDialog {...props} selection={null} />); });
-    expect(labels()).toEqual(["This page", "Pages"]);
+    expect(labels()).toEqual(["This page", "Page range"]);
     expect(button("This page").getAttribute("aria-checked")).toBe("true");
   });
 
   it("sends This page as one job page without exposing range inputs", async () => {
     await mount();
-    expect(host.querySelector('input[type="number"]')).toBeNull();
+    expect(pane(0).querySelector('input[type="number"]')).toBeNull();
     expect(button("This page").getAttribute("aria-checked")).toBe("true");
-    await click("Start");
+    await tab(3); await click("Start");
     const body = fixture.create.mock.calls[0]![0] as NewAnnotationJobDto;
     expect(body).toMatchObject({ request_type: "page", per_page: 4, doc_id: "algorithms", device_id: "device-test" });
     expect(body.pages).toEqual([{ page: 7, scope: "p7", text: "The text of page 7." }]);
     expect(host.querySelector('[role="status"]')!.textContent).toContain("Sent to ChatBot");
   });
 
-  it("shows the Pages range only for that request and enforces its 40-page limit", async () => {
-    await mount(); await choose("Pages");
+  it("shows the Page range only for that request and enforces its 40-page limit", async () => {
+    await mount(); await choose("Page range");
     await fill(input("From page"), "20"); await fill(input("To page"), "60");
     expect(host.querySelector('[role="alert"]')!.textContent).toContain("Up to 40 pages");
-    expect(button("Start").disabled).toBe(true);
-    await fill(input("To page"), "59");
-    expect(button("Start").disabled).toBe(false);
+    await tab(3); expect(button("Start").disabled).toBe(true);
+    await tab(0); await fill(input("To page"), "59");
+    await tab(3); expect(button("Start").disabled).toBe(false);
     await click("Start");
     const body = fixture.create.mock.calls[0]![0] as NewAnnotationJobDto;
     expect(body.request_type).toBe("pages"); expect(body.pages).toHaveLength(40);
     expect(body.pages[0]!.page).toBe(20); expect(body.pages[39]!.page).toBe(59);
-    await choose("This page"); expect(host.querySelector('input[type="number"]')).toBeNull();
+    await tab(0); await choose("This page"); await settle(); expect(pane(0).querySelector('input[type="number"]')).toBeNull();
   });
 
   it("forwards focus, density and file/page attachments through the selection path", async () => {
@@ -217,9 +242,9 @@ describe("ChatBot requests", () => {
     await mount({ selection, onSelectionRequest });
     expect(button("Selection").getAttribute("aria-checked")).toBe("true");
     await fill(host.querySelector("textarea")!, "  Proof intuition  "); await click("Thorough");
-    await click("Attach"); await click("Notes 1.md");
+    await tab(2); await click("Notes 1.md");
     await fill(input("Attach from page"), "106"); await fill(input("Attach to page"), "107");
-    await click("Attach pages"); await click("Start");
+    await click("Add pages"); await tab(3); await click("Start");
     expect(fixture.create).not.toHaveBeenCalled(); expect(onSelectionRequest).toHaveBeenCalledOnce();
     expect(onSelectionRequest.mock.calls[0]![0]).toMatchObject({
       focus: "Proof intuition", perPage: 8, references: [
@@ -233,7 +258,7 @@ describe("ChatBot requests", () => {
 
   it("attaches more than three files and shows the size of each", async () => {
     await mount(); expect(host.querySelector('[aria-label="Attachments"]')).toBeNull();
-    await click("Attach");
+    await tab(2);
     for (let index = 1; index <= 4; index++) await click(`Notes ${index}.md`);
     const entries = [...host.querySelectorAll('[aria-label="Attachments"] li')];
     expect(entries).toHaveLength(4);
@@ -241,21 +266,22 @@ describe("ChatBot requests", () => {
       expect(entries[index]!.querySelector("strong")!.textContent).toBe(`Notes ${index + 1}.md`);
       expect(entries[index]!.querySelector("small")!.textContent).toBe("6 characters");
     }
-    expect(button("Notes 5.md").disabled).toBe(false); await click("Start");
+    expect(button("Notes 5.md").disabled).toBe(false); await tab(3); await click("Start");
     expect((fixture.create.mock.calls[0]![0] as NewAnnotationJobDto).references).toHaveLength(4);
     expect(host.textContent).toContain("24 characters / 600,000 total");
   });
 
   it("blocks an attachment set over the total cap and recovers when one is removed", async () => {
     fixture.sources["file-0"] = "x".repeat(600_000); fixture.sources["file-1"] = "y";
-    await mount(); await click("Attach"); await click("Notes 1.md");
-    expect(button("Start").disabled).toBe(false);
+    await mount(); await tab(2); await click("Notes 1.md");
+    await tab(3); expect(button("Start").disabled).toBe(false);
     expect(host.querySelector('[aria-label="Attachments"] small')!.textContent).toBe("600,000 characters");
-    await click("Notes 2.md");
+    await tab(2); await click("Notes 2.md");
     expect(host.querySelector('[role="alert"]')!.textContent).toContain("600,001 characters");
-    expect(button("Start").disabled).toBe(true);
+    await tab(3); expect(button("Start").disabled).toBe(true);
     expect(fixture.create).not.toHaveBeenCalled();
     await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Remove attachment 2"]')!.click(); });
+    for (let tries = 0; tries < 40 && host.querySelector('[role="alert"]'); tries++) await settle(100);
     expect(host.querySelector('[role="alert"]')).toBeNull(); expect(button("Start").disabled).toBe(false);
   });
 
@@ -267,20 +293,20 @@ describe("ChatBot requests", () => {
     const attachments = host.querySelector('[aria-label="Attachments"]')!;
     expect(attachments.querySelector("strong")!.textContent).toBe("Notes 1.md");
     expect(attachments.querySelector("small")!.textContent).toBe("6 characters");
-    await click("Start");
+    await tab(3); await click("Start");
     expect((fixture.create.mock.calls[0]![0] as NewAnnotationJobDto).references).toEqual([
       { kind: "file", title: "Notes 1.md", text: "Text 0" },
     ]);
   });
 
   it("allows a PDF attachment longer than the 40-page request limit", async () => {
-    await mount(); await click("Attach");
+    await mount(); await tab(2);
     await fill(input("Attach from page"), "106"); await fill(input("Attach to page"), "160");
-    expect(button("Attach pages").disabled).toBe(false);
+    expect(button("Add pages").disabled).toBe(false);
     expect(host.textContent).not.toContain("Up to 40 pages");
-    await click("Attach pages");
+    await click("Add pages");
     expect(host.querySelector('[aria-label="Attachments"] strong')!.textContent).toBe("Pages 106–160");
-    expect(button("Start").disabled).toBe(false); await click("Start");
+    await tab(3); expect(button("Start").disabled).toBe(false); await click("Start");
     const body = fixture.create.mock.calls[0]![0] as NewAnnotationJobDto;
     expect(body.pages).toHaveLength(1); expect(body.request_type).toBe("page");
     expect(body.references).toHaveLength(1);
@@ -300,25 +326,111 @@ describe("ChatBot requests", () => {
     expect(document.activeElement).toBe(button("This page"));
     expect(button("This page").getAttribute("aria-checked")).toBe("true");
     await key(button("This page"), "End");
-    expect(document.activeElement).toBe(button("Pages")); expect(input("From page")).toBeTruthy();
-    await key(button("Pages"), "Home");
-    expect(document.activeElement).toBe(button("Selection")); expect(host.querySelector('input[type="number"]')).toBeNull();
+    expect(document.activeElement).toBe(button("Page range")); expect(input("From page")).toBeTruthy();
+    await key(button("Page range"), "Home");
+    expect(document.activeElement).toBe(button("Selection")); await settle(); expect(pane(0).querySelector('input[type="number"]')).toBeNull();
     await key(button("Normal"), "ArrowRight");
     expect(document.activeElement).toBe(button("Thorough"));
     expect(button("Thorough").getAttribute("aria-checked")).toBe("true");
-    await click("Start");
+    await tab(3); await click("Start");
     expect(onSelectionRequest.mock.calls[0]![0].perPage).toBe(8);
   });
 
   it("keeps the sheet open on content clicks and closes on its backdrop or close control", async () => {
     const onClose = vi.fn(); await mount({ onClose });
     await act(async () => { host.querySelector<HTMLElement>(".lc-chatbot-pages h2")!.click(); });
-    await click("Attach"); await click("Notes 1.md");
+    await tab(2); await click("Notes 1.md");
     expect(onClose).not.toHaveBeenCalled();
     await act(async () => { host.querySelector<HTMLElement>(".lc-chatbot-pages-scrim")!.click(); });
     expect(onClose).toHaveBeenCalledOnce(); onClose.mockClear();
     await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Close ChatBot"]')!.click(); });
     expect(onClose).toHaveBeenCalledOnce();
+  });
+});
+
+describe("ChatBot steps", () => {
+  const tabs = () => [...host.querySelectorAll<HTMLElement>('[role="tab"]')];
+  const selected = () => tabs().findIndex((node) => node.getAttribute("aria-selected") === "true");
+  const panes = () => [0, 1, 2, 3].map((index) => pane(index).getAttribute("data-pos"));
+  const skip = () => host.querySelector<HTMLButtonElement>(".lc-chatbot-skip-link")!;
+
+  it("walks Request, Reading, Attach and Review with Next and Back, sliding each pane", async () => {
+    await mount();
+    expect(tabs().map((node) => node.textContent?.replace(/^[\d✓]+/, ""))).toEqual(["Request", "Reading", "Attach", "Review"]);
+    expect(selected()).toBe(0); expect(panes()).toEqual(["current", "after", "after", "after"]);
+    expect(host.querySelector(".lc-chatbot-back-slot")!.hasAttribute("data-open")).toBe(false);
+    await click("Next"); expect(selected()).toBe(1); expect(panes()).toEqual(["before", "current", "after", "after"]);
+    expect(host.querySelector(".lc-chatbot-back-slot")!.hasAttribute("data-open")).toBe(true);
+    await click("Next"); await click("Next");
+    expect(selected()).toBe(3); expect(panes()).toEqual(["before", "before", "before", "current"]);
+    expect(() => button("Next")).toThrow(); expect(button("Start")).toBeTruthy();
+    await click("Back"); expect(selected()).toBe(2); expect(panes()).toEqual(["before", "before", "current", "after"]);
+  });
+
+  it("jumps by tab and by keyboard, and marks visited steps", async () => {
+    await mount();
+    await tab(2); expect(selected()).toBe(2);
+    expect(tabs()[0]!.hasAttribute("data-done")).toBe(true); expect(tabs()[1]!.hasAttribute("data-done")).toBe(false);
+    await act(async () => { tabs()[2]!.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true })); });
+    expect(selected()).toBe(1);
+  });
+
+  it("folds Skip away on Review and sends Skip to Review with what is set", async () => {
+    await mount();
+    expect(host.querySelector(".lc-chatbot-skip")!.hasAttribute("data-open")).toBe(true);
+    await act(async () => { skip().click(); });
+    expect(selected()).toBe(3); expect(host.querySelector(".lc-chatbot-skip")!.hasAttribute("data-open")).toBe(false);
+    expect(skip().disabled).toBe(true); expect(skip().tabIndex).toBe(-1);
+  });
+
+  it("holds Next and Skip until a first request has a document kind", async () => {
+    localStorage.clear(); await mount();
+    expect(skip().disabled).toBe(false); await act(async () => { skip().click(); });
+    expect(selected()).toBe(1); expect(button("Next").disabled).toBe(true); expect(skip().disabled).toBe(true);
+    expect(tabs()[1]!.querySelector(".lc-chatbot-step-dot")).toBeNull();
+    await tab(0); expect(tabs()[1]!.querySelector(".lc-chatbot-step-dot")).toBeTruthy();
+    await tab(1); await pick("Kind of text", "Paper");
+    expect(button("Next").disabled).toBe(false);
+  });
+
+  it("recaps the request on Review and lets each row jump back", async () => {
+    await mount(); await fill(host.querySelector("textarea")!, "Key definitions");
+    await click("Thorough"); await pick("Notes", "Study");
+    await tab(2); await click("Notes 2.md"); await tab(3);
+    const text = host.querySelector(".lc-chatbot-review-note")!.textContent!;
+    expect(text).toContain("Your assistant will annotate page 7, focusing on Key definitions.");
+    expect(text).toContain("The bot will limit notes to 8 per page.");
+    expect(text).toContain("It will read the text as a textbook and try to fill in the Idea, Example, Common mistake, Helps with and Think about it fields");
+    expect(text).toContain("It will use Notes 2.md as context.");
+    expect(host.querySelector(".lc-chatbot-review")!.textContent).toContain("Thorough · about 8 per page");
+    await act(async () => { host.querySelector<HTMLButtonElement>('[aria-label="Edit Document"]')!.click(); });
+    expect(selected()).toBe(1);
+  });
+
+  it("uses a dropdown for more than three options and a sliding group for three or fewer", async () => {
+    await mount(); await tab(1);
+    expect(host.querySelector('button[aria-label^="Kind of text: "]')).toBeTruthy();
+    expect(host.querySelector('[role="radiogroup"][aria-label="Kind of text"]')).toBeNull();
+    expect(host.querySelector('button[aria-label^="Notes: "]')).toBeTruthy();
+    await pick("Kind of text", "Article");
+    expect(host.querySelector('[role="radiogroup"][aria-label="Notes"]')).toBeTruthy();
+    expect(host.querySelector('button[aria-label^="Notes: "]')).toBeNull();
+    expect(host.querySelector('[role="radiogroup"][aria-label="Request type"]')!.querySelectorAll(".lc-sliding-seg-thumb")).toHaveLength(1);
+  });
+
+  it("opens past requests in place of the steps and returns on its toggle", async () => {
+    fixture.jobs = [job() as AnnotationJobDto]; await mount();
+    const link = () => host.querySelector<HTMLButtonElement>(".lc-chatbot-history-link")!;
+    const layers = () => [...host.querySelectorAll(".lc-chatbot-layer")].map((node) => node.getAttribute("data-pos"));
+    expect(layers()).toEqual(["current", "after"]); expect(link().textContent).toBe("History");
+    await act(async () => { link().click(); });
+    expect(layers()).toEqual(["before", "current"]); expect(link().textContent).toBe("New request");
+    await act(async () => { link().click(); });
+    expect(layers()).toEqual(["current", "after"]);
+  });
+
+  it("leaves out the history toggle until there are past requests", async () => {
+    await mount(); expect(host.querySelector(".lc-chatbot-history-link")).toBeNull();
   });
 });
 
@@ -346,7 +458,7 @@ describe("ChatBot history", () => {
       mark("dfs", 7, "Depth-first search"), mark("traversal", 7, "Traversal order"), mark("backtrack", 8, "Backtracking"),
       mark("other", 20, "Other run", { jobId: "aj-other" }),
     ] });
-    expect(host.querySelector('[aria-label="History"]')!.textContent).toContain("Pages · Pages 7–8 · 3 footnotes · Finished");
+    expect(host.querySelector('[aria-label="History"]')!.textContent).toContain("Pages 7–8 · 3 footnotes · Finished");
     expect([...host.querySelectorAll("button")].some((node) => node.textContent === "Undo" || node.textContent === "Cancel")).toBe(false);
     expect(host.textContent).not.toContain("Graph traversal"); await openHistory();
     expect(popup().textContent).toContain("Pages 7–8 · Normal · Finished");
@@ -365,7 +477,7 @@ describe("ChatBot history", () => {
     await mount(); await openHistory();
     expect(popup().textContent).toContain("Story · Reading companion");
     await act(async () => { host.querySelector<HTMLElement>(".lc-chatbot-run-scrim")!.click(); });
-    await click("Article"); await click("Argument"); await openHistory();
+    await tab(1); await pick("Kind of text", "Article"); await click("Argument"); await openHistory();
     expect(popup().textContent).toContain("Story · Reading companion");
     expect(popup().textContent).not.toContain("Article · Argument");
   });
@@ -373,9 +485,9 @@ describe("ChatBot history", () => {
   it("remembers a selection request's custom style and keeps it when the sheet changes", async () => {
     const onSelectionRequest = vi.fn(async (_settings: SelectionRequestSettings) => ({ id: "fr-reading", page: 7 }));
     await mount({ selection, onSelectionRequest });
-    await click("Custom"); await click("Idea"); await click("Start");
+    await tab(1); await pick("Notes", "Custom"); await click("Idea"); await tab(3); await click("Start");
     expect(loadSelectionRuns("algorithms")[0]!.reading).toEqual(onSelectionRequest.mock.calls[0]![0].reading);
-    await click("Article"); await click("Free-form");
+    await tab(1); await pick("Kind of text", "Article"); await click("Free-form");
     await act(async () => root!.unmount()); host.remove(); await mount();
     await openHistory();
     expect(popup().textContent).toContain("Textbook · Custom");
