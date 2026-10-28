@@ -3465,12 +3465,15 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    *
    * Returns the distance granted. At the end of the document that is zero, and
    * the caller stops asking instead of running a frame loop into a wall.
+   *
+   * Annotate mode is no reason to refuse. Only a selection drag asks, and the
+   * layer runs one there too (a mark's panel open, or highlighting): turning
+   * it away left a box that could not grow past the screen.
    */
   useEffect(() => {
     return onDocScrollRequest({
       owns: (origin) => Boolean(origin && boardRef.current?.contains(origin)),
       move: (dy) => {
-        if (annotateCodeRef.current) return 0;
         const cam = readScrollRef.current();
         // `dy > 0` is "show me what comes next", and Excalidraw's scrollY grows
         // as the content moves *down* — so going forward means subtracting.
