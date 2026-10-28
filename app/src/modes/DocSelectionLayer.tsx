@@ -123,6 +123,8 @@ import { liveFrameIn, selectInLivePage } from "./LiveHtmlFrame";
 const SQUARE_ROW_GAP = 4;
 
 /** How far into the edge a drag has to reach before the page starts moving. */
+/** The open box's handles: corners and edge midpoints, by compass point. */
+const BOX_HANDLES = ["nw", "n", "ne", "e", "se", "s", "sw", "w"] as const;
 const SELECT_EDGE_PX = 36;
 /** Per-frame travel at the boundary, and at full lean. */
 const SELECT_EDGE_STEP_MIN_PX = 2;
@@ -141,6 +143,24 @@ const SELECT_EDGE_RAMP_PX = 90;
 function edgeStep(over: number): number {
   const lean = Math.min(1, Math.abs(over) / SELECT_EDGE_RAMP_PX);
   return SELECT_EDGE_STEP_MIN_PX + (SELECT_EDGE_STEP_MAX_PX - SELECT_EDGE_STEP_MIN_PX) * lean;
+}
+
+/**
+ * How far `y` is into the top or bottom scroll zone, signed (0 outside them).
+ *
+ * Measured on the board the page is read in. The selection host wraps the
+ * whole document, so its box is the book: clamped to the window, its edges
+ * were the screen's, under the app's bars and the system's gesture strip,
+ * and a finger at the bottom of the visible page never reached them.
+ */
+function paneEdgeOverY(host: HTMLElement, y: number): number {
+  const board = host.closest(".lc-board");
+  const view = (board instanceof HTMLElement ? board : host).getBoundingClientRect();
+  const top = Math.max(view.top, 0);
+  const bottom = Math.min(view.bottom, window.innerHeight);
+  if (y > bottom - SELECT_EDGE_PX) return y - (bottom - SELECT_EDGE_PX);
+  if (y < top + SELECT_EDGE_PX) return y - (top + SELECT_EDGE_PX);
+  return 0;
 }
 
 type RibbonPlacement = {
@@ -616,7 +636,16 @@ export function DocSelectionLayer({
     lastY: number;
     sideScroll: HTMLElement | null;
     textReady?: Promise<boolean>;
+    /** Dragging a handle of a box already made, not drawing a new one. */
+    resize?: boolean;
+    /** A side handle moves one edge: the other axis keeps the box's span. */
+    keepX?: { left: number; width: number };
+    keepY?: { top: number; height: number };
+    /** How far the finger landed from the dragged corner, so the box does not jump to it. */
+    grab?: { x: number; y: number };
   } | null>(null);
+  /** The box the open hold-box selection was made from, for its handles. */
+  const boxRef = useRef<{ rect: LocalRect; root: HTMLElement; scope: string | undefined } | null>(null);
 
   const clearGesture = useCallback(() => {
     if (edgeFrameRef.current != null) {
@@ -651,14 +680,20 @@ export function DocSelectionLayer({
     setSelection(null);
     setPhase("idle");
     setRects([]);
-    setBand(null);
-    setBandFading(false);
+    // A hold box stays drawn while it is open, so it fades out rather than blinking off.
+    setBandFading(true);
+    bandFadeTimerRef.current = window.setTimeout(() => {
+      setBand(null);
+      setBandFading(false);
+      bandFadeTimerRef.current = null;
+    }, 220);
     setHitRects([]);
     setCopied(false);
     setSubMarkLive(null);
     setSubMarkConfirm(false);
     subMarkDragRef.current = null;
     selectionScreenBoxRef.current = null;
+    boxRef.current = null;
     setActionsVia("native");
   }, []);
 
@@ -747,13 +782,20 @@ export function DocSelectionLayer({
     setHitRects([]);
   }, []);
 
-  /** Enter confirm: keep paragraph chrome, fade the rubber-band away. */
+  /**
+   * Enter confirm: keep paragraph chrome and the box itself.
+   *
+   * The box stays drawn, with handles, so it can be pulled further after a
+   * scroll. It also gives Screenshot its bounds: the blocks under a box
+   * that runs onto the next page are only the first page's.
+   */
   const confirmMarquee = useCallback(
-    (done: DocSelectionResult, rect: LocalRect) => {
+    (done: DocSelectionResult, rect: LocalRect, root: HTMLElement, scope: string | undefined) => {
       if (bandFadeTimerRef.current != null) {
         window.clearTimeout(bandFadeTimerRef.current);
         bandFadeTimerRef.current = null;
       }
+      boxRef.current = { rect, root, scope };
       setHitRects(done.hitRects);
       setSelection({
         text: done.text,
@@ -763,13 +805,8 @@ export function DocSelectionLayer({
         ...(done.live ? { live: true } : {}),
       });
       setBand(rect);
-      setBandFading(true);
+      setBandFading(false);
       setPhase("confirm");
-      bandFadeTimerRef.current = window.setTimeout(() => {
-        setBand(null);
-        setBandFading(false);
-        bandFadeTimerRef.current = null;
-      }, 220);
     },
     [],
   );
@@ -998,12 +1035,18 @@ export function DocSelectionLayer({
     if (!host || !enabled || subMarkArmed || subMarkParent) return;
     let selectionRequest = 0;
 
+    /** The box from where the hold began to the finger, less any edge a side handle keeps. */
+    const bandOf = (body: HTMLElement, hold: NonNullable<typeof holdRef.current>, start: { x: number; y: number }): LocalRect => {
+      const finger = viewportToLocal(body, hold.lastX, hold.lastY);
+      const end = { x: finger.x - (hold.grab?.x ?? 0), y: finger.y - (hold.grab?.y ?? 0) };
+      const rect = bandFromLocalPoints(body, start, end);
+      return { ...rect, ...hold.keepX, ...hold.keepY };
+    };
+
     const paintFromFinger = (hold: NonNullable<typeof holdRef.current>) => {
       const body = bodyRef.current;
       if (!body || !hold.startLocal || !hold.root) return;
-      const end = viewportToLocal(body, hold.lastX, hold.lastY);
-      const rect = bandFromLocalPoints(body, hold.startLocal, end);
-      paintMarquee(rect, hold.root);
+      paintMarquee(bandOf(body, hold, hold.startLocal), hold.root);
     };
 
     const autoScroll = () => {
@@ -1031,15 +1074,7 @@ export function DocSelectionLayer({
         }
       }
 
-      const view = hostRef.current?.getBoundingClientRect();
-      const top = view ? Math.max(view.top, 0) : 0;
-      const bottom = view ? Math.min(view.bottom, window.innerHeight) : window.innerHeight;
-      const overY =
-        y > bottom - SELECT_EDGE_PX
-          ? y - (bottom - SELECT_EDGE_PX)
-          : y < top + SELECT_EDGE_PX
-            ? y - (top + SELECT_EDGE_PX)
-            : 0;
+      const overY = paneEdgeOverY(host, y);
       if (overY !== 0 && requestDocScroll(Math.sign(overY) * edgeStep(overY), host) !== 0) {
         moved = true;
       }
@@ -1087,9 +1122,9 @@ export function DocSelectionLayer({
       if (event.button !== 0) return;
       if (isDocChromeTarget(event.target)) return;
       selectionRequest += 1;
-      // Unsaved confirm (✓/✕, not yet Annotate) dies on tap-off. A new hold
-      // on this same pointer can replace it. Actions stay on the backdrop.
-      if (phaseRef.current === "confirm") dismiss();
+      // An open box (✓/✕, not yet Annotate) survives a pan, so it can be
+      // scrolled past and pulled further. A tap off it dismisses it (see the
+      // confirm tap-off listener); a new hold replaces it in `beginMarquee`.
       clearGesture();
       const startX = event.clientX;
       const startY = event.clientY;
@@ -1168,15 +1203,18 @@ export function DocSelectionLayer({
       const body = bodyRef.current;
       const root = hold.root;
       const scope = hold.scope;
-      const startLocal = hold.startLocal;
       const lastX = hold.lastX;
       const lastY = hold.lastY;
+      const rect = body && hold.startLocal ? bandOf(body, hold, hold.startLocal) : null;
+      const resize = hold.resize;
       try {
         host.releasePointerCapture(hold.pointerId);
       } catch {
         /* already released */
       }
       clearGesture();
+      // A handle drag the system took away leaves the box as it was.
+      if (resize && !confirm && boxRef.current) setBand(boxRef.current.rect);
       const liveFrame = body ? liveFrameIn(body) : null;
       // A live page has no words out here: a hold that did not move takes
       // the word under it, as a long press does on a still page.
@@ -1199,12 +1237,9 @@ export function DocSelectionLayer({
         });
         return;
       }
-      if (!held || !confirm || !body || !root || !startLocal) return;
-      const end = viewportToLocal(body, lastX, lastY);
-      const rect = bandFromLocalPoints(body, startLocal, end);
+      if (!held || !confirm || !body || !root || !rect) return;
       if (rect.width * (scaleOf(body) || 1) < MIN_BAND_PX) {
-        setBand(null);
-        setHitRects([]);
+        dismiss();
         return;
       }
       const page = pdfPageNumberOf(root);
@@ -1217,12 +1252,11 @@ export function DocSelectionLayer({
           if (!body.isConnected || selectionRequest !== request) return;
           const anchor = found ? regionAnchorFromRect(root, viewportBand, scope, scale) : null;
           if (!found || !anchor) {
-            setBand(null);
-            setHitRects([]);
+            dismiss();
             return;
           }
           const hits = unionRectsIntoBlocks(clientRectsToLocal(body, found.rects));
-          confirmMarquee({ text: found.text, excerpt: excerptOf(found.text), anchor, hitRects: hits.length > 0 ? hits : [rect], live: true }, rect);
+          confirmMarquee({ text: found.text, excerpt: excerptOf(found.text), anchor, hitRects: hits.length > 0 ? hits : [rect], live: true }, rect, root, scope);
         });
         return;
       }
@@ -1230,11 +1264,10 @@ export function DocSelectionLayer({
         if (!body.isConnected || selectionRequest !== request) return;
         const done = finalizeMarquee(body, rect, root, scope);
         if (!done) {
-          setBand(null);
-          setHitRects([]);
+          dismiss();
           return;
         }
-        confirmMarquee(done, rect);
+        confirmMarquee(done, rect, root, scope);
       };
       // A partly rendered layer can already contain text. Always wait for the
       // requested build before extracting either the quote or its tight bands.
@@ -1259,6 +1292,58 @@ export function DocSelectionLayer({
       clearGesture();
     };
 
+    /*
+     * A handle on the open box: the same drag as drawing one, from the corner
+     * across from the handle, so edge auto-scroll grows it past the screen.
+     * Taken at the window, before the board can start a pan with it.
+     */
+    const onHandleDown = (event: PointerEvent) => {
+      if (event.button !== 0 || phaseRef.current !== "confirm") return;
+      const handle = (event.target as Element | null)?.closest?.("[data-box-handle]");
+      const box = boxRef.current;
+      const body = bodyRef.current;
+      if (!handle || !box || !body) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const edge = handle.getAttribute("data-box-handle") ?? "";
+      const { rect } = box;
+      const right = rect.left + rect.width;
+      const bottom = rect.top + rect.height;
+      const dragged = { x: edge.includes("w") ? rect.left : right, y: edge.includes("n") ? rect.top : bottom };
+      const finger = viewportToLocal(body, event.clientX, event.clientY);
+      selectionRequest += 1;
+      clearGesture();
+      holdRef.current = {
+        pointerId: event.pointerId,
+        touch: event.pointerType === "touch",
+        startX: event.clientX,
+        startY: event.clientY,
+        armTimer: null,
+        armed: true,
+        held: true,
+        root: box.root,
+        scope: box.scope,
+        startLocal: { x: edge.includes("w") ? right : rect.left, y: edge.includes("n") ? bottom : rect.top },
+        lastX: event.clientX,
+        lastY: event.clientY,
+        sideScroll: horizontalScrollHost(box.root),
+        resize: true,
+        grab: { x: finger.x - dragged.x, y: finger.y - dragged.y },
+        ...(edge === "n" || edge === "s" ? { keepX: { left: rect.left, width: rect.width } } : {}),
+        ...(edge === "e" || edge === "w" ? { keepY: { top: rect.top, height: rect.height } } : {}),
+      };
+      claimSelectionGesture();
+      try {
+        host.setPointerCapture(event.pointerId);
+      } catch {
+        /* window listeners still run */
+      }
+      host.classList.add("lc-doc-selecting", "lc-doc-select-mode");
+      if (edgeFrameRef.current == null) {
+        edgeFrameRef.current = requestAnimationFrame(autoScroll);
+      }
+    };
+
     const onPointerUp = (event: PointerEvent) => finishHold(event, true);
     const onPointerCancel = (event: PointerEvent) => finishHold(event, false);
     const onSelectStart = (event: Event) => {
@@ -1275,6 +1360,7 @@ export function DocSelectionLayer({
     host.addEventListener("contextmenu", onContextMenu);
     host.addEventListener("pointerdown", onPointerDown);
     window.addEventListener("pointerdown", onOtherPointerDown, true);
+    window.addEventListener("pointerdown", onHandleDown, true);
     window.addEventListener("pointermove", onPointerMove, { capture: true, passive: false });
     window.addEventListener("pointerup", onPointerUp, true);
     window.addEventListener("pointercancel", onPointerCancel, true);
@@ -1284,6 +1370,7 @@ export function DocSelectionLayer({
       host.removeEventListener("contextmenu", onContextMenu);
       host.removeEventListener("pointerdown", onPointerDown);
       window.removeEventListener("pointerdown", onOtherPointerDown, true);
+      window.removeEventListener("pointerdown", onHandleDown, true);
       window.removeEventListener("pointermove", onPointerMove, true);
       window.removeEventListener("pointerup", onPointerUp, true);
       window.removeEventListener("pointercancel", onPointerCancel, true);
@@ -1291,15 +1378,37 @@ export function DocSelectionLayer({
     };
   }, [enabled, highlighting, subMarkArmed, subMarkParent, clearGesture, dismiss, paintMarquee, confirmMarquee, paletteScope]);
 
+  /*
+   * An open box dies on a tap off it, not on any touch: a pan has to leave it
+   * up, so it can be scrolled past and its handles pulled further.
+   */
   useEffect(() => {
+    let down: { id: number; x: number; y: number } | null = null;
     const onDown = (event: PointerEvent) => {
+      down = null;
       if (event.button !== 0) return;
       if (phaseRef.current !== "confirm") return;
       if (isDocChromeTarget(event.target)) return;
+      down = { id: event.pointerId, x: event.clientX, y: event.clientY };
+    };
+    const onUp = (event: PointerEvent) => {
+      const tap = down;
+      down = null;
+      if (!tap || tap.id !== event.pointerId || phaseRef.current !== "confirm") return;
+      if (Math.hypot(event.clientX - tap.x, event.clientY - tap.y) > SELECT_HOLD_SLOP_PX) return;
       dismiss();
     };
+    const onCancel = () => {
+      down = null;
+    };
     window.addEventListener("pointerdown", onDown, true);
-    return () => window.removeEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onUp, true);
+    window.addEventListener("pointercancel", onCancel, true);
+    return () => {
+      window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onUp, true);
+      window.removeEventListener("pointercancel", onCancel, true);
+    };
   }, [dismiss]);
 
   /*
@@ -1549,15 +1658,7 @@ export function DocSelectionLayer({
           if (side.scrollLeft !== before) moved = true;
         }
       }
-      const view = hostRef.current?.getBoundingClientRect();
-      const top = view ? Math.max(view.top, 0) : 0;
-      const bottom = view ? Math.min(view.bottom, window.innerHeight) : window.innerHeight;
-      const overY =
-        y > bottom - SELECT_EDGE_PX
-          ? y - (bottom - SELECT_EDGE_PX)
-          : y < top + SELECT_EDGE_PX
-            ? y - (top + SELECT_EDGE_PX)
-            : 0;
+      const overY = paneEdgeOverY(host, y);
       if (overY !== 0 && requestDocScroll(Math.sign(overY) * edgeStep(overY), host) !== 0) {
         moved = true;
       }
@@ -2768,6 +2869,25 @@ export function DocSelectionLayer({
               }}
             />
           )}
+          {/* Handles on the open box: pull any edge or corner, scrolling at the screen's edge. */}
+          <AnimatePresence>
+            {phase === "confirm" && band && !bandFading && !highlighting &&
+              BOX_HANDLES.map((edge) => (
+                <motion.span
+                  key={edge}
+                  className="lc-doc-marquee-handle"
+                  data-box-handle={edge}
+                  initial={{ opacity: 0, scale: 0.5 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.5 }}
+                  transition={{ duration: 0.14 }}
+                  style={{
+                    left: band.left + band.width * (edge.includes("w") ? 0 : edge.includes("e") ? 1 : 0.5),
+                    top: band.top + band.height * (edge.includes("n") ? 0 : edge.includes("s") ? 1 : 0.5),
+                  }}
+                />
+              ))}
+          </AnimatePresence>
           {/*
             Painted from the glyph boxes, with a little air — see `padQuoteRect`.
             The rects themselves stay as measured; only what is drawn grows.

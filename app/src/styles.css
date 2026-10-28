@@ -22522,6 +22522,55 @@ button.lc-row-selected:hover:not(:disabled) {
   background: color-mix(in srgb, var(--accent, #0d9488) 12%, transparent);
 }
 
+/*
+ * The open box's handles. The hit area is a finger, the knob is small;
+ * margins centre it on the edge so motion's scale stays the only transform.
+ */
+.lc-doc-marquee-handle {
+  position: absolute;
+  width: 36px;
+  height: 36px;
+  margin: -18px 0 0 -18px;
+  pointer-events: auto;
+  touch-action: none;
+  z-index: 6;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.lc-doc-marquee-handle::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 12px;
+  height: 12px;
+  margin: -6px 0 0 -6px;
+  border-radius: 50%;
+  background: var(--accent, #0d9488);
+  border: 2px solid #fff;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 28%);
+}
+
+.lc-doc-marquee-handle[data-box-handle="n"],
+.lc-doc-marquee-handle[data-box-handle="s"] {
+  cursor: ns-resize;
+}
+
+.lc-doc-marquee-handle[data-box-handle="e"],
+.lc-doc-marquee-handle[data-box-handle="w"] {
+  cursor: ew-resize;
+}
+
+.lc-doc-marquee-handle[data-box-handle="nw"],
+.lc-doc-marquee-handle[data-box-handle="se"] {
+  cursor: nwse-resize;
+}
+
+.lc-doc-marquee-handle[data-box-handle="ne"],
+.lc-doc-marquee-handle[data-box-handle="sw"] {
+  cursor: nesw-resize;
+}
+
 .lc-doc-footnote-pack {
   /* Origin only — must not fill the overlay (`inset: 0` washed the page
    * whenever `--lc-fn-color` leaked onto this box). Bands/chip are absolute

@@ -77,6 +77,41 @@ it("keeps drawing a band that covers the whole page", () => {
   expect(document.querySelector(".lc-doc-marquee-band")).not.toBeNull();
 });
 
+async function drawBox(page: HTMLElement) {
+  live.select.mockResolvedValue({ text: "Words the page has", rects: [new DOMRect(30, 50, 150, 20)] });
+  act(() => page.dispatchEvent(pointer("pointerdown", 40, 60)));
+  act(() => { vi.advanceTimersByTime(400); });
+  act(() => page.dispatchEvent(pointer("pointermove", 160, 80)));
+  await act(async () => page.dispatchEvent(pointer("pointerup", 160, 80)));
+}
+
+it("keeps the box and its handles through a pan, and drops them on a tap", async () => {
+  const page = mount();
+  await drawBox(page);
+  expect(document.querySelector(".lc-doc-marquee-band")).not.toBeNull();
+  expect(document.querySelectorAll("[data-box-handle]")).toHaveLength(8);
+  act(() => page.dispatchEvent(pointer("pointerdown", 300, 400)));
+  act(() => page.dispatchEvent(pointer("pointermove", 300, 200)));
+  act(() => page.dispatchEvent(pointer("pointerup", 300, 200)));
+  expect(document.querySelector('[aria-label="Use this selection"]')).not.toBeNull();
+  act(() => page.dispatchEvent(pointer("pointerdown", 300, 400)));
+  act(() => page.dispatchEvent(pointer("pointerup", 300, 400)));
+  expect(document.querySelector('[aria-label="Use this selection"]')).toBeNull();
+});
+
+it("grows the box from its bottom handle", async () => {
+  const page = mount();
+  await drawBox(page);
+  const handle = document.querySelector<HTMLElement>('[data-box-handle="s"]')!;
+  act(() => handle.dispatchEvent(pointer("pointerdown", 100, 84)));
+  act(() => handle.dispatchEvent(pointer("pointermove", 100, 304)));
+  expect(document.querySelector<HTMLElement>(".lc-doc-marquee-band")!.style.height).toBe("240px");
+  await act(async () => handle.dispatchEvent(pointer("pointerup", 100, 304)));
+  // The finger landed 4px under the edge; the box keeps its width and grows by the drag.
+  expect(live.select).toHaveBeenLastCalledWith(live.frame, { band: expect.objectContaining({ left: 40, top: 60, width: 120, height: 240 }) });
+  expect(document.querySelectorAll("[data-box-handle]")).toHaveLength(8);
+});
+
 it("takes the word under a hold that does not move on a live page", async () => {
   live.select.mockResolvedValue({ text: "beta", rects: [new DOMRect(60, 50, 40, 20)] });
   const changed = vi.fn();
