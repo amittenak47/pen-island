@@ -733,11 +733,11 @@ export function DocSelectionLayer({
       bandFadeTimerRef.current = null;
     }
     setBandFading(false);
-    if (localRectCoversHost(body, rect)) {
-      setBand(null);
-      setHitRects([]);
-      return;
-    }
+    /*
+     * No page-wash test here: the band is the box the reader is drawing, so a
+     * sweep from the top of the page to the bottom is still meant. Hiding it
+     * once it covered most of the page made a tall box vanish mid-drag.
+     */
     setBand(rect);
     /*
      * Live chrome is the rubber-band only. `hitRectsUnder` walks every PDF
@@ -1411,7 +1411,7 @@ export function DocSelectionLayer({
         bandFadeTimerRef.current = null;
       }
       setBandFading(false);
-      setBand(localRectCoversHost(body, rect) ? null : rect);
+      setBand(rect);
     };
 
     const releaseSubMarkGesture = () => {
@@ -2485,17 +2485,26 @@ export function DocSelectionLayer({
         )
       : [];
     const paintedBoxes = painted
-      .map((node) => node.getBoundingClientRect())
-      .filter((box) => {
+      .map((node) => ({ node, box: node.getBoundingClientRect() }))
+      .filter(({ node, box }) => {
         if (box.width <= 0.5 || box.height <= 0.5) return false;
+        /*
+         * Hold-box chrome is measured from the content under the box the
+         * reader drew, never from a browser range, so it cannot be a page
+         * wash. A tall box over a PDF unions its lines into one block that
+         * fills most of the page; dropping it left only the blocks above it,
+         * and the screenshot took the top of the selection alone.
+         */
+        if (node.matches(".lc-doc-marquee-hit, .lc-doc-marquee-band")) return true;
         if (host) return !isPageCoverRect(box, host);
         return !coversViewportBox(box, hostBox);
-      });
+      })
+      .map(({ box }) => box);
     /*
      * The whole block, not its first line.
      *
-     * Every box in `paintedBoxes` has already been through the page-cover
-     * filter, so their union is the selection's own extent — a paragraph is
+     * Every box in `paintedBoxes` is already the selection's own (washes
+     * were filtered above), so their union is the selection's own extent — a paragraph is
      * still a paragraph when it happens to run the full width of its column.
      * Testing the union again and falling back to the topmost box is what put
      * ✓/✕, Copy / Google and the ribbon on the right edge of the *first line*:
@@ -2745,8 +2754,7 @@ export function DocSelectionLayer({
             visibleSubMarks.length === 0
           }
         >
-          {band &&
-            !(bodyRef.current && localRectCoversHost(bodyRef.current, band)) && (
+          {band && (
             <div
               className={
                 (highlighting ? "lc-doc-highlight-band" : "lc-doc-marquee-band") +

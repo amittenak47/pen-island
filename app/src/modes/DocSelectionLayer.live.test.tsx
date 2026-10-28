@@ -65,7 +65,16 @@ it("reads a band swept over a live page from the page, and offers no mark for it
   expect(labels()).toEqual(["▣Screenshot", "Copy"]);
   await act(async () => document.querySelector<HTMLButtonElement>(".lc-doc-sheet-action")!.click());
   expect(onScreenshot).toHaveBeenCalledTimes(1);
-  expect(onScreenshot.mock.calls[0]).toEqual([expect.objectContaining({ text: "Words the page has", live: true }), null, expect.anything()]);
+  // Every box here measures as the whole page; the drawn selection still gives the screenshot its bounds.
+  expect(onScreenshot.mock.calls[0]).toEqual([expect.objectContaining({ text: "Words the page has", live: true }), new DOMRect(0, 0, 800, 1000), expect.anything()]);
+});
+
+it("keeps drawing a band that covers the whole page", () => {
+  const page = mount();
+  act(() => page.dispatchEvent(pointer("pointerdown", 20, 20)));
+  act(() => { vi.advanceTimersByTime(400); });
+  act(() => page.dispatchEvent(pointer("pointermove", 780, 980)));
+  expect(document.querySelector(".lc-doc-marquee-band")).not.toBeNull();
 });
 
 it("takes the word under a hold that does not move on a live page", async () => {
