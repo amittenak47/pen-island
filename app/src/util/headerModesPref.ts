@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 
 export const HEADER_MODES = [
   ["annotate", "Annotate"], ["whiteboard", "Whiteboard"], ["practice", "Practice"],
-  ["web", "Web"], ["explore", "Explore"],
+  ["web", "Web"], ["explore", "Explore"], ["video", "Video"],
 ] as const;
 export type HeaderMode = typeof HEADER_MODES[number][0];
 /**
@@ -10,7 +10,7 @@ export type HeaderMode = typeof HEADER_MODES[number][0];
  * HEADER_MODES keeps its own order: it is the order the choice is saved in.
  */
 export const HEADER_MODES_SHOWN: readonly (typeof HEADER_MODES[number])[] =
-  (["annotate", "web", "whiteboard", "explore", "practice"] as const).map(mode => HEADER_MODES.find(([m]) => m === mode)!);
+  (["annotate", "web", "video", "whiteboard", "explore", "practice"] as const).map(mode => HEADER_MODES.find(([m]) => m === mode)!);
 export type HeaderModes = Record<HeaderMode, boolean>;
 export const HEADER_MODES_EVENT = "lc-header-modes";
 const KEY = "whiteboard.headerModes.v1";

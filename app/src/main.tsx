@@ -10,9 +10,13 @@ import { StorageUnavailableError } from "./util/idb";
 import { hydrateBookMetadata } from "./util/localBookStore";
 import "./styles.css";
 import { debugLogEnabled, installDebugLog } from "./util/debugLog";
+import { installFileDropGuard } from "./util/fileDropGuard";
 
 // Off unless switched on in Settings → Diagnostics; first, so the boot is in it too.
 if (debugLogEnabled()) installDebugLog();
+
+// The page takes file drops on desktop; a stray one must not open in place of the app.
+installFileDropGuard();
 
 /*
  * The type documents are set in, fetched now rather than when first used.

@@ -29,7 +29,8 @@ export type TabKind =
   | "whiteboard"
   | "annotate"
   | "web"
-  | "explore";
+  | "explore"
+  | "video";
 
 /** Mirrors `DocIndexChipStatus` without pulling a component into the model. */
 export type TabIndexState = "idle" | "indexing" | "indexed" | "error";
@@ -74,6 +75,13 @@ interface TabBase {
 
 export interface ExploreTab extends TabBase {
   kind: "explore";
+}
+
+/** A video and its marks, stored under `videoId` in the video store. */
+export interface VideoTab extends TabBase {
+  kind: "video";
+  /** Null while the tab is still asking which video to open. */
+  videoId: string | null;
 }
 
 export interface HomeTab extends TabBase {
@@ -143,7 +151,8 @@ export type TabRecord =
   | WhiteboardTab
   | AnnotateTab
   | WebTab
-  | ExploreTab;
+  | ExploreTab
+  | VideoTab;
 
 /** Vertical sash = left | right panes. Horizontal sash = top | bottom. */
 export type SplitAxis = "vertical" | "horizontal";
@@ -229,6 +238,7 @@ export type TabPatch = Partial<{
   docType: DocType;
   indexed: TabIndexState;
   source: string | null;
+  videoId: string | null;
 }>;
 
 export type TabAction =
@@ -257,12 +267,12 @@ export function newTabId(kind: TabKind): string {
  * Whether opening this kind of tab runs a document load.
  *
  * The shell's loading lap is cleared by the workspace's load when it ends.
- * Home and Explore draw themselves and never load, so a lap started for them
+ * Home, Explore and Video draw themselves and never load, so a lap started for them
  * has nothing to end it: an Explore tab sat "loading" for as long as it was
  * open.
  */
 export function tabKindLoads(kind: TabKind): boolean {
-  return kind !== "home" && kind !== "explore";
+  return kind !== "home" && kind !== "explore" && kind !== "video";
 }
 
 export function newGroupId(): string {
@@ -497,6 +507,8 @@ export function sameEntity(a: TabRecord, b: TabRecord): boolean {
     }
     case "web":
       return false;
+    case "video":
+      return a.videoId !== null && a.videoId === (b as VideoTab).videoId;
   }
 }
 

@@ -4,7 +4,7 @@ import { useDialogButtonPress } from "./useDialogButtonPress";
 import "./dialogFrame.css";
 
 export type DialogShape = "soft" | "blocky";
-export type DialogMode = "practice" | "annotate" | "whiteboard" | "browse" | "explore";
+export type DialogMode = "practice" | "annotate" | "whiteboard" | "browse" | "explore" | "video";
 
 /** Opt-in presentation only; each dialog keeps its own lifecycle and actions. */
 export function DialogFrame({

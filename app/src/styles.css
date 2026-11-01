@@ -55,6 +55,7 @@
   --lc-mode-annotate: #ff0000;
   --lc-mode-browse: #34d399;
   --lc-mode-explore: #f472b6;
+  --lc-mode-video: #fb923c;
   --ink: #111827;
   --muted: #4b5563;
   --hint: #6b7280;
@@ -701,6 +702,10 @@ a,
 
 .lc-tab[data-tab-kind="explore"] {
   --lc-tab-mode: var(--lc-mode-explore);
+}
+
+.lc-tab[data-tab-kind="video"] {
+  --lc-tab-mode: var(--lc-mode-video);
 }
 
 .lc-tab[data-tab-kind="home"] {
@@ -7790,6 +7795,10 @@ body[data-lc-sash-drag="horizontal"] {
 
 .lc-home-card[data-mode="explore"] {
   --lc-home-mode: var(--lc-mode-explore);
+}
+
+.lc-home-card[data-mode="video"] {
+  --lc-home-mode: var(--lc-mode-video);
 }
 
 .lc-ink-lab-canvas {
@@ -24358,6 +24367,7 @@ html[data-corners="rounded"] {
 .lc-header .lc-header-right .lc-head-mode-whiteboard { --lc-head-mode: var(--lc-mode-whiteboard); }
 .lc-header .lc-header-right .lc-head-mode-practice { --lc-head-mode: var(--lc-mode-practice); }
 .lc-header .lc-header-right .lc-head-mode-explore { --lc-head-mode: var(--lc-mode-explore); }
+.lc-header .lc-header-right .lc-head-mode-video { --lc-head-mode: var(--lc-mode-video); }
 
 .lc-header .lc-header-right .lc-icon:not(:disabled):hover {
   color: var(--ink);

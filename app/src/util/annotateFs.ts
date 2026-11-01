@@ -209,7 +209,7 @@ export const FILE_PICKER_POLL_MS = 500;
  */
 export const FILE_PICKER_GIVE_UP_MS = 20_000;
 
-function pickFromHiddenInput<T>(
+export function pickFromHiddenInput<T>(
   accept: string,
   read: (file: File, all: File[]) => Promise<T>,
   configure?: (input: HTMLInputElement) => void,

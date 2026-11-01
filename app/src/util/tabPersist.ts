@@ -82,6 +82,10 @@ function persistable(tab: TabRecord): TabRecord | null {
       if (!tab.hash && !tab.docId && !source) return null;
       return { ...tab, dirty: false, indexed: asIndex(tab.indexed), source };
     }
+    case "video":
+      // The pad's marks live in the video store; the chip only names it.
+      if (!tab.videoId) return null;
+      return { ...tab, dirty: false };
     case "explore":
       // The chip only. Nodes and edges live in IndexedDB, so a restored atlas
       // reads the graph as it is now rather than as it was when the app closed.
@@ -177,6 +181,11 @@ function parseTab(raw: unknown): TabRecord | null {
   }
   if (kind === "explore") {
     return persistable({ id, kind, title: "Explore", dirty, lastActive, group });
+  }
+  if (kind === "video") {
+    const videoId = asString(raw.videoId);
+    if (!videoId) return null;
+    return persistable({ id, kind, title, dirty, lastActive, group, videoId });
   }
   if (kind === "inklab" || kind === "freehand") return null;
   if (kind === "web") {
