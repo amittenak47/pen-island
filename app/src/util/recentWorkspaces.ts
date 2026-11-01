@@ -16,6 +16,7 @@ export function recentWorkspaceKey(tab: TabRecord): string | null {
     case "whiteboard": return !tab.footnoteBoard && tab.notebookId ? `whiteboard:${tab.notebookId}` : null;
     case "annotate": return tab.docId ? `document:${tab.docId}` : tab.hash ? `file:${tab.docType}:${tab.hash}` : null;
     case "web": return tab.docId ? `document:${tab.docId}` : currentEntry(tab)?.url ? `web:${currentEntry(tab)!.url}` : null;
+    case "video": return tab.videoId ? `video:${tab.videoId}` : null;
     default: return null;
   }
 }

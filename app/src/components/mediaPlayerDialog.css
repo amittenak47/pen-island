@@ -2,3 +2,6 @@
 .lc-media-player-body { padding-bottom: 16px; }
 .lc-media-player-body video { display: block; width: 100%; max-height: 74dvh; border-radius: 8px; background: #000; }
 .lc-media-player-body audio { display: block; width: 100%; }
+
+.lc-media-player-foot { display: flex; align-items: center; justify-content: flex-end; gap: 12px; }
+.lc-media-player-error { color: #dc2626; font-size: 13px; }

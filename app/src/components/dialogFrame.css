@@ -31,6 +31,7 @@
 .lc-dialog-frame[data-dialog-mode="whiteboard"] { --lc-dialog-mode: var(--lc-mode-whiteboard); }
 .lc-dialog-frame[data-dialog-mode="browse"] { --lc-dialog-mode: var(--lc-mode-browse); }
 .lc-dialog-frame[data-dialog-mode="explore"] { --lc-dialog-mode: var(--lc-mode-explore); }
+.lc-dialog-frame[data-dialog-mode="video"] { --lc-dialog-mode: var(--lc-mode-video); }
 
 .lc-dialog-frame .lc-dialog-head {
   flex: 0 0 auto;

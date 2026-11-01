@@ -33,6 +33,8 @@ export interface HomeChooserProps {
   onBrowse: () => void;
   /** The notes graph — one tab, see `EXPLORE_TAB_LIMIT`. */
   onExplore: () => void;
+  /** A video to mark up, frame by frame or across a stretch of time. */
+  onVideo?: () => void;
   /** Something is already opening; the cards stop taking taps. */
   busy?: boolean;
   active?: boolean;
@@ -48,8 +50,8 @@ export interface HomeChooserProps {
  * Start, in tiers: the two main tiles, then LeetCode alone, then the two
  * work-in-progress ones. Each tier is the same shape a size smaller.
  */
-const HOME_ORDER = ["annotate", "whiteboard", "practice", "browse", "explore"];
-const HOME_TIER: Record<string, number> = { annotate: 1, whiteboard: 1, practice: 2, browse: 3, explore: 3 };
+const HOME_ORDER = ["annotate", "whiteboard", "practice", "browse", "video", "explore"];
+const HOME_TIER: Record<string, number> = { annotate: 1, whiteboard: 1, practice: 2, browse: 3, video: 3, explore: 3 };
 
 interface HomeMode {
   id: string;
@@ -205,6 +207,24 @@ function PracticeLive() {
       <span className="lc-home-fn lc-home-fn-a">{lines(slots.a)}</span>
       <span className="lc-home-fn lc-home-fn-b">{lines(slots.b)}</span>
     </span>
+  );
+}
+
+/**
+ * A frame on a timeline. While the card is boosted the playhead runs, pauses on
+ * a frame, and a ring is drawn round the subject: the tab's whole idea.
+ */
+function VideoGlyph() {
+  return (
+    <Glyph className="lc-home-video">
+      <rect x="2.5" y="3.5" width="19" height="13" rx="2" />
+      <path className="lc-home-video-play" d="m10 7.4 4.6 2.6-4.6 2.6z" />
+      <circle className="lc-home-video-ring" cx="12" cy="10" r="4.6" pathLength={1} />
+      <path className="lc-home-video-track" d="M2.5 20.5h19" />
+      <path className="lc-home-video-tick" d="M8.5 19v3" />
+      <path className="lc-home-video-tick lc-home-video-tick-b" d="M16 19v3" />
+      <circle className="lc-home-video-head" cx="2.5" cy="20.5" r="1.3" fill="currentColor" stroke="none" />
+    </Glyph>
   );
 }
 
@@ -707,6 +727,7 @@ export function HomeChooser({
   onAnnotate,
   onBrowse,
   onExplore,
+  onVideo,
   busy = false,
   active = true,
   covered = false,
@@ -910,6 +931,14 @@ export function HomeChooser({
       icon: <BrowseGlyph />,
       onOpen: onBrowse,
     },
+    ...(onVideo ? [{
+      id: "video",
+      kicker: "Video",
+      blurb: "Draw on a video, pinned to a frame or a stretch of time.",
+      wip: true,
+      icon: <VideoGlyph />,
+      onOpen: onVideo,
+    } satisfies HomeMode] : []),
     {
       id: "explore",
       kicker: "Explore",
@@ -987,8 +1016,8 @@ export function HomeChooser({
                 <rect x="1" y="1" pathLength="100" />
               </svg>}
               {!editing && <span className="lc-home-card-glow" aria-hidden><span className="lc-home-card-sweep" /></span>}
-              <span className="lc-home-recent-preview" aria-hidden="true"><svg viewBox="0 0 40 52" fill="none"><path d="M8 8h24M8 17h24M8 26h24M8 35h24M8 44h18"/><path className="lc-home-recent-mark" d={tab.kind === "whiteboard" ? "M8 31q6-15 12 0t12 0" : "M8 17h18"}/></svg></span>
-              <span className="lc-home-recent-text"><strong>{tab.title}</strong><span>{tab.kind === "practice" ? "Practice" : tab.kind === "whiteboard" ? "Whiteboard" : tab.kind === "web" ? "Web" : `Annotate · ${tab.kind === "annotate" ? tab.docType === "markdown" ? "Markdown" : tab.docType.toUpperCase() : ""}`}</span></span>
+              <span className="lc-home-recent-preview" aria-hidden="true"><svg viewBox="0 0 40 52" fill="none"><path d="M8 8h24M8 17h24M8 26h24M8 35h24M8 44h18"/><path className="lc-home-recent-mark" d={tab.kind === "whiteboard" ? "M8 31q6-15 12 0t12 0" : tab.kind === "video" ? "M8 44h24M15 44v-4" : "M8 17h18"}/></svg></span>
+              <span className="lc-home-recent-text"><strong>{tab.title}</strong><span>{tab.kind === "practice" ? "Practice" : tab.kind === "whiteboard" ? "Whiteboard" : tab.kind === "web" ? "Web" : tab.kind === "video" ? "Video" : `Annotate · ${tab.kind === "annotate" ? tab.docType === "markdown" ? "Markdown" : tab.docType.toUpperCase() : ""}`}</span></span>
             </button>
             {editing && <button type="button" className="lc-home-recent-remove" aria-label={`Remove ${tab.title} from Recently opened`}
               onClick={()=>forgetRecentWorkspace(tab)}>
@@ -1073,7 +1102,7 @@ function HomeCard({ mode, busy, active, delay }: { mode: HomeMode; busy: boolean
   /** When the braces finish opening, so a leave knows whether code was typed. */
   const codeStartsAt = useRef(0);
   const hoverable = HOVER_SCENES.has(mode.id);
-  const boostable = mode.id === "browse" || mode.id === "explore";
+  const boostable = mode.id === "browse" || mode.id === "explore" || mode.id === "video";
   const [pointerOver, setPointerOver] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pressed, setPressed] = useState(false);

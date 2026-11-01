@@ -151,6 +151,7 @@ import { AmbientPanel, type AmbientEntry } from "./modes/AmbientPanel";
 import { ProblemBrowser } from "./modes/ProblemBrowser";
 import { HomeChooser } from "./modes/HomeChooser";
 import { ExploreWorkspace } from "./modes/ExploreWorkspace";
+import { OPEN_VIDEO_EVENT, VideoWorkspace, padForRequest, type OpenVideoRequest } from "./modes/VideoWorkspace";
 import { LinkStrokeOverlay, type LinkChip } from "./modes/LinkStrokeOverlay";
 import { collectDomLinkHits, boxesOverlap, type LinkHit } from "./modes/linkHitTest";
 import type { StrokeBox } from "./modes/linkStroke";
@@ -1749,7 +1750,8 @@ export const Workspace = memo(function Workspace({
    */
   const needsBoard =
     tab.kind !== "home" &&
-    tab.kind !== "explore";
+    tab.kind !== "explore" &&
+    tab.kind !== "video";
   const [BoardView, setBoardView] = useState<BoardComponent | null>(
     () => peekBoardComponent(),
   );
@@ -5202,6 +5204,35 @@ export const Workspace = memo(function Workspace({
       lastActive: 0,
     });
   }, [openWorkspace]);
+
+  /** A Video tab: empty (it asks which video), or on a pad that exists. */
+  const openVideo = useCallback((videoId: string | null = null, title = "Video") => {
+    openWorkspace({
+      id: newTabId("video"),
+      kind: "video",
+      title,
+      dirty: false,
+      lastActive: 0,
+      videoId,
+    });
+  }, [openWorkspace]);
+
+  // A video handed over from elsewhere (the Web tab's player). Only the tab on
+  // screen answers, so one request opens one pad.
+  useEffect(() => {
+    if (!active) return;
+    const onOpen = (event: Event) => {
+      const request = (event as CustomEvent<OpenVideoRequest>).detail;
+      void padForRequest(request)
+        .then((pad) => {
+          if (pad) openVideo(pad.id, pad.title);
+          else setNotice("That link isn't a video the Video tab can open.");
+        })
+        .catch(() => setNotice("The video couldn't be copied into the app. The device may be out of space."));
+    };
+    window.addEventListener(OPEN_VIDEO_EVENT, onOpen);
+    return () => window.removeEventListener(OPEN_VIDEO_EVENT, onOpen);
+  }, [active, openVideo]);
 
   const openRecentWorkspace = useCallback((recent: TabRecord) => {
     openWorkspace({...recent,id:newTabId(recent.kind),dirty:false,group:undefined});
@@ -8877,7 +8908,9 @@ export const Workspace = memo(function Workspace({
       switch (tab.kind) {
         case "home":
         case "explore":
+        case "video":
           // Home has no board to read back; the chooser is the whole of it.
+          // Video reads its own pad from the video store when it mounts.
           setBusy(null);
           setWorkspaceLoadActive(false);
           setBoardPreparing(false);
@@ -10246,6 +10279,27 @@ export const Workspace = memo(function Workspace({
             </HoldButton>
           )}
           {/*
+            Video: a new Video tab, which asks for the video itself (a file, a
+            link, or one already marked up). Lit while a Video tab is on screen.
+          */}
+          {!hidePadMenu && headerModes.video && (
+            <button
+              type="button"
+              className={tab.kind === "video" ? "lc-icon lc-head-mode-video is-active" : "lc-icon lc-head-mode-video"}
+              aria-label="Video: open a video to mark up"
+              aria-pressed={tab.kind === "video"}
+              disabled={busy !== null || canvasLoading}
+              onClick={() => openVideo()}
+            >
+              <svg className="lc-icon-svg" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor"
+                strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <rect x="2.5" y="4.5" width="19" height="13" rx="2" />
+                <path d="m10 8.4 4.6 2.6-4.6 2.6z" />
+                <path d="M2.5 21h19" />
+              </svg>
+            </button>
+          )}
+          {/*
             Paper icon: tap for a blank notebook, hold for the library.
             Starting to write is the common case by a wide margin, and it was
             behind a dialog whose other option nobody wanted most of the time.
@@ -11176,6 +11230,7 @@ export const Workspace = memo(function Workspace({
               // app draws itself rather than boards, so they share the layer
               // that sits over a canvas which never mounts for them.
               tab.kind === "explore" ||
+              tab.kind === "video" ||
               holdBrowseOverlay ||
               boardPreparing ||
               browseMotion !== "idle") && (
@@ -11213,6 +11268,8 @@ export const Workspace = memo(function Workspace({
                     onResetSession={showReset}
                     onRandomSession={(filters) => void startRandomSession(filters)}
                   />
+                ) : tab.kind === "video" ? (
+                  <VideoWorkspace tab={tab} active={active} onPatch={(patch) => patchTab(tab.id, patch)} />
                 ) : tab.kind === "explore" ? (
                   <ExploreWorkspace
                     refreshKey={exploreRevision}
@@ -11264,6 +11321,7 @@ export const Workspace = memo(function Workspace({
                     }}
                     onBrowse={() => void openWebPage(WEB_HOME)}
                     onExplore={openExplore}
+                    onVideo={() => openVideo()}
                   />
                 ) : null}
               </div>

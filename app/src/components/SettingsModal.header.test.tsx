@@ -47,7 +47,7 @@ it("keeps header visibility as a draft on Cancel and persists each mode on Save"
   for (const mode of ["Annotate","Whiteboard","Practice","Web","Explore"]) expect(toggle(mode).getAttribute("aria-checked")).toBe("true");
   // Listed in the header's order.
   expect([...host.querySelectorAll('[aria-label="Top bar buttons"] [role="switch"]')].map(el => el.querySelector("strong")?.textContent))
-    .toEqual(["Annotate","Web","Whiteboard","Explore","Practice"]);
+    .toEqual(["Annotate","Web","Video","Whiteboard","Explore","Practice"]);
   await act(async()=>{toggle("Web").click();toggle("Explore").click();});
   expect(count()).toBe("2 changes"); expect(loadHeaderModes().web).toBe(true);
   await act(async()=>button("Cancel").click());
@@ -57,6 +57,6 @@ it("keeps header visibility as a draft on Cancel and persists each mode on Save"
   expect(toggle("Web").getAttribute("aria-checked")).toBe("true");
   await act(async()=>{toggle("Web").click();toggle("Explore").click();});
   await act(async()=>button("Save").click());
-  expect(loadHeaderModes()).toEqual({annotate:true,whiteboard:true,practice:true,web:false,explore:false});
+  expect(loadHeaderModes()).toEqual({annotate:true,whiteboard:true,practice:true,web:false,explore:false,video:true});
   expect(api.putConfig).not.toHaveBeenCalled();
 });

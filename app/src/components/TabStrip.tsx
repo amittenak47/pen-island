@@ -163,6 +163,14 @@ function TabIcon({ kind }: { kind: TabRecord["kind"] | "cancel" }) {
           <path d="M7.7 17 10.4 13.9" />
         </Glyph>
       );
+    case "video":
+      return (
+        <Glyph>
+          <rect x="2.5" y="4.5" width="19" height="13" rx="2" />
+          <path d="m10 8.4 4.6 2.6-4.6 2.6z" />
+          <path d="M2.5 21h19" />
+        </Glyph>
+      );
     case "web":
       return (
         <Glyph>
