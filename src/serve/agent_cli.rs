@@ -15,7 +15,10 @@ use crate::llm::agent_runs::{AgentAction, AgentRequest, AgentRunRegistry, AppAge
 use crate::mcp::coach::{BOTS_ENV, RUN_ENV};
 
 const DEFAULT_MODEL: &str = "gpt-6.1-sol";
-const CODEX_VERSION: &str = "codex-cli 0.162.1";
+/// Codex releases whose flags, feature names and bundled tool catalog have been
+/// checked against the lockdown below. Add a version only after a Test and a
+/// real page run pass with it.
+const VERIFIED_CODEX_VERSIONS: &[&str] = &["codex-cli 0.162.1", "codex-cli 0.163.0"];
 
 #[derive(Debug)]
 pub(super) struct CommandSpec {
@@ -126,6 +129,7 @@ pub(super) fn command_spec(
             "sleep_tool",
             "workspace_dependencies",
             "view_image",
+            "unified_exec",
         ] {
             args.extend(["--disable".into(), feature.into()]);
         }
@@ -161,6 +165,8 @@ pub(super) fn command_spec(
             "--no-chrome".into(),
             "--output-format".into(),
             "json".into(),
+            "--effort".into(),
+            settings.effort.clone(),
         ]);
         if !settings.model.trim().is_empty() {
             args.extend(["--model".into(), settings.model.trim().into()]);
@@ -181,6 +187,14 @@ pub(super) fn command_spec(
     Ok(CommandSpec { executable, args })
 }
 pub(super) fn native_executable(app: &str) -> Result<PathBuf> {
+    if let Some(path) = find_native(app) {
+        return Ok(path);
+    }
+    let installed = |other: &str| find_native(other).is_some();
+    Err(anyhow!(missing_app_message(app, installed)))
+}
+
+fn find_native(app: &str) -> Option<PathBuf> {
     let name = if app == "claude" { "claude" } else { "codex" };
     for directory in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()) {
         let native = directory.join(if cfg!(windows) {
@@ -189,12 +203,12 @@ pub(super) fn native_executable(app: &str) -> Result<PathBuf> {
             name.into()
         });
         if native.is_file() {
-            return Ok(native);
+            return Some(native);
         }
         if cfg!(windows) && app == "codex" {
             let binary = directory.join("node_modules/@openai/codex/node_modules/@openai/codex-win32-x64/vendor/x86_64-pc-windows-msvc/bin/codex.exe");
             if binary.is_file() {
-                return Ok(binary);
+                return Some(binary);
             }
         }
     }
@@ -205,16 +219,54 @@ pub(super) fn native_executable(app: &str) -> Result<PathBuf> {
             format!(".local/bin/{name}")
         });
         if native.is_file() {
-            return Ok(native);
+            return Some(native);
         }
     }
-    Err(anyhow!(
-        "{} is not installed on this PC.",
-        if app == "claude" {
-            "Claude Code"
+    None
+}
+
+pub(super) fn app_label(app: &str) -> &'static str {
+    if app == "claude" {
+        "Claude Code"
+    } else {
+        "Codex"
+    }
+}
+
+/// Names the other supported app when it is installed, so the reader knows
+/// whether switching apps would help or nothing on this PC can answer.
+pub(super) fn missing_app_message(app: &str, installed: impl Fn(&str) -> bool) -> String {
+    let other = if app == "claude" { "codex" } else { "claude" };
+    if installed(other) {
+        format!(
+            "{} is not installed on this PC. {} is: choose it under App in Settings, ChatBot.",
+            app_label(app),
+            app_label(other)
+        )
+    } else {
+        "Neither Codex nor Claude Code is installed on this PC, so no assistant app can answer. Install one and sign in, then try Test again.".into()
+    }
+}
+
+pub(super) fn codex_version_message(installed: &str) -> Option<String> {
+    let installed = installed.trim();
+    if VERIFIED_CODEX_VERSIONS.contains(&installed) {
+        return None;
+    }
+    let verified: Vec<_> = VERIFIED_CODEX_VERSIONS
+        .iter()
+        .map(|version| version.trim_start_matches("codex-cli "))
+        .collect();
+    let found = installed.trim_start_matches("codex-cli ");
+    let found =
+        if found.is_empty() || found.chars().count() > 40 || found.chars().any(char::is_control) {
+            "an unknown version".to_owned()
         } else {
-            "Codex"
-        }
+            format!("version {found}")
+        };
+    Some(format!(
+        "Codex {found} has not been verified for automatic footnotes (verified: {}). Choose Claude Code under App, or install a verified Codex version.",
+        verified.join(", ")
     ))
 }
 
@@ -331,8 +383,9 @@ pub(super) async fn prepare(
     let claude_mcp = temp.path().join("mcp.json");
     if settings.app == "codex" {
         let version = cli_output(&executable, &["--version"]).await?;
-        anyhow::ensure!(String::from_utf8_lossy(&version).trim() == CODEX_VERSION,
-            "This Codex version has not been verified for automatic footnotes. Open Settings, ChatBot, Test.");
+        if let Some(message) = codex_version_message(&String::from_utf8_lossy(&version)) {
+            anyhow::bail!(message);
+        }
         let metadata = cli_output(&executable, &["debug", "models", "--bundled"]).await?;
         let selected = if settings.model.trim().is_empty() {
             DEFAULT_MODEL

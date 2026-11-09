@@ -1627,7 +1627,11 @@ export function SettingsModal({
           setHubCheck({ kind: "idle" });
         }
       }
-      if (chatBotAnswerMode === "app" && !runnerConfig) throw new Error("Connect to your PC to set up the assistant app.");
+      // Only a switch to app mode needs the PC now; app mode as the saved or
+      // default choice must not block saving other settings while it is away.
+      if (chatBotAnswerMode === "app" && chatBotAnswerMode !== baselineChatBotAnswerMode && !runnerConfig) {
+        throw new Error("Connect to your PC to set up the assistant app.");
+      }
       if (runnerConfig && JSON.stringify(runnerConfig) !== JSON.stringify(baselineRunnerConfig)) {
         const saved = await client.putAssistantRunnerConfig(runnerConfig);
         setRunnerConfig(saved); setBaselineRunnerConfig(saved);
@@ -1718,10 +1722,10 @@ export function SettingsModal({
         </select></label>
         <label><span>Model (optional)</span><input aria-label="Assistant app model" value={config.model} maxLength={200}
           placeholder="The app’s default" onChange={event => setRunnerConfig({ ...config, model: event.target.value })} /></label>
-        {config.app === "codex" ? <label><span>Effort</span><select aria-label="Assistant app effort" value={config.effort}
+        <label><span>Effort</span><select aria-label="Assistant app effort" value={config.effort}
           onChange={event => setRunnerConfig({ ...config, effort: event.target.value as AssistantRunnerConfig["effort"] })}>
           <option value="low">Light</option><option value="medium">Normal</option><option value="high">Thorough</option>
-        </select></label> : null}
+        </select></label>
         <div className="lc-settings-actions-row"><button type="button" className="lc-secondary lc-dialog-action" disabled={runnerTesting || saving}
           onClick={() => {
             setRunnerTesting(true); setRunnerError(null);

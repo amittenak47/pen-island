@@ -11,7 +11,8 @@ export function AgentRunProgress({ pending, provider, events, showSteps = true }
   // Capture the selected assistant for this turn, so Settings changes don't rename it mid-run.
   const [name] = useState(() => {
     const client = loadChatBotClient();
-    return client === "grok" ? "Grok" : CHATBOT_CLIENTS.find(item => item.id === client)?.label ?? "the AI assistant";
+    if (client === "grok") return "Grok";
+    return client === "other" ? "the AI assistant" : CHATBOT_CLIENTS.find(item => item.id === client)?.label ?? "the AI assistant";
   });
   useEffect(() => {
     if (!pending || provider !== "bot") return;
