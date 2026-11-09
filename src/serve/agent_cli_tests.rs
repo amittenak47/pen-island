@@ -624,3 +624,41 @@ fn default_hooks_share_the_app_slot_and_custom_settings_round_trip() {
     assert!(old.custom_command.is_empty());
     old.validate().unwrap();
 }
+
+#[test]
+fn codex_gate_names_the_installed_and_verified_versions() {
+    assert_eq!(codex_version_message("codex-cli 0.162.1\n"), None);
+    assert_eq!(codex_version_message("codex-cli 0.163.0"), None);
+    let newer = codex_version_message("codex-cli 0.170.2").unwrap();
+    assert!(
+        newer.contains("Codex version 0.170.2 has not been verified"),
+        "{newer}"
+    );
+    assert!(newer.contains("verified: 0.162.1, 0.163.0"), "{newer}");
+    assert!(newer.contains("Choose Claude Code under App"), "{newer}");
+    // Untrusted output is never echoed back when it is not a plain version.
+    let odd = codex_version_message(&"x".repeat(500)).unwrap();
+    assert!(
+        odd.starts_with("Codex an unknown version has not been verified"),
+        "{odd}"
+    );
+    assert!(codex_version_message("")
+        .unwrap()
+        .contains("an unknown version"));
+}
+
+#[test]
+fn missing_app_says_whether_the_other_app_can_answer() {
+    assert_eq!(
+        missing_app_message("codex", |other| other == "claude"),
+        "Codex is not installed on this PC. Claude Code is: choose it under App in Settings, ChatBot."
+    );
+    assert_eq!(
+        missing_app_message("claude", |other| other == "codex"),
+        "Claude Code is not installed on this PC. Codex is: choose it under App in Settings, ChatBot."
+    );
+    for app in ["codex", "claude"] {
+        assert!(missing_app_message(app, |_| false)
+            .starts_with("Neither Codex nor Claude Code is installed on this PC"));
+    }
+}

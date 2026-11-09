@@ -48,7 +48,8 @@ it.each(["app", "bot"] as const)("renders %s waiting and chips live from the soc
   wire.frame({ type: "stage", request_id, stage: "ask", detail: waiting(provider).detail! });
   expect(host.querySelector('.lc-agent-waiting-dance')).not.toBeNull();
   expect(host.querySelector('[role="progressbar"]')).toBeNull();
-  expect(host.textContent).toContain(provider === "bot" ? "Waiting for Grok" : "Waiting for the AI application");
+  // No assistant is saved, so the bot is named generically rather than assumed to be Grok.
+  expect(host.textContent).toContain(provider === "bot" ? "Waiting for the AI assistant" : "Waiting for the AI application");
   expect(host.querySelector('.lc-agent-process')).toBeNull();
   act(() => vi.advanceTimersByTime(42_000));
   if (provider === "bot") expect(host.querySelector('.lc-agent-waiting-time')?.textContent).toBe(" · 0:42");

@@ -397,6 +397,8 @@ sleep_tool
 workspace_dependencies
 --disable
 view_image
+--disable
+unified_exec
 Answer the pending Pen Island ChatBot work. Call list_footnote_requests and answer each request (get_footnote_request, then submit_footnote). Then call list_annotation_jobs and, for the job `aj-one` only, read its pages and references and submit footnotes page by page, then finish_annotation_job. Follow the tool descriptions. Don't do anything else."#);
         let settings = AssistantAppConfig { app: "claude".into(), model: "sonnet".into(), ..settings };
         let spec = command_spec(&settings, "claude.exe".into(), Path::new("desktop.exe"),
@@ -406,7 +408,7 @@ Answer the pending Pen Island ChatBot work. Call list_footnote_requests and answ
             "--mcp-config", "mcp.json", "--tools", "", "--allowedTools", "mcp__pen_island__*",
             "--permission-mode", "dontAsk", "--permission-prompts", "none",
             "--no-session-persistence", "--disable-slash-commands", "--no-chrome",
-            "--output-format", "json", "--model", "sonnet"]);
+            "--output-format", "json", "--effort", "high", "--model", "sonnet"]);
     }
 
     #[test]

@@ -14,28 +14,40 @@ const KEY = "whiteboard.chatBotClient.v1";
 export function loadChatBotClient(): ChatBotClient {
   try {
     const value = localStorage.getItem(KEY);
-    return CHATBOT_CLIENTS.find(client => client.id === value)?.id ?? "grok";
-  } catch { return "grok"; }
+    return CHATBOT_CLIENTS.find(client => client.id === value)?.id ?? "other";
+  } catch { return "other"; }
 }
 export function saveChatBotClient(client: ChatBotClient): void {
   localStorage.setItem(KEY, client);
 }
 
 const MODE_KEY = "whiteboard.chatBotAnswerMode.v1";
+/** With nothing saved, Codex or Claude Code on the PC writes the footnotes; no online bot is needed. */
 export function loadChatBotAnswerMode(): ChatBotAnswerMode {
   try {
     const mode = localStorage.getItem(MODE_KEY);
-    return mode === "llm" || mode === "app" ? mode : "bot";
+    return mode === "llm" || mode === "bot" ? mode : "app";
   }
-  catch { return "bot"; }
+  catch { return "app"; }
 }
 export function saveChatBotAnswerMode(mode: ChatBotAnswerMode): void {
   localStorage.setItem(MODE_KEY, mode);
 }
 
+/** Setup problems the hub words itself. Anything else may echo process output, so it stays hidden. */
+const PLAIN_RUNNER_ERRORS = [
+  /^(Codex|Claude Code) is not installed on this PC\. (Codex|Claude Code) is: choose it under App in Settings, ChatBot\.$/,
+  /^Neither Codex nor Claude Code is installed on this PC, so no assistant app can answer\. Install one and sign in, then try Test again\.$/,
+  /^Codex (version [\w.-]{1,40}|an unknown version) has not been verified for automatic footnotes \(verified: [\w., -]{1,200}\)\. Choose Claude Code under App, or install a verified Codex version\.$/,
+  /^Sign in to Claude Code on this PC, then try Test again\.$/,
+];
+
 export function assistantRunnerMessage(status: AssistantRunnerStatus): string {
   const app = status.app === "claude" ? "Claude Code" : "Codex";
   if (status.state === "running") return `${app} is writing…`;
-  if (status.state === "failed") return `${app} couldn't finish. Open Settings → ChatBot → Test.`;
+  if (status.state === "failed") {
+    const error = status.error?.trim() ?? "";
+    return PLAIN_RUNNER_ERRORS.some(pattern => pattern.test(error)) ? error : `${app} couldn't finish. Open Settings → ChatBot → Test.`;
+  }
   return status.state === "done" ? `${app} finished.` : `${app} is ready.`;
 }

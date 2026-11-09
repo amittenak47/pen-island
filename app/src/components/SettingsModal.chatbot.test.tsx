@@ -15,6 +15,8 @@ let root: ReturnType<typeof createRoot>;
 let host: HTMLDivElement;
 beforeEach(() => {
   localStorage.clear();
+  // Most cases start from a reader who saved the online-bot mode earlier.
+  localStorage.setItem("whiteboard.chatBotAnswerMode.v1", "bot");
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("ResizeObserver", class { observe() {} disconnect() {} });
   vi.stubGlobal("matchMedia", () => ({ matches: true, addEventListener() {}, removeEventListener() {} }));
@@ -66,9 +68,9 @@ it("shows three modes and saves app mode with settings on the desktop", async ()
 it("tests the unsaved draft without saving or enabling app mode", async () => {
   const api = client(); await open(api); await change("ChatBot answer mode", "app");
   await change("Assistant app", "claude"); await change("Assistant app model", "test-model");
-  expect(host.querySelector('[aria-label="Assistant app effort"]')).toBeNull();
+  await change("Assistant app effort", "medium");
   await act(async () => button("Test").click());
-  expect(api.testAssistantRunner).toHaveBeenCalledWith({ app: "claude", model: "test-model", effort: "high", allow_bots: false });
+  expect(api.testAssistantRunner).toHaveBeenCalledWith({ app: "claude", model: "test-model", effort: "medium", allow_bots: false });
   expect(api.putAssistantRunnerConfig).not.toHaveBeenCalled();
   expect(loadChatBotAnswerMode()).toBe("bot");
   expect(host.textContent).toContain("Codex finished.");
@@ -100,4 +102,13 @@ it("opens with every section folded", async () => {
   const folds = [...document.querySelectorAll<HTMLButtonElement>(".lc-settings-fold-summary")];
   expect(folds.length).toBeGreaterThan(0);
   expect(folds.filter((fold) => fold.getAttribute("aria-expanded") === "true")).toEqual([]);
+});
+it("opens a fresh install on the assistant app on this PC, not an online bot", async () => {
+  localStorage.clear();
+  const api = client(); await open(api);
+  expect(host.querySelector<HTMLSelectElement>('[aria-label="ChatBot answer mode"]')!.value).toBe("app");
+  expect(host.querySelector('[aria-label="ChatBot assistant"]')).toBeNull();
+  expect(host.querySelector<HTMLSelectElement>('[aria-label="Assistant app"]')!.value).toBe("codex");
+  await change("Assistant app", "claude");
+  expect(host.querySelector('[aria-label="Assistant app effort"]')).not.toBeNull();
 });
