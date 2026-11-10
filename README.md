@@ -22,12 +22,12 @@ on your own machine.
 
 <!-- TODO: screenshots (docs/screenshots/*.png): Whiteboard, Annotate, Browse, Practice, the Agent panel -->
 
+https://github.com/user-attachments/assets/679c5cb9-b249-4128-9f0c-5f0a56d89a59
+
 <p align="center">
-  <a href="docs/media/test_demo.mp4">
-    <img src="docs/media/test_demo.jpg" alt="Pen Island demo video" width="720">
-  </a>
-  <br>
-  <sub>Demo video: click to play</sub>
+  <sub>Stepping through a tracer page and inking on it, a ChatBot footnote written by Codex,
+  a selection screenshot, a whiteboard sketch and a Practice problem.
+  Not playing? <a href="docs/media/demo.mp4">Download the MP4</a>.</sub>
 </p>
 
 ---
