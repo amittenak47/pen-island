@@ -39,9 +39,10 @@ Everything opens in tabs, and two tabs can sit side by side.
 | Mode | What it's for |
 | --- | --- |
 | **Whiteboard** | A blank page for sketches, notes and diagrams. |
-| **Annotate** | Write on top of a PDF, an EPUB, a Markdown document or source code. Export the marked-up file when you're done. |
-| **Browse** | Open a web page and write straight onto a snapshot of it. |
+| **Annotate** | Write on top of a PDF, an EPUB, a Markdown document, source code or a local HTML page. Fill in PDF forms. Export the marked-up file when you're done. |
+| **Web** | Open a web page and write straight onto a snapshot of it. |
 | **Practice** | Pick a coding problem, work it out by hand, write the solution and run the tests in the app. |
+| **Video** *(in testing)* | Draw on a video, pinned to one frame or to a stretch of time. Marks stay on the device for now. |
 | **Explore** *(work in progress)* | See how your files, notebooks and problems connect. |
 
 The **Agent** panel sits beside every mode. Ask it about what's on the page, have
@@ -53,6 +54,12 @@ A few more things worth knowing about:
 
 - **Footnotes** in a document can carry their own whiteboard, code or Markdown
   attachments.
+- **ChatBot footnotes.** Select text, tap **Ask ChatBot**, and an explanation
+  arrives as a footnote. It can also annotate a whole page range
+  ([ChatBot footnotes](#chatbot-footnotes)).
+- **A selection box that reaches past the screen.** Hold and drag on a document
+  to draw a box, scroll, then pull its handles onto the next page. Screenshot
+  takes the whole box.
 - **Exports and backups.** Annotated PDF, EPUB and Markdown archives export;
   annotation and whiteboard backups import again.
 - **A tablet and a PC together.** The desktop app can host a hub that keeps your
@@ -60,7 +67,7 @@ A few more things worth knowing about:
   ([Pad hub](#using-a-tablet-and-a-pc-together)).
 
 The [client guide](app/README.md#documents-attachments-and-recovery) has the
-details on reading modes, document search, recovery and the Android pen, capture
+details on reading modes, document search, recovery and the Android pen, screenshot
 and gesture integrations.
 
 ---
@@ -72,7 +79,7 @@ Two APKs. Same app, one difference.
 | Build | You get | Left out |
 | --- | --- | --- |
 | **Practice** *(default)* | Every mode, the Agent, and Practice with its test runner | nothing |
-| **Whiteboard-only** | Whiteboard, Annotate, Browse, Explore and the Agent | Practice, and the Python engine that runs its tests |
+| **Whiteboard-only** | Whiteboard, Annotate, Web, Video, Explore and the Agent | Practice, and the Python engine that runs its tests |
 
 Take **Practice** unless you want a smaller app and know you'll never run a test.
 Whiteboard-only leaves out RustPython, which is most of the download.
@@ -166,7 +173,7 @@ it. That isn't a supported way to run the app.
 ## Problem sets
 
 The APK ships without problems; it would be several times the size with them.
-Install them from inside the app under **Settings → Workspace → Datasets**. They
+Install them from inside the app under **Settings → Workspace → Problem sets**. They
 download from the
 [`corpora-v1`](https://github.com/amittenak47/pen-island/releases/tag/corpora-v1)
 release, which is separate from app releases, so updating the app leaves your
@@ -205,6 +212,56 @@ Android has no environment variables, so Settings is the only route there.
 
 ---
 
+## Assistant apps and AI assistants
+
+Under **Settings → AI → AI model → Model for each task**, each agent mode
+(Review and Ask, Reveal, Diagrams, Planner) can use a model provider or one of
+two assistants instead:
+
+- **Assistant app:** Codex or Claude Code on your PC, run headless by the
+  desktop app with only Pen Island's own tools. It uses the app's subscription,
+  not an API key. Pick the app under **Settings → AI → ChatBot**.
+- **AI assistant:** an assistant you connect over MCP with `lc mcp`, which
+  answers when it checks for requests. **AI assistant time limit** sets how long
+  a run waits for it.
+
+Both need the desktop app running on the PC, including when you ask from a
+paired tablet.
+
+---
+
+## ChatBot footnotes
+
+Select text in Annotate and tap **Ask ChatBot**, and an explanation arrives as a
+footnote. The ChatBot sheet in the right-hand tray also annotates a page range
+(up to 40 pages): it walks you through **Request**, **Reading**, **Attach** and
+**Review**, and **Attach** takes library files or PDF pages, such as the
+chapter's problems, so the footnotes can prepare you for them without solving
+them. **History** lists each run, with **Cancel** and **Undo**.
+
+Choose who writes them under **Settings → AI → ChatBot → Footnotes written by**:
+
+| Choice | Who writes | What it needs |
+| --- | --- | --- |
+| **An assistant app on this PC** *(default)* | Codex or Claude Code, started by the desktop app with only Pen Island's tools | The app installed and signed in on the PC. Pick it under **App**, set **Model** and **Effort**, and press **Test**. |
+| **Your AI model** | The model in **Settings → AI → AI model** | Your model server running. Single footnotes only; page runs need an assistant. |
+| **An AI assistant bot** | An assistant connected with `lc mcp`: OpenAI Dots, xAI Grok Bot, Codex or Cursor, or any other MCP client | The assistant connected over MCP. It answers when you ask it to check. A cloud bot also needs a public, signed-in route to the PC. |
+
+ChatBot always needs the desktop app running on the PC. It holds the request
+inbox, and sync carries each footnote to your other devices.
+
+Claude Code has to be signed in with a claude.ai account; it refuses API keys
+in this mode. Codex is locked down per release, so only versions Pen Island has
+checked run (`VERIFIED_CODEX_VERSIONS` in
+[`src/serve/agent_cli.rs`](src/serve/agent_cli.rs)). After a Codex update,
+press **Test**; a newer version is refused until it is added there.
+
+With **An AI assistant bot**, the switch **Let it hand the writing to an app on
+this PC** lets you tell the bot to "use Codex", and the assistant app on the PC
+writes the footnotes instead.
+
+---
+
 ## Voice dictation
 
 On Android, tap the mic to the left of **+** in the agent box, talk, and tap it
@@ -214,7 +271,7 @@ again to stop. The words land where your cursor was. Pick the speech engine unde
 | Engine | Cost | How it works |
 | --- | --- | --- |
 | **Android** *(default)* | Free | The tablet's built-in recognizer. Words appear as you speak. |
-| **Local** | Free | Your own Whisper server, such as [whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s `whisper-server` or speaches. Enter its URL, using your PC's network address. |
+| **Whisper on your PC** | Free | Your own Whisper server, such as [whisper.cpp](https://github.com/ggml-org/whisper.cpp)'s `whisper-server` or speaches. Enter its address, using your PC's network address. |
 | **OpenAI**, **Groq** | Your API key | Records a clip, then transcribes it. Uses the same keys as the LLM settings. |
 | **Deepgram** | Your API key | Same idea, with its own key. |
 
@@ -252,14 +309,15 @@ changes enough to change the answer, it says so and says why.
 
 **Run tests** and **Submit** on the Practice toolbar both run your solution's tests
 in the app and post the result to the agent thread. Submit doesn't send anything
-to a judge site. **Settings → Practice → Test Cases** controls whether every case
+to a judge site. **Settings → Practice → Tests** controls whether every case
 runs and whether failures go to the agent automatically.
 
-Two extras are off until you turn them on. **Settings → Practice → Agent Planning**
-works out which approaches a problem admits before the agent reads your board,
-and is worth pointing at a larger model. **Settings → Personalize → UI → Agent
-behavior** has a diagram check, which looks at each diagram the agent draws and
-redraws it once if the picture doesn't show what it claims.
+Two extras are off until you turn them on. **Plan approaches first**, under
+**Settings → Practice → Planning**, works out which approaches a problem admits
+before the agent reads your board, and is worth pointing at a larger model.
+**Check drawn diagrams**, under **Settings → Personalize → Display → AI
+assistant replies**, looks at each diagram the agent draws and redraws it once
+if the picture doesn't show what it claims. It needs a model that reads images.
 
 ---
 
