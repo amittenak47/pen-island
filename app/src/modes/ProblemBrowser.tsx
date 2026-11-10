@@ -73,6 +73,44 @@ export function cycle<T>(options: readonly T[], current: T): T {
   return options[(index + 1) % options.length];
 }
 
+/** The filters one search was made for; rows are stale when this moves on. */
+export function searchKey(
+  dataset: string,
+  query: string,
+  difficulty: string,
+  tag: string,
+  sort: string,
+): string {
+  return [dataset, query, difficulty, tag, sort].join("\0");
+}
+
+/** Letters the table claims for itself (see the key list in the header). */
+const SHORTCUT_KEYS = new Set(["w", "a", "s", "d", "t", "e", "o", "g", "r", "m", "x"]);
+
+/**
+ * Whether a key pressed outside the search box is the start of a search.
+ *
+ * A letter or digit with no shortcut of its own, with no modifier held. The
+ * shortcut letters stay shortcuts, which is why the box also takes focus when
+ * the library opens on a desktop.
+ */
+export function startsSearch(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey">): boolean {
+  if (event.ctrlKey || event.metaKey || event.altKey) return false;
+  if (!/^[\p{L}\p{N}]$/u.test(event.key)) return false;
+  return !SHORTCUT_KEYS.has(event.key.toLowerCase());
+}
+
+/**
+ * Whether opening the library should put the caret in the search box.
+ *
+ * Only with a mouse as the main pointer: on a tablet or phone a focused input
+ * pops the on-screen keyboard over the table.
+ */
+function shouldFocusSearchOnOpen(mobile: boolean): boolean {
+  if (mobile || typeof window.matchMedia !== "function") return false;
+  return window.matchMedia("(pointer: fine)").matches;
+}
+
 export function ProblemBrowser({
   client,
   onPick,
@@ -201,7 +239,7 @@ export function ProblemBrowser({
     };
   }, [client, offline, seedTick]);
 
-  // Any filter change resets to the first page.
+  // Any filter change resets to the first page and the top row.
   // Skip the first run so a restored browse position keeps its page.
   const skipPageResetRef = useRef(true);
   useEffect(() => {
@@ -210,7 +248,24 @@ export function ProblemBrowser({
       return;
     }
     setPage(0);
+    // The remembered row index belongs to the old result list. Keeping it
+    // made Enter after a search open whatever landed at that index (row 4 of
+    // "valid parentheses" instead of Valid Parentheses itself).
+    setSelected(0);
   }, [query, difficulty, tag, sort, dataset]);
+
+  /*
+   * Which filters the rows on screen were fetched for, and an Enter that
+   * arrived before they were. Search is debounced, so Enter right after the
+   * last keystroke used to open a row from the previous query's results.
+   */
+  const filterKey = searchKey(dataset, query, difficulty, tag, sort);
+  const filterKeyRef = useRef(filterKey);
+  filterKeyRef.current = filterKey;
+  const rowsKeyRef = useRef<string | null>(null);
+  const pendingEnterRef = useRef(false);
+  /** `pick`, for the search callback above, which runs outside render. */
+  const openRef = useRef<(taskId: string) => void>(() => {});
 
   // Persist browse spot so returning from a problem lands on the same tab/page.
   useEffect(() => {
@@ -238,6 +293,7 @@ export function ProblemBrowser({
     setLoading(true);
     // Debounce typing/filter changes; fetch immediately on first open.
     const delay = tableReadyRef.current ? 200 : 0;
+    const key = searchKey(dataset, query, difficulty, tag, sort);
     const timer = setTimeout(() => {
       client
         .searchProblems({
@@ -251,15 +307,22 @@ export function ProblemBrowser({
         })
         .then((result) => {
           if (cancelled) return;
+          rowsKeyRef.current = key;
           setRows(result.items);
           setTotal(result.total);
           setSelected((current) => Math.min(current, Math.max(result.items.length - 1, 0)));
+          if (pendingEnterRef.current) {
+            pendingEnterRef.current = false;
+            const top = result.items[0];
+            if (top) openRef.current(top.task_id);
+          }
           setError(null);
           tableReadyRef.current = true;
           setTableReady(true);
         })
         .catch((cause) => {
           if (cancelled) return;
+          pendingEnterRef.current = false;
           setError(messageOf(cause));
           tableReadyRef.current = true;
           setTableReady(true);
@@ -275,6 +338,19 @@ export function ProblemBrowser({
   useEffect(() => {
     if (tableReady) onReady?.();
   }, [tableReady, onReady]);
+
+  // Typing a name is the usual first move, so on a desktop the box is where
+  // keys land. Selecting the old query lets a new one replace it. W/S/A/D and
+  // the other shortcuts work again after Esc.
+  useEffect(() => {
+    if (!tableReady || !shouldFocusSearchOnOpen(mobile)) return;
+    const box = searchRef.current;
+    if (!box || document.activeElement === box) return;
+    box.focus({ preventScroll: true });
+    box.select();
+    // Once per open: the browser remounts each time the library opens.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tableReady]);
 
   useEffect(() => {
     if (loading) return;
@@ -357,6 +433,7 @@ export function ProblemBrowser({
     (taskId: string) => onPick(taskId, bankFilters),
     [onPick, bankFilters],
   );
+  openRef.current = pick;
 
   const togglePick = useCallback((taskId: string) => {
     setPicked((prev) => {
@@ -410,16 +487,44 @@ export function ProblemBrowser({
         return;
       }
       if (typing) {
-        if (event.key === "Escape") (target as HTMLInputElement).blur();
         // Search box only — other INPUTs in the header must not steal Enter.
-        if (
-          event.key === "Enter" &&
-          target === searchRef.current &&
-          rows[selected]
-        ) {
-          event.preventDefault();
-          pick(rows[selected].task_id);
+        if (target !== searchRef.current) {
+          if (event.key === "Escape") (target as HTMLInputElement).blur();
+          return;
         }
+        if (event.key === "Escape") {
+          // Esc leaves the box for the shortcuts. A search input also clears
+          // itself on Esc by default, which threw the filter away with it.
+          event.preventDefault();
+          target.blur();
+          return;
+        }
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          move(event.key === "ArrowDown" ? 1 : -1);
+          return;
+        }
+        if (event.key === "Enter") {
+          event.preventDefault();
+          if (rowsKeyRef.current !== filterKeyRef.current) {
+            // The rows on screen are the previous query's. Open the top match
+            // of this one once it lands.
+            pendingEnterRef.current = true;
+            return;
+          }
+          if (rows[selected]) pick(rows[selected].task_id);
+        }
+        return;
+      }
+
+      if (startsSearch(event)) {
+        // Typing a name with the box unfocused used to fire R (random
+        // session), Space (add to picks), T, E and so on letter by letter.
+        // A letter with no shortcut of its own moves into the search box and
+        // types there, replacing the old query, and the rest of the word
+        // follows it.
+        searchRef.current?.focus();
+        searchRef.current?.select();
         return;
       }
 
@@ -740,8 +845,8 @@ export function ProblemBrowser({
                 </div>
                 <div className="lc-browser-foot-keys lc-desktop-only">
                   <span className="lc-keys lc-muted">
-                    W/S move · A/D page · / search · T tag · E diff · O / column sort · G
-                    dataset · R random · M select · Space add · X reset · Enter open
+                    Esc leave search · W/S move · A/D page · / search · T tag · E diff · O / column
+                    sort · G dataset · R random · M select · Space add · X reset · Enter open
                   </span>
                 </div>
               </div>

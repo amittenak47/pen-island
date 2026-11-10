@@ -101,11 +101,15 @@ audit-*.jsonl.progress.json
 **/.cargo-ok
 
 # --- Local / agent docs (not shipped; ingest from docs/fix-log/) ---
-# Nothing under docs/ ships except docs/icons/, which is build input for
-# `npm run icons:sync`. Markdown is matched at every depth, not just the top
-# level, so a backup or a subfolder cannot quietly become tracked.
+# Nothing under docs/ ships except docs/icons/ (build input for
+# `npm run icons:sync`), docs/media/, and the user-facing guides listed
+# below. Markdown is matched at every depth, not just the top level, so a
+# backup or a subfolder cannot quietly become tracked. Internal and
+# historical notes stay local.
 docs/*.md
 docs/**/*.md
+!docs/AI-SETUP-GUIDE.md
+!docs/DESKTOP-SETUP.md
 docs/fix-log/
 docs/plans/
 docs/backup-*/

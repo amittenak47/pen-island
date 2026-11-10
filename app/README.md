@@ -34,9 +34,10 @@ spacedesk (mirror the desktop window) rather than screen-mirroring a separate
 PC daemon. The APK can instead sync its own library through the desktop Pad hub.
 
 For installation and user workflows, start with the [main README](../README.md).
-The `lc` CLI is maintenance-only (`index`, `datasets`, `config`); use the app for
-editing solutions, running tests and asking the Agent. Corpus audits use the
-separate `audit_tests` binary.
+The `lc` CLI is maintenance-only (`index`, `datasets`, `config`) plus `mcp`,
+which lets an AI assistant answer ChatBot requests; use the app for editing
+solutions, running tests and asking the Agent. Corpus audits use the separate
+`audit_tests` binary.
 
 ## Getting started
 
@@ -52,9 +53,10 @@ npm install
 npm run tauri dev
 ```
 
-Opens on Home, with cards for Practice, Whiteboard, Annotate, Browse and
-Explore (WIP). Each opens in its own tab. Tabs can split for side-by-side work.
-Home stays as the first tab rather than being somewhere you navigate back to.
+Opens on Home, with cards for Practice, Annotate, Whiteboard, Web, Video (in
+testing) and Explore (WIP). Each opens in its own tab. Tabs can split for
+side-by-side work. Home stays as the first tab rather than being somewhere you
+navigate back to.
 
 ### Whiteboard-only (no Practice)
 
@@ -73,15 +75,15 @@ app\scripts\android-install-whiteboard.cmd <your-device-serial>
 ```
 
 Linux: `./app/scripts/android-install-whiteboard.sh`. From this directory:
-`npm run android:apk:whiteboard` then `adb install -r` the universal debug APK.
-Release: `npm run android:apk:whiteboard:release`. Details: [`docs/ANDROID_SETUP.md`](docs/ANDROID_SETUP.md).
+`npm run android:apk:whiteboard` then `adb install -r` the debug APK.
+Release: `npm run android:apk:whiteboard:release`. Both flavors build for arm64
+(`aarch64`) only. Details: [`docs/ANDROID_SETUP.md`](docs/ANDROID_SETUP.md).
 
 Both flavors share the app id `dev.lc.whiteboard`. Use `adb install -r` to
 update or switch when the package, signing certificate, and version are
 compatible. Different build sources can have different signing keys. If Android
 rejects the update, verify an export/backup before choosing a fresh install;
-normal uninstall removes the local library and settings. The wrappers select
-the generated universal or arm64 output as appropriate.
+normal uninstall removes the local library and settings.
 
 The old `*-pads*` script and npm names still work. They forward to these, and
 they will be removed once nobody is typing them.
@@ -94,9 +96,10 @@ npm run tauri -- dev -- --no-default-features
 ```
 
 Linux / macOS: `VITE_FEATURE_LEETCODE=0 npm run tauri -- dev -- --no-default-features`.
-LLM config is **Settings → LLM** (`localhost` is this machine). Paste Groq/OpenAI
-keys there on the APK (no process env). Tests: **Settings
-→ Practice → Test Cases** (hidden when Practice is off).
+The model is set under **Settings → AI → AI model** (`localhost` is this
+machine). Paste Groq/OpenAI keys there on the APK (no process env). Tests:
+**Settings → Practice → Tests** (the Practice tab is hidden when Practice is
+off).
 
 Windows Android Practice builds need Git for Windows and GNU make
 (`winget install -e --id ezwinports.make`); the Practice wrapper configures the
@@ -133,9 +136,18 @@ the approach claim, leaving unearned parts as TODOs. It does not grant Reveal
 consent or load the reference. This is separate from the legacy reveal-mode Lazy
 API path, which requires explicit confirmation before using the reference.
 
-Planning is under **Settings → Practice → Agent Planning**, approach commitment
-under **Settings → Practice → Agent Approach**, and diagram checking under
-**Settings → Personalize → UI → Agent behavior**.
+Planning is under **Settings → Practice → Planning**, approach commitment
+under **Settings → Practice → Approach**, and diagram checking (**Check drawn
+diagrams**) under **Settings → Personalize → Display → AI assistant replies**.
+
+**Who answers each mode.** **Settings → AI → AI model → Model for each task**
+picks a provider per mode (Review and Ask, Reveal, Diagrams, Planner, and the
+disabled Background check). Besides Local, Ollama, OpenAI and Groq, a mode can
+use the **Assistant app** (Codex or Claude Code, run headless on the PC, chosen
+under **Settings → AI → ChatBot**) or an **AI assistant** connected over MCP. Both
+answer through Pen Island's own tools only, and the run shows "Waiting for the
+AI application" (or the assistant's name) while it works. The PC has to be
+running the desktop app, since these runs go through its hub.
 
 ## Problem sets
 
@@ -147,10 +159,10 @@ queries. Filters do reset on a switch, since a tag
 from one corpus matches nothing in another's tables.
 
 A tab whose corpus is not on this device still appears, showing `0`. Nothing
-ships in the APK. Settings → Workspace → Datasets → Install downloads GitHub
-`corpora-v1`. Pass/fail badges survive Remove and reinstall (`dataset/task_id`
-in `session.json`). Empty tabs also name the Hugging Face repo for a desktop
-`lc index --dataset …` checkout.
+ships in the APK. **Settings → Workspace → Problem sets → Install** downloads
+GitHub `corpora-v1`. Pass/fail badges survive Remove and reinstall
+(`dataset/task_id` in `session.json`). Empty tabs also name the Hugging Face
+repo for a desktop `lc index --dataset …` checkout.
 Pass/fail badges are per problem set: the router keys session progress on
 `dataset/task_id`, so solving `two-sum` in one corpus does not mark the
 identically-named problem in another.
@@ -165,44 +177,116 @@ the agent can answer *"why
 did case 3 fail?"* without you pasting anything. Closing the modal loses
 nothing.
 
-Settings → Practice → **Test Cases** picks between running every case and stopping at the first
-failure. Running every case is the default: it is what lets the agent choose a
-real counterexample.
+**Settings → Practice → Tests → When a test fails** picks between running every
+case and stopping at the first failure. Running every case is the default: it
+is what lets the agent choose a real counterexample.
 
-That section also controls automatic failure forwarding: wait for a question,
-ask about the whole failing run, or ask once per failing case. The Tests card is
-always added to the thread.
+**After tests fail**, in the same section, controls automatic failure
+forwarding: wait for a question, ask about the whole failing run, or ask once
+per failing case. The Tests card is always added to the thread.
+
+## How the Practice agent is kept honest
+
+Design notes for the coach on the Practice board. How the agent fits into the
+rest of the app is in [ARCHITECTURE.md](../ARCHITECTURE.md#the-agent).
+
+**The model never emits coordinates.** LLMs are unreliable at coordinate
+geometry and reliable at structured semantic state, so the agent emits a *viz
+program*, full state per frame, and the renderer registry in
+`src/viz/render/index.ts` lays it out deterministically into a reserved agent
+lane on the right of the board (`AGENT_LANE` in `src/templates/regions.ts`).
+Two tools point at things rather than draw structures, and neither takes
+coordinates either: `annotate_region` names a board region, and
+`highlight_student_work` names ids from the captured scene, which the router
+checks against the board. On a document or whiteboard, Ask's diagrams go to a
+drawing panel docked beside the page instead of the agent lane.
+
+**The agent never reads its own output back as the student's work.** Injected
+diagrams are tagged with `lcVizId` and excluded from the structured capture
+(`studentElements` in `src/canvas/capture.ts`) and from region screenshots;
+otherwise the agent starts agreeing with itself. One exception: with a model
+that reads images, Review and Draw also attach a picture of the whole board,
+and that picture still includes the agent lane.
+
+**Cited test cases are verified, not trusted.** The router checks the cited
+index against the problem's real sample cases and replaces the quoted
+input/expected with the corpus's own text. A fabricated citation is dropped
+and reported (`validate_counterexample` in `src/llm/coach/modes/review.rs` for
+Review, `validate_citation` in `src/llm/coach/actions/draw.rs` for Draw).
+
+**Draw survives a server that cannot tool-call.** vLLM rejects a request
+carrying `tools` unless it was started with `--enable-auto-tool-choice` and a
+`--tool-call-parser`, and diagrams are the one mode built entirely on tool
+calls. The router retries in plain JSON using the same schemas
+(`draw_without_tool_calls` in `src/serve/viz.rs`), also when the model simply
+answers without calling a tool, so the feature degrades in latency rather than
+in existence.
+
+**Test results are the app's voice, not the student's.** They travel on their
+own `app_messages` channel and the prompt tells the model to read them as fact.
+Everything else on the board is something the student claimed and the agent is
+meant to question; a real test run is not.
 
 ## Documents, attachments and recovery
 
-Whiteboard, Annotate and Browse have their own library workflows alongside
+Whiteboard, Annotate, Web and Video have their own library workflows alongside
 Practice. Explore is a shipped WIP view. Split tabs can keep a source page and
 notes open side by side. Document footnotes can own whiteboard, code and
 Markdown attachments, with their own editing and agent context.
 
-**Settings → Personalize → UI → Reading** selects continuous Scroll or
-page-by-page Pages, with full-screen or margin page fit. Documents can be
-indexed locally for agent search. **Settings → LLM → Local** configures optional
-embedding model/endpoint fields; leaving the model empty uses word matching.
-Search tools also support a configured SearXNG endpoint (`serve.searxng_url`),
-and footnote search can open the external browser.
+Annotate opens PDF, EPUB, Markdown, source code and local HTML files. An HTML
+file opens as a frozen page, or live in a sandbox with ink over it, and a local
+page loads the videos and pictures beside it. PDF form fields can be filled in,
+kept and exported. A document can be linked to its source file, so the app copy
+follows changes to the file. **Web** opens a page and writes onto a snapshot of
+it.
+
+**Video** is in testing. It opens a local file, a direct video link or a YouTube
+link and draws ink over the picture, pinned to one frame or to a stretch of time
+on the timeline. Marks stay on the device for now; hub sync is not done yet.
+
+**The selection box.** A hold-drag on a document draws a selection box that
+stays drawn after you lift, with handles on its corners and edges. Panning
+doesn't cancel it (a tap off it does), so you can scroll and pull a handle past
+the screen and onto the next page. **Screenshot** takes its bounds from the box,
+and the sheet beside it also offers Ask Agent, Mark, Annotate, and, for selected
+words, Copy, Google and Ask ChatBot.
+
+**ChatBot footnotes.** Select text and tap **Ask ChatBot**, or open the ChatBot
+sheet for a page range, and the answer arrives as a footnote. The sheet walks
+Request, Reading, Attach and Review. **Settings → AI → ChatBot → Footnotes
+written by** picks who writes them: **Your AI model** (single footnotes only),
+**An AI assistant bot** connected over `lc mcp`, or **An assistant app on this
+PC**, where the desktop app starts Codex or Claude Code headless with only Pen
+Island's MCP tools (`src/serve/assistant_runner.rs`, `src/serve/agent_cli.rs`).
+The PC must be running the desktop app. Setup:
+[main README](../README.md#chatbot-footnotes).
+
+**Settings → Personalize → Display → Reading layout** selects continuous Scroll
+or Page by page, and **Page size** picks Full screen or Slightly zoomed out.
+Documents can be indexed locally for agent search. On the Local provider,
+**Settings → AI → AI model → Search model** sets an optional embedding model;
+leaving it empty uses word matching. **Search server** takes a SearXNG endpoint
+(`serve.searxng_url`) for search tools, and footnote search can open the
+external browser.
 
 Annotate's **Export** shares an annotated PDF, EPUB or Markdown ZIP archive.
 **Annotation backup** and Whiteboard export/import keep restorable ink/board
 copies. The library's **Trash** view restores archived items, while **Restore**
-offers saved 2-hour, 24-hour and 7-day snapshots when available. These exports are useful
-before a fresh install as well as for sharing.
+offers saved 2-hour, 24-hour and 7-day snapshots when available. Retained copies
+show as numbered versions on each Recents row. These exports are useful before
+a fresh install as well as for sharing.
 
 IndexedDB keeps the device's working copy. Local backend or paired hub storage
 adds document/whiteboard/problem-board, agent, attachment and snapshot history.
-Offline edits queue for sync; reconnecting may need a conflict choice. Python
+Offline edits sync later; reconnecting may need a conflict choice. Python
 workspaces, attempt archives, corpus indexes, session progress and test execution
 remain on the device doing Practice. See the [storage split](../ARCHITECTURE.md#notebooks-vs-problems).
 
-Android integrations provide native live web pages and page capture, gallery or
-Downloads image saves, edge-gesture protection while writing, ML Kit ink
-recognition, and dictation. Voice controls are under **Settings → LLM → Voice
-dictation**. See [Android setup](docs/ANDROID_SETUP.md) for device/build details.
+Android integrations provide native live web pages and page screenshots, gallery
+or Downloads image saves, edge-gesture protection while writing, ML Kit ink
+recognition, and dictation. Voice controls are under **Settings → AI → Voice
+typing**. See [Android setup](docs/ANDROID_SETUP.md) for device/build details.
 
 ## Leaving a problem
 
@@ -226,12 +310,14 @@ answer you already drew is not practice. The router owns the rules
 
 - **Desktop window on a tablet screen:** spacedesk (below). Router stays in-process.
 - **APK:** same Tauri binary with the in-process router. From the repo root:
-  `app\scripts\android-install-practice.cmd` (optional USB serial). First run generates
+  `app\scripts\android-install-practice.cmd` (optional USB serial), or
+  `npm run android:wireless:practice` over wireless adb. First run generates
   `app/src-tauri/gen/android/` if missing. Practice installs its corpus separately
   on that device, and its configured model endpoint must be reachable from it.
-- **Library sync:** in **Settings → Personalize → Storage → Pad hub**, enter the
-  desktop app's PC URL and six-digit code on the tablet. Both flavors support
-  the hub. Local commands and tests still use the tablet's embedded backend.
+- **Library sync:** in **Settings → Personalize → Storage → Sync with your PC**,
+  enter the desktop app's PC URL and six-digit code on the tablet. Both flavors
+  support the hub. Local commands and tests still use the tablet's embedded
+  backend.
 
 APK build/install → [`docs/ANDROID_SETUP.md`](docs/ANDROID_SETUP.md).
 
@@ -253,19 +339,21 @@ the APK.
 
 See [`docs/ANDROID_SETUP.md`](docs/ANDROID_SETUP.md) for prerequisites, build
 commands, and install steps. The APK uses the same in-process router as desktop;
-optional LAN library pairing is in **Settings → Personalize → Storage → Pad hub**.
+optional LAN library pairing is in **Settings → Personalize → Storage → Sync
+with your PC**.
 
 ## Layout
 
 | Path | What |
 |---|---|
 | `src/api/` | Named Tauri invoke client (`lc_run_tests`, …) and coach event transport |
-| `src/canvas/` | Excalidraw wrapper, capture extractors, ink recognizers |
+| `src/canvas/` | Excalidraw wrapper, raster and WebGL ink, page turns, capture extractors, ink recognizers |
 | `src/templates/` | Board regions and the pre-seeded problem layout |
-| `src/viz/` | Viz schema with 17 kinds, renderers, applier, frame scrubber |
-| `src/modes/` | Home, reading, attachments, Explore, Review, reveal, test results, attempt dialog, problem picker |
+| `src/viz/` | Viz schema with 17 kinds, renderers, applier, frame scrubber, document drawing panel |
+| `src/modes/` | Home, reading, attachments, ChatBot sheet, Video, Explore, Review, reveal, test results, attempt dialog, problem picker |
+| `src/workspace/` | Hooks split out of `Workspace.tsx`: the open document, PDF session, hub sync, web screenshots |
 | `src/util/datasetKey.ts` | `dataset/task_id` keys, which is how per-problem state is addressed |
-| `src/util/` | Persistence/migration, library and hub sync, snapshots, exports, reading and device preferences |
+| `src/util/` | Persistence/migration, library and hub sync, snapshots, exports, reading and device preferences, video store |
 | `../src/workspace/attempt.rs` | Backend keep/discard/archive rules for Practice attempts |
 | `src-tauri/` | Tauri shell, in-process harness router, desktop LAN listener, coach events |
 | `src-tauri/plugins/` | `gallerysave`, `gestureguard`, `inkrecognition` (ML Kit), `livewebview`, `voicedictation` |
@@ -289,28 +377,3 @@ Type-check and bundle:
 ```bash
 npm run build
 ```
-
-## Notes on the design
-
-**The model never emits coordinates.** LLMs are unreliable at coordinate
-geometry and reliable at structured semantic state, so the agent emits a *viz
-program*, full state per frame, and `viz/render/<kind>.ts` lays it out
-deterministically into a reserved agent lane on the right of the board.
-
-**The agent never reads its own output back.** Injected diagrams are tagged and
-excluded from capture; otherwise the agent starts agreeing with itself.
-
-**Cited test cases are verified, not trusted.** The router checks the cited
-index against the workspace's real cases and replaces the quoted input/expected
-with the corpus's own text. A fabricated citation is dropped and reported.
-
-**Draw survives a server that cannot tool-call.** vLLM rejects a request
-carrying `tools` unless it was started with `--enable-auto-tool-choice` and a
-`--tool-call-parser`, and diagrams are the one mode built entirely on tool
-calls. The router retries in plain JSON using the same schemas, so the feature
-degrades in latency rather than in existence.
-
-**Test results are the app's voice, not the student's.** They travel on their
-own `app_messages` channel and the prompt tells the model to read them as fact.
-Everything else on the board is something the student claimed and the agent is
-meant to question; a real test run is not.

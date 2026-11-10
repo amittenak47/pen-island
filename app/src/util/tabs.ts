@@ -557,6 +557,41 @@ export function openedRecord(state: TabState, tab: TabRecord): TabRecord {
   return target;
 }
 
+/**
+ * Whether an open aimed at the focused tab still has to reach the reducer.
+ *
+ * Focusing the tab that is already focused is a no-op, so the shell skips it.
+ * Practice prev/next is the exception: it lands in the same chip under a new
+ * problem, and skipping the open left the chip on the old one.
+ */
+export function openChangesActive(state: TabState, tab: TabRecord): boolean {
+  const landed = openedRecord(state, tab);
+  if (landed.id !== state.activeId) return false;
+  const current = state.tabs.find((open) => open.id === landed.id);
+  return Boolean(current && !sameEntity(current, landed));
+}
+
+/** `dataset/task_id`, the one name a problem goes by in every store. */
+export function practiceKey(dataset: string, taskId: string): string {
+  return `${dataset}/${taskId}`;
+}
+
+/**
+ * The problem a mounted Practice workspace should switch to, or null.
+ *
+ * A workspace loads its record once, on mount, and a Practice chip is reused
+ * for the next problem picked from the library. Without this the chip took
+ * the new title while the board, the statement, the code and Run tests stayed
+ * on the old problem. `loaded` is the problem the workspace last started
+ * loading; null means its first open has not got that far yet, and the mount
+ * open will read the record itself.
+ */
+export function practiceSwitchTarget(loaded: string | null, tab: TabRecord): string | null {
+  if (tab.kind !== "practice" || loaded === null) return null;
+  const wanted = practiceKey(tab.dataset, tab.taskId);
+  return wanted === loaded ? null : wanted;
+}
+
 /** Only keys the record already declares are written; the rest are dropped. */
 function applyPatch(tab: TabRecord, patch: TabPatch): TabRecord {
   const next: Record<string, unknown> = { ...tab };

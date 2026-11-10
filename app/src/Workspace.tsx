@@ -242,6 +242,8 @@ import {
   isFootnoteBoardTab,
   newTabId,
   pdfHoldDecodeInSplit,
+  practiceKey,
+  practiceSwitchTarget,
   shouldMirrorNotebookId,
   type TabRecord,
   type WebTab,
@@ -2760,6 +2762,8 @@ export const Workspace = memo(function Workspace({
   );
 
   const problemLoadErrorRef = useRef<string | null>(null);
+  /** The Practice problem this workspace last started loading (`dataset/task_id`). */
+  const loadedProblemKeyRef = useRef<string | null>(null);
   const loadProblem = useCallback(
     async (
       taskId: string,
@@ -2775,6 +2779,7 @@ export const Workspace = memo(function Workspace({
       // caller turns a false into the missing-content prompt.
       let opened = false;
       problemLoadErrorRef.current = null;
+      loadedProblemKeyRef.current = practiceKey(bank?.dataset ?? DEFAULT_DATASET, taskId);
       const { gen: loadGen } = beginWorkspaceLoad();
       const offline = serverLinkRef.current !== "online";
       const datasetId = bank?.dataset ?? DEFAULT_DATASET;
@@ -2900,6 +2905,9 @@ export const Workspace = memo(function Workspace({
          * returned. `{dataset, task_id}` is the identity either way — the same
          * key every route and store already names.
          */
+        // Named before the patch, so the switch watcher below does not read
+        // the daemon's spelling of the same problem as a request for another.
+        loadedProblemKeyRef.current = practiceKey(detail.dataset ?? datasetId, detail.task_id);
         patchTab(opts.tabId, {
           title: titleFromSlug(detail.task_id, detail.question_id),
           dataset: detail.dataset ?? datasetId,
@@ -9809,6 +9817,46 @@ export const Workspace = memo(function Workspace({
     // Deliberately mount-only past that gate: see above.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [BoardView, needsBoard]);
+
+  /*
+   * A Practice chip picked again from the library, or stepped with prev/next.
+   *
+   * The mount open above runs once, but a Practice chip is reused for the next
+   * problem: the shell rewrites its record in place and keeps this instance.
+   * Nothing read the new record, so the chip showed the new title over the old
+   * board, code and tests. When the record names a problem other than the one
+   * loaded here, park the old one (its solution and thread are written) and
+   * load the new one into the same chip.
+   */
+  const tabRef = useRef(tab);
+  tabRef.current = tab;
+  const practiceDataset = tab.kind === "practice" ? tab.dataset : null;
+  const practiceTaskId = tab.kind === "practice" ? tab.taskId : null;
+  useEffect(() => {
+    if (!mountedRef.current) return;
+    const record = tabRef.current;
+    if (record.kind !== "practice") return;
+    if (!practiceSwitchTarget(loadedProblemKeyRef.current, record)) return;
+    parkWorkspace(() => {
+      const latest = tabRef.current;
+      if (latest.kind !== "practice") return;
+      void loadProblem(
+        latest.taskId,
+        { ...bankFilters, dataset: latest.dataset },
+        { tabId: latest.id, userLoad: true },
+      ).then((opened) => {
+        if (!opened) {
+          reportMissingTab(
+            latest,
+            problemLoadErrorRef.current ??
+              `“${latest.taskId}” could not be loaded from ${latest.dataset}.`,
+          );
+        }
+      });
+    });
+    // Keyed on the record's problem alone: the callbacks change every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [practiceDataset, practiceTaskId]);
 
   /*
    * What the shell can ask of a workspace it is about to unmount.
