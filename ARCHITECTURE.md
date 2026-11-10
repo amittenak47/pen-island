@@ -10,7 +10,7 @@ Internals. If you just want to install and use the app, read the
 | Name | What it is | Where |
 | --- | --- | --- |
 | Root Rust crate | `whiteboard`, the shared engine: corpus index, Practice tests, router, notebook DB | [`Cargo.toml`](Cargo.toml) |
-| CLI binary | `lc`, maintenance-only: `index`, `datasets`, `config`; from `cargo install --path .` | [`src/`](src/) |
+| CLI binary | `lc`: `index`, `datasets`, `config`, and `mcp` (the MCP server for ChatBot and agent requests); from `cargo install --path .` | [`src/`](src/) |
 | GUI crate | `whiteboard-gui` | [`app/src-tauri/Cargo.toml`](app/src-tauri/Cargo.toml) |
 | GUI native lib | `whiteboard_lib`, which Android links as `libwhiteboard_lib.so` | same |
 | Client | React + Vite | [`app/src/`](app/src/) |
@@ -19,9 +19,9 @@ Internals. If you just want to install and use the app, read the
 The Practice split uses Cargo feature `leetcode` (on by default) together with
 `VITE_FEATURE_LEETCODE`. Disabling both gives the Whiteboard-only build.
 
-The five native plugins are `gallerysave` (capture saves), `gestureguard`
+The five native plugins are `gallerysave` (screenshot saves), `gestureguard`
 (writing gesture protection), `inkrecognition` (ML Kit), `livewebview` (native
-pages and capture), and `voicedictation`. They live under
+pages and page screenshots), and `voicedictation`. They live under
 [`app/src-tauri/plugins/`](app/src-tauri/plugins/).
 
 ## Names you'll see in the code
@@ -36,9 +36,10 @@ the mode and build-flavor name. The GitHub repository was renamed from
 `lc-gui-tui` to `pen-island`; GitHub redirects the old repository and download
 URLs, so builds that still fetch problem sets from the old address keep working.
 
-The `lc` CLI handles only corpus indexing, dataset inspection and configuration;
-bare `lc` prints help. The separate `audit_tests` binary audits corpus tests.
-Problem editing, tests and Agent interactions run through the app.
+The `lc` CLI handles corpus indexing, dataset inspection and configuration, and
+`lc mcp` serves Pen Island's MCP tools to an AI assistant; bare `lc` prints
+help. The separate `audit_tests` binary audits corpus tests. Problem editing,
+tests and Agent interactions run through the app.
 
 ---
 
@@ -51,7 +52,7 @@ There is no separate `lc serve` CLI daemon.
 Desktop startup also serves the shared router on `0.0.0.0`, at configured
 `serve.port` (default **7878**), with a persisted six-digit pairing code. Both
 Practice and Whiteboard-only host this LAN Pad hub. Its PC URL and code appear
-under **Settings → Personalize → Storage → Pad hub**; the tablet connects from
+under **Settings → Personalize → Storage → Sync with your PC**; the tablet connects from
 the same section. Android keeps its own embedded router and does not start this
 desktop listener. Model calls and corpus downloads use network services.
 
@@ -87,7 +88,9 @@ flowchart LR
     Axum --> Pads
   end
   Tablet[Tablet_local_working_copy] <-->|"Pad hub sync"| LAN
-  Axum -->|"chat completions"| LLM[Ollama_Groq_OpenAI]
+  Axum -->|"chat completions"| LLM[Local_Ollama_OpenAI_Groq]
+  Axum -->|"headless run, MCP tools only"| App[Codex_or_Claude_Code]
+  Bot[MCP_assistant_via_lc_mcp] -->|"requests and answers"| LAN
 ```
 
 Layers that move independently:
@@ -95,7 +98,7 @@ Layers that move independently:
 | Layer | What | Where | "Anywhere" means |
 | --- | --- | --- | --- |
 | Canvas UI | Ink, footnotes, tabs | On the device | Already there |
-| Agent / LLM | Chat HTTP | Same process as the GUI, out to the model URL | The model URL must be reachable from *this* device |
+| Agent / LLM | Chat HTTP to a model, or a run answered by an assistant app or MCP assistant | Same process as the GUI, out to the model URL; assistant runs go through the desktop | The model URL must be reachable from *this* device; assistant runs need the desktop app running |
 | Harness | Corpus, `solution.py`, RustPython tests, document index | Inside the GUI process | Workspaces and `problems.db` on this machine |
 | Pad hub | Notebook, document, problem-board and attachment history | Desktop LAN listener and local disk | A paired device can sync library content; pairing does not install its corpus or runtime |
 
@@ -132,7 +135,7 @@ flowchart TD
 | Surface | Offline | Sync |
 | --- | --- | --- |
 | Whiteboard / Annotate | The working copy is IndexedDB on the device; downloaded documents and ink remain available offline. | Dual-writes to the local backend or paired hub's `pads.db` and `pad-blobs/`: documents, boards, agent threads, attachments and snapshots. Tombstones archive items across devices; sidecar `.lc-ink.json` files are backups. |
-| Problem boards | Local board, agent and attachment working copies can be edited offline. Practice needs a corpus installed under Settings → Workspace → Datasets → Install. | Live problem boards, agent threads and attachments sync through the pad store, addressed by `dataset/task_id`. Offline writes are queued; reconnecting can surface a conflict. |
+| Problem boards | Local board, agent and attachment working copies can be edited offline. Practice needs a corpus installed under Settings → Workspace → Problem sets → Install. | Live problem boards, agent threads and attachments sync through the pad store, addressed by `dataset/task_id`. Offline edits sync on the next pass; reconnecting can surface a conflict. |
 | Practice execution / progress | Generated Python workspaces and attempt archives stay on the executing device. RustPython tests run there. `session.json` and `last_run.json` live under its backend config root. | Pairing does not copy the corpus index, Python runtime, generated workspaces, or session/test-result files. Dataset Remove/reinstall preserves the local progress file. |
 
 The device IndexedDB is the working copy. `pads.db` is the backend historical
@@ -145,7 +148,8 @@ Offline board conflict policy `offlineMerge` supports ask / prefer-local /
 prefer-server. Hub conflicts also have explicit comparison and resolution;
 sharing only the Python workspace directory does not share every kind of state.
 
-Personalise (handedness, theme, capture folder, and so on) is a per-device blob.
+Personalize (handedness, theme, screenshot folder, and so on) is a per-device blob.
+Video tab marks are device-local for now.
 
 ### A note on the word "pad"
 
@@ -167,8 +171,14 @@ annotating a PDF. Also unchanged.
 
 ## The agent
 
-Redaction, diagrams as programs rather than pictures, the approach-commitment
-model, and the frame contract live under [`src/llm/coach/`](src/llm/coach/).
+Redaction lives in [`src/gate/`](src/gate/) and the dataset adapters, diagrams
+as programs rather than pictures in [`src/llm/viz/`](src/llm/viz/) (validated in
+[`src/serve/viz.rs`](src/serve/viz.rs)), the approach-commitment model in
+[`src/llm/coach/approach.rs`](src/llm/coach/approach.rs), and the frame contract
+in [`src/serve/ws.rs`](src/serve/ws.rs) and
+[`src/llm/coach/events.rs`](src/llm/coach/events.rs). The client side, and how
+the coach is kept honest, is in
+[app/README.md](app/README.md#how-the-practice-agent-is-kept-honest).
 
 Ordinary Ask, Review and planning use redacted problem sources. Explicitly
 confirmed Reveal can load the reference solution to build a bridge; its intended
@@ -178,7 +188,7 @@ path also uses this confirmation boundary. The current composer's separate
 reference or granting Reveal consent.
 
 Review runs perceive → claim → verdict inside the process, and answers over
-Tauri events (`lc-coach-frame`) so each stage appears as it happens. It is sent
+Tauri events (`lc-coach-frame-<channel>`) so each stage appears as it happens. It is sent
 through Review in the Agent composer. Practice toolbar Submit runs solution
 tests; it does not send a solution to a judge site.
 
@@ -188,15 +198,40 @@ user-facing only. `/workspace/:id/agent` is a different thing: the chat
 transcript file.
 
 Feature flags:
-`coach.<ws_runs|process_events_ui|approach_commitment|planner_enabled|draw_review_enabled>`.
+`coach.<ws_runs|process_events_ui|approach_commitment|planner_enabled|draw_review_enabled|agent_mcp_tools|agent_send_board_image>`,
+plus `coach.agent_bot_timeout_secs` (60 to 600, default 600).
+
+### Assistant apps, AI assistants and ChatBot
+
+Each `llm.modes.*` entry is a model provider (`local`, `ollama`, `openai`,
+`groq`) or one of two assistants:
+
+- `app`: the desktop app runs Codex or Claude Code headless, in an empty
+  directory, with only Pen Island's MCP tools
+  ([`src/serve/agent_cli.rs`](src/serve/agent_cli.rs)). Codex must be a version
+  on `VERIFIED_CODEX_VERSIONS`; Claude Code needs a claude.ai sign-in.
+- `bot`: the run waits in the agent-run registry
+  ([`src/llm/coach/agent_runs.rs`](src/llm/coach/agent_runs.rs)) for an MCP client
+  connected through `lc mcp` ([`src/mcp.rs`](src/mcp.rs),
+  [`src/mcp/coach.rs`](src/mcp/coach.rs)), up to `coach.agent_bot_timeout_secs`.
+
+The window and the desktop LAN listener share one agent-run registry, so a run
+started on a paired tablet is answered on the PC too.
+
+ChatBot footnotes use the same pieces. Requests and page runs (annotation jobs)
+live in the hub's footnote inbox ([`src/pads/`](src/pads/)). They are written by
+the configured model ([`src/serve/footnote_answers.rs`](src/serve/footnote_answers.rs),
+single footnotes only), by an MCP assistant, or by the assistant app that
+[`src/serve/assistant_runner.rs`](src/serve/assistant_runner.rs) starts, one
+process at a time, with its settings under `assistant_app.*`.
 
 ---
 
 ## Building
 
 Use Rust **1.93+** and Node **22.13+** with the current locks. Android wrappers
-select JDK **17–24**. Windows Practice also needs Git for Windows and GNU make
-for RustPython; Whiteboard-only omits those cp/make prerequisites. See the
+select JDK **17–24**. Windows Android Practice builds also need Git for Windows
+and GNU make for RustPython; Whiteboard-only omits those cp/make prerequisites. See the
 [Android setup guide](app/docs/ANDROID_SETUP.md) for the environment and wrappers.
 
 | Change | Root `Cargo.lock` | `app/src-tauri/Cargo.lock` | `app/package-lock.json` | Rebuild? |
@@ -207,17 +242,18 @@ for RustPython; Whiteboard-only omits those cp/make prerequisites. See the
 | Rust dependency changes | update if affected | update if affected | no | affected Rust binaries |
 | Renaming the `whiteboard` crate | yes | yes | no | everything, plus `package = "whiteboard"` in the GUI crate |
 
-The Practice APK is aarch64-only, because rustpython 0.5 does not compile for
-32-bit Android. Whiteboard-only has no such limit and builds universal.
-
-The generated debug output can be universal:
+Both APK flavors build aarch64 only. Practice has to, because rustpython 0.5
+does not compile for 32-bit Android, and Whiteboard-only is pinned the same way
+so each build compiles one target. Don't add armv7, x86 or x86_64 targets. The
+debug output still uses Tauri's universal flavor name, with only arm64 inside:
 
 ```
 app/src-tauri/gen/android/app/build/outputs/apk/universal/debug/app-universal-debug.apk
 ```
 
-or `.../apk/arm64/debug/app-arm64-debug.apk` when the build was pinned to one
-target. Nothing under `gen/` is in git. The parts worth keeping live in
+A build split per ABI lands at `.../apk/arm64/debug/app-arm64-debug.apk`
+instead, which the Practice installer also accepts. Nothing under `gen/` is in
+git. The parts worth keeping live in
 `app/src-tauri/android-overlay/`.
 
 CI pins NDK **r26d**. Local tablet builds have been on **29.0.13846066**. Both
@@ -241,3 +277,4 @@ run `lc index --dataset <slug> --rebuild`.
 ## Not done yet
 
 - Explore is shipped as WIP.
+- The Video tab is in testing, and its marks don't sync through the hub yet.
