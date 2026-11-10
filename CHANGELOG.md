@@ -6,6 +6,109 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Summary: August 30 to November 9, 2026
+
+The entries below this summary were written as each change landed, up to late
+August. This summary covers what landed after that, grouped by area. Commit
+history has the detail.
+
+#### Added: ChatBot footnotes
+
+- **Ask ChatBot.** Select text in Annotate and tap **Ask ChatBot**, and an
+  explanation arrives as a footnote. Requests wait in a footnote inbox on the
+  desktop hub, and sync carries answers to every device.
+- **`lc mcp`.** A new `lc` command serves the inbox to MCP clients over stdio,
+  or over Streamable HTTP with `--listen` and `--auth-token-file`. It offers two
+  ready-made prompts, "Answer my footnote requests" and "Keep answering
+  footnote requests". `scripts/chatbot-oauth-bridge/` adds the GitHub sign-in a
+  cloud bot such as Grok Bot needs.
+- **Page runs.** The ChatBot sheet in the right-hand tray annotates up to 40
+  pages at once. It walks Request, Reading, Attach and Review. Attached library
+  files or PDF pages (a chapter's problems, say) aim the footnotes at what those
+  problems need without solving them. **History** lists each run, with
+  **Cancel** and **Undo**.
+- **Three answer modes** under **Settings → AI → ChatBot → Footnotes written
+  by**: **Your AI model** (single footnotes), **An AI assistant bot** connected
+  over `lc mcp`, and **An assistant app on this PC**, where the desktop app runs
+  Codex or Claude Code headless with only Pen Island's MCP tools. The assistant
+  app is now the default; saved choices are kept. A bot can hand the writing to
+  the assistant app when **Let it hand the writing to an app on this PC** is on.
+- **Codex and Claude Code.** Codex runs only on checked releases
+  (`VERIFIED_CODEX_VERSIONS`: 0.162.1 and 0.163.0). Claude Code needs a
+  claude.ai sign-in and refuses API keys. **App**, **Model**, **Effort** and a
+  **Test** button sit in ChatBot settings.
+- **The footnote panel** gained chips, foldable sections with counts, drag and
+  resize, undo and redo, and pictures in notes.
+
+#### Added: agent runs answered by an assistant
+
+- Each agent mode under **Settings → AI → AI model → Model for each task** can
+  use the **Assistant app** (Codex or Claude Code on the PC) or an **AI
+  assistant** connected through `lc mcp`, whose coach tools are scoped to one
+  run. **AI assistant time limit** sets how long a run waits.
+- The window and the desktop LAN listener share one agent-run registry, so a run
+  started on a paired tablet is answered on the PC.
+- The agent panel gained slash commands, voice dictation in the composer,
+  sessions that remember their place, streamed thinking steps, and chat
+  attachments it owns, with snapshots.
+
+#### Added: reading and documents
+
+- **Page by page** reading turns pages like paper (Paperback and Hardcover
+  styles), shows text two pages to a spread, pinches to zoom, and carries marks,
+  captions and booktabs through the turn. Booktabs have their own display
+  settings.
+- **Local HTML files** open as frozen pages or live in a sandbox with ink over
+  them. A local page loads the videos and pictures beside it and keeps its own
+  `localStorage`.
+- **PDF forms**: fill AcroForm fields in Annotate, keep them and export them.
+- **Linked source files**: a document can follow its source file, be relinked
+  when the file moves, or link a whole folder.
+- **Retained copies** show as numbered versions on each Recents row.
+- **The selection box** stays drawn after you lift, has handles, survives a pan
+  and grows past the screen onto the next page. **Screenshot** takes the whole
+  box.
+- Annotated document copies and PDF output join the exports.
+
+#### Added: Video tab (in testing)
+
+- A new tab for drawing on a local file, a direct video link or a YouTube link.
+  Ink is pinned to one frame or to a stretch of time that the timeline's handles
+  resize, and **Stop at marks** halts playback on each frame mark. The Web tab's
+  media player offers **Mark up in Video**. Marks are device-local for now.
+
+#### Changed: ink
+
+- The WebGL2 capsule pen is the board pen again, with a 2D fallback. Saved and
+  replayed strokes and PNG/PDF exports draw with the same capsules.
+- A still hold blots once, with its own texture kept with the stroke, and
+  peeks the pen wheel; moving on keeps the stroke.
+
+#### Changed: sync
+
+- Change tracking no longer depends on device clocks, each book syncs
+  atomically from its latest state, and the upload queue is gone. The hub keeps
+  revisions.
+- Deletes and restores from other devices are followed, with a choice when the
+  book was edited here. Tab **Sync** syncs the open book; **Sync all** on Home
+  syncs the library.
+- Hub offline, an index error and an offline embedding model are reported as
+  three different things.
+
+#### Changed: interface
+
+- Settings is regrouped into **Personalize**, **Practice**, **Workspace** and
+  **AI** tabs with plain-language labels. Renamed along the way: **LLM** to
+  **AI**, **Voice dictation** to **Voice typing**, **Clean-up pass** to **Tidy
+  up text**, **Pad hub** to **Sync with your PC**, **Datasets** to **Problem
+  sets**, and **Diagnostics** to **Troubleshooting** (with **Activity log**).
+- The Home **Browse** card is now **Web**. Home was redesigned around
+  **Recently opened**, dialogs went square, and a first-launch prompt asks
+  which AI model to use.
+- A new Pen Island icon and start-up screen. UI copy says "screenshot" instead
+  of "capture".
+- Android APKs build for arm64 only, in both flavors.
+
 ### Changed — Pen Island and in-app Practice
 
 - Renamed the app to **Pen Island**, including its window/launcher title,
