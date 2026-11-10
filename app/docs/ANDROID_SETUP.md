@@ -4,7 +4,7 @@ Guide for installing the Pen Island APK on an Android tablet and fixing PATH on 
 
 **Author device:** XPPen Magic Note Pad (MNP1095), Android 14 (API 34), NDK 29.0.13846066. If the APK misbehaves on another tablet, [open an issue](https://github.com/amittenak47/pen-island/issues).
 
-The APK runs its harness in-process through named Tauri invokes and coach events. It works independently of a PC. Desktop also starts a LAN hub listener on `0.0.0.0` at the configured port (default `7878`), serving the shared router for optional tablet sync. Both flavors support the hub's PC URL and six-digit code under **Settings → Personalize → Storage → Pad hub**; no separate `lc serve` daemon is needed.
+The APK runs its harness in-process through named Tauri invokes and coach events. It works independently of a PC. Desktop also starts a LAN hub listener on `0.0.0.0` at the configured port (default `7878`), serving the shared router for optional tablet sync. Both flavors support the hub's PC URL and six-digit code under **Settings → Personalize → Storage → Sync with your PC**; no separate `lc serve` daemon is needed.
 
 ---
 
@@ -14,9 +14,9 @@ The APK runs its harness in-process through named Tauri invokes and coach events
 | --- | --- |
 | **Android SDK + NDK** | Android Studio → SDK Platform 34 + NDK. Set `ANDROID_HOME` to `%LOCALAPPDATA%\Android\Sdk`. The author device was tested with NDK `29.0.13846066`; APK CI pins `r26d`. Check this difference when a local build and CI behave differently. |
 | **JDK 17–24** | Set `JAVA_HOME` to a supported JDK. The picker uses it when valid, otherwise chooses the lowest supported installation it finds, and writes `org.gradle.java.home`. It skips JDK 25, including Android Studio's JBR `25.0.2`, which fails configuring `:buildSrc`. It does not hardcode `jdk-23`. |
-| **Rust 1.93+ and Android targets** | The root crate requires Rust 1.93. Install targets with `rustup target add aarch64-linux-android armv7-linux-androideabi i686-linux-android x86_64-linux-android`. Practice debug builds target `aarch64`; Whiteboard-only builds are not restricted to that target. |
+| **Rust 1.93+ and the arm64 target** | The root crate requires Rust 1.93. Install the target with `rustup target add aarch64-linux-android`. Both flavors build arm64 (`aarch64`) only. Don't add armv7, x86 or x86_64 targets, and don't run `tauri android build` without `--target aarch64`: each extra target is another full Rust build. |
 | **Node ≥22.13.0** | Locked `pdfjs-dist` 6.2.108 declares `>=22.13.0 \|\| >=24`. Both APK workflows pin Node 22. |
-| **Windows Practice: Git for Windows + GNU make** | RustPython's bundled `libffi-sys` build needs `cp`, `sh`, and `make`. Install Git for Windows in its default location and run `winget install -e --id ezwinports.make`, then open a new shell. The Practice wrappers add Git's Unix tools through a path without spaces and add WinGet's links to PATH. Whiteboard-only does not need these RustPython build tools. |
+| **Windows Android Practice builds: Git for Windows + GNU make** | RustPython's bundled `libffi-sys` build needs `cp`, `sh`, and `make`. Install Git for Windows in its default location and run `winget install -e --id ezwinports.make`, then open a new shell. The Practice wrappers add Git's Unix tools through a path without spaces and add WinGet's links to PATH. Whiteboard-only does not need these RustPython build tools. |
 
 On the tablet: **Settings → About → tap Build number 7×** → Developer options → **USB debugging** on. For no-cable installs, also turn on **Wireless debugging** (Android 11+; Magic Note Pad is 14).
 
@@ -42,15 +42,17 @@ npm run android:init
 
 `src-tauri/gen/android/` is **generated** by `tauri android init` and is not in git. Android 9+ blocks cleartext HTTP in WebViews by default.
 
-The overlay lets the WebView fetch cleartext `http://` document URLs in Annotate mode. App commands use the in-process harness, while model requests go to the URL configured under Settings → LLM and corpus downloads use the external GitHub release. Optional hub sync uses the desktop's LAN listener.
+The overlay lets the WebView fetch cleartext `http://` document URLs in Annotate mode. App commands use the in-process harness, while model requests go to the URL configured under Settings → AI → AI model and corpus downloads use the external GitHub release. Optional hub sync uses the desktop's LAN listener.
 
-`scripts/android-overlay.mjs` applies five fixes after init or regeneration:
+`scripts/android-overlay.mjs` applies these fixes after init or regeneration:
 
 1. Copy `src-tauri/android-overlay/network_security_config.xml` into the generated `res/xml/`.
 2. Add `android:networkSecurityConfig="@xml/network_security_config"` on `<application>` in `AndroidManifest.xml`.
 3. Rewrite generated `BuildTask.kt` to use `ExecOperations` instead of deprecated `Project.exec`.
 4. Pin `buildSrc` Kotlin compilation to JVM 17.
 5. Select a JDK 17–24 and pin Gradle's `org.gradle.java.home` to it.
+6. Set the launcher title to Pen Island.
+7. When `PEN_ISLAND_DEBUG_KEYSTORE` is set, sign debug builds with that keystore, so CI APKs install over each other. Local builds leave it unset.
 
 `android:dev`, `android:apk:practice`, `android:apk:whiteboard`, `android-dev.cmd`, `android-install-practice.cmd`, and `android-install-whiteboard.cmd` run this automatically before every build. Idempotent, so running it twice is safe.
 
@@ -176,7 +178,7 @@ npm run adb:connect -- 192.168.1.20:41259
 npm run android:wireless:practice
 ```
 
-The pairing port is on **Pair device with pairing code**. The connect port is the **IP address & Port** line on the main Wireless debugging screen — they are not the same. After that, `npm run adb:reconnect` then `npm run android:wireless:practice`. Live PDF open log: `npm run logs:open` (pins the saved wireless serial so `adb logcat` does not fail with "more than one device/emulator").
+The pairing port is on **Pair device with pairing code**. The connect port is the **IP address & Port** line on the main Wireless debugging screen; they are not the same. After that, day to day, run `npm run android:wireless:practice` from the repo root: it reconnects to the saved wireless serial and runs the Practice installer (`npm run adb:reconnect` does the reconnect on its own). Live PDF open log: `npm run logs:open` (pins the saved wireless serial so `adb logcat` does not fail with "more than one device/emulator").
 
 Or copy the generated APK (see §8 for both possible paths) to the tablet → open in **Files** → allow "Install unknown apps" when prompted. Generated filenames differ from the APK asset names on GitHub releases.
 
@@ -206,9 +208,11 @@ cd <repo>\app
 scripts\android-install-whiteboard.cmd
 ```
 
-Release: `npm run android:apk:whiteboard:release`.
+Release: `npm run android:apk:whiteboard:release`. The Practice release is
+`npm run android:apk:release` from `app/`. Build release APKs only when you
+need one; debug builds are enough for testing.
 
-Practice debug builds target `aarch64`; Whiteboard-only builds use the default multi-architecture output. The generated filenames do not identify the flavor, and both share package `dev.lc.whiteboard`. Switch with the appropriate installer using `install -r`, subject to the package/signature/version requirements above.
+Both flavors build arm64 only. The generated filenames do not identify the flavor, and both share package `dev.lc.whiteboard`. Switch with the appropriate installer using `install -r`, subject to the package/signature/version requirements above.
 
 The old `android-install-pads.*` scripts and `android:apk:pads` npm targets
 still work. They forward to the names above, and will be removed.
@@ -217,26 +221,27 @@ still work. They forward to the names above, and will be removed.
 
 ## 5. Running on the tablet
 
-The APK bundles the pad library and coach inside the app process; the Practice flavor also includes RustPython tests. Problem corpora are a separate download under **Settings → Workspace → Datasets → Install**, from the GitHub `corpora-v1` release. On first launch Practice is an empty table until you install a set. The tablet works independently; a desktop app needs to be running only when using its hub or a model hosted on that PC.
+The APK bundles the pad library and coach inside the app process; the Practice flavor also includes RustPython tests. Problem corpora are a separate download under **Settings → Workspace → Problem sets → Install**, from the GitHub `corpora-v1` release. On first launch Practice is an empty table until you install a set. The tablet works independently; a desktop app needs to be running only when using its hub or a model hosted on that PC.
 
 The five native plugins in `app/src-tauri/plugins/` provide gallery/Downloads
-capture saves (`gallerysave`), writing gesture protection (`gestureguard`), ML
-Kit ink recognition (`inkrecognition`), live pages and capture (`livewebview`),
-and dictation (`voicedictation`). Voice settings are under **Settings → LLM →
-Voice dictation**. The `lc` CLI is for maintenance only (`index`, `datasets`,
-`config`); Practice editing, tests and Agent actions are in the app.
+screenshot saves (`gallerysave`), writing gesture protection (`gestureguard`), ML
+Kit ink recognition (`inkrecognition`), live pages and page screenshots
+(`livewebview`), and dictation (`voicedictation`). Voice settings are under
+**Settings → AI → Voice typing**. The `lc` CLI covers `index`, `datasets`,
+`config` and `mcp`; Practice editing, tests and Agent actions are in the app.
 
 ### Architecture
 
 ```
-Tablet APK  ──in-process──►  axum router (named invoke)  ──►  LLM URL from Settings → LLM
+Tablet APK  ──in-process──►  axum router (named invoke)  ──►  LLM URL from Settings → AI
            └──optional LAN sync──►  desktop app hub (default port 7878, six-digit code)
 ```
 
-- Coach answers stream over Tauri events (`lc-coach-frame`), not a session WebSocket to a PC.
-- Configure the model under Settings → LLM on the device, where `localhost` means the tablet. Paste Groq or OpenAI keys there. The APK has no `GROQ_API_KEY` or `OPENAI_API_KEY` environment.
+- Coach answers stream over Tauri events (`lc-coach-frame-<channel>`), not a session WebSocket to a PC.
+- Configure the model under Settings → AI → AI model on the device, where `localhost` means the tablet. Paste Groq or OpenAI keys there. The APK has no `GROQ_API_KEY` or `OPENAI_API_KEY` environment.
 - For a local model, run Ollama or llama.cpp on the tablet itself, or point at a URL the tablet can reach (Tailscale, LAN IP, Groq, OpenAI, etc.).
-- Desktop starts its shared-router LAN listener on `0.0.0.0` at the configured port. To use it for sync, enter the desktop's PC URL and six-digit code in **Settings → Personalize → Storage → Pad hub** on the tablet. This works with either flavor and is separate from adb wireless debugging.
+- ChatBot footnotes, and agent modes set to the assistant app or an AI assistant, are answered on the PC, so they need the paired desktop app running.
+- Desktop starts its shared-router LAN listener on `0.0.0.0` at the configured port. To use it for sync, enter the desktop's PC URL and six-digit code in **Settings → Personalize → Storage → Sync with your PC** on the tablet. This works with either flavor and is separate from adb wireless debugging.
 
 ### Tablet as a second display (optional)
 
@@ -255,7 +260,7 @@ cd <repo>
 app\scripts\android-install-practice.cmd
 ```
 
-If controls still overlap, record the device/Android version, gesture or button navigation mode, orientation, keyboard state, and a screenshot. In a WebView inspector, read the computed root values of `--lc-safe-bottom` and `--lc-keyboard-inset` alongside `window.innerHeight` and `window.visualViewport` height/offset. For a reproducible report, enable **Settings → Personalize → Diagnostics → Debug log**, save, reproduce, and use **Export log**. `npm run logs:android` captures WebView console output from the selected adb device (using the saved wireless serial when connected); `logs:open` is specifically filtered for document-open events.
+If controls still overlap, record the device/Android version, gesture or button navigation mode, orientation, keyboard state, and a screenshot. In a WebView inspector, read the computed root values of `--lc-safe-bottom` and `--lc-keyboard-inset` alongside `window.innerHeight` and `window.visualViewport` height/offset. For a reproducible report, turn on **Settings → Personalize → Troubleshooting → Activity log**, save, restart the app, reproduce, and use **Export log**. `npm run logs:android` captures WebView console output from the selected adb device (using the saved wireless serial when connected); `logs:open` is specifically filtered for document-open events.
 
 ---
 
@@ -266,7 +271,7 @@ If controls still overlap, record the device/Android version, gesture or button 
 | `'adb' is not recognized` | PATH is missing platform-tools. Fix it via the GUI (§3), then open a new cmd |
 | `cargo` works, `adb` does not | Stale cmd window. Close every cmd and reopen |
 | Tauri opens Android Studio | No device or emulator seen. Fix `adb` PATH, run `adb devices` |
-| Coach offline, LLM unreachable | Settings → LLM on the tablet. Check the provider, the API key, and that the model URL is reachable from the tablet |
+| Coach offline, LLM unreachable | Settings → AI → AI model on the tablet. Check the provider, the API key, and that the model URL is reachable from the tablet |
 | `no src-tauri/gen/android` / init failed | Overlay runs `tauri android init` when missing. Check SDK, NDK, JDK 17–24, Rust 1.93+, and Node ≥22.13.0 (§1); from the repo root run `cd app && npm run android:init` |
 | `:buildSrc` fails with `25.0.2` | Set `JAVA_HOME` to a JDK 17–24. The overlay selects a supported JDK and pins `org.gradle.java.home`; retry `npm run android:wireless:practice` |
 | Annotate cannot load `http://` pages | Rebuild after overlay (`npm run android:overlay` then `android:apk:practice`) |
@@ -278,7 +283,7 @@ If controls still overlap, record the device/Android version, gesture or button 
 
 | Item | Path |
 | --- | --- |
-| Universal debug APK | `app\src-tauri\gen\android\app\build\outputs\apk\universal\debug\app-universal-debug.apk` |
-| arm64 debug APK (Practice fallback) | `app\src-tauri\gen\android\app\build\outputs\apk\arm64\debug\app-arm64-debug.apk` |
+| Debug APK (universal flavor, arm64 inside) | `app\src-tauri\gen\android\app\build\outputs\apk\universal\debug\app-universal-debug.apk` |
+| arm64 debug APK (split-per-ABI build; the Practice installer also accepts it) | `app\src-tauri\gen\android\app\build\outputs\apk\arm64\debug\app-arm64-debug.apk` |
 | Package id | `dev.lc.whiteboard` |
 | App README | `app/README.md` |
