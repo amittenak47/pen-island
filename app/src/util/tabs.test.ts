@@ -20,6 +20,9 @@ import {
   splitEdgeAt,
   tabsReducer,
   openTarget,
+  openChangesActive,
+  practiceKey,
+  practiceSwitchTarget,
   pdfHoldDecodeInSplit,
   visibleTabIds,
   webTabCount,
@@ -596,5 +599,47 @@ describe("tabKindLoads", () => {
   });
   it("is true for tabs that open a document", () => {
     for (const kind of ["practice", "whiteboard", "annotate", "web"] as const) expect(tabKindLoads(kind)).toBe(true);
+  });
+});
+
+describe("Practice problem switches in one chip", () => {
+  const withPractice = (taskId: string): TabState =>
+    run(initialTabState(), { type: "open", tab: problem("p1", taskId), at: 1 });
+
+  it("lets prev/next on the focused Practice chip reach the reducer", () => {
+    const state = withPractice("two-sum");
+    expect(openChangesActive(state, problem("p2", "valid-parentheses"))).toBe(true);
+    const next = tabsReducer(state, { type: "open", tab: problem("p2", "valid-parentheses"), at: 2 });
+    expect(next.activeId).toBe("p1");
+    expect(activeTab(next)).toMatchObject({ taskId: "valid-parentheses", title: "valid-parentheses" });
+  });
+
+  it("still skips re-opening the problem the focused chip already shows", () => {
+    const state = withPractice("two-sum");
+    expect(openChangesActive(state, problem("p2", "two-sum"))).toBe(false);
+  });
+
+  it("leaves opens that land on a background chip to the normal path", () => {
+    const state = run(withPractice("two-sum"), { type: "focus", id: HOME_TAB_ID, at: 2 });
+    expect(openChangesActive(state, problem("p2", "valid-parentheses"))).toBe(false);
+  });
+
+  it("asks a mounted workspace to load the problem its record now names", () => {
+    const record = problem("p1", "valid-parentheses");
+    expect(practiceSwitchTarget(practiceKey("leetcode", "two-sum"), record)).toBe(
+      "leetcode/valid-parentheses",
+    );
+    expect(practiceSwitchTarget(practiceKey("leetcode", "valid-parentheses"), record)).toBeNull();
+  });
+
+  it("treats the same slug in another problem set as a different problem", () => {
+    expect(practiceSwitchTarget("leetcode/two-sum", problem("p1", "two-sum", "kodcode"))).toBe(
+      "kodcode/two-sum",
+    );
+  });
+
+  it("waits for the mount open, and ignores other kinds", () => {
+    expect(practiceSwitchTarget(null, problem("p1", "two-sum"))).toBeNull();
+    expect(practiceSwitchTarget("leetcode/two-sum", board("b1", null))).toBeNull();
   });
 });

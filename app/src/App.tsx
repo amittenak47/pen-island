@@ -77,6 +77,7 @@ import {
   activeTab as activeTabOf,
   groupOf,
   liveOverflow,
+  openChangesActive,
   openedRecord,
   pinLive,
   promoteLive,
@@ -1108,7 +1109,15 @@ export function App() {
       // The reducer decides which chip an open lands in; `openedRecord` is the
       // same call it makes, so the answer here cannot disagree with it.
       const landed = openedRecord(tabsRef.current, proposed);
-      if (landed.id === tabsRef.current.activeId) return landed;
+      if (landed.id === tabsRef.current.activeId) {
+        // Already focused and mounted. Only a new identity (Practice prev/next
+        // in its own chip) has anything to write; the workspace sees the
+        // record change and loads the problem it now names.
+        if (openChangesActive(tabsRef.current, proposed)) {
+          dispatchTabs({ type: "open", tab: proposed, at: Date.now() });
+        }
+        return landed;
+      }
       const existed = tabsRef.current.tabs.some((tab) => tab.id === landed.id);
       if (!existed && tabKindLoads(landed.kind)) {
         markUserLoad(landed.id);
