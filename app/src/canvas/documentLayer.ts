@@ -14,7 +14,7 @@ export const DOCUMENT_LAYER_SELECTOR =
  * for there first — a full `querySelectorAll` walks every KaTeX glyph of a
  * long note, ~50 ms on a tablet, and the page frames ask on every turn.
  */
-function documentLayers(slot: HTMLElement): HTMLElement[] {
+export function documentLayers(slot: HTMLElement): HTMLElement[] {
   const found: HTMLElement[] = [];
   const visit = (el: Element, depth: number) => {
     for (const child of Array.from(el.children)) {

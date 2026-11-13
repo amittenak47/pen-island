@@ -153,7 +153,7 @@ import {
   liveExcalidrawViewport,
 } from "./documentRotateCamera";
 import { paintExcalidrawCanvases } from "./excalidrawCanvasSize";
-import { DOCUMENT_LAYER_SELECTOR, documentLayerHeight } from "./documentLayer";
+import { documentLayerHeight, documentLayers } from "./documentLayer";
 import {
   contentSlotCssTransform,
   contentSlotPlaceAt,
@@ -279,7 +279,6 @@ import { BoardToolbar } from "./BoardToolbar";
 import type { ResetClearMode } from "./resetClearMode";
 import { InkPresetEditor } from "./InkPresetEditor";
 import { InkToolWheel } from "./InkToolWheel";
-import { ScrollBackHold } from "./ScrollBackHold";
 import {
   isDeletableElement,
   selectionBounds,
@@ -4455,7 +4454,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         el.closest(
           ".lc-toolbar, .lc-map-controls, .lc-pager, .lc-stamp-trash, .lc-capture-overlay," +
             " .lc-scene-select, .lc-scene-text-edit, .lc-doc-footnote, .lc-doc-confirm, .lc-doc-sheet, .lc-footnote-overview" +
-            ", .lc-footnote-bubble, .lc-scroll-back-hold, .lc-hold-reveal, .lc-split-sash",
+            ", .lc-footnote-bubble, .lc-hold-reveal, .lc-split-sash",
         )
       ) {
         return false;
@@ -7463,10 +7462,24 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const node = contentSlotNodeRef.current;
     if (!node || typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(() => read());
+    /*
+     * The slot and the document layers in it, kept in step with what is
+     * mounted. Looked up near the slot, not by a `querySelectorAll` over it:
+     * a long note with math is tens of thousands of KaTeX spans, and this runs
+     * on every delivery, which on a tablet was every frame of a pan (12 ms each).
+     */
+    const observed = new Set<Element>();
     const watch = () => {
-      observer.observe(node);
-      for (const inner of node.querySelectorAll<HTMLElement>(DOCUMENT_LAYER_SELECTOR)) {
-        if (inner !== node) observer.observe(inner);
+      const current = new Set<Element>([node, ...documentLayers(node)]);
+      for (const el of observed) {
+        if (current.has(el)) continue;
+        observer.unobserve(el);
+        observed.delete(el);
+      }
+      for (const el of current) {
+        if (observed.has(el)) continue;
+        observer.observe(el);
+        observed.add(el);
       }
     };
     const read = () => {
@@ -11344,12 +11357,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       {interactive && <PadTitle ref={padTitleRef} />}
       {interactive && <PageIndicator ref={pageIndicatorRef} />}
       {interactive && <FlickPredictHud ref={flickPredictHudRef} />}
-      {interactive && (
-        <ScrollBackHold
-          boardRef={boardRef}
-          onScrollBack={() => apiRef.current?.scrollToContent()}
-        />
-      )}
       {inkWheel && !(presetEditor && !wheelPeek) && (
         <InkToolWheel
           open
