@@ -480,6 +480,38 @@ describe("pinHostScroll", () => {
     expect(mutationAffectsScrollHosts([record(board, [doc])])).toBe(true);
   });
 
+  it("ignores live copies of the page that a quick turn puts up, hands on and takes down", () => {
+    const { board, doc } = buildDoc();
+    const copy = () => {
+      const holder = document.createElement("div");
+      holder.append(doc.cloneNode(true));
+      return holder;
+    };
+    const record = (target: Node, addedNodes: Node[] = [], removedNodes: Node[] = []) =>
+      ({ target, addedNodes, removedNodes }) as unknown as MutationRecord;
+
+    const under = document.createElement("div");
+    under.className = "lc-page-turn-under";
+    const facing = document.createElement("div");
+    facing.className = "lc-page-mask-facing";
+    board.append(under, facing);
+
+    // The turn's layer arriving with its copy, and leaving.
+    expect(mutationAffectsScrollHosts([record(board, [under])])).toBe(false);
+    expect(mutationAffectsScrollHosts([record(board, [], [under])])).toBe(false);
+    // The landed copy moved out of the turn's layer into the facing page.
+    const landed = copy();
+    under.append(landed);
+    expect(mutationAffectsScrollHosts([record(under, [], [landed])])).toBe(false);
+    expect(mutationAffectsScrollHosts([record(facing, [landed])])).toBe(false);
+    // Changes inside a copy, and the facing page's picture swapped back in.
+    const inner = landed.querySelector("pre")!;
+    expect(mutationAffectsScrollHosts([record(inner, [document.createElement("span")])])).toBe(false);
+    expect(mutationAffectsScrollHosts([record(facing, [document.createElement("canvas")], [landed])])).toBe(false);
+    // The real page still counts, even in the same batch as a copy.
+    expect(mutationAffectsScrollHosts([record(facing, [copy()]), record(board, [], [doc])])).toBe(true);
+  });
+
   it("restores nested scroll that drifted during a stroke", () => {
     const el = document.createElement("div");
     Object.defineProperty(el, "scrollLeft", {

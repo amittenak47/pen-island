@@ -600,17 +600,34 @@ export function mutationIsPageTurnLayer(records: readonly MutationRecord[]): boo
   });
 }
 
+/**
+ * Where live copies of a page sit: a turn's own layers, and a spread's facing
+ * page, which holds a picture or, after a quick turn, the copy that turn
+ * landed with (moved there out of `.lc-page-turn-under`).
+ */
+const PAGE_COPY_HOLDER = `${PAGE_TURN_LAYER}, .lc-page-mask-facing`;
+
 export function mutationAffectsScrollHosts(records: readonly MutationRecord[]): boolean {
+  const elementOf = (node: Node): Element | null =>
+    node.nodeType === 1 ? node as Element : node.parentElement;
+  const inCopy = (el: Element | null): boolean => Boolean(el?.closest(PAGE_COPY_HOLDER));
   const inDocument = (node: Node): boolean => {
-    const el = node.nodeType === 1 ? node as Element : node.parentElement;
-    return Boolean(el?.closest(DOC_PAGE_SELECTOR)) && !el?.closest(".lc-page-turn-under");
+    const el = elementOf(node);
+    return Boolean(el?.closest(DOC_PAGE_SELECTOR)) && !inCopy(el);
   };
-  // A page turn's live copy of the page is not the page: no hosts to find in it.
+  // A live copy of the page is not the page: no hosts to find in it.
   const containsDocument = (node: Node): boolean => node.nodeType === 1 &&
-    !(node as Element).matches(PAGE_TURN_LAYER) &&
+    !(node as Element).matches(PAGE_COPY_HOLDER) &&
     Boolean((node as Element).matches(DOC_PAGE_SELECTOR) || (node as Element).querySelector(DOC_PAGE_SELECTOR));
+  /*
+   * Nodes put into or taken out of a copy's holder are copies too. Counting
+   * them rescanned every host of the real page (two whole-document walks, a
+   * forced layout among them) on each quick turn: about 0.4 s a turn on a
+   * tablet for a note with thousands of formulas.
+   */
   return records.some(record => inDocument(record.target) ||
-    [...record.addedNodes, ...record.removedNodes].some(containsDocument));
+    (!inCopy(elementOf(record.target)) &&
+      [...record.addedNodes, ...record.removedNodes].some(containsDocument)));
 }
 
 /** Write `pin` onto the current host for that key (survives React replacing the node). */
