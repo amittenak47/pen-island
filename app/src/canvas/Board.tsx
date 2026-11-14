@@ -14,7 +14,7 @@ import { makeFingerRest } from "./fingerRest";
 import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
 import { createCameraController, type CameraController } from "./cameraController";
-import { touchPointersIn } from "./touchPointers";
+import { syncTouchPointers } from "./touchPointers";
 import {
   CaptureUpdateAction,
   createBoardScene,
@@ -6690,9 +6690,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const onDown = (event: PointerEvent) => {
       if (event.pointerType !== "touch") return;
       // A page edge can consume the first finger before it reaches this
-      // root. Seed both fingers from capture so the pinch still starts now.
-      for (const [id, touch] of touchPointersIn(root)) touches.set(id, touch);
+      // root. Seed both fingers from capture so the pinch still starts now;
+      // and drop the ones that have lifted where this root did not see it
+      // (see `syncTouchPointers`), ending a pinch that has lost its fingers.
+      syncTouchPointers(touches, root);
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touches.size < 2) end();
       if (touches.size !== 2 || pinch || !reading()) return;
       begin();
       if (!pinch) return;
