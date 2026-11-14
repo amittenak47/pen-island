@@ -34,6 +34,7 @@ import { canvasGestureFrame, protectGestureSurface } from "../../util/gestureExc
 import { turnCornerAt, turnEdgeAt, turnCornerSize, turnReachAt } from "./corners";
 import { cssColorLuminance } from "../../util/webPagePaper";
 import { hasSideScrollRoom, hitBoardScrollHostAtPoint, invalidateBoardScrollHostLayout, nestedScrollHost } from "../scrollHost";
+import { touchPointersIn } from "../touchPointers";
 
 /** In Pages reading the side stacks sit this much further up, as a share of their gap from the bottom. */
 const CHROME_LIFT = 0.5;
@@ -86,6 +87,8 @@ const PREFETCH_QUIET_MS = 1200;
 
 /** When the reader last touched or typed — see `PREFETCH_QUIET_MS`. */
 let lastInputAt = -Infinity;
+/** When a finger, key or wheel last went down, or a finger came up: a hover does not count. */
+let lastPressAt = -Infinity;
 /**
  * Pictures taken while the reader rests stop at the next touch, key or
  * wheel. One is up to a second and a half of the main thread on a tablet,
@@ -101,11 +104,13 @@ if (typeof window !== "undefined") {
   const note = () => { lastInputAt = performance.now(); };
   const stop = () => {
     note();
+    lastPressAt = lastInputAt;
     restingPictures?.abort();
   };
   for (const type of ["pointerdown", "pointermove", "keydown", "wheel"]) {
     window.addEventListener(type, type === "pointermove" ? note : stop, { capture: true, passive: true });
   }
+  window.addEventListener("pointerup", () => { lastPressAt = performance.now(); }, { capture: true, passive: true });
 }
 const inputQuiet = () => performance.now() - lastInputAt >= PREFETCH_QUIET_MS;
 /** How often a still page checks whether its pictures went stale (a sharper paint landed). */
@@ -126,6 +131,12 @@ const LANDED_PREFETCH_MS = 90;
 const FLICK_ON_PX = 12;
 /** A turn this soon after the last landing is flicking through: no new pictures, see `flicking`. */
 const FLICK_THROUGH_MS = 800;
+/**
+ * A facing page left as plain paper by a turn flicked through is drawn this
+ * long after the last landing or touch, with no hand on the glass: the hand
+ * has stopped there. See `fillPaperFacing`.
+ */
+const PAPER_FILL_MS = 300;
 /** How long a turn waits for the next page's picture before turning over plain paper. */
 const TO_PICTURE_GRACE_MS = 80;
 /** Let go before the pictures were taken: how long to wait for them before simply going. */
@@ -558,6 +569,8 @@ interface Turn {
    * one may be in the facing page's slot instead (`liveSpread`).
    */
   spreadLive?: { left: HTMLElement | null; right: HTMLElement | null };
+  /** Flicked through: `spreadLive`'s pages are plain paper, not copies (see `liveSpread`). */
+  paper?: boolean;
   /** Settles true once both pictures are in, false if they cannot be had. */
   ready: Promise<boolean>;
   corner: Point;
@@ -1163,48 +1176,66 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
 
     /**
+     * Page `frame`'s own HTML in `holder`, a `w` by `H` sheet of paper: its
+     * text at once, its ink when that is ready, unless `kept` says the holder
+     * has gone by then. False if there is no page there to copy.
+     */
+    const fillPage = (b: BoardHandle, holder: HTMLElement, frame: PageFrame, w: number, H: number, surface: HTMLElement, kept: () => boolean): boolean => {
+      const scene = pageBoxScene(b, frame);
+      if (!scene || !(scene.width > 0)) return false;
+      const copy = b.livePageCopy(scene, surface);
+      if (!copy) return false;
+      const paper = turnPaperColor(paperColor(), false);
+      const k = w / scene.width;
+      copy.style.transformOrigin = "0 0";
+      copy.style.transform = `scale(${k})`;
+      holder.appendChild(copy);
+      const cut = (frame.maxY - scene.y + CUT_BLEED) * k;
+      const blank = cut < H ? document.createElement("div") : null;
+      if (blank) {
+        Object.assign(blank.style, { position: "absolute", left: "0", right: "0", top: `${Math.max(0, cut)}px`, bottom: "0", background: paper });
+        holder.appendChild(blank);
+      }
+      void b.captureSceneMarks(scene, shotScale(w, scene.width)).then((marks) => {
+        if (!marks || !kept()) return;
+        Object.assign(marks.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%" });
+        holder.insertBefore(marks, blank);
+      }, () => {});
+      return true;
+    };
+
+    /**
      * The pages a live spread turn shows that the board does not.
      *
      * Turning on, the next right page, where the sheet has come off it.
      * Turning back, the earlier spread: its left page whole, beneath the
      * returning sheet, and its right page where that sheet lies flat. The
      * board keeps showing the spread on screen everywhere else.
+     *
+     * Flicked through (`paper`), they are plain paper. Copying a page of math
+     * and laying it out was 40-55 ms of each turn's start on the tablet,
+     * about half of it, for pages the hand went straight past. The page the
+     * hand stops on is drawn once it rests (see `fillPaperFacing`); the
+     * board itself shows the other one.
      */
-    const liveSpread = (b: BoardHandle, turn: Turn, frames: readonly PageFrame[], other: number): HTMLElement | null => {
+    const liveSpread = (b: BoardHandle, turn: Turn, frames: readonly PageFrame[], other: number, paper = false): HTMLElement | null => {
       const pane = document.querySelector<HTMLElement>(hostSelector);
       const surface = pane?.querySelector<HTMLElement>(".lc-board") ?? pane;
       if (!surface) return null;
       const w = turn.rect.width / 2;
       const H = turn.rect.height;
-      const paper = turnPaperColor(paperColor(), false);
+      const background = turnPaperColor(paperColor(), false);
       const page = (frame: PageFrame | undefined, side: "left" | "right"): HTMLElement | null => {
-        const scene = frame ? pageBoxScene(b, frame) : null;
         const holder = document.createElement("div");
         Object.assign(holder.style, {
           position: "absolute", top: "0", left: side === "right" ? `${w}px` : "0",
-          width: `${w}px`, height: `${H}px`, overflow: "hidden", background: paper,
+          width: `${w}px`, height: `${H}px`, overflow: "hidden", background,
         });
         // A spread's last page can be missing: plain paper, as the board shows it.
-        if (!frame || !scene || !(scene.width > 0)) return holder;
-        const copy = b.livePageCopy(scene, surface);
-        if (!copy) return holder;
-        const k = w / scene.width;
-        copy.style.transformOrigin = "0 0";
-        copy.style.transform = `scale(${k})`;
-        holder.appendChild(copy);
-        const cut = (frame.maxY - scene.y + CUT_BLEED) * k;
-        const blank = cut < H ? document.createElement("div") : null;
-        if (blank) {
-          Object.assign(blank.style, { position: "absolute", left: "0", right: "0", top: `${Math.max(0, cut)}px`, bottom: "0", background: paper });
-          holder.appendChild(blank);
-        }
-        void b.captureSceneMarks(scene, shotScale(w, scene.width)).then((marks) => {
-          if (!marks || turn.done) return;
-          Object.assign(marks.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%" });
-          holder.insertBefore(marks, blank);
-        }, () => {});
+        if (frame && !paper) fillPage(b, holder, frame, w, H, surface, () => !turn.done);
         return holder;
       };
+      turn.paper = paper;
       const under = document.createElement("div");
       under.className = "lc-page-turn-under";
       under.setAttribute("aria-hidden", "true");
@@ -1492,7 +1523,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
             turn.images = direction === "next" ? { from: here, to: there } : { from: there, to: here };
           } else {
             turn.images = { from: null, to: null };
-            turn.under = liveSpread(b, turn, frames, toStart);
+            turn.under = liveSpread(b, turn, frames, toStart, flicking());
           }
           mountTurnCanvas(turn);
           draw(turn);
@@ -1647,8 +1678,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         // remains registered; sharp rendering is not required to turn it.
         let there = pagedRef.current ? await thereShot : await Promise.race([thereShot, grace()]);
         if (disposed || turn.done || (pagedRef.current && !there)) return false;
-        // No picture of a text page in time: the page itself, live.
-        if (!there && !pagedRef.current && layout === "sheet") turn.under = liveUnder(b, turn, toScene, scale, to);
+        // No picture of a text page in time: the page itself, live. Flicking
+        // through, plain paper: the board shows the page once it lands.
+        if (!there && !pagedRef.current && layout === "sheet" && !flicking()) turn.under = liveUnder(b, turn, toScene, scale, to);
         const blank = there || turn.under
           ? null
           : blankSheet(here ?? { width: Math.max(1, Math.round(scene.width * scale)), height: Math.max(1, Math.round(scene.height * scale)) });
@@ -1760,6 +1792,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       heading = turn.direction;
       // The spread lands with its left page held: the right one, which the
       // turn already shows live, is the facing page.
+      paperFacing = null;
       const facingCopy = turn.spreadLive?.right;
       const facingEl = maskFacing();
       const frames = turn.spreadLive ? b.readingPageFrames() : [];
@@ -1775,14 +1808,52 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         }
         facingHandoffRef.current = { minY: facingPage.minY };
         if (turn.spreadLive) turn.spreadLive.right = null;
+        paperFacing = turn.paper ? { holder: facingCopy, w: turn.rect.width / 2, H: turn.rect.height } : null;
       }
       const flipping = flicking();
       lastLandAt = performance.now();
+      if (paperFacing && !paperFillTimer) paperFillTimer = window.setTimeout(fillPaperFacing, PAPER_FILL_MS);
       // Mid-flick, the next picture waits for the hand to rest. So does a
       // text page's, always: its pictures are about half a second of the
       // main thread each, and taken just after landing they held the next
       // grab back by a second. A grab needs none now (see `planTurn`).
       prefetch(flipping || !pagedRef.current ? PREFETCH_IDLE_MS : LANDED_PREFETCH_MS);
+    };
+
+    /**
+     * The facing page a turn flicked through left as plain paper (see
+     * `liveSpread`), drawn once the hand stops on it: no turn going, none
+     * lined up, no finger down, and `PAPER_FILL_MS` since the last landing or
+     * touch. A hand still flicking turns it over first, and it is never drawn.
+     */
+    let paperFacing: { holder: HTMLElement; w: number; H: number } | null = null;
+    let paperFillTimer = 0;
+    const fillPaperFacing = () => {
+      paperFillTimer = 0;
+      const p = paperFacing;
+      const el = maskFacing();
+      // Gone: turned over, swapped for the held page, or pictured.
+      if (disposed || !p || !el || el.hidden || p.holder.parentNode !== el) {
+        paperFacing = null;
+        return;
+      }
+      const wait = PAPER_FILL_MS - (performance.now() - Math.max(lastLandAt, lastPressAt));
+      const pane = document.querySelector<HTMLElement>(hostSelector);
+      if (wait > 0 || turnRef.current || active || queued || (pane && touchPointersIn(pane).size > 0)) {
+        paperFillTimer = window.setTimeout(fillPaperFacing, Math.max(50, wait));
+        return;
+      }
+      paperFacing = null;
+      // Still the page facing the one held, as the landing left it.
+      const b = board();
+      const held = lockedRef.current;
+      const handoff = facingHandoffRef.current;
+      const surface = boardSurface() ?? pane;
+      if (!b || !held || !handoff || !surface) return;
+      const frames = b.readingPageFrames();
+      const i = frames.findIndex((f) => Math.abs(f.minY - held.minY) < 0.5);
+      const frame = i >= 0 && i % 2 === 0 ? frames[i + 1] : undefined;
+      if (frame && Math.abs(frame.minY - handoff.minY) < 0.5) fillPage(b, p.holder, frame, p.w, p.H, surface, () => p.holder.isConnected);
     };
 
     /** Move navigation on while this sheet finishes its own animation. */
@@ -2632,6 +2703,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       window.removeEventListener("keydown", onKey);
       disposed = true;
       window.clearTimeout(prefetchTimer);
+      window.clearTimeout(paperFillTimer);
       window.clearInterval(recheck);
       document.removeEventListener("selectstart", noSelect, true);
       const hole = holeEl();
