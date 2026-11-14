@@ -2371,8 +2371,10 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         const dy = event.clientY - start.y;
         const inward = start.reach === "right" ? -dx : dx;
         if (inward >= REACH_DRAG_PX && inward >= Math.abs(dy)) {
-          // A live spread still landing: this drag takes hold once it has.
-          if (chainsAfter(turnRef.current)) {
+          // A turn on its way: a live spread landing, or a lined-up one still
+          // setting up. The drag takes hold once it has landed; let go first,
+          // it is lined up.
+          if (waitsForTurn(turnRef.current)) {
             event.stopImmediatePropagation();
             event.preventDefault();
             return;

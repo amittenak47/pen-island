@@ -1246,6 +1246,55 @@ it("hurries a live spread's sheet to land when the next flick comes, then turns 
   board.livePageCopy.mockReset().mockReturnValue(null);
 });
 
+it("keeps a flick from the strip that comes while a lined-up turn is still being set up", async () => {
+  const frame = manualFrames();
+  const textFrames = [1, 2, 3, 4, 5, 6, 7, 8].map((pageId, i) => ({ pageId, minY: i * 600, maxY: i * 600 + 600 }));
+  board.readingPageFrames.mockReturnValue(textFrames);
+  view = { x: 0, y: 0, width: 400, height: 600, zoom: 1 };
+  pageBox = { minX: 0, maxX: 200, minY: 0, maxY: 600 };
+  board.livePageCopy.mockImplementation(() => document.createElement("div"));
+  const hole = document.createElement("div");
+  hole.className = "lc-page-mask-hole";
+  hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+  const mask = document.createElement("div");
+  mask.className = "lc-page-mask";
+  mask.append(hole);
+  const ref = { current: board as unknown as BoardHandle };
+  act(() =>
+    root.render(
+      <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} />,
+    ),
+  );
+  host.append(mask);
+  pointer("pointerdown", 380, 580, "touch", 1000);
+  pointer("pointermove", 340, 585, "touch", 1040);
+  await pictures();
+  frame();
+  pointer("pointermove", 300, 585, "touch", 1080);
+  pointer("pointerup", 300, 585, "touch", 1090);
+  frame();
+  // A flick on the page while that sheet goes over: lined up.
+  pointer("pointerdown", 300, 300, "touch", 1100);
+  pointer("pointermove", 200, 302, "touch", 1120);
+  pointer("pointerup", 150, 302, "touch", 1140);
+  // A thumb on the strip, before the sheet is down.
+  pointer("pointerdown", 392, 300, "touch", 1200);
+  // The sheet lands, and the lined-up turn is set up: not yet holding its pages.
+  frame(150);
+  frame();
+  // The thumb's flick comes now. It used to be dropped here.
+  pointer("pointermove", 300, 300, "touch", 1230);
+  pointer("pointerup", 200, 300, "touch", 1250);
+  for (let i = 0; i < 10; i += 1) {
+    await pictures();
+    frame(1000);
+  }
+  const landed = (board.jumpToPageFrame.mock.calls as unknown as [{ pageId: number }][]).map((call) => call[0].pageId);
+  expect(landed).toEqual([3, 5, 7]);
+  board.readingPageFrames.mockReturnValue(FRAMES);
+  board.livePageCopy.mockReset().mockReturnValue(null);
+});
+
 describe("switching a text document from scroll reading to Pages", () => {
   // A long note cut into 14 text pages of 600 units: spread 6 is pages 11 and 12.
   const textFrames = Array.from({ length: 14 }, (_, i) => ({ pageId: i + 1, minY: i * 600, maxY: (i + 1) * 600 }));
