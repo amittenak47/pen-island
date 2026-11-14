@@ -657,6 +657,12 @@ export function livePageCopy(
   return root;
 }
 
+/** Laid out in the normal flow, so every later sibling in the flow sits at or below it. */
+function flowsInOrder(el: Element): boolean {
+  const { position, float } = getComputedStyle(el);
+  return (position === "" || position === "static" || position === "relative") && (float === "" || float === "none");
+}
+
 /** `slot` inside stand-ins for its ancestors up to `host`, with only `top`–`bottom` (slot units) filled in. */
 function copyBand(slot: HTMLElement, host: Element, top: number, bottom: number): HTMLElement | null {
   const slotRect = slot.getBoundingClientRect();
@@ -719,6 +725,11 @@ function copyBand(slot: HTMLElement, host: Element, top: number, bottom: number)
           shell.style.overflow = "hidden";
         }
         into.appendChild(shell);
+        // Nothing after a block below the band moves the band: the rest
+        // are left out. On a long note that was most of the copy, every
+        // block measured and cloned for each page a turn showed. This one
+        // stays, so the band's last block is not the last child.
+        if (childTop > bottom && box.height > 0 && flowsInOrder(child)) break;
         continue;
       }
       // Small, or all inside the band: as it is. A long list or table

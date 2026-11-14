@@ -399,4 +399,41 @@ describe("livePageCopy", () => {
     expect(copy.querySelector("p")!.style.contentVisibility).toBe("visible");
     expect(p.style.contentVisibility).toBe("hidden");
   });
+
+  it("leaves out what follows the first block below the band, unless that block is out of the flow or has no box", () => {
+    const host = document.createElement("div");
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = rect(0, 4000);
+    const measured: string[] = [];
+    const block = (name: string, top: number, height: number, style = "") => {
+      const p = document.createElement("p");
+      p.textContent = name;
+      if (style) p.setAttribute("style", style);
+      p.getBoundingClientRect = () => {
+        measured.push(name);
+        return rect(top, height)();
+      };
+      slot.append(p);
+    };
+    block("a", 0, 100);
+    block("b", 200, 100);
+    // Below the band, but neither says where the rest of the flow is.
+    block("pinned", 900, 100, "position:absolute");
+    block("empty", 900, 0);
+    block("c", 400, 100);
+    block("d", 600, 100);
+    block("e", 800, 100);
+    host.append(slot);
+    document.body.append(host);
+    const copy = livePageCopy(
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 2000 }, paperColor: "#fff" },
+      // Slot units at half size: a is 0-50, b 100-150, c 200-250, d 300-350.
+      { x: 0, y: 90, width: 200, height: 120 },
+      host,
+    )!;
+    host.remove();
+    expect(Array.from(copy.querySelectorAll("p"), (p) => p.textContent)).toEqual(["", "b", "", "", "c", ""]);
+    expect(measured).toEqual(["a", "b", "pinned", "empty", "c", "d"]);
+  });
 });

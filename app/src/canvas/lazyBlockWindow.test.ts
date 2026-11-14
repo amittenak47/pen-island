@@ -3,7 +3,6 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   drawLazyBlocksIn,
-  lazyBlocksShownBetween,
   placeLazyWindow,
   releaseLazyBlocks,
   showLazyBlocksBetween,
@@ -39,8 +38,6 @@ describe("lazy blocks in Pages reading", () => {
     expect(showLazyBlocksBetween(slot, 250, 520)).toBe(8);
     // Measured through the camera's half scale: block i is i*100 to i*100+100 in slot units.
     expect(shown()).toEqual(["hidden", "hidden", "visible", "visible", "visible", "visible", "hidden", "hidden"]);
-    expect(lazyBlocksShownBetween(slot, 300, 400)).toBe(true);
-    expect(lazyBlocksShownBetween(slot, 0, 100)).toBe(false);
     // Moving the window only touches the blocks that cross its edges.
     expect(showLazyBlocksBetween(slot, 350, 620)).toBe(2);
     releaseLazyBlocks(slot);
@@ -76,29 +73,43 @@ describe("lazy blocks in Pages reading", () => {
       const i = later.push(work) - 1;
       return () => cancelled.push(i);
     };
-    // First page shown, at 600 with pages 100 high: nothing drawn yet, so all of it now.
+    const letters = () => shown().map((v) => v[0]).join("");
+    // First page shown, at 600 with pages 100 high: 2 pages back to 4 ahead,
+    // 400 to 1000, now (blocks 3 to 10, those touching an edge included).
     placeLazyWindow(slot, 600, 100, fake);
-    expect(later).toHaveLength(0);
-    // 4 pages back to 8 ahead, 200 to 1400: blocks 1 to 14, those touching an edge included.
-    expect(shown().map((v) => v[0]).join("")).toBe("hvvvvvvvvvvvvvvhhhhh");
+    expect(letters()).toBe("aaavvvvvvvvaaaaaaaaa");
+    // 4 pages back to 8 ahead, 200 to 1400, once the hand rests: blocks 1 to 14.
+    expect(later).toHaveLength(1);
+    later[0]!();
+    expect(letters()).toBe("hvvvvvvvvvvvvvvhhhhh");
     // A turn on: its spread and the next are drawn already, so the rest waits.
     placeLazyWindow(slot, 800, 100, fake);
-    expect(later).toHaveLength(1);
+    expect(later).toHaveLength(2);
     expect(shown()[16]).toBe("hidden");
     // Another turn before the rest happened: the wait starts over.
     placeLazyWindow(slot, 1000, 100, fake);
-    expect(cancelled).toEqual([0]);
-    later[1]!();
+    expect(cancelled).toEqual([1]);
+    later[2]!();
     // 600 to 1800: blocks 5 to 18.
-    expect(shown().map((v) => v[0]).join("")).toBe("hhhhhvvvvvvvvvvvvvvh");
+    expect(letters()).toBe("hhhhhvvvvvvvvvvvvvvh");
+    // A run of quick turns past it: the spread after the next comes now, and
+    // nothing is hidden until the hand rests.
+    placeLazyWindow(slot, 1600, 100, fake);
+    expect(letters()).toBe("hhhhhvvvvvvvvvvvvvvv");
   });
 
   it("draws a jump's page at once even with a wait pending", () => {
     const { slot, shown } = note(40);
-    const fake = () => () => {};
+    const later: (() => void)[] = [];
+    const fake = (work: () => void) => {
+      later.push(work);
+      return () => {};
+    };
     placeLazyWindow(slot, 600, 100, fake);
     placeLazyWindow(slot, 3000, 100, fake);
     expect(shown()[30]).toBe("visible");
+    expect(shown()[6]).toBe("visible");
+    later.at(-1)!();
     expect(shown()[6]).toBe("hidden");
   });
 
@@ -116,7 +127,6 @@ describe("lazy blocks in Pages reading", () => {
     const later = vi.fn(() => () => {});
     placeLazyWindow(slot, 0, 100, later);
     expect(showLazyBlocksBetween(slot, 0, 100)).toBe(0);
-    expect(lazyBlocksShownBetween(slot, 0, 100)).toBe(true);
     expect(slot.querySelector("p")!.getAttribute("style")).toBeNull();
   });
 });

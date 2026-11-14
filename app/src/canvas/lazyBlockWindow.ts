@@ -84,12 +84,17 @@ export function showLazyBlocksBetween(slot: HTMLElement, top: number, bottom: nu
   return changed;
 }
 
-/** Whether every lazy block between `top` and `bottom` is shown: the page there will draw. */
-export function lazyBlocksShownBetween(slot: HTMLElement, top: number, bottom: number): boolean {
+/** Show the lazy blocks between `top` and `bottom` that are not shown yet, hiding none. How many changed. */
+function revealLazyBlocksBetween(slot: HTMLElement, top: number, bottom: number): number {
   const layout = lazyLayout(slot);
-  if (!layout) return true;
-  return layout.blocks.every((el, i) =>
-    layout.bottoms[i]! < top || layout.tops[i]! > bottom || el.style.contentVisibility === "visible");
+  if (!layout) return 0;
+  let changed = 0;
+  layout.blocks.forEach((el, i) => {
+    if (layout.bottoms[i]! < top || layout.tops[i]! > bottom || el.style.contentVisibility === "visible") return;
+    el.style.contentVisibility = "visible";
+    changed += 1;
+  });
+  return changed;
 }
 
 /** Back to `auto`, for scroll reading or another document. */
@@ -120,21 +125,20 @@ const whenIdle: LaterFn = (work) => {
  * The open page is at `at` (slot units), pages `pageH` high: draw what can be
  * seen from it.
  *
- * Its spread and the one either side are drawn now if any part of them is
- * hidden, as on the first page shown or after a jump. Otherwise the wider
- * window waits for the main thread to be free: drawing a spread's worth of
- * blocks in the frame a turn lands was what the quick turns could least
- * afford.
+ * Its spread and the one either side are drawn now, the parts of them that
+ * are hidden: on the first page shown or after a jump, all of it; on a run
+ * of quick turns, the spread after the next. Only those, and nothing hidden:
+ * the frame a turn lands is the one the quick turns can least afford, and
+ * drawing the whole wider window there, a dozen pages of math every second
+ * or third turn, was its slowest part. The wider window, and hiding what
+ * fell out of it, wait for the main thread to be free.
  */
 export function placeLazyWindow(slot: HTMLElement, at: number, pageH: number, later: LaterFn = whenIdle): void {
   if (!(pageH > 0) || !Number.isFinite(at)) return;
   pending.get(slot)?.();
   pending.delete(slot);
   const wide = () => showLazyBlocksBetween(slot, at - WIDE_BACK * pageH, at + WIDE_AHEAD * pageH);
-  if (!lazyBlocksShownBetween(slot, at - NEAR_BACK * pageH, at + NEAR_AHEAD * pageH)) {
-    wide();
-    return;
-  }
+  revealLazyBlocksBetween(slot, at - NEAR_BACK * pageH, at + NEAR_AHEAD * pageH);
   const cancel = later(() => {
     pending.delete(slot);
     wide();
