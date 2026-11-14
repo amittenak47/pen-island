@@ -773,6 +773,87 @@ it("turns a text spread at once without pictures: the next right page live under
   board.livePageCopy.mockReturnValue(null);
 });
 
+describe("a text spread turned live, with the facing page on the right", () => {
+  const textFrames = [
+    { pageId: 1, minY: 0, maxY: 600 },
+    { pageId: 2, minY: 600, maxY: 1200 },
+    { pageId: 3, minY: 1200, maxY: 1800 },
+    { pageId: 4, minY: 1800, maxY: 2400 },
+  ];
+  const setUp = () => {
+    board.readingPageFrames.mockReturnValue(textFrames);
+    view = { x: 0, y: 0, width: 400, height: 600, zoom: 1 };
+    pageBox = { minX: 0, maxX: 200, minY: 0, maxY: 600 };
+    const copy = document.createElement("div");
+    board.livePageCopy.mockReturnValue(copy);
+    const hole = document.createElement("div");
+    hole.className = "lc-page-mask-hole";
+    hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+    const facing = document.createElement("div");
+    facing.className = "lc-page-mask-facing";
+    // Where the board puts it while the left page is held.
+    facing.style.left = "50%";
+    const shown = document.createElement("canvas");
+    facing.append(shown);
+    hole.append(facing);
+    const mask = document.createElement("div");
+    mask.className = "lc-page-mask";
+    mask.append(hole);
+    const ref = { current: board as unknown as BoardHandle };
+    act(() =>
+      root.render(
+        <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} />,
+      ),
+    );
+    host.append(mask);
+    const added: Node[] = [];
+    new MutationObserver((records) => records.forEach((r) => added.push(...r.addedNodes))).observe(facing, { childList: true });
+    return { copy, facing, shown, added };
+  };
+  afterEach(() => {
+    board.readingPageFrames.mockReturnValue(FRAMES);
+    board.livePageCopy.mockReturnValue(null);
+  });
+
+  it("builds the next right page in the facing slot, and keeps it there as laid out when the spread lands", async () => {
+    const { copy, facing, shown, added } = setUp();
+    pointer("pointerdown", 380, 580);
+    pointer("pointermove", 300, 585);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    const holder = copy.parentElement as HTMLElement;
+    expect(holder.parentElement).toBe(facing);
+    expect(holder.style.left).toBe("0px");
+    expect(host.querySelector(".lc-page-turn-under")?.contains(copy)).toBe(false);
+    // Above what the slot showed, which stays for where the sheet still lies.
+    expect(facing.lastElementChild).toBe(holder);
+    expect(facing.contains(shown)).toBe(true);
+    pointer("pointermove", 20, 585);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    pointer("pointerup", 20, 585);
+    for (let i = 0; i < 6; i += 1) await settle();
+    expect(board.jumpToPageFrame).toHaveBeenCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
+    // Landed: the same copy, never taken out and put back; the old page gone.
+    expect(facing.contains(copy)).toBe(true);
+    expect(facing.contains(shown)).toBe(false);
+    expect(added.filter((node) => node === holder)).toHaveLength(1);
+    expect(holder.style.clipPath).toBe("none");
+  });
+
+  it("takes its right page out of the facing slot when the sheet falls back", async () => {
+    const { copy, facing, shown } = setUp();
+    pointer("pointerdown", 380, 580);
+    pointer("pointermove", 360, 582);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    expect(facing.contains(copy)).toBe(true);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    pointer("pointerup", 360, 582);
+    for (let i = 0; i < 8; i += 1) await settle();
+    expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+    expect(facing.contains(copy)).toBe(false);
+    expect(facing.contains(shown)).toBe(true);
+  });
+});
+
 it("keeps the canvas frame protected when annotation takes over in Pages mode", () => {
   mount(true);
   expect(gesture.protect).toHaveBeenCalledWith(host, expect.any(Function));

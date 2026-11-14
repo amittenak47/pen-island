@@ -554,7 +554,8 @@ interface Turn {
   underSheet: boolean;
   /**
    * A text spread turned without pictures: the pages it shows that are not on
-   * the board, as live copies inside `under` — see `planSpreadTurn`.
+   * the board, as live copies inside `under` — see `planSpreadTurn`. The right
+   * one may be in the facing page's slot instead (`liveSpread`).
    */
   spreadLive?: { left: HTMLElement | null; right: HTMLElement | null };
   /** Settles true once both pictures are in, false if they cannot be had. */
@@ -913,7 +914,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const scene = pageBoxScene(b, facing);
       if (!scene) { void liveShot.finally(() => { refreshing = false; }); return; }
       const facingShot = takeShot(shotsRef.current, b, scene, scale, facing.maxY, "", false, false, signal).then((canvas) => {
-        if (disposed || !canvas || lockedRef.current !== held || el.hidden) return;
+        // A turn under way may be building its right page in this slot.
+        if (disposed || !canvas || lockedRef.current !== held || el.hidden || turnRef.current) return;
         if (el.firstElementChild !== canvas) el.replaceChildren(canvas);
         shows = facing.minY;
         facingHandoffRef.current = null;
@@ -1210,7 +1212,19 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const left = turn.direction === "prev" ? page(frames[other], "left") : null;
       const right = page(frames[other + 1], "right");
       if (right) right.style.clipPath = "inset(100%)";
-      for (const holder of [left, right]) if (holder) under.appendChild(holder);
+      /*
+       * The right page becomes the facing page when the turn lands. Built in
+       * the facing page's slot, above what it shows now, it stays there: moved
+       * there at the landing, it was styled and laid out a second time, a
+       * page of math in the frame the turn could least afford. Only with the
+       * slot on the right, the board holding the left page.
+       */
+      const facing = maskFacing();
+      if (right && facing && !facing.hidden && facing.style.left === "50%") {
+        right.style.left = "0";
+        facing.appendChild(right);
+      }
+      for (const holder of [left, right]) if (holder && !holder.parentNode) under.appendChild(holder);
       turn.spreadLive = { left, right };
       return under;
     };
@@ -1721,6 +1735,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         }
         turn.canvas.remove();
         turn.under?.remove();
+        // Not landed: its right page, built in the facing slot, goes too.
+        turn.spreadLive?.right?.remove();
         layers.delete(turn);
         if (turn.marksHidden) {
           turn.marksHidden = false;
@@ -1749,8 +1765,14 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const frames = turn.spreadLive ? b.readingPageFrames() : [];
       const facingPage = frames[frames.findIndex((f) => Math.abs(f.minY - turn.to.minY) < 0.5) + 1];
       if (facingCopy && facingEl && facingPage && !facingEl.hidden) {
-        Object.assign(facingCopy.style, { left: "0", clipPath: "none" });
-        facingEl.replaceChildren(facingCopy);
+        if (facingCopy.parentNode === facingEl) {
+          // Built in the slot (see `liveSpread`): it stays as laid out.
+          facingCopy.style.clipPath = "none";
+          for (const child of Array.from(facingEl.children)) if (child !== facingCopy) child.remove();
+        } else {
+          Object.assign(facingCopy.style, { left: "0", clipPath: "none" });
+          facingEl.replaceChildren(facingCopy);
+        }
         facingHandoffRef.current = { minY: facingPage.minY };
         if (turn.spreadLive) turn.spreadLive.right = null;
       }
@@ -2235,6 +2257,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           teardown(turn);
           turn.canvas.remove();
           turn.under?.remove();
+          turn.spreadLive?.right?.remove();
           layers.delete(turn);
         }
         return;
@@ -2628,6 +2651,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         teardown(turn);
         turn.canvas.remove();
         turn.under?.remove();
+        turn.spreadLive?.right?.remove();
         layers.delete(turn);
       }
     };
