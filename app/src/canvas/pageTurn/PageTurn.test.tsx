@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BoardHandle } from "../BoardHandle";
 import { markBootSettled } from "../../util/bootSettled";
-import { glide, glideSlope, launchFor, PageTurn, rollMs, takeShot, turnPaperColor } from "./PageTurn";
+import { glide, glideSlope, inTab, launchFor, PageTurn, rollMs, takeShot, turnPaperColor } from "./PageTurn";
 import { flatSheet, paintTurn } from "./paintTurn";
 import { touchPointersIn } from "../touchPointers";
 
@@ -946,6 +946,59 @@ it("turns the page for a quick sideways flick from anywhere on it", async () => 
   pointer("pointerup", 120, 304, "touch", 1070);
   for (let i = 0; i < 4; i += 1) await settle();
   expect(board.jumpToPageFrame).toHaveBeenCalledWith(expect.objectContaining({ pageId: 3 }));
+});
+
+it("leaves a flick on a wide equation to it, without searching the note for one each time", async () => {
+  mount();
+  const surface = document.createElement("div");
+  surface.className = "lc-board";
+  const doc = document.createElement("div");
+  doc.className = "lc-md-ink-doc";
+  const wide = document.createElement("span");
+  wide.className = "katex-display";
+  wide.style.overflowX = "auto";
+  Object.defineProperty(wide, "scrollWidth", { value: 600 });
+  Object.defineProperty(wide, "clientWidth", { value: 300 });
+  wide.getBoundingClientRect = () => ({ left: 100, right: 400, top: 250, bottom: 350, width: 300, height: 100, x: 100, y: 250, toJSON() {} }) as DOMRect;
+  doc.append(wide);
+  surface.append(doc);
+  host.append(surface);
+  const search = vi.spyOn(doc, "querySelectorAll");
+  const flick = (y: number, at: number) => {
+    pointer("pointerdown", 220, y, "touch", at);
+    pointer("pointermove", 180, y + 2, "touch", at + 30);
+    pointer("pointermove", 120, y + 4, "touch", at + 60);
+    pointer("pointerup", 120, y + 4, "touch", at + 70);
+  };
+  // On the equation, twice: it scrolls sideways, and the page stays.
+  flick(300, 1000);
+  flick(300, 2000);
+  for (let i = 0; i < 4; i += 1) await settle();
+  expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+  // The board's list of boxes that scroll is used, not a search of the note per flick.
+  expect(search.mock.calls.length).toBeLessThanOrEqual(1);
+  // Off it, the page turns.
+  flick(500, 3000);
+  for (let i = 0; i < 4; i += 1) await settle();
+  expect(board.jumpToPageFrame).toHaveBeenCalledWith(expect.objectContaining({ pageId: 3 }));
+});
+
+it("keeps an element found in the tab while it stays there and matches", () => {
+  const find = inTab('[data-lc-tab="t1"]', ".lc-page-mask-facing");
+  const first = document.createElement("div");
+  first.className = "lc-page-mask-facing";
+  host.append(first);
+  const search = vi.spyOn(host, "querySelector");
+  expect(find()).toBe(first);
+  expect(find()).toBe(first);
+  expect(search).toHaveBeenCalledTimes(1);
+  first.remove();
+  const second = document.createElement("div");
+  second.className = "lc-page-mask-facing";
+  host.append(second);
+  expect(find()).toBe(second);
+  second.className = "lc-page-mask-hole";
+  expect(find()).toBeNull();
 });
 
 it("turns back for a quick flick to the right from the middle of the page", async () => {

@@ -643,7 +643,7 @@ export function livePageCopy(
   const top = frame.y - bounds.minY;
   const bottom = top + frame.height;
   for (const slot of [layers.contentSlot, layers.marksSlot]) {
-    if (!slot || !host.contains(slot) || slot.querySelector("canvas.lc-pdf-canvas")) continue;
+    if (!slot || !host.contains(slot) || holdsPdfCanvas(slot)) continue;
     const layer = copyBand(slot, host, top, bottom);
     if (!layer) continue;
     layer.style.position = "absolute";
@@ -655,6 +655,24 @@ export function livePageCopy(
   // Footnote and heading anchors stay unique to the page.
   root.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
   return root;
+}
+
+const pdfCanvases = new WeakMap<Element, HTMLCollectionOf<Element>>();
+
+/**
+ * Whether a PDF page's canvas is in `slot`. A search for one walked every
+ * element of a note, which has none, for each page a turn copied; the browser
+ * keeps a live list by class up to date, and counting it is cheap until the
+ * slot changes.
+ */
+function holdsPdfCanvas(slot: Element): boolean {
+  let list = pdfCanvases.get(slot);
+  if (!list) {
+    list = slot.getElementsByClassName("lc-pdf-canvas");
+    pdfCanvases.set(slot, list);
+  }
+  for (let i = 0; i < list.length; i += 1) if (list[i]!.tagName === "CANVAS") return true;
+  return false;
 }
 
 /** Laid out in the normal flow, so every later sibling in the flow sits at or below it. */

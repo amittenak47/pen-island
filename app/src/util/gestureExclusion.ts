@@ -216,12 +216,12 @@ export function protectGestureSurface(node: HTMLElement, fullHeight: boolean | (
     claim();
   };
   claim();
+  // What is claimed follows the surface's own box. The page mask inside it
+  // used to be watched too, from when the claim followed the fitted page:
+  // every page turn's landing changes the mask, and the claim measured the
+  // surface there, laying the new page out early (5-22 ms on a tablet).
   const observer = new ResizeObserver(claim);
   observer.observe(node);
-  // A fitted page can move inside an unchanged board (zoom/panel/page turn).
-  const mask = node.querySelector(".lc-page-mask");
-  const mutations = typeof fullHeight === "function" && mask ? new MutationObserver(claim) : null;
-  mutations?.observe(mask!, { attributes: true, subtree: true, attributeFilter: ["style", "hidden"] });
   window.addEventListener("resize", claim);
   window.addEventListener("orientationchange", claim);
   window.visualViewport?.addEventListener("resize", claim);
@@ -231,7 +231,6 @@ export function protectGestureSurface(node: HTMLElement, fullHeight: boolean | (
     if (disposed) return;
     disposed = true;
     observer.disconnect();
-    mutations?.disconnect();
     window.removeEventListener("resize", claim);
     window.removeEventListener("orientationchange", claim);
     window.visualViewport?.removeEventListener("resize", claim);

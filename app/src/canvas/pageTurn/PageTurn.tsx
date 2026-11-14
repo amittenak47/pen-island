@@ -33,7 +33,7 @@ import { keepResumePicture } from "../../util/resumePicture";
 import { canvasGestureFrame, protectGestureSurface } from "../../util/gestureExclusion";
 import { turnCornerAt, turnEdgeAt, turnCornerSize, turnReachAt } from "./corners";
 import { cssColorLuminance } from "../../util/webPagePaper";
-import { hasSideScrollRoom, scrollHostAtPoint } from "../scrollHost";
+import { hasSideScrollRoom, hitBoardScrollHostAtPoint, invalidateBoardScrollHostLayout, nestedScrollHost } from "../scrollHost";
 
 /** In Pages reading the side stacks sit this much further up, as a share of their gap from the bottom. */
 const CHROME_LIFT = 0.5;
@@ -188,6 +188,22 @@ const KEY_QUEUE_MAX = 12;
 function shotScale(clientWidth: number, sceneWidth: number): number {
   const dpr = typeof window !== "undefined" ? Math.min(1.5, window.devicePixelRatio || 1) : 1;
   return sceneWidth > 0 ? dpr * (clientWidth / sceneWidth) : dpr;
+}
+
+/**
+ * Find `selector` in the tab, and keep it while it stays there and matches.
+ *
+ * The page mask and the marks layers come after the document in the tab, so
+ * a search for one walked every element of the note first: on a chapter of
+ * math, 60,000 of them, several times each turn.
+ */
+export function inTab<T extends HTMLElement = HTMLElement>(hostSelector: string, selector: string): () => T | null {
+  let found: T | null = null;
+  return () => {
+    if (found?.isConnected && found.matches(selector) && found.closest(hostSelector)) return found;
+    found = document.querySelector(hostSelector)?.querySelector<T>(selector) ?? null;
+    return found;
+  };
 }
 
 type Direction = "next" | "prev";
@@ -839,8 +855,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
    */
   useEffect(() => {
     if (!lockActive || !textSpread) return;
-    const facingEl = () =>
-      document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-mask-facing") ?? null;
+    const facingEl = inTab(hostSelector, ".lc-page-mask-facing");
     const same = (a: PageFrame, b: PageFrame) => Math.abs(a.minY - b.minY) < 0.5 && Math.abs(a.maxY - b.maxY) < 0.5;
     /** The held page's own picture, for when it becomes the facing one. */
     let live: { page: PageFrame; canvas: HTMLCanvasElement } | null = null;
@@ -948,6 +963,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     if (!turnEnabled) return;
 
     const board = () => boardRef.current;
+    const maskHole = inTab(hostSelector, ".lc-page-mask-hole");
+    const maskFacing = inTab(hostSelector, ".lc-page-mask-facing");
+    const boardSurface = inTab(hostSelector, ".lc-board");
 
     /*
      * A picture of part of the document, taken once.
@@ -984,11 +1002,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      * layer as laid out (the pages either side of the view keep theirs there,
      * hidden), and the live layer is hidden while a sheet with them is up.
      */
-    const marksLayer = () =>
-      document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-booktabs-slot") ?? null;
+    const marksLayer = inTab(hostSelector, ".lc-page-booktabs-slot");
     /** The page's own marks: quote bands, highlights, underlines, captions. */
-    const pageMarksLayer = () =>
-      document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-marks-slot:not(.lc-page-booktabs-slot)") ?? null;
+    const pageMarksLayer = inTab(hostSelector, ".lc-page-marks-slot:not(.lc-page-booktabs-slot)");
     const withMarks = (b: BoardHandle, scene: Scene, picture: HTMLCanvasElement | null): HTMLCanvasElement | null => {
       const layer = picture ? marksLayer() : null;
       if (!picture || !layer) return picture;
@@ -1360,8 +1376,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
 
     /** The open spread on screen: both pages, as the board shows them. */
     const spreadRect = () => {
-      const hole = document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-mask-hole");
-      const r = hole?.getBoundingClientRect();
+      const r = maskHole()?.getBoundingClientRect();
       return r && r.width > 16 && r.height > 8 ? r : null;
     };
 
@@ -1730,7 +1745,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       // The spread lands with its left page held: the right one, which the
       // turn already shows live, is the facing page.
       const facingCopy = turn.spreadLive?.right;
-      const facingEl = document.querySelector(hostSelector)?.querySelector<HTMLElement>(".lc-page-mask-facing");
+      const facingEl = maskFacing();
       const frames = turn.spreadLive ? b.readingPageFrames() : [];
       const facingPage = frames[frames.findIndex((f) => Math.abs(f.minY - turn.to.minY) < 0.5) + 1];
       if (facingCopy && facingEl && facingPage && !facingEl.hidden) {
@@ -1982,7 +1997,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     // Side strips and corner triangles own turning. The body keeps scrolling
     // and selection; a stylus with a drawing tool up keeps all but the corners.
     const host = () => document.querySelector<HTMLElement>(hostSelector);
-    const holeEl = () => host()?.querySelector<HTMLElement>(".lc-page-mask-hole") ?? null;
+    const holeEl = maskHole;
     const pageRect = (): DOMRect | null => {
       const hole = holeEl();
       if (!hole || (hole.parentElement as HTMLElement | null)?.hidden) return null;
@@ -2161,8 +2176,13 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     const startFlick = (event: PointerEvent, start: NonNullable<typeof pending>): boolean => {
       const r = pageRect();
       if (!r) return false;
-      // A code block or a wide equation scrolls sideways itself.
-      const scroller = scrollHostAtPoint(start.x, start.y);
+      // A code block or a wide equation scrolls sideways itself. The board
+      // keeps the list of those, as its own sideways drag uses it: listing
+      // them here matched a selector against every element of the note, a
+      // sixth of the frame a turn started in.
+      const surface = boardSurface();
+      if (surface) invalidateBoardScrollHostLayout(surface);
+      const scroller = (surface ? hitBoardScrollHostAtPoint(start.x, start.y, surface) : null) ?? nestedScrollHost(start.target);
       if (scroller && hasSideScrollRoom(scroller)) return false;
       const direction: Direction = event.clientX < start.x ? "next" : "prev";
       const heldY = Math.min(r.bottom - 1, Math.max(r.top + 1, start.y));
