@@ -130,6 +130,74 @@ describe("compositePageLayers", () => {
       .rejects.toThrow("export layer image failed");
   });
 
+  it("copies only the band near a picture: far blocks go in empty at their height, never cloned whole", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
+    });
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = () => ({ top: 0, width: 200 }) as DOMRect;
+    // Slot units at scale 1; the picture's band is 300 to 700.
+    const spans = [[0, 100], [150, 200], [260, 290], [300, 700], [760, 800]];
+    const blocks = spans.map(([top, bottom], i) => {
+      const p = document.createElement("p");
+      p.innerHTML = `<span>block ${i}</span>`;
+      p.getBoundingClientRect = () => ({ top, bottom, height: bottom - top, width: 200 }) as DOMRect;
+      Object.defineProperty(p, "offsetHeight", { value: bottom - top });
+      slot.append(p);
+      return p;
+    });
+    const far = vi.spyOn(blocks[0]!, "cloneNode");
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D,
+      { minX: 0, minY: 300, maxX: 200, maxY: 700 }, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" });
+    const xml = decodeURIComponent(sources[0]!.slice(sources[0]!.indexOf(",") + 1));
+    const ps = Array.from(new DOMParser().parseFromString(xml, "image/svg+xml").querySelectorAll("p"));
+    // A line or two from the band is kept; 100 px off it, as 150-200 is, is not.
+    expect(ps.map((p) => p.textContent)).toEqual(["", "", "block 2", "block 3", ""]);
+    expect(ps[1]!.getAttribute("style")).toContain("height: 50px");
+    expect(far).toHaveBeenCalledWith(false);
+    expect(far).not.toHaveBeenCalledWith(true);
+  });
+
+  it("stops a picture called off, before it loads or draws anything", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
+    });
+    const slot = document.createElement("div");
+    slot.innerHTML = "<p>Page one</p>";
+    const bounds = { minX: 0, minY: 0, maxX: 200, maxY: 100 };
+    const stop = new AbortController();
+    const drawImage = vi.fn();
+    const picture = compositePageLayers({ drawImage } as unknown as CanvasRenderingContext2D, bounds, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: bounds, paperColor: "#fff" }, { signal: stop.signal });
+    stop.abort();
+    await expect(picture).rejects.toMatchObject({ name: "AbortError" });
+    expect(sources).toHaveLength(0);
+    expect(drawImage).not.toHaveBeenCalled();
+  });
+
+  it("calls a picture off when the page changes while it is being copied", async () => {
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    });
+    // Every look at the clock is past the slice: the copy pauses at once.
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 10));
+    const slot = document.createElement("div");
+    slot.innerHTML = "<p>one</p><p>two</p>";
+    const bounds = { minX: 0, minY: 0, maxX: 200, maxY: 100 };
+    const picture = compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D, bounds, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: bounds, paperColor: "#fff" }, { signal: new AbortController().signal });
+    slot.append(document.createElement("p"));
+    await expect(picture).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("no-ops without page bounds", async () => {
     await expect(
       compositePageLayers(

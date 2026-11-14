@@ -86,10 +86,25 @@ const PREFETCH_QUIET_MS = 1200;
 
 /** When the reader last touched or typed — see `PREFETCH_QUIET_MS`. */
 let lastInputAt = -Infinity;
+/**
+ * Pictures taken while the reader rests stop at the next touch, key or
+ * wheel. One is up to a second and a half of the main thread on a tablet,
+ * and a turn started while one ran waited for all of it. A hover does not
+ * stop them: a mouse or a stylus near the glass moves all the time.
+ */
+let restingPictures: AbortController | null = null;
+function restingPictureSignal(): AbortSignal {
+  if (!restingPictures || restingPictures.signal.aborted) restingPictures = new AbortController();
+  return restingPictures.signal;
+}
 if (typeof window !== "undefined") {
   const note = () => { lastInputAt = performance.now(); };
+  const stop = () => {
+    note();
+    restingPictures?.abort();
+  };
   for (const type of ["pointerdown", "pointermove", "keydown", "wheel"]) {
-    window.addEventListener(type, note, { capture: true, passive: true });
+    window.addEventListener(type, type === "pointermove" ? note : stop, { capture: true, passive: true });
   }
 }
 const inputQuiet = () => performance.now() - lastInputAt >= PREFETCH_QUIET_MS;
@@ -337,6 +352,8 @@ export function takeShot(
   onlyIfTaken = false,
   /** A PDF's quick picture, `captureSceneQuick`: kept apart from the full one. */
   quick = false,
+  /** Calls a new picture off part-way: see `restingPictureSignal`. */
+  signal?: AbortSignal,
 ): Promise<HTMLCanvasElement | null> {
   const key = [scene.x, scene.y, scene.width, scene.height, scale, b.getInkRevision(), Math.min(cutY, 1e9)]
     .map((n) => Math.round(n * 100) / 100)
@@ -346,7 +363,9 @@ export function takeShot(
   if (!taken) {
     // Below a text page's cut is the next page's text, which the view
     // hides; the picture has to hide it too.
-    taken = (quick ? b.captureSceneQuick(scene, scale) : b.captureSceneFrame(scene, scale)).then((canvas) => {
+    const pending: Promise<HTMLCanvasElement | null> = (
+      quick ? b.captureSceneQuick(scene, scale) : b.captureSceneFrame(scene, scale, signal ? { signal } : undefined)
+    ).then((canvas) => {
       const cut = cutY - scene.y + CUT_BLEED;
       if (!canvas || !(cut < scene.height)) return canvas;
       const ctx = canvas.getContext("2d");
@@ -355,7 +374,15 @@ export function takeShot(
       ctx.fillStyle = paperColor();
       ctx.fillRect(0, top, canvas.width, canvas.height - top);
       return canvas;
-    }).catch(() => null);
+    }).catch((error: unknown) => {
+      // Called off by a touch, or overtaken by the page changing under it: a
+      // picture of nothing, not kept, so the next rest takes it again. Any
+      // other failure is kept, or a page that cannot be pictured would be
+      // tried again at every rest.
+      if ((error as { name?: unknown } | null)?.name === "AbortError" && shots.get(key) === pending) shots.delete(key);
+      return null;
+    });
+    taken = pending;
     shots.set(key, taken);
     while (shots.size > SHOT_CACHE) shots.delete(shots.keys().next().value!);
   }
@@ -832,12 +859,16 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       } else if (handoff) {
         facingHandoffRef.current = null;
       }
+      // So does a fresher picture of the facing page already shown: taken
+      // between two quick turns, it held the second back by a second.
+      if (facing && shows != null && Math.abs(shows - facing.minY) < 0.5 && !inputQuiet()) return;
       const hole = el.parentElement?.getBoundingClientRect();
       const heldScene = pageBoxScene(b, held);
       if (!hole || !heldScene) return;
       const scale = shotScale(hole.width / 2, heldScene.width);
       refreshing = true;
-      const liveShot = takeShot(shotsRef.current, b, heldScene, scale, held.maxY, "").then((canvas) => {
+      const signal = restingPictureSignal();
+      const liveShot = takeShot(shotsRef.current, b, heldScene, scale, held.maxY, "", false, false, signal).then((canvas) => {
         if (!disposed && canvas && lockedRef.current === held) live = { page: held, canvas };
       });
       if (!facing) {
@@ -848,7 +879,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       }
       const scene = pageBoxScene(b, facing);
       if (!scene) { void liveShot.finally(() => { refreshing = false; }); return; }
-      const facingShot = takeShot(shotsRef.current, b, scene, scale, facing.maxY, "").then((canvas) => {
+      const facingShot = takeShot(shotsRef.current, b, scene, scale, facing.maxY, "", false, false, signal).then((canvas) => {
         if (disposed || !canvas || lockedRef.current !== held || el.hidden) return;
         if (el.firstElementChild !== canvas) el.replaceChildren(canvas);
         shows = facing.minY;
@@ -907,9 +938,18 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      * stroke added since, or a zoom, takes a fresh one. At most a few kept:
      * each is a screenful of pixels.
      */
-    const shot = (b: BoardHandle, scene: Scene, scale: number, cutY = Infinity, pageId = 0, onlyIfTaken = pagedRef.current) => {
+    const shot = (
+      b: BoardHandle,
+      scene: Scene,
+      scale: number,
+      cutY = Infinity,
+      pageId = 0,
+      onlyIfTaken = pagedRef.current,
+      /** A picture taken ahead, while the reader rests: stops at their next touch. */
+      signal?: AbortSignal,
+    ) => {
       const signature = pagedRef.current ? pdfPaintSignature(hostSelector, pageId) : "";
-      const taken = takeShot(shotsRef.current, b, scene, scale, cutY, signature, onlyIfTaken);
+      const taken = takeShot(shotsRef.current, b, scene, scale, cutY, signature, onlyIfTaken, false, signal);
       if (!onlyIfTaken || !pagedRef.current) return taken;
       // A PDF page is a bitmap already: copying it is a few ms, so a page
       // flicked to always has a picture, however blurry its paint still is.
@@ -1235,10 +1275,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         const from = frames[at]!;
         const current = () => !disposed && !turnRef.current && !boardResizeDeferred() && (quick || (!isCameraBusy() && inputQuiet())) &&
           board() === b && b.getViewportBounds()?.y === view.y && b.getViewportBounds()?.zoom === view.zoom;
+        const signal = restingPictureSignal();
         if (textSpreadRef.current) {
           // This spread, and the ones either side of it, page by page.
           const start = at - (at % 2);
-          const pageShot = spreadPageShot(b, frames);
+          const pageShot = spreadPageShot(b, frames, signal);
           if (!pageShot) return;
           prefetching = true;
           void (async () => {
@@ -1260,7 +1301,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         prefetching = true;
         void (async () => {
           try {
-            const here = await shot(b, scene, scale, from.maxY, from.pageId);
+            const here = await shot(b, scene, scale, from.maxY, from.pageId, undefined, signal);
             // The page as it rests, for this tab to show at once if it is
             // reopened — see `resumePicture`.
             const tab = document.querySelector<HTMLElement>(hostSelector)?.getBoundingClientRect();
@@ -1283,7 +1324,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
             for (const neighbour of neighbours) {
               if (!current()) return;
               if (!neighbour) continue;
-              await shot(b, { ...scene, y: neighbour.minY + (scene.y - from.minY) }, scale, neighbour.maxY, neighbour.pageId);
+              await shot(b, { ...scene, y: neighbour.minY + (scene.y - from.minY) }, scale, neighbour.maxY, neighbour.pageId, undefined, signal);
             }
           } finally {
             prefetching = false;
@@ -1307,7 +1348,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
 
     /** Take (or find) the picture of page `i` of a text spread, at the size it is shown. */
-    const spreadPageShot = (b: BoardHandle, frames: readonly PageFrame[]) => {
+    const spreadPageShot = (b: BoardHandle, frames: readonly PageFrame[], signal?: AbortSignal) => {
       const r = spreadRect();
       const first = frames[0] ? pageBoxScene(b, frames[0]) : null;
       if (!r || !first) return null;
@@ -1315,7 +1356,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return (i: number, onlyIfTaken = pagedRef.current): Promise<HTMLCanvasElement | null> => {
         const f = frames[i];
         const scene = f ? pageBoxScene(b, f) : null;
-        return f && scene ? shot(b, scene, scale, f.maxY, f.pageId, onlyIfTaken).then((picture) => withMarks(b, scene, picture)) : Promise.resolve(null);
+        return f && scene ? shot(b, scene, scale, f.maxY, f.pageId, onlyIfTaken, signal).then((picture) => withMarks(b, scene, picture)) : Promise.resolve(null);
       };
     };
 

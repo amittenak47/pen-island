@@ -751,6 +751,8 @@ async function renderSceneFrameCanvas(
    * its HTML marks layer (a few ms instead of a few hundred).
    */
   layers: "all" | "none" | "pdf" = "all",
+  /** Calls a page turn's picture off part-way (see `compositePageLayers`). */
+  signal?: AbortSignal,
 ): Promise<HTMLCanvasElement | null> {
   const appState = { ...(api.getAppState() as object), exportScale } as Record<string, unknown>;
   const files = api.getFiles();
@@ -780,7 +782,7 @@ async function renderSceneFrameCanvas(
   if (layers !== "none") {
     ctx.fillStyle = paper;
     ctx.fillRect(0, 0, width, height);
-    await compositePageLayers(ctx, bounds, drawScale, pageLayers, { pdfOnly: layers === "pdf" });
+    await compositePageLayers(ctx, bounds, drawScale, pageLayers, { pdfOnly: layers === "pdf", signal });
   }
 
   if (all.length > 0) {
@@ -10202,13 +10204,13 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         if (jumped && pageFitRef.current != null) applyPageFit();
         return jumped;
       },
-      captureSceneFrame: async (frame, scale) => {
+      captureSceneFrame: async (frame, scale, options) => {
         const api = apiRef.current;
         if (!api || frame.width < 1 || frame.height < 1) return null;
         const ops = rasterInkRef.current?.getOpsInBounds({
           minX: frame.x, minY: frame.y, maxX: frame.x + frame.width, maxY: frame.y + frame.height,
         }) ?? [];
-        return renderSceneFrameCanvas(api, ops, frame, scale, pageExportLayers(), true);
+        return renderSceneFrameCanvas(api, ops, frame, scale, pageExportLayers(), true, "all", options?.signal);
       },
       captureSceneMarks: async (frame, scale) => {
         const api = apiRef.current;

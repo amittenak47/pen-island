@@ -317,10 +317,14 @@ export interface BoardHandle {
   zoomedIntoPage(): boolean;
   /** Put this slot's top at the top of the view — or, with a page fit, the whole slot in the middle of it. */
   jumpToPageFrame(frame: PageFrame): boolean;
-  /** The page, its marks and its ink for a scene rectangle, as pixels. */
+  /**
+   * The page, its marks and its ink for a scene rectangle, as pixels.
+   * `signal` calls it off part-way: it rejects, and draws nothing more.
+   */
   captureSceneFrame(
     frame: { x: number; y: number; width: number; height: number },
     scale: number,
+    options?: { signal?: AbortSignal },
   ): Promise<HTMLCanvasElement | null>;
   /**
    * A PDF's page bitmaps, its ink and shapes for a scene rectangle: what

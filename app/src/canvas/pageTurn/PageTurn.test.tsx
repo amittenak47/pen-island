@@ -1160,3 +1160,19 @@ it("rolls a released sheet smoothly from the hand's pace to rest", () => {
     expect((1 - glide(0.999, launch)) / 0.001).toBeLessThan(0.05);
   }
 });
+
+it("forgets a picture that was called off, and takes it again the next time", async () => {
+  const shots = new Map<string, Promise<HTMLCanvasElement | null>>();
+  const stop = new AbortController();
+  board.captureSceneFrame.mockImplementationOnce(async () => {
+    stop.abort();
+    throw new DOMException("called off", "AbortError");
+  });
+  const scene = { x: 0, y: 0, width: 200, height: 600 };
+  const b = board as unknown as BoardHandle;
+  expect(await takeShot(shots, b, scene, 1, Infinity, "", false, false, stop.signal)).toBeNull();
+  expect((board.captureSceneFrame.mock.calls[0] as unknown[])[2]).toEqual({ signal: stop.signal });
+  expect(shots.size).toBe(0);
+  expect(await takeShot(shots, b, scene, 1, Infinity, "")).not.toBeNull();
+  expect(board.captureSceneFrame).toHaveBeenCalledTimes(2);
+});
