@@ -282,6 +282,14 @@ it("reopens a note never saved (only read) at its place too", async () => {
   expect(mocks.board.goToReadingPlace).toHaveBeenCalledWith({ y: 3000, height: 50000 });
 });
 
+it("keeps a read-only note's id on its tab while it opens, so a relaunch reopens the same set", async () => {
+  mocks.docs.clear();
+  await mount({ ...tab, docId: "launch-1" });
+  // Clearing it before the open read the record minted a new id each launch.
+  expect(mocks.shell.patchTab).not.toHaveBeenCalledWith(tab.id, { docId: null });
+  expect(mocks.shell.patchTab).toHaveBeenCalledWith(tab.id, expect.objectContaining({ docId: "launch-1" }));
+});
+
 it("reopens a note only read, under a new id, at the place its content was read to", async () => {
   mocks.docs.clear();
   saveReadingPlace({ docId: "launch-1", hash: hashMarkdown("# First") }, { y: 5541, height: 113753 });
