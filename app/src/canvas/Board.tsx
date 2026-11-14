@@ -155,6 +155,7 @@ import {
 import { paintExcalidrawCanvases } from "./excalidrawCanvasSize";
 import { documentLayerHeight, documentLayers } from "./documentLayer";
 import { placeLazyWindow, releaseLazyBlocks } from "./lazyBlockWindow";
+import { jumpLandsOnFittedLock } from "./fittedLock";
 import {
   contentSlotCssTransform,
   contentSlotPlaceAt,
@@ -9432,12 +9433,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * view, `pageFitRef` of it on the limiting side. `clampPanScroll` holds the
    * camera to the same box, so a wheel or a drag cannot walk it off centre.
    */
-  const applyPageFit = () => {
+  const applyPageFit = (): boolean => {
     const fraction = pageFitRef.current;
     const lock = pageLockRef.current;
     const bounds = pageBoundsRef.current;
     const api = apiRef.current;
-    if (fraction == null || !lock || !bounds || !api) return;
+    if (fraction == null || !lock || !bounds || !api) return false;
     const state = api.getAppState() as {
       width?: number;
       height?: number;
@@ -9457,7 +9458,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const bare = pageColumn(bounds);
     const bareW = bare.maxX - bare.minX;
     const h = lock.maxY - lock.minY;
-    if (availW < 8 || availH < 8 || !(bareW > 0) || !(h > 0)) return;
+    if (availW < 8 || availH < 8 || !(bareW > 0) || !(h > 0)) return false;
     // Not the gesture ceiling: a reading column is 300–760 units, so a page
     // filling a large window needs well past 1.75, and the fit is arithmetic.
     let zoom = Math.min(PAGE_FIT_ZOOM_MAX, Math.max(FIT_ZOOM_MIN, Math.min(availW / bareW, availH / h) * fraction));
@@ -9516,7 +9517,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       Math.abs(same.scrollY - scrollY) < 0.01
     ) {
       placePageMask(scrollX, scrollY, zoom);
-      return;
+      return true;
     }
     pendingVisualScrollRef.current = null;
     if (visualScrollRafRef.current) {
@@ -9549,6 +9550,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     placeContentSlotAtRef.current(scrollX, scrollY, zoom);
     void rasterInkRef.current?.syncCamera();
     scheduleSlotReports();
+    return true;
   };
   const applyPageFitRef = useLatest<() => void>(applyPageFit);
 
@@ -9609,14 +9611,53 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       pageLockRef.current = { minY: span.minY, maxY: span.maxY };
       pageShownRef.current = { minY: span.minY, maxY: span.maxY };
     }
-    if (pageFitRef.current != null) applyPageFit();
-    else publishTextBooktabs();
+    if (pageFitRef.current != null) {
+      if (applyPageFit()) fittedLockNow(pageLockRef.current);
+    } else publishTextBooktabs();
+  };
+
+  /**
+   * The page the lock fitted the camera on in this task: a page turn locks the
+   * page it lands on and then jumps to it, and the jump has nothing left to
+   * move (see `jumpToPageFrame`).
+   */
+  const fittedLockRef = useRef<{ minY: number; maxY: number } | null>(null);
+  const fittedLockNow = (lock: { minY: number; maxY: number } | null) => {
+    fittedLockRef.current = lock;
+    queueMicrotask(() => {
+      if (fittedLockRef.current === lock) fittedLockRef.current = null;
+    });
   };
   const lockPageSpanRef = useLatest<(span: { minY: number; maxY: number; pageId?: number } | null, side?: "left" | "right") => void>(lockPageSpan);
 
-  const jumpToPdfPage = useCallback((pageId: number, opts?: { hold?: boolean; frameMinY?: number }) => {
+  const jumpToPdfPage = useCallback((pageId: number, opts?: { hold?: boolean; frameMinY?: number; fitted?: boolean }) => {
     const api = apiRef.current;
     if (!api || pageId < 1) return false;
+    if (opts?.fitted) {
+      /*
+       * The page lock has just fitted the camera on this page (a page turn
+       * landing): nothing to measure or move, only the page to announce.
+       * Measuring the board, placing a provisional camera, then locking and
+       * fitting again forced a style pass on the whole note at each step,
+       * four a landing on a chapter of math.
+       */
+      userAdjustedCameraRef.current = true;
+      pendingPdfPageRef.current = opts.hold === false ? 0 : pageId;
+      pendingVisualScrollRef.current = null;
+      if (visualScrollRafRef.current) {
+        cancelAnimationFrame(visualScrollRafRef.current);
+        visualScrollRafRef.current = 0;
+      }
+      const frames = offsetPageFrames(peekPdfReadingFrames(filmScope), pageBoundsRef.current?.minY ?? 0);
+      publishPdfFilmCurrent(filmScope, pageId);
+      publishPdfViewPages(
+        filmScope,
+        [pageId],
+        pdfRestPages(pageId, Math.max(pageId, lastPageId(frames)), [pageId], undefined, readAhead()),
+      );
+      scheduleSlotReports();
+      return true;
+    }
     const state = api.getAppState() as {
       zoom?: { value?: number };
       scrollX?: number;
@@ -9642,7 +9683,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const insetTop = measured.top + (mobileRef.current ? 0 : safeCssPx("--lc-safe-top"));
     const origin = pageBoundsRef.current?.minY ?? 0;
     let frames = offsetPageFrames(peekPdfReadingFrames(filmScope), origin);
-    if (!frames.some((frame) => frame.pageId === pageId)) {
+    // Only a PDF has page slots to read: on a note, the search for them
+    // walked every element and measured the slot, at every jump.
+    if (pdfDocumentRef.current && !frames.some((frame) => frame.pageId === pageId)) {
       frames = pageFramesFromPdfSlot(
         contentSlotNodeRef.current,
         pageBoundsRef.current,
@@ -10306,8 +10349,11 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         runFit(undefined, "keepY");
       },
       jumpToPageFrame: (frame) => {
-        const jumped = jumpToPdfPage(frame.pageId, { hold: false, frameMinY: frame.minY });
-        if (jumped && pageFitRef.current != null) applyPageFit();
+        // A page turn landing locks its page and then jumps to it: the lock's
+        // fit has the camera there already.
+        const fitted = jumpLandsOnFittedLock(fittedLockRef.current, pageLockRef.current, pageFitRef.current != null, frame.minY);
+        const jumped = jumpToPdfPage(frame.pageId, { hold: false, frameMinY: frame.minY, fitted });
+        if (jumped && pageFitRef.current != null && !fitted) applyPageFit();
         return jumped;
       },
       captureSceneFrame: async (frame, scale, options) => {
