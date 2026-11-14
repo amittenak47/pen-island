@@ -1921,9 +1921,16 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      */
     const chainsAfter = (turn: Turn | null): boolean =>
       Boolean(turn && turn.commit && turn.spreadLive && !turn.done);
-    /** A turn the next flick waits for, queued: a PDF page's preview still coming, or a live spread landing. */
+    /**
+     * A turn on its way over, that a flick already under way lines up
+     * behind: a PDF page's preview still coming, a live spread landing, or a
+     * pictured sheet going over. A flick that touched down before that
+     * pictured sheet set off (a live spread or a preview still coming then)
+     * used to be dropped when it moved: a pictured sheet is caught by a touch
+     * that lands on it, and this one had landed before.
+     */
     const waitsForTurn = (turn: Turn | null): boolean =>
-      Boolean(turn?.commit && (!turn.images || turn.spreadLive));
+      Boolean(turn?.commit && !turn.done);
 
     /** Finish a sheet going over within `HURRY_MS`, from where it is and at the pace it has. */
     const hurry = (turn: Turn) => {
@@ -2338,7 +2345,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     /** Land a caught sheet that was going over, and take hold of the next one from rest. */
     const flickOn = (event: PointerEvent, releaseStart?: { x: number; y: number; t: number }) => {
       if (!active) return;
-      const { id, turn: caught } = active;
+      const { id, turn: caught, trail: caughtTrail, fromX: caughtFromX } = active;
       active = null;
       caught.commit = true;
       continueTurn(caught);
@@ -2351,11 +2358,25 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const w = turn.layout === "book" ? turn.rect.width / 2 : turn.rect.width;
       const rest = { x: turn.direction === "next" ? w : -w, y: turn.restY };
       turn.corner = rest;
-      active = {
-        id, x: releaseStart?.x ?? event.clientX, y: releaseStart?.y ?? event.clientY, turn, caughtCorner: rest,
-        vx: 0, lastX: releaseStart?.x ?? event.clientX, lastT: releaseStart?.t ?? event.timeStamp, atX: releaseStart?.x ?? event.clientX,
-        trail: [{ x: releaseStart?.x ?? event.clientX, t: releaseStart?.t ?? event.timeStamp }], fromX: releaseStart?.x ?? event.clientX,
-      };
+      if (releaseStart) {
+        active = {
+          id, x: releaseStart.x, y: releaseStart.y, turn, caughtCorner: rest,
+          vx: 0, lastX: releaseStart.x, lastT: releaseStart.t, atX: releaseStart.x,
+          trail: [{ x: releaseStart.x, t: releaseStart.t }], fromX: releaseStart.x,
+        };
+      } else {
+        // Taken from where the hand is, so the sheet does not jump to it, but
+        // judged on the whole flick when let go. A busy frame can merge a
+        // flick's moves into the one that pushed the caught sheet on; the
+        // lift then comes no farther along, and judged from here alone the
+        // flick fell back.
+        const at = { x: event.clientX, t: event.timeStamp };
+        active = {
+          id, x: at.x, y: event.clientY, turn, caughtCorner: rest,
+          vx: 0, lastX: at.x, lastT: at.t, atX: at.x,
+          trail: [...caughtTrail, at].slice(-12), fromX: caughtFromX,
+        };
+      }
       draw(turn);
     };
 
@@ -2371,9 +2392,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         const dy = event.clientY - start.y;
         const inward = start.reach === "right" ? -dx : dx;
         if (inward >= REACH_DRAG_PX && inward >= Math.abs(dy)) {
-          // A turn on its way: a live spread landing, or a lined-up one still
-          // setting up. The drag takes hold once it has landed; let go first,
-          // it is lined up.
+          // A turn on its way: a live spread landing, a pictured sheet going
+          // over, or a lined-up one still setting up. The drag takes hold once
+          // it has landed; let go first, it is lined up.
           if (waitsForTurn(turnRef.current)) {
             event.stopImmediatePropagation();
             event.preventDefault();
@@ -2399,7 +2420,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           pending = null;
         } else if (Math.abs(dx) >= BODY_FLICK_PX && Math.abs(dx) >= BODY_FLICK_SLOPE * Math.abs(dy) &&
           Math.abs(dx) / Math.max(1, dt) >= BODY_FLICK_PX_PER_MS) {
-          if (chainsAfter(turnRef.current)) {
+          if (waitsForTurn(turnRef.current) && turnRef.current?.images) {
             // Lined up now, not at the lift: the hand may stay down past the landing.
             pending = null;
             queueTurn(dx < 0 ? "next" : "prev");

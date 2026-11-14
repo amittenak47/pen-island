@@ -468,6 +468,34 @@ it("keeps an entire swipe burst while its first preview is pending", async () =>
   expect(board.jumpToPageFrame.mock.calls.map(([f]) => f.pageId)).toEqual([2, 3, 4, 5]);
 });
 
+it("keeps a flick that touched down while a preview was coming and moved once the sheet had set off", async () => {
+  vi.useFakeTimers();
+  const frame = manualFrames();
+  view = { ...view, y: 0 };
+  mount();
+  const destination = host.querySelector<HTMLElement>('[data-pdf-page="2"]')!;
+  delete destination.dataset.painted;
+  pointer("pointerdown", 380, 580, "touch", 1000);
+  pointer("pointermove", 150, 580, "touch", 1050);
+  pointer("pointerup", 150, 580, "touch", 1060);
+  // The next flick touches the page while that turn waits for its preview.
+  pointer("pointerdown", 300, 400, "touch", 1100);
+  // The preview paints; the sheet has its pictures and sets off.
+  await act(async () => { destination.dataset.painted = ""; await vi.advanceTimersByTimeAsync(1); });
+  frame(10);
+  await act(async () => vi.advanceTimersByTimeAsync(1));
+  expect(host.querySelector(".lc-page-turn")).not.toBeNull();
+  expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+  // Only now does the flick move, and lift.
+  pointer("pointermove", 150, 402, "touch", 1140);
+  pointer("pointerup", 100, 402, "touch", 1160);
+  for (let i = 0; i < 12; i++) {
+    frame(1000);
+    await act(async () => vi.advanceTimersByTimeAsync(1));
+  }
+  expect(board.jumpToPageFrame.mock.calls.map(([f]) => f.pageId)).toEqual([2, 3]);
+});
+
 it("continues backward sheets underneath the next returning sheet", async () => {
   const frame = manualFrames();
   view = { ...view, y: 1240 };
@@ -504,6 +532,25 @@ it("turns the next sheet for a caught body flick whose move events were merged",
   pointer("pointerup", 150, 580, "touch", 1090);
   pointer("pointerdown", 300, 400, "touch", 1150);
   pointer("pointerup", 100, 400, "touch", 1230);
+  await pictures();
+  for (let i = 0; i < 6; i++) frame(1000);
+  expect(board.jumpToPageFrame.mock.calls.map(([f]) => f.pageId)).toEqual([2, 3]);
+});
+
+it("turns the next sheet for a caught flick whose moves were merged into the one that pushed it on", async () => {
+  const frame = manualFrames();
+  view = { ...view, y: 0 };
+  mount();
+  pointer("pointerdown", 380, 580, "touch", 1000);
+  pointer("pointermove", 150, 580, "touch", 1080);
+  await pictures();
+  frame();
+  pointer("pointerup", 150, 580, "touch", 1090);
+  // A busy frame: the flick comes as its touch, one move most of the way, and
+  // the lift right after it, no farther along.
+  pointer("pointerdown", 300, 400, "touch", 1150);
+  pointer("pointermove", 90, 400, "touch", 1230);
+  pointer("pointerup", 90, 400, "touch", 1231);
   await pictures();
   for (let i = 0; i < 6; i++) frame(1000);
   expect(board.jumpToPageFrame.mock.calls.map(([f]) => f.pageId)).toEqual([2, 3]);
