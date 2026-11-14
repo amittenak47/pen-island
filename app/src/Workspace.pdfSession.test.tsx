@@ -152,6 +152,7 @@ beforeEach(() => {
     remapPdfInkAcrossPdfLayout: vi.fn(() => true), scrollToPdfPage: vi.fn(() => true), aimPdfPage: noop(),
     setInkSpread: noop(), restoreBoard: noop(), setElements: noop(), applyThemeInk: noop(), stripCoachViz: noop(),
     waitForTemplate: vi.fn(async () => {}), settleFitView: vi.fn(async () => {}), restoreView: noop(),
+    readingPlace: vi.fn(() => null), goToReadingPlace: vi.fn(() => false),
     primeInkSnap: vi.fn(async () => {}), syncDocumentScrollBounds: noop(), armReadingScroll: noop(), fitCodeToSource: noop(),
     getInkOpCount: vi.fn(() => 0), getInkRevision: vi.fn(() => 0),
     inkFingerprint: vi.fn(() => "ink"), seedTemplate: noop(), setInkDoc: noop(), setInkOps: noop(),

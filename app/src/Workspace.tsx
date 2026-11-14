@@ -21,6 +21,7 @@ import { createPortal, flushSync } from "react-dom";
 import { useShell } from "./shellContext";
 import { useWebCapture } from "./workspace/useWebCapture";
 import { usePdfSession } from "./workspace/usePdfSession";
+import { keepsReadingPlace, restoreTextReadingPlace, trackTextReadingPlace } from "./workspace/textReadingPlace";
 import { useAnnotateSession } from "./workspace/useAnnotateSession";
 import { useHubSync } from "./workspace/useHubSync";
 
@@ -4363,6 +4364,12 @@ export const Workspace = memo(function Workspace({
           }
           if (existing?.board.appState) {
             boardRef.current?.restoreView(existing.board.appState);
+          }
+          // Read on since the last save, or never saved at all (a note that is
+          // only read has no session): where it was read to on this device.
+          if (keepsReadingPlace(docType)) {
+            const place = restoreTextReadingPlace(boardRef.current, sessionDocId, existing?.updatedAt ?? 0);
+            if (place) traceOpen("reading place restored", { y: Math.round(place.y), height: Math.round(place.height) });
           }
           traceOpen("view restored", { ms: openMs() });
         }
@@ -9615,6 +9622,13 @@ export const Workspace = memo(function Workspace({
     if (!pdfReading) return;
     return trackPdfReadingPage();
   }, [pdfReading, tab.id]);
+  // A text document's place, the same way: its pages are cut from the view,
+  // so the place is a line of it rather than a page number.
+  const textReading = keepsReadingPlace(annotateSource?.docType) && showing && !boardPreparing && switchMotion === "idle";
+  useEffect(() => {
+    if (!textReading) return;
+    return trackTextReadingPlace(() => boardRef.current, () => annotateDocIdRef.current);
+  }, [textReading, tab.id]);
 
   const canvasLoading =
     boardPreparing ||

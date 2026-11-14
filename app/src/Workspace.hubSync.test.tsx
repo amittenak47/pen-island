@@ -154,6 +154,7 @@ beforeEach(() => {
     hasRasterInk: vi.fn(() => false), isPdfInkLayoutPending: vi.fn(() => false), isInking: vi.fn(() => false),
     restoreBoard: noop(), setElements: noop(), applyThemeInk: noop(), stripCoachViz: noop(),
     waitForTemplate: vi.fn(async () => {}), settleFitView: vi.fn(async () => {}), restoreView: noop(),
+    readingPlace: vi.fn(() => null), goToReadingPlace: vi.fn(() => false),
     primeInkSnap: vi.fn(async () => {}), syncDocumentScrollBounds: noop(), armReadingScroll: noop(), fitCodeToSource: noop(),
     getInkOpCount: vi.fn(() => 0), getInkRevision: vi.fn(() => 0), dirtyInkPageCount: vi.fn(() => 0),
     takeDirtyInkPages: vi.fn(() => new Map()), markInkPagesFlushed: noop(),

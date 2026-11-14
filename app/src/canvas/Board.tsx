@@ -404,6 +404,7 @@ import {
 } from "./exportPageComposite";
 import type { PageFrame } from "./inkPageIndex";
 import { sectionPages, type TextBlock } from "./pageTurn/sectionPages";
+import { pageIndexAtLine, readingPlaceAt, readingPlaceLine, scrollYForLine, type ReadingPlace } from "./readingPlace";
 
 /** What a text page may not be cut through: whole blocks, innermost first. */
 const TEXT_PAGE_BLOCKS =
@@ -9726,6 +9727,101 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [applyDocumentFrameHeight, scheduleSlotReports]);
   const scrollToPdfPageRef = useLatest<(pageId: number, opts?: { hold?: boolean }) => boolean>(jumpToPdfPage);
 
+  /** A text document laid out on the board: markdown, code, text, EPUB. Not a PDF. */
+  const textDocumentOnBoard = () =>
+    Boolean(pageContentRef.current && pageBoundsRef.current) &&
+    !pdfDocumentRef.current &&
+    peekPdfReadingFrames(filmScope).length === 0;
+
+  /** The document's laid-out height in scene units, for a reading place. */
+  const readingDocHeight = () => {
+    const measured = pageContentHeightRef.current;
+    if (measured != null && measured > 0) return measured;
+    const bounds = pageBoundsRef.current;
+    return bounds ? bounds.maxY - bounds.minY : 0;
+  };
+
+  /**
+   * Scroll reading: put scene line `line` just under the top chrome, at the
+   * zoom the camera is at. The same writes as a page jump, so the slot, the
+   * ink and the next pan all start from the new camera.
+   */
+  const jumpCameraToLine = (line: number): boolean => {
+    const api = apiRef.current;
+    if (!api || !Number.isFinite(line)) return false;
+    const state = api.getAppState() as {
+      zoom?: { value?: number };
+      scrollX?: number;
+      width?: number;
+      height?: number;
+      offsetLeft?: number;
+      offsetTop?: number;
+    };
+    const prev = liveCameraRef.current;
+    const zoom = state.zoom?.value ?? prev?.zoom ?? 1;
+    if (!(zoom > 0)) return false;
+    const inset = measureChromeInsets(
+      boardRef.current,
+      toolbarHeightRef.current,
+      mapChromeHiddenRef.current,
+      mobileRef.current,
+    );
+    const placed = clampPanScroll(
+      state.scrollX ?? prev?.scrollX ?? 0,
+      scrollYForLine(line, zoom, inset.top),
+      zoom,
+    );
+    const { viewWidth, viewHeight } = liveBoardViewSize(boardBoxOf(boardRef.current), state);
+    userAdjustedCameraRef.current = true;
+    pendingVisualScrollRef.current = null;
+    if (visualScrollRafRef.current) {
+      cancelAnimationFrame(visualScrollRafRef.current);
+      visualScrollRafRef.current = 0;
+    }
+    committedPanCameraRef.current = { scrollX: placed.scrollX, scrollY: placed.scrollY, zoom };
+    liveCameraRef.current = {
+      scrollX: placed.scrollX,
+      scrollY: placed.scrollY,
+      zoom,
+      width: viewWidth || prev?.width || state.width || 800,
+      height: viewHeight || prev?.height || state.height || 800,
+      offsetLeft: prev?.offsetLeft ?? state.offsetLeft ?? 0,
+      offsetTop: prev?.offsetTop ?? state.offsetTop ?? 0,
+      live: false,
+    };
+    clearPanOffsetsRef.current();
+    api.updateScene({
+      appState: { scrollX: placed.scrollX, scrollY: placed.scrollY },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    placeContentSlotAtRef.current(placed.scrollX, placed.scrollY, zoom);
+    void rasterInkRef.current?.syncCamera();
+    scheduleSlotReports();
+    return true;
+  };
+
+  /**
+   * Back to a text document's reading place. Pages reading holds the page the
+   * place falls on (fitted, when a fit is on); scroll reading puts its line
+   * under the top chrome.
+   */
+  const goToReadingPlace = (place: ReadingPlace): boolean => {
+    const bounds = pageBoundsRef.current;
+    if (!bounds || !textDocumentOnBoard()) return false;
+    const line = readingPlaceLine(place, bounds, readingDocHeight());
+    if (!pageLockRef.current) return jumpCameraToLine(line);
+    const frames = textPageFrames();
+    const index = pageIndexAtLine(frames, line);
+    if (index < 0) return false;
+    const frame = frames[index]!;
+    lockPageSpan(frame);
+    // Without a fit the lock only bounds the camera: move it onto the page.
+    if (pageFitRef.current == null) return jumpCameraToLine(frame.minY);
+    void rasterInkRef.current?.syncCamera();
+    scheduleSlotReports();
+    return true;
+  };
+
   useImperativeHandle(
     ref,
     (): BoardHandle => wrapForDebug<BoardHandle>("board", {
@@ -10368,6 +10464,24 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         rasterInkRef.current?.syncCamera();
         scheduleSlotReports();
       },
+      readingPlace: () => {
+        const bounds = pageBoundsRef.current;
+        if (!bounds || !textDocumentOnBoard()) return null;
+        const inset = measureChromeInsets(
+          boardRef.current,
+          toolbarHeightRef.current,
+          mapChromeHiddenRef.current,
+          mobileRef.current,
+        );
+        return readingPlaceAt({
+          bounds,
+          docHeight: readingDocHeight(),
+          held: pageLockRef.current,
+          camera: getViewport(),
+          insetTop: inset.top,
+        });
+      },
+      goToReadingPlace: (place) => goToReadingPlace(place),
       appendScratchPage: (skeletons: Skeleton[]) => {
         const api = apiRef.current;
         if (!api || skeletons.length === 0) return 0;

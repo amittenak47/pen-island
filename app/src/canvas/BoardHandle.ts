@@ -14,6 +14,7 @@ import type { InkStroke, SceneElementLike } from "./capture";
 import type { EncodedInk } from "./inkCodec";
 import type { PageFrame } from "./inkPageIndex";
 import type { InkOp } from "./rasterInk";
+import type { ReadingPlace } from "./readingPlace";
 
 export interface BoardBlob {
   /**
@@ -369,6 +370,18 @@ export interface BoardHandle {
    * single-page docs restore scroll/zoom as written.
    */
   restoreView(saved: { scrollX: number; scrollY: number; zoom: number; pdfPage?: number }): void;
+  /**
+   * Where the reader is in a text document (markdown, code, text, EPUB): the
+   * held page's top in Pages reading, else the line under the top chrome.
+   * Null for a PDF, or before the document has a height.
+   */
+  readingPlace(): ReadingPlace | null;
+  /**
+   * Back to a place from {@link readingPlace}: Pages reading holds the page it
+   * falls on, scroll reading puts it under the top chrome. False when there
+   * is nothing to go to yet (no text layout, or a PDF).
+   */
+  goToReadingPlace(place: ReadingPlace): boolean;
   /**
    * Glide the page `dy` screen pixels down (up when negative), as the wheel
    * moves it: an in-page link's jump. A touch stops it like a coast.
