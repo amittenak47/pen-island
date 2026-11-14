@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { pageIndexAtLine, readingPlaceAt, readingPlaceLine, scrollYForLine, viewMiddleLine } from "./readingPlace";
+import { pageIndexAtLine, pageShownByCamera, readingPlaceAt, readingPlaceLine, scrollYForLine, viewMiddleLine } from "./readingPlace";
 
 const bounds = { minY: 100 };
 // Text pages cut from a document whose top is at scene y 100.
@@ -57,5 +57,24 @@ describe("going back to a place", () => {
   it("reads a saved camera's page from the middle of its view", () => {
     // A page fit centres the page: zoom 0.5, 900 px tall, page 2 in the middle.
     expect(pageIndexAtLine(frames, viewMiddleLine({ scrollY: -(690 - 900), zoom: 0.5 }, 900))).toBe(1);
+  });
+});
+
+describe("pageShownByCamera", () => {
+  it("is the page a camera saved in Pages reading held, not the first page", () => {
+    // Page 3 fitted: its middle (1100) in the middle of a 900 px view at zoom 0.5.
+    expect(pageShownByCamera(frames, { scrollY: 900 - 1100, zoom: 0.5 }, 900)).toBe(2);
+  });
+
+  it("is the page in the middle of a camera saved in scroll reading", () => {
+    // Scroll camera at the document's top: 600 px at zoom 1 reaches 400 units down.
+    expect(pageShownByCamera(frames, { scrollY: -100, zoom: 1 }, 600)).toBe(0);
+    expect(pageShownByCamera(frames, { scrollY: -500, zoom: 1 }, 600)).toBe(1);
+  });
+
+  it("has nothing to show without pages or a view", () => {
+    expect(pageShownByCamera([], { scrollY: 0, zoom: 1 }, 600)).toBe(-1);
+    expect(pageShownByCamera(frames, { scrollY: Number.NaN, zoom: 1 }, 600)).toBe(-1);
+    expect(pageShownByCamera(frames, { scrollY: 0, zoom: 1 }, 0)).toBe(-1);
   });
 });

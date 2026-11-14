@@ -404,7 +404,7 @@ import {
 } from "./exportPageComposite";
 import type { PageFrame } from "./inkPageIndex";
 import { sectionPages, type TextBlock } from "./pageTurn/sectionPages";
-import { pageIndexAtLine, readingPlaceAt, readingPlaceLine, scrollYForLine, type ReadingPlace } from "./readingPlace";
+import { pageIndexAtLine, pageShownByCamera, readingPlaceAt, readingPlaceLine, scrollYForLine, type ReadingPlace } from "./readingPlace";
 
 /** What a text page may not be cut through: whole blocks, innermost first. */
 const TEXT_PAGE_BLOCKS =
@@ -9800,6 +9800,16 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     return true;
   };
 
+  /** Pages reading: hold this text page and bring the camera to it. */
+  const holdTextPage = (frame: PageFrame): boolean => {
+    lockPageSpan(frame);
+    // Without a fit the lock only bounds the camera: move it onto the page.
+    if (pageFitRef.current == null) return jumpCameraToLine(frame.minY);
+    void rasterInkRef.current?.syncCamera();
+    scheduleSlotReports();
+    return true;
+  };
+
   /**
    * Back to a text document's reading place. Pages reading holds the page the
    * place falls on (fitted, when a fit is on); scroll reading puts its line
@@ -9812,14 +9822,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     if (!pageLockRef.current) return jumpCameraToLine(line);
     const frames = textPageFrames();
     const index = pageIndexAtLine(frames, line);
-    if (index < 0) return false;
-    const frame = frames[index]!;
-    lockPageSpan(frame);
-    // Without a fit the lock only bounds the camera: move it onto the page.
-    if (pageFitRef.current == null) return jumpCameraToLine(frame.minY);
-    void rasterInkRef.current?.syncCamera();
-    scheduleSlotReports();
-    return true;
+    return index >= 0 && holdTextPage(frames[index]!);
   };
 
   useImperativeHandle(
@@ -10447,6 +10450,18 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           pendingPdfPageRef.current = savedPage;
           publishPdfFilmCurrent(filmScope, savedPage);
           return;
+        }
+        /*
+         * Pages reading holds a text page already: the one the fit showed
+         * while the document opened, its first. Clamped into that page, the
+         * saved camera reopened every note on page 1. Hold the page the saved
+         * view showed instead.
+         */
+        if (pageLockRef.current && textDocumentOnBoard() && typeof saved.scrollY === "number") {
+          const frames = textPageFrames();
+          const { viewHeight } = liveBoardViewSize(boardBoxOf(boardRef.current), api.getAppState() as { width?: number; height?: number });
+          const shown = pageShownByCamera(frames, { scrollY: saved.scrollY, zoom }, viewHeight || viewH);
+          if (shown >= 0 && holdTextPage(frames[shown]!)) return;
         }
         // Inside the page: a place saved while the page's scroll limit was
         // wrong (past its end) would otherwise reopen on empty board.

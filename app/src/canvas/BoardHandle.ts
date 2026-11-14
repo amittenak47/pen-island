@@ -367,7 +367,8 @@ export interface BoardHandle {
   isPdfInkLayoutPending(): boolean;
   /**
    * Reopen camera: PDF jumps to the saved page at today's fit zoom;
-   * single-page docs restore scroll/zoom as written.
+   * single-page docs restore scroll/zoom as written. With a text page held
+   * (Pages reading), the page in the middle of the saved view is held.
    */
   restoreView(saved: { scrollX: number; scrollY: number; zoom: number; pdfPage?: number }): void;
   /**

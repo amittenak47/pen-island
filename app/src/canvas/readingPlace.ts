@@ -87,3 +87,18 @@ export function viewMiddleLine(camera: { scrollY: number; zoom: number }, viewHe
   const zoom = camera.zoom > 0 ? camera.zoom : 1;
   return viewHeight / 2 / zoom - camera.scrollY;
 }
+
+/**
+ * The page a saved camera showed, for Pages reading to hold when that camera
+ * comes back: the one in the middle of its view, as when scroll reading
+ * switches to Pages. A page fit centres its page, so a camera saved in Pages
+ * reading names its own page. -1 with no pages.
+ */
+export function pageShownByCamera(
+  frames: readonly PageFrame[],
+  camera: { scrollY: number; zoom: number },
+  viewHeight: number,
+): number {
+  if (!Number.isFinite(camera.scrollY) || !(viewHeight > 0)) return -1;
+  return pageIndexAtLine(frames, viewMiddleLine(camera, viewHeight));
+}
