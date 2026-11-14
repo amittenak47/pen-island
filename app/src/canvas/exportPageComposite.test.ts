@@ -377,4 +377,26 @@ describe("livePageCopy", () => {
     expect(copy.querySelector("[id]")).toBeNull();
     expect(blocks[1]!.id).toBe("b1");
   });
+
+  it("draws a block in the copy that Pages reading hides on the board", () => {
+    const host = document.createElement("div");
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = rect(0, 2000);
+    const p = document.createElement("p");
+    p.setAttribute("style", "content-visibility:hidden;contain-intrinsic-size:150px");
+    p.textContent = "the next page";
+    p.getBoundingClientRect = rect(400, 300);
+    slot.append(p);
+    host.append(slot);
+    document.body.append(host);
+    const copy = livePageCopy(
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" },
+      { x: 0, y: 200, width: 200, height: 150 },
+      host,
+    )!;
+    host.remove();
+    expect(copy.querySelector("p")!.style.contentVisibility).toBe("visible");
+    expect(p.style.contentVisibility).toBe("hidden");
+  });
 });

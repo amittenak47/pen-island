@@ -8,6 +8,7 @@
  */
 
 import { intersectBounds } from "./geom";
+import { drawLazyBlocksIn } from "./lazyBlockWindow";
 import type { SceneBounds } from "./rasterInk";
 
 export interface PageExportLayers {
@@ -507,6 +508,7 @@ async function copyForCapture(
   } finally {
     changes?.disconnect();
   }
+  drawLazyBlocksIn(root);
   return root;
 }
 
@@ -734,5 +736,6 @@ function copyBand(slot: HTMLElement, host: Element, top: number, bottom: number)
   // Out before the copy is mounted: a live page's frame would load and run
   // the whole page again.
   copy.querySelectorAll("iframe").forEach((frame) => frame.remove());
+  drawLazyBlocksIn(copy);
   return outer;
 }

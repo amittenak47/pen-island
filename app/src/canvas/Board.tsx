@@ -154,6 +154,7 @@ import {
 } from "./documentRotateCamera";
 import { paintExcalidrawCanvases } from "./excalidrawCanvasSize";
 import { documentLayerHeight, documentLayers } from "./documentLayer";
+import { placeLazyWindow, releaseLazyBlocks } from "./lazyBlockWindow";
 import {
   contentSlotCssTransform,
   contentSlotPlaceAt,
@@ -9581,6 +9582,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       publishBooktabPages(filmScope, []);
       pageLockRef.current = null;
       pageShownRef.current = null;
+      // Scroll reading: off-screen blocks go back to the browser's own skipping.
+      if (contentSlotNodeRef.current) releaseLazyBlocks(contentSlotNodeRef.current);
       const cam = committedPanCameraRef.current;
       placePageMask(cam.scrollX, cam.scrollY, cam.zoom);
       return;
@@ -9597,6 +9600,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     if (textH > 0) {
       pageLockRef.current = { minY: span.minY, maxY: span.minY + textH };
       pageShownRef.current = { minY: span.minY, maxY: Math.min(span.maxY, span.minY + textH) };
+      // Only what can be seen from this page is drawn (see `placeLazyWindow`).
+      const slot = contentSlotNodeRef.current;
+      const bounds = pageBoundsRef.current;
+      if (slot && bounds) placeLazyWindow(slot, span.minY - bounds.minY, textH);
     } else {
       publishBooktabPages(filmScope, []);
       pageLockRef.current = { minY: span.minY, maxY: span.maxY };
