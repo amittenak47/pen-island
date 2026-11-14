@@ -282,6 +282,14 @@ it("reopens a note never saved (only read) at its place too", async () => {
   expect(mocks.board.goToReadingPlace).toHaveBeenCalledWith({ y: 3000, height: 50000 });
 });
 
+it("reopens a note only read, under a new id, at the place its content was read to", async () => {
+  mocks.docs.clear();
+  saveReadingPlace({ docId: "launch-1", hash: hashMarkdown("# First") }, { y: 5541, height: 113753 });
+  vi.mocked(mocks.board.readingPlace).mockReturnValue({ y: 0, height: 113754 });
+  await mount({ ...tab, docId: "launch-2" });
+  expect(mocks.board.goToReadingPlace).toHaveBeenCalledWith({ y: 5541, height: 113753 });
+});
+
 it("leaves a note saved after its last reading on the session's camera", async () => {
   saveReadingPlace("first", { y: 8420, height: 113574 });
   mocks.docs.set("first", { ...doc(), updatedAt: Date.now() + 60_000 });

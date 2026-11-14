@@ -90,23 +90,51 @@ function isPlace(value: unknown): value is ReadingPlace {
 }
 
 /**
+ * Which text document a place belongs to: its annotation set's id, and the
+ * hash of its content. A note that is only read has no saved set, so the id
+ * it opens under can be a new one each time (a file picked again from Files
+ * mints one); the content hash is the same file whatever id it opens under.
+ */
+export interface ReadingPlaceKey {
+  docId?: string | null;
+  hash?: string | null;
+}
+
+function placeKeys(key: string | ReadingPlaceKey | null | undefined): { id: string | null; content: string | null } {
+  if (typeof key === "string") return { id: key || null, content: null };
+  return { id: key?.docId || null, content: key?.hash ? `#${key.hash}` : null };
+}
+
+/**
  * The place this text document was last read at here, or null. Only a
  * reading newer than `savedAt` counts, as for {@link loadReadingPage}.
+ *
+ * The set's own place first. Only a set with none (a new id) falls back to
+ * the place this file's content was last read at, under whatever id: two
+ * annotation sets of one file keep their own places.
  */
-export function loadReadingPlace(docId: string | null | undefined, savedAt = 0): ReadingPlace | null {
-  if (!docId) return null;
-  const entry = load<ReadingPlace & Entry>(PLACE_KEY)[docId];
+export function loadReadingPlace(key: string | ReadingPlaceKey | null | undefined, savedAt = 0): ReadingPlace | null {
+  const { id, content } = placeKeys(key);
+  const places = load<ReadingPlace & Entry>(PLACE_KEY);
+  const own = id ? places[id] : undefined;
+  const entry = isPlace(own) ? own : content ? places[content] : undefined;
   if (!isPlace(entry) || !(Number(entry.at) > savedAt)) return null;
   return { y: entry.y, height: entry.height };
 }
 
-export function saveReadingPlace(docId: string | null | undefined, place: ReadingPlace | null): void {
-  if (!docId || !isPlace(place)) return;
+export function saveReadingPlace(key: string | ReadingPlaceKey | null | undefined, place: ReadingPlace | null): void {
+  const { id, content } = placeKeys(key);
+  if (!id || !isPlace(place)) return;
   const places = load<ReadingPlace & Entry>(PLACE_KEY);
-  const prior = places[docId];
-  if (isPlace(prior) && Math.abs(prior.y - place.y) < PLACE_SLOP && Math.abs(prior.height - place.height) < PLACE_SLOP) {
-    return;
+  const at = Date.now();
+  let changed = false;
+  for (const name of content ? [id, content] : [id]) {
+    const prior = places[name];
+    if (isPlace(prior) && Math.abs(prior.y - place.y) < PLACE_SLOP && Math.abs(prior.height - place.height) < PLACE_SLOP) {
+      continue;
+    }
+    places[name] = { y: place.y, height: place.height, at };
+    changed = true;
   }
-  places[docId] = { y: place.y, height: place.height, at: Date.now() };
-  store(PLACE_KEY, places);
+  if (changed) store(PLACE_KEY, places);
 }

@@ -868,6 +868,11 @@ export const Workspace = memo(function Workspace({
     createAnnotateUntouched, createSaveAnnotateSession,
     trackFootnoteBoardSaves, registerAnnotateFootnotes, mirrorAnnotateDocId, mirrorAnnotateTitle,
   } = useAnnotateSession({ tab, boardRef, patchTab, setError });
+  /**
+   * The text document whose open has been back to its reading place. Until
+   * then its place is not taken: a note still opening sits at its top.
+   */
+  const readingPlaceArmedRef = useRef<string | null>(null);
   const [liveOriginal, setLiveOriginal] = useState<string | null>(null);
   const [liveChoice, setLiveChoice] = useState<string | null>(null);
   useEffect(() => {
@@ -3896,6 +3901,7 @@ export const Workspace = memo(function Workspace({
          * to lay down under an id nothing else knows about.
          */
         const sessionDocId = input.docId ?? existing?.id ?? freshAnnotateId();
+        readingPlaceArmedRef.current = null;
         if (input.source) setDocSource(sessionDocId, input.source);
         // The ink, read and unpacked while the page is prepared: it is waited
         // for only once the template is up, and was a second of the open.
@@ -4367,9 +4373,11 @@ export const Workspace = memo(function Workspace({
           }
           // Read on since the last save, or never saved at all (a note that is
           // only read has no session): where it was read to on this device.
+          // By content too: such a note can come back under a new id.
           if (keepsReadingPlace(docType)) {
-            const place = restoreTextReadingPlace(boardRef.current, sessionDocId, existing?.updatedAt ?? 0);
+            const place = restoreTextReadingPlace(boardRef.current, { docId: sessionDocId, hash }, existing?.updatedAt ?? 0);
             if (place) traceOpen("reading place restored", { y: Math.round(place.y), height: Math.round(place.height) });
+            readingPlaceArmedRef.current = sessionDocId;
           }
           traceOpen("view restored", { ms: openMs() });
         }
@@ -9627,7 +9635,11 @@ export const Workspace = memo(function Workspace({
   const textReading = keepsReadingPlace(annotateSource?.docType) && showing && !boardPreparing && switchMotion === "idle";
   useEffect(() => {
     if (!textReading) return;
-    return trackTextReadingPlace(() => boardRef.current, () => annotateDocIdRef.current);
+    return trackTextReadingPlace(() => boardRef.current, () => {
+      const docId = annotateDocIdRef.current;
+      if (!docId || readingPlaceArmedRef.current !== docId) return null;
+      return { docId, hash: annotateSourceRef.current?.hash ?? null };
+    });
   }, [textReading, tab.id]);
 
   const canvasLoading =
