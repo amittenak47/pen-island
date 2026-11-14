@@ -162,6 +162,76 @@ describe("compositePageLayers", () => {
     expect(far).not.toHaveBeenCalledWith(true);
   });
 
+  it("keeps an emptied block's margins only, and an inline run beside the band whole", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
+    });
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = () => ({ top: 0, width: 200 }) as DOMRect;
+    const place = (el: Element, top: number, bottom: number) => {
+      el.getBoundingClientRect = () => ({ top, bottom, height: bottom - top, width: 200 }) as DOMRect;
+      Object.defineProperty(el, "offsetHeight", { value: bottom - top });
+    };
+    // A block far above the band, then a paragraph running into it whose first line is above it.
+    const far = document.createElement("p");
+    far.style.margin = "1em 0";
+    far.innerHTML = "<span>far</span>";
+    place(far, 0, 100);
+    const running = document.createElement("p");
+    // jsdom has no user-agent sheet: say what a browser resolves for a span.
+    running.innerHTML = '<span class="early" style="display:inline">early words</span> and <span class="late" style="display:inline">late words</span>';
+    place(running, 200, 500);
+    place(running.querySelector(".early")!, 200, 220);
+    place(running.querySelector(".late")!, 320, 340);
+    slot.append(far, running);
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D,
+      { minX: 0, minY: 300, maxX: 200, maxY: 700 }, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" });
+    const xml = decodeURIComponent(sources[0]!.slice(sources[0]!.indexOf(",") + 1));
+    const ps = Array.from(new DOMParser().parseFromString(xml, "image/svg+xml").querySelectorAll("p"));
+    const shell = ps[0]!.getAttribute("style") ?? "";
+    expect(ps[0]!.textContent).toBe("");
+    expect(shell).toMatch(/margin(-top)?:/);
+    expect(shell).not.toContain("font-size");
+    // Emptied, the early words would rewrap the lines that are in the band.
+    expect(ps[1]!.textContent).toBe("early words and late words");
+  });
+
+  it("lets a touch through between any two blocks while copying a page-turn picture", async () => {
+    let pausesBeforeLoad = -1;
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(_value: string) {
+        pausesBeforeLoad = pauses.mock.calls.filter(([, ms]) => !ms).length;
+        queueMicrotask(() => this.onload?.());
+      }
+    });
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 10));
+    const pauses = vi.spyOn(window, "setTimeout");
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = () => ({ top: 0, width: 200 }) as DOMRect;
+    // Six blocks far above the band: emptied, never opened, all children of one parent.
+    for (let i = 0; i < 6; i += 1) {
+      const p = document.createElement("p");
+      p.style.display = "block";
+      p.textContent = String(i);
+      p.getBoundingClientRect = () => ({ top: i * 10, bottom: i * 10 + 10, height: 10, width: 200 }) as DOMRect;
+      Object.defineProperty(p, "offsetHeight", { value: 10 });
+      slot.append(p);
+    }
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D,
+      { minX: 0, minY: 500, maxX: 200, maxY: 600 }, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" },
+      { signal: new AbortController().signal });
+    // One pause per block while copying, then the two before the picture loads.
+    expect(pausesBeforeLoad).toBeGreaterThanOrEqual(8);
+  });
+
   it("stops a picture called off, before it loads or draws anything", async () => {
     const sources: string[] = [];
     vi.stubGlobal("Image", class {

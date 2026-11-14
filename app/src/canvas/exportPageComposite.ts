@@ -398,6 +398,9 @@ const CAPTURE_METRICS = [
   "top", "right", "bottom", "left", "vertical-align",
 ] as const;
 
+/** All an emptied block outside the band needs: its height is set, and it paints out of view. */
+const SHELL_METRICS = ["margin-top", "margin-right", "margin-bottom", "margin-left"] as const;
+
 /** SVG images do not inherit Android WebView's system text zoom. Preserve
  * resolved type AND em-based geometry, or the fold rewraps the live page. */
 function freezeCaptureMetrics(from: Element, to: Element): void {
@@ -445,7 +448,8 @@ async function copyForCapture(
   const bottom = bandBottom + margin;
   const root = slot.cloneNode(false) as HTMLElement;
   freezeCaptureMetrics(slot, root);
-  const open: [original: Element, copy: Element, depth: number][] = [[slot, root, 0]];
+  type Open = { original: Element; copy: Element; depth: number; children: ChildNode[]; next: number };
+  const open: Open[] = [{ original: slot, copy: root, depth: 0, children: Array.from(slot.childNodes), next: 0 }];
   // Between checkpoints the page could change, and a copy of half of each is of neither.
   let changed = false;
   const changes = signal && typeof MutationObserver !== "undefined" ? new MutationObserver(() => { changed = true; }) : null;
@@ -453,6 +457,7 @@ async function copyForCapture(
   try {
     let sliceAt = performance.now();
     while (open.length > 0) {
+      // A page's top level alone is a thousand blocks: the slice is per element.
       if (signal && performance.now() - sliceAt > CAPTURE_SLICE_MS) {
         await checkpoint(signal);
         if (changed) throw new DOMException("The page changed while it was pictured", "AbortError");
@@ -460,35 +465,44 @@ async function copyForCapture(
         if (slot.offsetWidth > 0 && slotRect.width > 0) scale = slotRect.width / slot.offsetWidth;
         sliceAt = performance.now();
       }
-      const [original, copy, depth] = open.pop()!;
-      for (const child of Array.from(original.childNodes)) {
-        if (!(child instanceof Element)) {
-          copy.appendChild(child.cloneNode(true));
-          continue;
-        }
-        const box = depth < 6 ? child.getBoundingClientRect() : null;
-        if (box && ((box.bottom - slotRect.top) / scale < top || (box.top - slotRect.top) / scale > bottom)) {
-          if (child instanceof HTMLElement && child.offsetHeight > 0) {
-            const shell = child.cloneNode(false) as HTMLElement;
-            freezeCaptureMetrics(child, shell);
-            // offsetHeight rounds every paragraph to whole CSS pixels. On a
-            // long capture those errors accumulate above the selected passage,
-            // moving the text while ink keeps its exact scene coordinates.
-            shell.style.height = `${box.height / scale}px`;
-            shell.style.boxSizing = "border-box";
-            shell.style.overflow = "hidden";
-            copy.appendChild(shell);
-          } else {
-            copy.appendChild(child.cloneNode(true));
-          }
-          continue;
-        }
-        // Freeze only the retained band, never every glyph in the full document.
-        const kept = child.cloneNode(false) as Element;
-        freezeCaptureMetrics(child, kept);
-        copy.appendChild(kept);
-        open.push([child, kept, depth + 1]);
+      const at = open[open.length - 1]!;
+      const child = at.children[at.next++];
+      if (!child) {
+        open.pop();
+        continue;
       }
+      if (!(child instanceof Element)) {
+        at.copy.appendChild(child.cloneNode(true));
+        continue;
+      }
+      const box = at.depth < 6 ? child.getBoundingClientRect() : null;
+      if (box && ((box.bottom - slotRect.top) / scale < top || (box.top - slotRect.top) / scale > bottom)) {
+        const resolved = child instanceof HTMLElement && child.offsetHeight > 0 ? getComputedStyle(child) : null;
+        // An inline run outside the band shares lines with what is inside it:
+        // emptied, the lines in the band would rewrap. It is kept like them.
+        if (resolved && !resolved.display.startsWith("inline")) {
+          const shell = child.cloneNode(false) as HTMLElement;
+          // Empty and fixed in height, only its margins still move what follows.
+          for (const name of SHELL_METRICS) shell.style.setProperty(name, resolved.getPropertyValue(name));
+          // offsetHeight rounds every paragraph to whole CSS pixels. On a
+          // long capture those errors accumulate above the selected passage,
+          // moving the text while ink keeps its exact scene coordinates.
+          shell.style.height = `${box.height / scale}px`;
+          shell.style.boxSizing = "border-box";
+          shell.style.overflow = "hidden";
+          at.copy.appendChild(shell);
+          continue;
+        }
+        if (!resolved) {
+          at.copy.appendChild(child.cloneNode(true));
+          continue;
+        }
+      }
+      // Freeze only the retained band, never every glyph in the full document.
+      const kept = child.cloneNode(false) as Element;
+      freezeCaptureMetrics(child, kept);
+      at.copy.appendChild(kept);
+      open.push({ original: child, copy: kept, depth: at.depth + 1, children: Array.from(child.childNodes), next: 0 });
     }
   } finally {
     changes?.disconnect();
