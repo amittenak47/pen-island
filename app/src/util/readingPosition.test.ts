@@ -62,6 +62,27 @@ describe("readingPosition", () => {
       expect(loadReadingPlace("note-1", 15_000)).toEqual({ y: 1400, height: 5000 });
     });
 
+    it("finds the place by content for a set that has none of its own", () => {
+      saveReadingPlace({ docId: "launch-1", hash: "md-h" }, { y: 5541, height: 113753 });
+      expect(loadReadingPlace({ docId: "launch-2", hash: "md-h" })).toEqual({ y: 5541, height: 113753 });
+      expect(loadReadingPlace({ docId: "launch-2", hash: "md-other" })).toBeNull();
+      expect(loadReadingPlace("launch-2")).toBeNull();
+    });
+
+    it("keeps each annotation set of one file on its own place", () => {
+      saveReadingPlace({ docId: "set-a", hash: "md-h" }, { y: 900, height: 5000 });
+      saveReadingPlace({ docId: "set-b", hash: "md-h" }, { y: 3000, height: 5000 });
+      expect(loadReadingPlace({ docId: "set-a", hash: "md-h" })).toEqual({ y: 900, height: 5000 });
+      expect(loadReadingPlace({ docId: "set-new", hash: "md-h" })).toEqual({ y: 3000, height: 5000 });
+    });
+
+    it("leaves a content place older than the session to the session", () => {
+      vi.useFakeTimers();
+      vi.setSystemTime(10_000);
+      saveReadingPlace({ docId: "launch-1", hash: "md-h" }, { y: 900, height: 5000 });
+      expect(loadReadingPlace({ docId: "launch-2", hash: "md-h" }, 11_000)).toBeNull();
+    });
+
     it("ignores a missing document or a place it cannot use", () => {
       saveReadingPlace(null, { y: 10, height: 100 });
       saveReadingPlace("note-1", { y: -5, height: 100 });
