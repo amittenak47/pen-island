@@ -175,6 +175,8 @@ const STRAY_AFTER_MS = 250;
 const CUT_BLEED = 1;
 /** Turns queued while a preview loads play at this pace. */
 const QUICK_TURN_MS = 240;
+/** Longest a live spread's sheet takes to land once the next flick has come (see `hurry`). */
+const HURRY_MS = 110;
 /** Most turns a held or hammered key may queue ahead. */
 const KEY_QUEUE_MAX = 12;
 
@@ -281,6 +283,22 @@ function currentIndex(
 export function glide(t: number, launch: number): number {
   const a = Math.min(3, Math.max(0, launch));
   return a * t + (3 - 2 * a) * t * t + (a - 2) * t * t * t;
+}
+
+/** How fast `glide` is moving at `t`, in multiples of its average pace. */
+export function glideSlope(t: number, launch: number): number {
+  const a = Math.min(3, Math.max(0, launch));
+  return a + 2 * (3 - 2 * a) * t + 3 * (a - 2) * t * t;
+}
+
+/**
+ * The `launch` that has a roll of `left` px (signed) over `ms` leave at
+ * `speed` px per ms (signed): a sheet re-timed mid-roll carries on at the
+ * pace it had, with no jolt where the new timing takes over.
+ */
+export function launchFor(speed: number, left: number, ms: number): number {
+  if (!(Math.abs(left) > 0.5) || !(ms > 0)) return 0;
+  return Math.min(GLIDE_MAX_LAUNCH, Math.max(0, (speed * ms) / left));
 }
 
 /**
@@ -1893,6 +1911,43 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       });
     };
 
+    /**
+     * A live spread's sheet going over when the next flick comes.
+     *
+     * Its pages are the board itself (see `liveSpread`): it cannot finish
+     * over the next spread the way a pictured sheet does, and putting it down
+     * at once made each quick turn after the first a jump with no turn shown.
+     * It hurries to land instead, and the next turn plays from there.
+     */
+    const chainsAfter = (turn: Turn | null): boolean =>
+      Boolean(turn && turn.commit && turn.spreadLive && !turn.done);
+    /** A turn the next flick waits for, queued: a PDF page's preview still coming, or a live spread landing. */
+    const waitsForTurn = (turn: Turn | null): boolean =>
+      Boolean(turn?.commit && (!turn.images || turn.spreadLive));
+
+    /** Finish a sheet going over within `HURRY_MS`, from where it is and at the pace it has. */
+    const hurry = (turn: Turn) => {
+      const a = turn.anim;
+      if (!a || !a.commit || turn.done) return;
+      const now = performance.now();
+      const t = Math.min(1, Math.max(0, (now - a.began) / a.ms));
+      if ((1 - t) * a.ms <= HURRY_MS) return;
+      const speed = ((a.goal.x - a.start.x) * glideSlope(t, a.launch)) / a.ms;
+      const left = a.goal.x - turn.corner.x;
+      turn.anim = {
+        began: now, ms: HURRY_MS, start: { ...turn.corner }, goal: a.goal, commit: true,
+        launch: launchFor(speed, left, HURRY_MS), lift: 0,
+      };
+      requestAnimationFrame(step(turn));
+    };
+
+    /** Line up one more turn `direction`, behind any already lined up the same way. */
+    const queueTurn = (direction: Direction) => {
+      notePageTurn(filmScope);
+      const count = queued?.direction === direction ? queued.count : 0;
+      queued = { direction, count: Math.min(KEY_QUEUE_MAX, count + 1) };
+    };
+
     const keyTurn = (direction: Direction, ms: number, after?: Turn): boolean => {
       const turn = planTurn(direction, true, after);
       if (!turn) return false;
@@ -2169,6 +2224,23 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       // Away from a corner peel, a stylus with a drawing tool up is writing.
       if (!side && penWrites(event.pointerType, board()?.getActiveTool?.())) return;
       const playing = turnRef.current;
+      if (playing && chainsAfter(playing)) {
+        // The sheet going over hurries to land; this touch, a flick or a
+        // drag in from a strip, turns the next page once it has.
+        hurry(playing);
+        if (side) {
+          event.stopImmediatePropagation();
+          event.preventDefault();
+        }
+        if (side || event.pointerType !== "mouse") {
+          const r = pageRect();
+          pending = {
+            id: event.pointerId, x: event.clientX, y: event.clientY, t: event.timeStamp, target: event.target,
+            reach: side ?? (r ? turnReachAt(r, event.clientX, event.clientY) : null),
+          };
+        }
+        return;
+      }
       if (playing) {
         const r = playing.rect;
         const catchable = Boolean(playing.anim && playing.images) && !playing.done &&
@@ -2299,6 +2371,12 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         const dy = event.clientY - start.y;
         const inward = start.reach === "right" ? -dx : dx;
         if (inward >= REACH_DRAG_PX && inward >= Math.abs(dy)) {
+          // A live spread still landing: this drag takes hold once it has.
+          if (chainsAfter(turnRef.current)) {
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return;
+          }
           pending = null;
           if (!turnRef.current && startFlick(event, start)) {
             event.stopImmediatePropagation();
@@ -2319,6 +2397,14 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           pending = null;
         } else if (Math.abs(dx) >= BODY_FLICK_PX && Math.abs(dx) >= BODY_FLICK_SLOPE * Math.abs(dy) &&
           Math.abs(dx) / Math.max(1, dt) >= BODY_FLICK_PX_PER_MS) {
+          if (chainsAfter(turnRef.current)) {
+            // Lined up now, not at the lift: the hand may stay down past the landing.
+            pending = null;
+            queueTurn(dx < 0 ? "next" : "prev");
+            event.stopImmediatePropagation();
+            event.preventDefault();
+            return;
+          }
           if (turnRef.current?.commit && !turnRef.current.images) {
             notePageTurn(filmScope);
             event.stopImmediatePropagation();
@@ -2379,11 +2465,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         if (event.type === "pointerup" && dt <= BODY_FLICK_WINDOW_MS &&
           Math.abs(dx) >= BODY_FLICK_PX && Math.abs(dx) >= BODY_FLICK_SLOPE * Math.abs(dy) &&
           Math.abs(dx) / Math.max(1, dt) >= BODY_FLICK_PX_PER_MS) {
-          if (turnRef.current?.commit && !turnRef.current.images) {
-            const direction: Direction = dx < 0 ? "next" : "prev";
-            notePageTurn(filmScope);
-            const count = queued?.direction === direction ? queued.count : 0;
-            queued = { direction, count: Math.min(KEY_QUEUE_MAX, count + 1) };
+          if (waitsForTurn(turnRef.current)) {
+            queueTurn(dx < 0 ? "next" : "prev");
             event.stopImmediatePropagation();
             event.preventDefault();
           } else if (!turnRef.current) startFlick(event, start);
@@ -2444,11 +2527,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         // Each ready sheet keeps rolling while the next key takes a new one.
         event.preventDefault();
         if (!playing.anim) {
-          if (playing.commit) {
-            notePageTurn(filmScope);
-            const count = queued?.direction === direction ? queued.count : 0;
-            queued = { direction, count: Math.min(KEY_QUEUE_MAX, count + 1) };
-          }
+          if (playing.commit) queueTurn(direction);
           return;
         }
         const commit = playing.direction === direction;
@@ -2458,6 +2537,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           return;
         }
         if (!commit) return;
+        if (chainsAfter(playing)) {
+          hurry(playing);
+          queueTurn(direction);
+          return;
+        }
         continueTurn(playing);
         keyTurn(direction, QUICK_TURN_MS, playing);
         return;

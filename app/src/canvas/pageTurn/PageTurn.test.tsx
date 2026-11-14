@@ -5,7 +5,7 @@ import { afterEach, beforeEach, expect, it, vi } from "vitest";
 
 import type { BoardHandle } from "../BoardHandle";
 import { markBootSettled } from "../../util/bootSettled";
-import { glide, PageTurn, rollMs, takeShot, turnPaperColor } from "./PageTurn";
+import { glide, glideSlope, launchFor, PageTurn, rollMs, takeShot, turnPaperColor } from "./PageTurn";
 import { flatSheet, paintTurn } from "./paintTurn";
 import { touchPointersIn } from "../touchPointers";
 
@@ -1161,6 +1161,17 @@ it("rolls a released sheet smoothly from the hand's pace to rest", () => {
   }
 });
 
+it("hands a hurried sheet on at the pace it had", () => {
+  // A roll leaves at its launch and comes to rest at the end.
+  expect(glideSlope(0, 1.5)).toBeCloseTo(1.5, 5);
+  expect(glideSlope(1, 1.5)).toBeCloseTo(0, 5);
+  // 200 px to go at 2 px/ms, re-timed to 110 ms: 1.1 times the new average pace.
+  expect(launchFor(-2, -200, 110)).toBeCloseTo(1.1, 5);
+  // Moving the other way, it leaves from a stop; far faster is capped.
+  expect(launchFor(2, -200, 110)).toBe(0);
+  expect(launchFor(-20, -200, 110)).toBe(2.5);
+});
+
 it("forgets a picture that was called off, and takes it again the next time", async () => {
   const shots = new Map<string, Promise<HTMLCanvasElement | null>>();
   const stop = new AbortController();
@@ -1175,4 +1186,62 @@ it("forgets a picture that was called off, and takes it again the next time", as
   expect(shots.size).toBe(0);
   expect(await takeShot(shots, b, scene, 1, Infinity, "")).not.toBeNull();
   expect(board.captureSceneFrame).toHaveBeenCalledTimes(2);
+});
+
+it("hurries a live spread's sheet to land when the next flick comes, then turns the next one", async () => {
+  const frame = manualFrames();
+  const textFrames = [1, 2, 3, 4, 5, 6].map((pageId, i) => ({ pageId, minY: i * 600, maxY: i * 600 + 600 }));
+  board.readingPageFrames.mockReturnValue(textFrames);
+  view = { x: 0, y: 0, width: 400, height: 600, zoom: 1 };
+  pageBox = { minX: 0, maxX: 200, minY: 0, maxY: 600 };
+  board.livePageCopy.mockImplementation(() => document.createElement("div"));
+  const hole = document.createElement("div");
+  hole.className = "lc-page-mask-hole";
+  hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+  const mask = document.createElement("div");
+  mask.className = "lc-page-mask";
+  mask.append(hole);
+  const ref = { current: board as unknown as BoardHandle };
+  act(() =>
+    root.render(
+      <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} />,
+    ),
+  );
+  host.append(mask);
+  // Peeled from the corner and let go a quarter of the way over: it rolls on.
+  pointer("pointerdown", 380, 580, "touch", 1000);
+  pointer("pointermove", 340, 585, "touch", 1040);
+  await pictures();
+  frame();
+  pointer("pointermove", 300, 585, "touch", 1080);
+  pointer("pointerup", 300, 585, "touch", 1090);
+  frame();
+  expect(host.querySelector(".lc-page-turn")).not.toBeNull();
+  // The next flick, from the middle of the page, while that sheet is still going over.
+  pointer("pointerdown", 300, 300, "touch", 1100);
+  // Not put down at once: that was the jump.
+  expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+  pointer("pointermove", 200, 302, "touch", 1130);
+  pointer("pointerup", 120, 302, "touch", 1160);
+  // Still going over, and seen to: halfway through its hurry it is between where it was let go and the spine's far side.
+  expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+  vi.mocked(paintTurn).mockClear();
+  frame(60);
+  expect(board.jumpToPageFrame).not.toHaveBeenCalled();
+  const between = vi.mocked(paintTurn).mock.calls.at(-1)![1].corner.x;
+  expect(between).toBeLessThan(100);
+  expect(between).toBeGreaterThan(-200);
+  // A quarter-turn left took 240 ms; hurried, it is down well inside 150.
+  frame(150);
+  expect(board.jumpToPageFrame).toHaveBeenCalledTimes(1);
+  expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
+  // The flick's turn plays from the spread it landed on.
+  for (let i = 0; i < 6; i += 1) {
+    await pictures();
+    frame(1000);
+  }
+  const landed = (board.jumpToPageFrame.mock.calls as unknown as [{ pageId: number }][]).map((call) => call[0].pageId);
+  expect(landed).toEqual([3, 5]);
+  board.readingPageFrames.mockReturnValue(FRAMES);
+  board.livePageCopy.mockReset().mockReturnValue(null);
 });
