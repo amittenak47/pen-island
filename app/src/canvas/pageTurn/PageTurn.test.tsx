@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { act } from "react";
 import { createRoot, type Root } from "react-dom/client";
-import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { BoardHandle } from "../BoardHandle";
 import { markBootSettled } from "../../util/bootSettled";
@@ -1244,4 +1244,50 @@ it("hurries a live spread's sheet to land when the next flick comes, then turns 
   expect(landed).toEqual([3, 5]);
   board.readingPageFrames.mockReturnValue(FRAMES);
   board.livePageCopy.mockReset().mockReturnValue(null);
+});
+
+describe("switching a text document from scroll reading to Pages", () => {
+  // A long note cut into 14 text pages of 600 units: spread 6 is pages 11 and 12.
+  const textFrames = Array.from({ length: 14 }, (_, i) => ({ pageId: i + 1, minY: i * 600, maxY: (i + 1) * 600 }));
+  const ref = { current: board as unknown as BoardHandle };
+  const render = (lockActive: boolean) => act(() => root.render(
+    <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive={lockActive} turnEnabled={lockActive} spread paged={false} fit={1} />,
+  ));
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    board.readingPageFrames.mockReturnValue(textFrames);
+  });
+
+  it("holds the first page when scroll reading is at the very top", () => {
+    view = { x: 0, y: -5, width: 400, height: 600, zoom: 1 };
+    render(false);
+    render(true);
+    expect(board.setPageLock).toHaveBeenLastCalledWith(textFrames[0]);
+  });
+
+  it("holds the page in the middle of the view further down", () => {
+    view = { x: 0, y: 3100, width: 400, height: 600, zoom: 1 };
+    render(false);
+    render(true);
+    expect(board.setPageLock).toHaveBeenLastCalledWith(textFrames[5]);
+  });
+
+  it("does not go back to the page held before scroll reading", async () => {
+    // Pages reading on spread 6: page 11 fitted in the middle of the view.
+    view = { x: 0, y: 6300 - 600, width: 800, height: 1200, zoom: 0.5 };
+    render(true);
+    expect(board.setPageLock).toHaveBeenLastCalledWith(textFrames[10]);
+    // Scroll reading, back at the very top.
+    render(false);
+    expect(board.setPageLock).toHaveBeenLastCalledWith(null);
+    view = { x: 0, y: -5, width: 400, height: 600, zoom: 1 };
+    board.setPageLock.mockClear();
+    render(true);
+    expect(board.setPageLock).toHaveBeenLastCalledWith(textFrames[0]);
+    // The hold is checked again every 400 ms: it stays on the first page.
+    await act(async () => { await vi.advanceTimersByTimeAsync(2000); });
+    expect(board.setPageLock).not.toHaveBeenCalledWith(textFrames[10]);
+    expect(board.setPageLock).toHaveBeenLastCalledWith(textFrames[0]);
+  });
 });
