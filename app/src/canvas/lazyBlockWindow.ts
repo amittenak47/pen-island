@@ -70,15 +70,36 @@ function lazyLayout(slot: HTMLElement): LazyLayout | null {
   return layout;
 }
 
+/**
+ * Draw a lazy block by hand, bounded as `auto` bounded it.
+ *
+ * `auto` carries paint containment, and a block shown `visible` loses it.
+ * Without it a hit test (four on each touch, and one a second from Chromium
+ * while frames run) walks every positioned piece of every formula shown: 9-17
+ * ms each on the tablet with a dozen pages of math drawn. A stacking context
+ * clipped to the block's box gives the bound back, so a hit test skips a block
+ * it misses, about a third cheaper. Neither property moves anything: margins
+ * collapse as before, where `contain: paint` would move page breaks. The clip
+ * is the one scroll reading draws these blocks with, and they were checked
+ * not to overflow (`measureSkippableHeights`).
+ */
+function drawBlock(el: HTMLElement): void {
+  el.style.contentVisibility = "visible";
+  if (el.style.isolation === "isolate") return;
+  el.style.isolation = "isolate";
+  el.style.overflow = "clip";
+}
+
 /** Show the lazy blocks between `top` and `bottom` (slot units) and hide the rest. How many changed. */
 export function showLazyBlocksBetween(slot: HTMLElement, top: number, bottom: number): number {
   const layout = lazyLayout(slot);
   if (!layout) return 0;
   let changed = 0;
   layout.blocks.forEach((el, i) => {
-    const want = layout.bottoms[i]! >= top && layout.tops[i]! <= bottom ? "visible" : "hidden";
-    if (el.style.contentVisibility === want) return;
-    el.style.contentVisibility = want;
+    const show = layout.bottoms[i]! >= top && layout.tops[i]! <= bottom;
+    if (el.style.contentVisibility === (show ? "visible" : "hidden")) return;
+    if (show) drawBlock(el);
+    else el.style.contentVisibility = "hidden";
     changed += 1;
   });
   return changed;
@@ -91,7 +112,7 @@ function revealLazyBlocksBetween(slot: HTMLElement, top: number, bottom: number)
   let changed = 0;
   layout.blocks.forEach((el, i) => {
     if (layout.bottoms[i]! < top || layout.tops[i]! > bottom || el.style.contentVisibility === "visible") return;
-    el.style.contentVisibility = "visible";
+    drawBlock(el);
     changed += 1;
   });
   return changed;
@@ -104,7 +125,12 @@ export function releaseLazyBlocks(slot: HTMLElement): void {
   const layout = layouts.get(slot);
   const blocks = layout ? layout.blocks : Array.from(slot.querySelectorAll<HTMLElement>('[style*="contain-intrinsic-size"]'));
   for (const el of blocks) {
-    if (el.isConnected && el.style.contentVisibility !== "auto") el.style.contentVisibility = "auto";
+    if (!el.isConnected) continue;
+    if (el.style.contentVisibility !== "auto") el.style.contentVisibility = "auto";
+    if (el.style.isolation === "isolate") {
+      el.style.removeProperty("isolation");
+      el.style.removeProperty("overflow");
+    }
   }
   layouts.delete(slot);
 }
@@ -149,10 +175,11 @@ export function placeLazyWindow(slot: HTMLElement, at: number, pageH: number, la
 /**
  * Copies of the page, live under a turning sheet or in a picture, are drawn
  * whole: a block hidden on the board, or left to `auto` and its observer,
- * would be blank or watched in the copy.
+ * would be blank or watched in the copy. Bounded too: a turn's copies are hit
+ * tested on every touch of a flick.
  */
 export function drawLazyBlocksIn(copy: Element): void {
   copy.querySelectorAll<HTMLElement>('[style*="content-visibility"]').forEach((el) => {
-    if (el.style.contentVisibility !== "visible") el.style.contentVisibility = "visible";
+    if (el.style.contentVisibility !== "visible" || el.style.isolation !== "isolate") drawBlock(el);
   });
 }

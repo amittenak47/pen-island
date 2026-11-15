@@ -44,6 +44,20 @@ describe("lazy blocks in Pages reading", () => {
     expect(shown().every((v) => v === "auto")).toBe(true);
   });
 
+  it("bounds each block it draws as auto did, so a hit test skips the blocks it misses, and unbounds them for scroll reading", () => {
+    const { slot, blocks } = note(4);
+    const bounds = () => blocks.map((b) => `${b.style.isolation || "-"}/${b.style.overflow || "-"}`);
+    showLazyBlocksBetween(slot, 0, 150);
+    expect(bounds()).toEqual(["isolate/clip", "isolate/clip", "-/-", "-/-"]);
+    // Hidden again, it keeps them: nothing to undo when it comes back.
+    showLazyBlocksBetween(slot, 250, 350);
+    expect(bounds()).toEqual(["isolate/clip", "isolate/clip", "isolate/clip", "isolate/clip"]);
+    expect(blocks[0]!.style.contentVisibility).toBe("hidden");
+    releaseLazyBlocks(slot);
+    expect(bounds()).toEqual(["-/-", "-/-", "-/-", "-/-"]);
+    expect(blocks[0]!.getAttribute("style")).toBe("content-visibility: auto; contain-intrinsic-size: 100px;");
+  });
+
   it("leaves blocks that always lay out alone", () => {
     const { slot, body } = note(3);
     const list = document.createElement("ul");
@@ -119,6 +133,7 @@ describe("lazy blocks in Pages reading", () => {
       '<p style="content-visibility:auto;contain-intrinsic-size:10px">b</p><p>c</p>';
     drawLazyBlocksIn(copy);
     expect(Array.from(copy.querySelectorAll("p"), (p) => p.style.contentVisibility)).toEqual(["visible", "visible", ""]);
+    expect(Array.from(copy.querySelectorAll("p"), (p) => p.style.isolation + p.style.overflow)).toEqual(["isolateclip", "isolateclip", ""]);
   });
 
   it("does nothing for a note with no lazy blocks", () => {
