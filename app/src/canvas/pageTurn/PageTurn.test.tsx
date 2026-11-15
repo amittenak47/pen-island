@@ -978,13 +978,22 @@ describe("flicking through a text spread", () => {
   });
 
   it("pictures the note's pages small while the reader rests, from here outward, and only once", async () => {
+    // A picture the size it was asked for.
+    const sized = async (scene: { width: number; height: number }, scale: number) => {
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.round(scene.width * scale);
+      canvas.height = Math.round(scene.height * scale);
+      return canvas;
+    };
+    board.captureSceneFrame.mockImplementation(sized as unknown as () => Promise<HTMLCanvasElement>);
     setUp("doc");
     await vi.waitFor(() => expect(thumbs.keep).toHaveBeenCalledTimes(8), { timeout: 5000, interval: 50 });
     expect(thumbs.keep.mock.calls.map(([, index]) => index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
     // The open spread and the next were pictured for turning already, and
-    // are shrunk; the pages further on are taken at thumb size.
+    // are shrunk; the four pages further on are taken at thumb size, in one
+    // picture of them all.
     const thumbScale = board.captureSceneFrame.mock.calls.filter((call) => (call as unknown[])[1] === 0.5);
-    expect(thumbScale).toHaveLength(4);
+    expect(thumbScale.map((call) => (call as unknown[])[0])).toEqual([{ x: 0, y: 2400, width: 200, height: 2400 }]);
     expect(thumbs.keep.mock.calls.every(([, , picture]) => picture.width === 100 && picture.height === 300)).toBe(true);
     // Every page pictured and no ink since: the next rest takes none.
     await wait(1700);

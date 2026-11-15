@@ -62,6 +62,8 @@ const GLIDE_FLICK_PX_PER_MS = 3;
 const GLIDE_FLICK_MIN_MS = 120;
 /** Steepest start a throw may give the roll, as a multiple of its average pace (3 would overshoot). */
 const GLIDE_MAX_LAUNCH = 2.5;
+/** Pages pictured small at once while the reader rests (see `thumbPass`): each picture walks the whole note. */
+const THUMB_RUN = 6;
 /** A text spread's facing picture is taken again once writing has rested this long. */
 const FACING_SETTLE_MS = 1200;
 
@@ -1527,17 +1529,46 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return canvas;
     };
 
+    /**
+     * Pages `lo` to `hi` at thumb `scale`: one picture of them all, cut into
+     * one per page, each paper below its own cut (the next page's text is
+     * there in the note).
+     */
+    const thumbRun = async (b: BoardHandle, frames: readonly PageFrame[], lo: number, hi: number, scale: number, signal: AbortSignal) => {
+      const first = pageBoxScene(b, frames[lo]!);
+      const last = pageBoxScene(b, frames[hi]!);
+      if (!first || !last) return null;
+      const scene = { x: first.x, y: first.y, width: first.width, height: last.y + last.height - first.y };
+      const picture = withMarks(b, scene, await takeShot(new Map(), b, scene, scale, Infinity, "", false, false, signal));
+      if (!picture || !(scene.height > 0)) return null;
+      const kx = picture.width / scene.width;
+      const ky = picture.height / scene.height;
+      const paper = paperColor();
+      return frames.slice(lo, hi + 1).map((f): HTMLCanvasElement | null => {
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(first.width * scale));
+        canvas.height = Math.max(1, Math.round(first.height * scale));
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return null;
+        ctx.fillStyle = paper;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        const shown = Math.min(first.height, f.maxY - f.minY + CUT_BLEED);
+        ctx.drawImage(picture, 0, (f.minY - scene.y) * ky, first.width * kx, shown * ky, 0, 0, canvas.width, shown * (canvas.height / first.height));
+        return canvas;
+      });
+    };
+
     /** Books whose every page was found pictured, with the ink revision then: nothing to look at again until it moves. */
     const thumbsSwept = new Map<string, number>();
 
     /**
      * Pictures of the note's pages, small and kept (see `pageThumbs`), for
-     * the turns that flick past them. Taken while the reader rests, one page
-     * at a time from here outward, the way the reader last went first, until
-     * every page has one that shows its ink. A page already pictured at full
-     * size for the next turn is shrunk; any other is taken at thumb size.
-     * Each stops at the next touch, as the other resting pictures do, and the
-     * next rest carries on where it left off.
+     * the turns that flick past them. Taken while the reader rests, from
+     * here outward, the way the reader last went first, until every page has
+     * one that shows its ink. A page already pictured at full size for the
+     * next turn is shrunk; the others are taken at thumb size, a few at a
+     * time (`thumbRun`). Each stops at the next touch, as the other resting
+     * pictures do, and the next rest carries on where it left off.
      */
     const thumbPass = async (b: BoardHandle, frames: readonly PageFrame[], at: number, current: () => boolean, signal: AbortSignal) => {
       if (pagedRef.current) return;
@@ -1557,25 +1588,59 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const spread = textSpreadRef.current;
       const fullShot = spread ? spreadPageShot(b, frames) : null;
       const near = thumbWindow(at, dir);
+      const inks = new Map<number, string>();
+      const inkOf = (j: number) => {
+        let ink = inks.get(j);
+        if (ink === undefined) {
+          const scene = pageBoxScene(b, frames[j]!);
+          ink = scene ? b.inkSignatureIn?.(scene) ?? "" : "";
+          inks.set(j, ink);
+        }
+        return ink;
+      };
+      const done = new Set<number>();
+      const needs = (j: number) => j >= 0 && j < frames.length && !done.has(j) && thumbInk(key, j) !== inkOf(j);
+      const keep = (j: number, small: HTMLCanvasElement) => keepThumb(key, j, small, inkOf(j), j >= near.lo && j <= near.hi);
       for (const i of thumbOrder(at, frames.length, dir, spread ? 2 : 1)) {
         if (!current() || signal.aborted) return;
-        const f = frames[i]!;
-        const scene = pageBoxScene(b, f);
-        if (!scene) continue;
-        const ink = b.inkSignatureIn?.(scene) ?? "";
-        if (thumbInk(key, i) === ink) continue;
-        let picture = fullShot ? await fullShot(i, true) : null;
-        if (!picture) {
-          const taken = await takeShot(new Map(), b, scene, scale, f.maxY, "", false, false, signal);
-          picture = withMarks(b, scene, taken);
+        if (!needs(i)) {
+          done.add(i);
+          continue;
         }
-        if (!picture || !current() || signal.aborted) return;
-        const w = scene.width * scale;
-        const h = scene.height * scale;
-        const small = picture.width > w * 1.25 ? shrinkPicture(picture, w, h) : picture;
-        if (!small) continue;
-        await keepThumb(key, i, small, ink, i >= near.lo && i <= near.hi);
-        // A touch between two pages is answered before the next one starts.
+        // Pictured at full size for the next turn already: shrunk, a few ms.
+        const full = fullShot ? await fullShot(i, true) : null;
+        const scene = pageBoxScene(b, frames[i]!);
+        if (full && scene) {
+          const small = shrinkPicture(full, scene.width * scale, scene.height * scale);
+          done.add(i);
+          if (small) await keep(i, small);
+          continue;
+        }
+        /*
+         * Any other is taken with the pages next to it that need one too, the
+         * way the reader is heading first, in one picture. A picture copies
+         * only its band of the note but walks the whole of it to keep the
+         * band in place, and on a chapter of math that walk was most of its
+         * cost: about a second a page on the tablet.
+         */
+        let lo = i;
+        let hi = i;
+        for (let j = i + dir; hi - lo + 1 < THUMB_RUN && needs(j); j += dir) {
+          if (dir > 0) hi = j;
+          else lo = j;
+        }
+        for (let j = (dir > 0 ? lo : hi) - dir; hi - lo + 1 < THUMB_RUN && needs(j); j -= dir) {
+          if (dir > 0) lo = j;
+          else hi = j;
+        }
+        const pictures = await thumbRun(b, frames, lo, hi, scale, signal);
+        if (!pictures || !current() || signal.aborted) return;
+        for (let j = lo; j <= hi; j += 1) {
+          done.add(j);
+          const small = pictures[j - lo];
+          if (small) await keep(j, small);
+        }
+        // A touch between two pictures is answered before the next one starts.
         await new Promise((resolve) => window.setTimeout(resolve, 0));
       }
       thumbsSwept.set(key, revision);
