@@ -922,6 +922,7 @@ describe("flicking through a text spread", () => {
   afterEach(() => {
     board.readingPageFrames.mockReturnValue(FRAMES);
     board.livePageCopy.mockReset().mockReturnValue(null);
+    board.setPageLock.mockReset();
   });
 
   it("turns the pages it goes past over plain paper, and draws only the page it stops on", async () => {
@@ -1016,6 +1017,101 @@ describe("flicking through a text spread", () => {
     await wait(300);
     expect(copies).toHaveLength(2);
     expect(stopped.contains(copies[1])).toBe(true);
+  });
+
+  /** The facing slot where the board shows it, and the board putting it on the left while it holds a right page. */
+  const placeFacing = (facing: HTMLElement) => {
+    facing.getBoundingClientRect = () => {
+      const left = facing.style.left === "50%" ? 200 : 0;
+      return { left, top: 0, width: 200, height: 600, right: left + 200, bottom: 600, x: left, y: 0, toJSON() {} };
+    };
+    Object.defineProperty(facing, "offsetWidth", { configurable: true, value: 200 });
+    Object.defineProperty(facing, "offsetHeight", { configurable: true, value: 600 });
+    board.setPageLock.mockImplementation((frame: { minY: number } | null) => {
+      if (frame) facing.style.left = Math.round(frame.minY / 600) % 2 === 1 ? "0px" : "50%";
+    });
+  };
+
+  it("leaves the page it held to the facing slot as its kept picture, then as a copy, when a turn flicked onto it left no picture of it", async () => {
+    thumbs.picture.mockImplementation(keptPicture);
+    const { copies, facing } = setUp("doc");
+    placeFacing(facing);
+    await flick();
+    await flick();
+    // Holding page 5 (index 4), drawn live: no picture of it taken yet.
+    expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[4], minY: textFrames[4].minY });
+    const before = copies.length;
+    thumbs.picture.mockClear();
+    // A touch on the facing page at once: the board goes over to it, and the
+    // page it held takes the slot, now on the left. It used to be left empty:
+    // plain paper, black in a dark palette.
+    pointer("pointerdown", 260, 300);
+    expect(board.setPageLock).toHaveBeenLastCalledWith(textFrames[5]);
+    expect(facing.style.left).toBe("0px");
+    expect(facing.childElementCount).toBe(1);
+    const standIn = facing.firstElementChild as HTMLElement;
+    expect(standIn.querySelector("canvas.lc-page-turn-thumb")).not.toBeNull();
+    expect(thumbs.picture).toHaveBeenCalledWith(expect.any(String), 4);
+    // Not copied on the touch: a few ms, not a page laid out.
+    expect(copies).toHaveLength(before);
+    pointer("pointerup", 260, 300);
+    // No turn took it: the page itself, sharp, in place of its soft picture.
+    await wait(400);
+    expect(copies).toHaveLength(before + 1);
+    expect(standIn.isConnected).toBe(true);
+    expect(standIn.contains(copies.at(-1)!)).toBe(true);
+    expect(standIn.querySelector("canvas.lc-page-turn-thumb")).toBeNull();
+  });
+
+  it("copies the page it held into the facing slot at once when it has no kept picture either", async () => {
+    const { copies, facing } = setUp();
+    placeFacing(facing);
+    await flick();
+    await flick();
+    const before = copies.length;
+    pointer("pointerdown", 260, 300);
+    expect(copies).toHaveLength(before + 1);
+    expect(facing.childElementCount).toBe(1);
+    expect(facing.firstElementChild!.contains(copies.at(-1)!)).toBe(true);
+    pointer("pointerup", 260, 300);
+  });
+
+  it("keeps the page it held on the left through a turn on from the facing page, until the spread lands", async () => {
+    thumbs.picture.mockImplementation(keptPicture);
+    const { copies, facing } = setUp("doc");
+    placeFacing(facing);
+    await flick();
+    await flick();
+    // Back the other way: page 3 (index 2) held, drawn live.
+    pointer("pointerdown", 20, 580);
+    pointer("pointermove", 100, 585);
+    await wait(50);
+    pointer("pointermove", 380, 585);
+    await wait(60);
+    pointer("pointerup", 380, 585);
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
+    // And on again, taken by the facing page's body.
+    pointer("pointerdown", 300, 580);
+    expect(facing.style.left).toBe("0px");
+    const standIn = facing.firstElementChild as HTMLElement;
+    expect(standIn.querySelector("canvas.lc-page-turn-thumb")).not.toBeNull();
+    pointer("pointermove", 240, 585);
+    await wait(50);
+    pointer("pointermove", 20, 585);
+    // The sheet is up, held there: the left page still shows, and its
+    // picture is not traded for a copy while the turn may take it.
+    await wait(380);
+    expect(facing.contains(standIn)).toBe(true);
+    expect(copies.some((copy) => standIn.contains(copy))).toBe(false);
+    pointer("pointerup", 20, 585);
+    for (let i = 0; i < 6; i += 1) await settle();
+    expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[4], minY: textFrames[4].minY });
+    // Landed: the turn's own right page is the facing page now.
+    expect(facing.contains(standIn)).toBe(false);
+    expect(facing.childElementCount).toBe(1);
+    await wait(400);
+    expect(copies.some((copy) => standIn.contains(copy))).toBe(false);
   });
 
   it("lays glass over the page text while flicking through, off soon after it lands and for a press that turns nothing", async () => {
