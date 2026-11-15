@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { curlGeometry, foldReflection } from "./curl";
-import { MARKS_THROUGH, PRINT_THROUGH, bookBack, flatSheet, paintTurn, underBlur } from "./paintTurn";
+import { MARKS_THROUGH, PRINT_THROUGH, bookBack, bookFlap, flatSheet, paintTurn, underBlur } from "./paintTurn";
 
 describe("flatSheet", () => {
   const frame = { layout: "sheet" as const, width: 400, height: 600, bottom: false };
@@ -140,6 +140,22 @@ describe("the back of a book's turning sheet, live", () => {
       expect(got.x).toBeCloseTo(want.x + 200, 1);
       expect(got.y).toBeCloseTo(want.y, 1);
     }
+  });
+
+  it("moves the page as a turn and a shift, its flap where its clip lands", () => {
+    const at = bookFlap({ ...sheet, corner: { x: 40, y: 430 } })!;
+    const [a, b, c, d] = at.matrix;
+    // No mirror: a rotation, which `rotate` and `translate` can play.
+    expect(a * d - b * c).toBeCloseTo(1, 6);
+    expect(c).toBeCloseTo(-b, 6);
+    expect(d).toBeCloseTo(a, 6);
+    at.clip.forEach((p, i) => {
+      const q = apply(at.matrix, p.x, p.y);
+      expect(q.x).toBeCloseTo(at.flap[i]!.x, 6);
+      expect(q.y).toBeCloseTo(at.flap[i]!.y, 6);
+    });
+    // Fully over, it is the left page where it lies.
+    expect(bookFlap({ ...sheet, corner: { x: -200, y: 600 } })!.matrix.map((v) => Math.round(v * 1000) / 1000 + 0)).toEqual([1, 0, 0, 1, 0, 0]);
   });
 
   it("leaves the canvas's flap clear for it, with only the shading drawn", () => {

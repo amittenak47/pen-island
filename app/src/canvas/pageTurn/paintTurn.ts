@@ -81,10 +81,11 @@ export interface TurnFrame {
    */
   fromMarks?: CanvasImageSource | null;
   /**
-   * A book's turning sheet has a live copy of its back under the canvas (see
-   * {@link bookBack}): the flap is left clear but for its shading, and that
-   * page shows through it. Without one the flap is the left page of `to`,
-   * or `back`, or paper.
+   * A book's turning sheet has its back live under the canvas: a copy of
+   * that page (see {@link bookBack}), or the board's own page moved to the
+   * flap ({@link bookFlap}). The flap is left clear but for its shading, and
+   * that page shows through it. Without one the flap is the left page of
+   * `to`, or `back`, or paper.
    */
   liveBack?: boolean;
 }
@@ -448,16 +449,38 @@ export function flatSheet(
 export function bookBack(
   frame: Pick<TurnFrame, "width" | "height" | "corner" | "bottom" | "restY">,
 ): { transform: string; clipPath: string } | null {
-  const w = frame.width;
-  const g = curlGeometry(frame.corner, w, frame.height, frame.bottom, frame.restY);
-  const flap = sheetPart(g, w, frame.height, true);
-  if (flap.length < 3) return null;
-  const [a, b, c, d, e, f] = foldReflection(g);
-  // Mirrored (x to w - x), reflected, then past the spine (w).
-  const m = [-a, -b, c, d, a * w + e + w, b * w + f].map((v) => Number(v.toFixed(5)) || 0);
+  const at = bookFlap(frame);
+  if (!at) return null;
+  const m = at.matrix.map((v) => Number(v.toFixed(5)) || 0);
   return {
     transform: `matrix(${m.join(", ")})`,
-    clipPath: `polygon(${flap.map((p) => `${(w - p.x).toFixed(2)}px ${p.y.toFixed(2)}px`).join(", ")})`,
+    clipPath: `polygon(${at.clip.map((p) => `${p.x.toFixed(2)}px ${p.y.toFixed(2)}px`).join(", ")})`,
+  };
+}
+
+/**
+ * The folded-over part of a book's turning sheet, as {@link bookBack}
+ * places it, in numbers.
+ *
+ * `matrix` (a to f, as a canvas or CSS matrix) takes a point of the page on
+ * the sheet's back, from that page's own top left, to the spread: mirrored
+ * into the sheet (x to w - x), reflected across the fold, moved past the
+ * spine. The mirror and the reflection cancel, so it is a turn and a shift.
+ * `clip` is the flap in that page's pixels, `flap` the same in the spread's.
+ * Null while nothing is folded over.
+ */
+export function bookFlap(
+  frame: Pick<TurnFrame, "width" | "height" | "corner" | "bottom" | "restY">,
+): { matrix: number[]; clip: Point[]; flap: Point[] } | null {
+  const w = frame.width;
+  const g = curlGeometry(frame.corner, w, frame.height, frame.bottom, frame.restY);
+  const part = sheetPart(g, w, frame.height, true);
+  if (part.length < 3) return null;
+  const [a, b, c, d, e, f] = foldReflection(g);
+  return {
+    matrix: [-a, -b, c, d, a * w + e + w, b * w + f],
+    clip: part.map((p) => ({ x: w - p.x, y: p.y })),
+    flap: part.map((p) => ({ x: a * p.x + c * p.y + e + w, y: b * p.x + d * p.y + f })),
   };
 }
 

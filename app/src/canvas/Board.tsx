@@ -10401,6 +10401,13 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         const layers = pageExportLayers();
         return layers ? livePageCopy(layers, frame, host) : null;
       },
+      pageLayers: (promote) => {
+        // The same nodes a pan's ride moves, and the slots that carry the page.
+        if (promote) setPanRideWillChange(true);
+        else if (promote === false && !cameraController.motionActive.current) setPanRideWillChange(false);
+        return [contentSlotNodeRef.current, marksSlotNodeRef.current, linedSlotNodeRef.current, ...ensurePanRideNodes()]
+          .filter((node): node is HTMLElement => node instanceof HTMLElement && node.isConnected);
+      },
       aimPdfPage: (pageId: number, opts?: { hold?: boolean }) => {
         if (!(pageId >= 1)) {
           pendingPdfPageRef.current = 0;
