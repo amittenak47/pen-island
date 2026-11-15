@@ -8,6 +8,7 @@
  */
 
 import { intersectBounds } from "./geom";
+import { drawLazyBlocksIn } from "./lazyBlockWindow";
 import type { SceneBounds } from "./rasterInk";
 
 export interface PageExportLayers {
@@ -248,6 +249,23 @@ const FONT_SETTLE_MAX_MS = 800;
 const FONT_SETTLE_MS = 150;
 const FONT_SETTLE_STEP_MS = 40;
 
+/**
+ * Let a touch or a frame through, then stop if the picture was called off.
+ *
+ * Only for a picture taken with a `signal` (a page turn's, taken while the
+ * reader rests): one runs for up to a second and a half on a tablet, and the
+ * next turn used to wait for all of it. Exports run straight through.
+ */
+async function checkpoint(signal: AbortSignal | undefined): Promise<void> {
+  if (!signal) return;
+  await new Promise((resolve) => window.setTimeout(resolve, 0));
+  stopIfCalledOff(signal);
+}
+
+function stopIfCalledOff(signal: AbortSignal | undefined): void {
+  if (signal?.aborted) throw signal.reason ?? new DOMException("The picture was called off", "AbortError");
+}
+
 /** A checksum of a small paint of the image; painting it is also what loads its fonts. */
 function paintedSum(img: HTMLImageElement, width: number, height: number): number | null {
   const scale = Math.min(1, 256 / Math.max(1, width));
@@ -273,7 +291,7 @@ function paintedSum(img: HTMLImageElement, width: number, height: number): numbe
  * in and its text moving a few millimetres. Paint it small until it stops
  * changing.
  */
-async function settleImageFonts(img: HTMLImageElement, width: number, height: number): Promise<void> {
+async function settleImageFonts(img: HTMLImageElement, width: number, height: number, signal?: AbortSignal): Promise<void> {
   if (typeof document === "undefined") return;
   const start = performance.now();
   let last = paintedSum(img, width, height);
@@ -281,6 +299,8 @@ async function settleImageFonts(img: HTMLImageElement, width: number, height: nu
   let changedAt = start;
   while (performance.now() - start < FONT_SETTLE_MAX_MS) {
     await new Promise((resolve) => window.setTimeout(resolve, FONT_SETTLE_STEP_MS));
+    // Each look is a fresh paint of the whole picture, ~100 ms on a tablet.
+    stopIfCalledOff(signal);
     const sum = paintedSum(img, width, height);
     if (sum !== last) {
       last = sum;
@@ -301,6 +321,7 @@ async function drawDomSlot(
   pageBounds: SceneBounds,
   exportBounds: SceneBounds,
   drawScale: number,
+  signal?: AbortSignal,
 ): Promise<boolean> {
   const overlap = intersectBounds(pageBounds, exportBounds);
   if (!overlap) return false;
@@ -312,8 +333,8 @@ async function drawDomSlot(
   const pixelW = Math.max(1, Math.round(sceneW * drawScale));
   const pixelH = Math.max(1, Math.round(sceneH * drawScale));
 
-  const clone = slot.cloneNode(true) as HTMLElement;
-  hollowOutside(slot, clone, overlap.minY - pageBounds.minY, overlap.maxY - pageBounds.minY);
+  const clone = await copyForCapture(slot, overlap.minY - pageBounds.minY, overlap.maxY - pageBounds.minY, signal);
+  await checkpoint(signal);
   // A live page's frame pictures as nothing in an SVG image, and its srcdoc
   // (megabytes) made the picture take seconds to decode. Only the screen has it.
   clone.querySelectorAll("iframe").forEach((frame) => frame.remove());
@@ -357,8 +378,12 @@ async function drawDomSlot(
   // final PNG encode then throws SecurityError (including otherwise clean PDF
   // captures with a marks layer). A self-contained data SVG stays exportable.
   // XML serialization also closes HTML void elements for the SVG image parser.
+  await checkpoint(signal);
   const img = await loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
-  if (css.includes("@font-face")) await settleImageFonts(img, pixelW, pixelH);
+  await checkpoint(signal);
+  if (css.includes("@font-face")) await settleImageFonts(img, pixelW, pixelH, signal);
+  // Drawing it at full size lays out and paints the whole picture again.
+  await checkpoint(signal);
   const dx = (overlap.minX - exportBounds.minX) * drawScale;
   const dy = (overlap.minY - exportBounds.minY) * drawScale;
   ctx.drawImage(img, dx, dy, pixelW, pixelH);
@@ -374,6 +399,9 @@ const CAPTURE_METRICS = [
   "top", "right", "bottom", "left", "vertical-align",
 ] as const;
 
+/** All an emptied block outside the band needs: its height is set, and it paints out of view. */
+const SHELL_METRICS = ["margin-top", "margin-right", "margin-bottom", "margin-left"] as const;
+
 /** SVG images do not inherit Android WebView's system text zoom. Preserve
  * resolved type AND em-based geometry, or the fold rewraps the live page. */
 function freezeCaptureMetrics(from: Element, to: Element): void {
@@ -386,50 +414,102 @@ function freezeCaptureMetrics(from: Element, to: Element): void {
 }
 
 /**
- * Empty the parts of a cloned document that are nowhere near the capture.
- *
- * A capture of one screen of a long document used to serialise the whole
- * document into the SVG. Blocks entirely outside the band (in the slot's own,
- * unscaled coordinates) keep their box — same element, same margins, fixed to
- * the height they had — and lose their contents, so everything inside the
- * band still lays out exactly where it was.
+ * Room kept either side of a picture's band, in the slot's own units: a line
+ * or two, for what hangs over its edges. Half the band each side used to be
+ * kept, which on a page picture froze the styles of two pages' worth of text.
  */
-function hollowOutside(slot: HTMLElement, clone: HTMLElement, bandTop: number, bandBottom: number): void {
-  const slotRect = slot.getBoundingClientRect();
-  const scale = slot.offsetWidth > 0 ? slotRect.width / slot.offsetWidth : 1;
-  if (!(scale > 0)) return;
-  const margin = (bandBottom - bandTop) * 0.5;
+const CAPTURE_BAND_MARGIN = 48;
+/** With a `signal`, the longest the copy holds the main thread before a checkpoint. */
+const CAPTURE_SLICE_MS = 8;
+
+/**
+ * The slot copied for a capture, with only the band near it filled in.
+ *
+ * A capture of one screen of a long document used to clone the whole
+ * document (60,000 nodes for a chapter of math) and then empty most of it.
+ * Blocks entirely outside the band (in the slot's own, unscaled coordinates)
+ * are copied empty instead: same element, same margins, fixed to the height
+ * they had, so everything inside the band still lays out exactly where it
+ * was. What is kept has its metrics frozen (see `freezeCaptureMetrics`).
+ *
+ * With a `signal`, the copy lets a touch or a frame through every few
+ * milliseconds, measuring against wherever the camera has moved the slot.
+ */
+async function copyForCapture(
+  slot: HTMLElement,
+  bandTop: number,
+  bandBottom: number,
+  signal?: AbortSignal,
+): Promise<HTMLElement> {
+  let slotRect = slot.getBoundingClientRect();
+  let scale = slot.offsetWidth > 0 ? slotRect.width / slot.offsetWidth : 1;
+  if (!(scale > 0)) return slot.cloneNode(true) as HTMLElement;
+  const margin = Math.min((bandBottom - bandTop) * 0.5, CAPTURE_BAND_MARGIN);
   const top = bandTop - margin;
   const bottom = bandBottom + margin;
-  const walk = (original: Element, copy: Element, depth: number) => {
-    freezeCaptureMetrics(original, copy);
-    const originals = original.children;
-    const copies = copy.children;
-    if (originals.length !== copies.length) return;
-    for (let i = 0; i < originals.length; i += 1) {
-      const from = originals[i]!;
-      const to = copies[i]! as HTMLElement;
-      const box = depth < 6 ? from.getBoundingClientRect() : null;
-      const localTop = box ? (box.top - slotRect.top) / scale : top;
-      const localBottom = box ? (box.bottom - slotRect.top) / scale : bottom;
-      if (box && (localBottom < top || localTop > bottom)) {
-        if (from instanceof HTMLElement && from.offsetHeight > 0) {
-          freezeCaptureMetrics(from, to);
+  const root = slot.cloneNode(false) as HTMLElement;
+  freezeCaptureMetrics(slot, root);
+  type Open = { original: Element; copy: Element; depth: number; children: ChildNode[]; next: number };
+  const open: Open[] = [{ original: slot, copy: root, depth: 0, children: Array.from(slot.childNodes), next: 0 }];
+  // Between checkpoints the page could change, and a copy of half of each is of neither.
+  let changed = false;
+  const changes = signal && typeof MutationObserver !== "undefined" ? new MutationObserver(() => { changed = true; }) : null;
+  changes?.observe(slot, { childList: true, characterData: true, subtree: true });
+  try {
+    let sliceAt = performance.now();
+    while (open.length > 0) {
+      // A page's top level alone is a thousand blocks: the slice is per element.
+      if (signal && performance.now() - sliceAt > CAPTURE_SLICE_MS) {
+        await checkpoint(signal);
+        if (changed) throw new DOMException("The page changed while it was pictured", "AbortError");
+        slotRect = slot.getBoundingClientRect();
+        if (slot.offsetWidth > 0 && slotRect.width > 0) scale = slotRect.width / slot.offsetWidth;
+        sliceAt = performance.now();
+      }
+      const at = open[open.length - 1]!;
+      const child = at.children[at.next++];
+      if (!child) {
+        open.pop();
+        continue;
+      }
+      if (!(child instanceof Element)) {
+        at.copy.appendChild(child.cloneNode(true));
+        continue;
+      }
+      const box = at.depth < 6 ? child.getBoundingClientRect() : null;
+      if (box && ((box.bottom - slotRect.top) / scale < top || (box.top - slotRect.top) / scale > bottom)) {
+        const resolved = child instanceof HTMLElement && child.offsetHeight > 0 ? getComputedStyle(child) : null;
+        // An inline run outside the band shares lines with what is inside it:
+        // emptied, the lines in the band would rewrap. It is kept like them.
+        if (resolved && !resolved.display.startsWith("inline")) {
+          const shell = child.cloneNode(false) as HTMLElement;
+          // Empty and fixed in height, only its margins still move what follows.
+          for (const name of SHELL_METRICS) shell.style.setProperty(name, resolved.getPropertyValue(name));
           // offsetHeight rounds every paragraph to whole CSS pixels. On a
           // long capture those errors accumulate above the selected passage,
           // moving the text while ink keeps its exact scene coordinates.
-          to.style.height = `${box.height / scale}px`;
-          to.style.boxSizing = "border-box";
-          to.style.overflow = "hidden";
-          to.replaceChildren();
+          shell.style.height = `${box.height / scale}px`;
+          shell.style.boxSizing = "border-box";
+          shell.style.overflow = "hidden";
+          at.copy.appendChild(shell);
+          continue;
         }
-        continue;
+        if (!resolved) {
+          at.copy.appendChild(child.cloneNode(true));
+          continue;
+        }
       }
       // Freeze only the retained band, never every glyph in the full document.
-      walk(from, to, depth + 1);
+      const kept = child.cloneNode(false) as Element;
+      freezeCaptureMetrics(child, kept);
+      at.copy.appendChild(kept);
+      open.push({ original: child, copy: kept, depth: at.depth + 1, children: Array.from(child.childNodes), next: 0 });
     }
-  };
-  walk(slot, clone, 0);
+  } finally {
+    changes?.disconnect();
+  }
+  drawLazyBlocksIn(root);
+  return root;
 }
 
 /**
@@ -501,26 +581,35 @@ export async function compositePageLayers(
   exportBounds: SceneBounds,
   drawScale: number,
   layers: PageExportLayers | null | undefined,
-  /** A PDF's page bitmaps only: no HTML layer pictured, which is most of the cost. */
-  { pdfOnly = false }: { pdfOnly?: boolean } = {},
+  {
+    pdfOnly = false,
+    signal,
+  }: {
+    /** A PDF's page bitmaps only: no HTML layer pictured, which is most of the cost. */
+    pdfOnly?: boolean;
+    /** Calls the picture off: it rejects at its next checkpoint (see `checkpoint`). */
+    signal?: AbortSignal;
+  } = {},
 ): Promise<void> {
   if (!layers?.pageBounds) return;
   const { pageBounds, contentSlot, marksSlot } = layers;
   if (!intersectBounds(pageBounds, exportBounds)) return;
+  stopIfCalledOff(signal);
 
   if (contentSlot) {
     const drewPdf = drawPdfCanvases(ctx, contentSlot, pageBounds, exportBounds, drawScale);
     // Markdown / statement: foreignObject. Also retry when PDF canvases were
     // blank or only partially drew — ink-only exports used to skip the DOM path.
     if (!drewPdf && !pdfOnly) {
-      await drawDomSlot(ctx, contentSlot, pageBounds, exportBounds, drawScale);
+      await drawDomSlot(ctx, contentSlot, pageBounds, exportBounds, drawScale, signal);
     }
   }
   if (pdfOnly) return;
 
   // Marks / highlights / footnotes always attempt independently of content path.
   if (marksSlot && marksSlot.childElementCount > 0) {
-    await drawDomSlot(ctx, marksSlot, pageBounds, exportBounds, drawScale);
+    await checkpoint(signal);
+    await drawDomSlot(ctx, marksSlot, pageBounds, exportBounds, drawScale, signal);
   }
 }
 
@@ -554,7 +643,7 @@ export function livePageCopy(
   const top = frame.y - bounds.minY;
   const bottom = top + frame.height;
   for (const slot of [layers.contentSlot, layers.marksSlot]) {
-    if (!slot || !host.contains(slot) || slot.querySelector("canvas.lc-pdf-canvas")) continue;
+    if (!slot || !host.contains(slot) || holdsPdfCanvas(slot)) continue;
     const layer = copyBand(slot, host, top, bottom);
     if (!layer) continue;
     layer.style.position = "absolute";
@@ -566,6 +655,30 @@ export function livePageCopy(
   // Footnote and heading anchors stay unique to the page.
   root.querySelectorAll("[id]").forEach((el) => el.removeAttribute("id"));
   return root;
+}
+
+const pdfCanvases = new WeakMap<Element, HTMLCollectionOf<Element>>();
+
+/**
+ * Whether a PDF page's canvas is in `slot`. A search for one walked every
+ * element of a note, which has none, for each page a turn copied; the browser
+ * keeps a live list by class up to date, and counting it is cheap until the
+ * slot changes.
+ */
+function holdsPdfCanvas(slot: Element): boolean {
+  let list = pdfCanvases.get(slot);
+  if (!list) {
+    list = slot.getElementsByClassName("lc-pdf-canvas");
+    pdfCanvases.set(slot, list);
+  }
+  for (let i = 0; i < list.length; i += 1) if (list[i]!.tagName === "CANVAS") return true;
+  return false;
+}
+
+/** Laid out in the normal flow, so every later sibling in the flow sits at or below it. */
+function flowsInOrder(el: Element): boolean {
+  const { position, float } = getComputedStyle(el);
+  return (position === "" || position === "static" || position === "relative") && (float === "" || float === "none");
 }
 
 /** `slot` inside stand-ins for its ancestors up to `host`, with only `top`–`bottom` (slot units) filled in. */
@@ -630,6 +743,11 @@ function copyBand(slot: HTMLElement, host: Element, top: number, bottom: number)
           shell.style.overflow = "hidden";
         }
         into.appendChild(shell);
+        // Nothing after a block below the band moves the band: the rest
+        // are left out. On a long note that was most of the copy, every
+        // block measured and cloned for each page a turn showed. This one
+        // stays, so the band's last block is not the last child.
+        if (childTop > bottom && box.height > 0 && flowsInOrder(child)) break;
         continue;
       }
       // Small, or all inside the band: as it is. A long list or table
@@ -647,5 +765,6 @@ function copyBand(slot: HTMLElement, host: Element, top: number, bottom: number)
   // Out before the copy is mounted: a live page's frame would load and run
   // the whole page again.
   copy.querySelectorAll("iframe").forEach((frame) => frame.remove());
+  drawLazyBlocksIn(copy);
   return outer;
 }

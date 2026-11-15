@@ -2496,6 +2496,22 @@ body[data-lc-sash-drag] .lc-board-chrome-slot {
   pointer-events: none;
 }
 
+/* Pages reading, flicking through: glass over the page text (PageTurn's
+ * `raiseGlass`). The browser looks up what is under each touch through every
+ * positioned box below it, thousands in a page of math. This layer is the
+ * board's own, so a touch ends on it at once, on the board. Over the text
+ * (z-index 1), under the ink and everything else on the board. */
+.lc-board[data-turn-glass]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.lc-board[data-turn-glass="on"]::after {
+  pointer-events: auto;
+}
+
 /* Shown in place of the panes while pages are compared, or on the way out
  * when nothing turned out to differ. */
 .lc-hub-conflict-checking {
@@ -5107,56 +5123,6 @@ body[data-lc-sash-drag="horizontal"] {
 .lc-mobile .lc-board .Stack.zoom-actions,
 .lc-mobile .lc-board .undo-redo-buttons {
   display: none !important;
-}
-
-/*
- * Excalidraw's tap "Scroll back to content" — mute visually and to hits, but
- * leave display alone so {@link ScrollBackHold} can mirror when it appears.
- * Our hold-to-fill control is `.lc-scroll-back-hold`.
- */
-.lc-board .scroll-back-to-content {
-  opacity: 0 !important;
-  pointer-events: none !important;
-  color: transparent !important;
-  background: transparent !important;
-  border-color: transparent !important;
-  box-shadow: none !important;
-}
-
-.lc-scroll-back-hold {
-  /* Fixed to the viewport — absolute-to-.lc-board put this under the fold when
-     the camera had already wandered into empty board space. */
-  position: fixed;
-  left: 50%;
-  bottom: max(18px, env(safe-area-inset-bottom, 0px));
-  top: auto;
-  z-index: 240;
-  transform: translateX(-50%);
-  min-width: 0;
-  min-height: 0;
-  height: 36px;
-  padding: 0 14px;
-  border-radius: var(--lc-r-block);
-  border: 1px solid color-mix(in srgb, var(--accent, #0d9488) 55%, transparent);
-  background: color-mix(in srgb, var(--accent, #0d9488) 14%, var(--panel, #fff));
-  color: var(--ink, #1a1a1a);
-  font-size: 12px;
-  font-weight: 600;
-  box-shadow: 0 4px 14px rgb(0 0 0 / 16%);
-  pointer-events: auto;
-  touch-action: manipulation;
-}
-
-.lc-scroll-back-hold .lc-hold-reveal-fill {
-  background: linear-gradient(
-    180deg,
-    var(--lc-hold-wash-top) 0%,
-    var(--lc-hold-wash-bottom) 100%
-  );
-}
-
-.lc-scroll-back-hold .lc-hold-reveal-label {
-  color: inherit;
 }
 
 /* Mid-drag the fade is the gesture, so it must not lag behind the finger. */
@@ -8872,6 +8838,14 @@ body[data-lc-sash-drag="horizontal"] {
 
 .lc-spread-toggle.is-busy .lc-spread-busy {
   opacity: 1;
+}
+
+/* Its spinner stands still while nothing is busy. Turning unseen, it had the
+ * browser draw about 11 frames a second for as long as the page was open,
+ * and each second of frames runs Chromium's look for pop-up ads under the
+ * screen's centre: 15-20 ms over a note of math on the tablet. */
+.lc-spread-toggle:not(.is-busy) .lc-spread-busy .lc-spinner {
+  animation-play-state: paused;
 }
 
 /* Fill form: the button is also the badge that says the PDF has fields. */

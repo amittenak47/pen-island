@@ -130,6 +130,144 @@ describe("compositePageLayers", () => {
       .rejects.toThrow("export layer image failed");
   });
 
+  it("copies only the band near a picture: far blocks go in empty at their height, never cloned whole", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
+    });
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = () => ({ top: 0, width: 200 }) as DOMRect;
+    // Slot units at scale 1; the picture's band is 300 to 700.
+    const spans = [[0, 100], [150, 200], [260, 290], [300, 700], [760, 800]];
+    const blocks = spans.map(([top, bottom], i) => {
+      const p = document.createElement("p");
+      p.innerHTML = `<span>block ${i}</span>`;
+      p.getBoundingClientRect = () => ({ top, bottom, height: bottom - top, width: 200 }) as DOMRect;
+      Object.defineProperty(p, "offsetHeight", { value: bottom - top });
+      slot.append(p);
+      return p;
+    });
+    const far = vi.spyOn(blocks[0]!, "cloneNode");
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D,
+      { minX: 0, minY: 300, maxX: 200, maxY: 700 }, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" });
+    const xml = decodeURIComponent(sources[0]!.slice(sources[0]!.indexOf(",") + 1));
+    const ps = Array.from(new DOMParser().parseFromString(xml, "image/svg+xml").querySelectorAll("p"));
+    // A line or two from the band is kept; 100 px off it, as 150-200 is, is not.
+    expect(ps.map((p) => p.textContent)).toEqual(["", "", "block 2", "block 3", ""]);
+    expect(ps[1]!.getAttribute("style")).toContain("height: 50px");
+    expect(far).toHaveBeenCalledWith(false);
+    expect(far).not.toHaveBeenCalledWith(true);
+  });
+
+  it("keeps an emptied block's margins only, and an inline run beside the band whole", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
+    });
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = () => ({ top: 0, width: 200 }) as DOMRect;
+    const place = (el: Element, top: number, bottom: number) => {
+      el.getBoundingClientRect = () => ({ top, bottom, height: bottom - top, width: 200 }) as DOMRect;
+      Object.defineProperty(el, "offsetHeight", { value: bottom - top });
+    };
+    // A block far above the band, then a paragraph running into it whose first line is above it.
+    const far = document.createElement("p");
+    far.style.margin = "1em 0";
+    far.innerHTML = "<span>far</span>";
+    place(far, 0, 100);
+    const running = document.createElement("p");
+    // jsdom has no user-agent sheet: say what a browser resolves for a span.
+    running.innerHTML = '<span class="early" style="display:inline">early words</span> and <span class="late" style="display:inline">late words</span>';
+    place(running, 200, 500);
+    place(running.querySelector(".early")!, 200, 220);
+    place(running.querySelector(".late")!, 320, 340);
+    slot.append(far, running);
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D,
+      { minX: 0, minY: 300, maxX: 200, maxY: 700 }, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" });
+    const xml = decodeURIComponent(sources[0]!.slice(sources[0]!.indexOf(",") + 1));
+    const ps = Array.from(new DOMParser().parseFromString(xml, "image/svg+xml").querySelectorAll("p"));
+    const shell = ps[0]!.getAttribute("style") ?? "";
+    expect(ps[0]!.textContent).toBe("");
+    expect(shell).toMatch(/margin(-top)?:/);
+    expect(shell).not.toContain("font-size");
+    // Emptied, the early words would rewrap the lines that are in the band.
+    expect(ps[1]!.textContent).toBe("early words and late words");
+  });
+
+  it("lets a touch through between any two blocks while copying a page-turn picture", async () => {
+    let pausesBeforeLoad = -1;
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(_value: string) {
+        pausesBeforeLoad = pauses.mock.calls.filter(([, ms]) => !ms).length;
+        queueMicrotask(() => this.onload?.());
+      }
+    });
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 10));
+    const pauses = vi.spyOn(window, "setTimeout");
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = () => ({ top: 0, width: 200 }) as DOMRect;
+    // Six blocks far above the band: emptied, never opened, all children of one parent.
+    for (let i = 0; i < 6; i += 1) {
+      const p = document.createElement("p");
+      p.style.display = "block";
+      p.textContent = String(i);
+      p.getBoundingClientRect = () => ({ top: i * 10, bottom: i * 10 + 10, height: 10, width: 200 }) as DOMRect;
+      Object.defineProperty(p, "offsetHeight", { value: 10 });
+      slot.append(p);
+    }
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D,
+      { minX: 0, minY: 500, maxX: 200, maxY: 600 }, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" },
+      { signal: new AbortController().signal });
+    // One pause per block while copying, then the two before the picture loads.
+    expect(pausesBeforeLoad).toBeGreaterThanOrEqual(8);
+  });
+
+  it("stops a picture called off, before it loads or draws anything", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
+    });
+    const slot = document.createElement("div");
+    slot.innerHTML = "<p>Page one</p>";
+    const bounds = { minX: 0, minY: 0, maxX: 200, maxY: 100 };
+    const stop = new AbortController();
+    const drawImage = vi.fn();
+    const picture = compositePageLayers({ drawImage } as unknown as CanvasRenderingContext2D, bounds, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: bounds, paperColor: "#fff" }, { signal: stop.signal });
+    stop.abort();
+    await expect(picture).rejects.toMatchObject({ name: "AbortError" });
+    expect(sources).toHaveLength(0);
+    expect(drawImage).not.toHaveBeenCalled();
+  });
+
+  it("calls a picture off when the page changes while it is being copied", async () => {
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    });
+    // Every look at the clock is past the slice: the copy pauses at once.
+    let clock = 0;
+    vi.spyOn(performance, "now").mockImplementation(() => (clock += 10));
+    const slot = document.createElement("div");
+    slot.innerHTML = "<p>one</p><p>two</p>";
+    const bounds = { minX: 0, minY: 0, maxX: 200, maxY: 100 };
+    const picture = compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D, bounds, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: bounds, paperColor: "#fff" }, { signal: new AbortController().signal });
+    slot.append(document.createElement("p"));
+    await expect(picture).rejects.toMatchObject({ name: "AbortError" });
+  });
+
   it("no-ops without page bounds", async () => {
     await expect(
       compositePageLayers(
@@ -238,5 +376,64 @@ describe("livePageCopy", () => {
     expect(ps[0]!.style.height).toBe("150px");
     expect(copy.querySelector("[id]")).toBeNull();
     expect(blocks[1]!.id).toBe("b1");
+  });
+
+  it("draws a block in the copy that Pages reading hides on the board", () => {
+    const host = document.createElement("div");
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = rect(0, 2000);
+    const p = document.createElement("p");
+    p.setAttribute("style", "content-visibility:hidden;contain-intrinsic-size:150px");
+    p.textContent = "the next page";
+    p.getBoundingClientRect = rect(400, 300);
+    slot.append(p);
+    host.append(slot);
+    document.body.append(host);
+    const copy = livePageCopy(
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" },
+      { x: 0, y: 200, width: 200, height: 150 },
+      host,
+    )!;
+    host.remove();
+    expect(copy.querySelector("p")!.style.contentVisibility).toBe("visible");
+    expect(p.style.contentVisibility).toBe("hidden");
+  });
+
+  it("leaves out what follows the first block below the band, unless that block is out of the flow or has no box", () => {
+    const host = document.createElement("div");
+    const slot = document.createElement("div");
+    Object.defineProperty(slot, "offsetWidth", { value: 200 });
+    slot.getBoundingClientRect = rect(0, 4000);
+    const measured: string[] = [];
+    const block = (name: string, top: number, height: number, style = "") => {
+      const p = document.createElement("p");
+      p.textContent = name;
+      if (style) p.setAttribute("style", style);
+      p.getBoundingClientRect = () => {
+        measured.push(name);
+        return rect(top, height)();
+      };
+      slot.append(p);
+    };
+    block("a", 0, 100);
+    block("b", 200, 100);
+    // Below the band, but neither says where the rest of the flow is.
+    block("pinned", 900, 100, "position:absolute");
+    block("empty", 900, 0);
+    block("c", 400, 100);
+    block("d", 600, 100);
+    block("e", 800, 100);
+    host.append(slot);
+    document.body.append(host);
+    const copy = livePageCopy(
+      { contentSlot: slot, marksSlot: null, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 2000 }, paperColor: "#fff" },
+      // Slot units at half size: a is 0-50, b 100-150, c 200-250, d 300-350.
+      { x: 0, y: 90, width: 200, height: 120 },
+      host,
+    )!;
+    host.remove();
+    expect(Array.from(copy.querySelectorAll("p"), (p) => p.textContent)).toEqual(["", "b", "", "", "c", ""]);
+    expect(measured).toEqual(["a", "b", "pinned", "empty", "c", "d"]);
   });
 });

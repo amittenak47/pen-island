@@ -93,6 +93,8 @@ export function useAnnotateSession({ tab, boardRef, patchTab, setError }: Annota
     localFileHash?: string;
   } | null>(null);
   const annotateDocIdRef = useRef<string | null>(null);
+  /** Whether this workspace has had a session id yet: see `mirrorAnnotateDocId`. */
+  const hadAnnotateDocIdRef = useRef(false);
   /**
    * Measured document height, in scene units, driving the page frame.
    *
@@ -320,9 +322,17 @@ export function useAnnotateSession({ tab, boardRef, patchTab, setError }: Annota
   const mirrorAnnotateDocId = () => {
     const docId = annotateDocId;
     if (!docId) {
-      patchTab(tab.id, { docId });
+      /*
+       * Only a session that was open is cleared off the record (a discard).
+       * A workspace that has not opened one yet has nothing to say about the
+       * record's id: on a cold start the board chunk lands after mount, the
+       * open reads the record only then, and clearing it here first made a
+       * set that was read but never saved open under a new id every launch.
+       */
+      if (hadAnnotateDocIdRef.current) patchTab(tab.id, { docId });
       return;
     }
+    hadAnnotateDocIdRef.current = true;
     let cancelled = false;
     void getAnnotateDoc(docId).then((doc) => {
       if (cancelled) return;

@@ -14,7 +14,7 @@ import { makeFingerRest } from "./fingerRest";
 import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
 import { createCameraController, type CameraController } from "./cameraController";
-import { touchPointersIn } from "./touchPointers";
+import { syncTouchPointers } from "./touchPointers";
 import {
   CaptureUpdateAction,
   createBoardScene,
@@ -153,7 +153,9 @@ import {
   liveExcalidrawViewport,
 } from "./documentRotateCamera";
 import { paintExcalidrawCanvases } from "./excalidrawCanvasSize";
-import { DOCUMENT_LAYER_SELECTOR, documentLayerHeight } from "./documentLayer";
+import { documentLayerHeight, documentLayers } from "./documentLayer";
+import { placeLazyWindow, releaseLazyBlocks } from "./lazyBlockWindow";
+import { jumpLandsOnFittedLock } from "./fittedLock";
 import {
   contentSlotCssTransform,
   contentSlotPlaceAt,
@@ -279,7 +281,6 @@ import { BoardToolbar } from "./BoardToolbar";
 import type { ResetClearMode } from "./resetClearMode";
 import { InkPresetEditor } from "./InkPresetEditor";
 import { InkToolWheel } from "./InkToolWheel";
-import { ScrollBackHold } from "./ScrollBackHold";
 import {
   isDeletableElement,
   selectionBounds,
@@ -405,6 +406,7 @@ import {
 } from "./exportPageComposite";
 import type { PageFrame } from "./inkPageIndex";
 import { sectionPages, type TextBlock } from "./pageTurn/sectionPages";
+import { pageIndexAtLine, pageShownByCamera, readingPlaceAt, readingPlaceLine, scrollYForLine, type ReadingPlace } from "./readingPlace";
 
 /** What a text page may not be cut through: whole blocks, innermost first. */
 const TEXT_PAGE_BLOCKS =
@@ -752,6 +754,8 @@ async function renderSceneFrameCanvas(
    * its HTML marks layer (a few ms instead of a few hundred).
    */
   layers: "all" | "none" | "pdf" = "all",
+  /** Calls a page turn's picture off part-way (see `compositePageLayers`). */
+  signal?: AbortSignal,
 ): Promise<HTMLCanvasElement | null> {
   const appState = { ...(api.getAppState() as object), exportScale } as Record<string, unknown>;
   const files = api.getFiles();
@@ -781,7 +785,7 @@ async function renderSceneFrameCanvas(
   if (layers !== "none") {
     ctx.fillStyle = paper;
     ctx.fillRect(0, 0, width, height);
-    await compositePageLayers(ctx, bounds, drawScale, pageLayers, { pdfOnly: layers === "pdf" });
+    await compositePageLayers(ctx, bounds, drawScale, pageLayers, { pdfOnly: layers === "pdf", signal });
   }
 
   if (all.length > 0) {
@@ -4455,7 +4459,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         el.closest(
           ".lc-toolbar, .lc-map-controls, .lc-pager, .lc-stamp-trash, .lc-capture-overlay," +
             " .lc-scene-select, .lc-scene-text-edit, .lc-doc-footnote, .lc-doc-confirm, .lc-doc-sheet, .lc-footnote-overview" +
-            ", .lc-footnote-bubble, .lc-scroll-back-hold, .lc-hold-reveal, .lc-split-sash",
+            ", .lc-footnote-bubble, .lc-hold-reveal, .lc-split-sash",
         )
       ) {
         return false;
@@ -6686,9 +6690,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const onDown = (event: PointerEvent) => {
       if (event.pointerType !== "touch") return;
       // A page edge can consume the first finger before it reaches this
-      // root. Seed both fingers from capture so the pinch still starts now.
-      for (const [id, touch] of touchPointersIn(root)) touches.set(id, touch);
+      // root. Seed both fingers from capture so the pinch still starts now;
+      // and drop the ones that have lifted where this root did not see it
+      // (see `syncTouchPointers`), ending a pinch that has lost its fingers.
+      syncTouchPointers(touches, root);
       touches.set(event.pointerId, { x: event.clientX, y: event.clientY });
+      if (pinch && touches.size < 2) end();
       if (touches.size !== 2 || pinch || !reading()) return;
       begin();
       if (!pinch) return;
@@ -7463,10 +7470,24 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const node = contentSlotNodeRef.current;
     if (!node || typeof ResizeObserver !== "function") return;
     const observer = new ResizeObserver(() => read());
+    /*
+     * The slot and the document layers in it, kept in step with what is
+     * mounted. Looked up near the slot, not by a `querySelectorAll` over it:
+     * a long note with math is tens of thousands of KaTeX spans, and this runs
+     * on every delivery, which on a tablet was every frame of a pan (12 ms each).
+     */
+    const observed = new Set<Element>();
     const watch = () => {
-      observer.observe(node);
-      for (const inner of node.querySelectorAll<HTMLElement>(DOCUMENT_LAYER_SELECTOR)) {
-        if (inner !== node) observer.observe(inner);
+      const current = new Set<Element>([node, ...documentLayers(node)]);
+      for (const el of observed) {
+        if (current.has(el)) continue;
+        observer.unobserve(el);
+        observed.delete(el);
+      }
+      for (const el of current) {
+        if (observed.has(el)) continue;
+        observer.observe(el);
+        observed.add(el);
       }
     };
     const read = () => {
@@ -9415,12 +9436,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
    * view, `pageFitRef` of it on the limiting side. `clampPanScroll` holds the
    * camera to the same box, so a wheel or a drag cannot walk it off centre.
    */
-  const applyPageFit = () => {
+  const applyPageFit = (): boolean => {
     const fraction = pageFitRef.current;
     const lock = pageLockRef.current;
     const bounds = pageBoundsRef.current;
     const api = apiRef.current;
-    if (fraction == null || !lock || !bounds || !api) return;
+    if (fraction == null || !lock || !bounds || !api) return false;
     const state = api.getAppState() as {
       width?: number;
       height?: number;
@@ -9440,7 +9461,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const bare = pageColumn(bounds);
     const bareW = bare.maxX - bare.minX;
     const h = lock.maxY - lock.minY;
-    if (availW < 8 || availH < 8 || !(bareW > 0) || !(h > 0)) return;
+    if (availW < 8 || availH < 8 || !(bareW > 0) || !(h > 0)) return false;
     // Not the gesture ceiling: a reading column is 300–760 units, so a page
     // filling a large window needs well past 1.75, and the fit is arithmetic.
     let zoom = Math.min(PAGE_FIT_ZOOM_MAX, Math.max(FIT_ZOOM_MIN, Math.min(availW / bareW, availH / h) * fraction));
@@ -9499,7 +9520,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       Math.abs(same.scrollY - scrollY) < 0.01
     ) {
       placePageMask(scrollX, scrollY, zoom);
-      return;
+      return true;
     }
     pendingVisualScrollRef.current = null;
     if (visualScrollRafRef.current) {
@@ -9532,6 +9553,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     placeContentSlotAtRef.current(scrollX, scrollY, zoom);
     void rasterInkRef.current?.syncCamera();
     scheduleSlotReports();
+    return true;
   };
   const applyPageFitRef = useLatest<() => void>(applyPageFit);
 
@@ -9565,6 +9587,8 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       publishBooktabPages(filmScope, []);
       pageLockRef.current = null;
       pageShownRef.current = null;
+      // Scroll reading: off-screen blocks go back to the browser's own skipping.
+      if (contentSlotNodeRef.current) releaseLazyBlocks(contentSlotNodeRef.current);
       const cam = committedPanCameraRef.current;
       placePageMask(cam.scrollX, cam.scrollY, cam.zoom);
       return;
@@ -9581,19 +9605,62 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     if (textH > 0) {
       pageLockRef.current = { minY: span.minY, maxY: span.minY + textH };
       pageShownRef.current = { minY: span.minY, maxY: Math.min(span.maxY, span.minY + textH) };
+      // Only what can be seen from this page is drawn (see `placeLazyWindow`).
+      const slot = contentSlotNodeRef.current;
+      const bounds = pageBoundsRef.current;
+      if (slot && bounds) placeLazyWindow(slot, span.minY - bounds.minY, textH);
     } else {
       publishBooktabPages(filmScope, []);
       pageLockRef.current = { minY: span.minY, maxY: span.maxY };
       pageShownRef.current = { minY: span.minY, maxY: span.maxY };
     }
-    if (pageFitRef.current != null) applyPageFit();
-    else publishTextBooktabs();
+    if (pageFitRef.current != null) {
+      if (applyPageFit()) fittedLockNow(pageLockRef.current);
+    } else publishTextBooktabs();
+  };
+
+  /**
+   * The page the lock fitted the camera on in this task: a page turn locks the
+   * page it lands on and then jumps to it, and the jump has nothing left to
+   * move (see `jumpToPageFrame`).
+   */
+  const fittedLockRef = useRef<{ minY: number; maxY: number } | null>(null);
+  const fittedLockNow = (lock: { minY: number; maxY: number } | null) => {
+    fittedLockRef.current = lock;
+    queueMicrotask(() => {
+      if (fittedLockRef.current === lock) fittedLockRef.current = null;
+    });
   };
   const lockPageSpanRef = useLatest<(span: { minY: number; maxY: number; pageId?: number } | null, side?: "left" | "right") => void>(lockPageSpan);
 
-  const jumpToPdfPage = useCallback((pageId: number, opts?: { hold?: boolean; frameMinY?: number }) => {
+  const jumpToPdfPage = useCallback((pageId: number, opts?: { hold?: boolean; frameMinY?: number; fitted?: boolean }) => {
     const api = apiRef.current;
     if (!api || pageId < 1) return false;
+    if (opts?.fitted) {
+      /*
+       * The page lock has just fitted the camera on this page (a page turn
+       * landing): nothing to measure or move, only the page to announce.
+       * Measuring the board, placing a provisional camera, then locking and
+       * fitting again forced a style pass on the whole note at each step,
+       * four a landing on a chapter of math.
+       */
+      userAdjustedCameraRef.current = true;
+      pendingPdfPageRef.current = opts.hold === false ? 0 : pageId;
+      pendingVisualScrollRef.current = null;
+      if (visualScrollRafRef.current) {
+        cancelAnimationFrame(visualScrollRafRef.current);
+        visualScrollRafRef.current = 0;
+      }
+      const frames = offsetPageFrames(peekPdfReadingFrames(filmScope), pageBoundsRef.current?.minY ?? 0);
+      publishPdfFilmCurrent(filmScope, pageId);
+      publishPdfViewPages(
+        filmScope,
+        [pageId],
+        pdfRestPages(pageId, Math.max(pageId, lastPageId(frames)), [pageId], undefined, readAhead()),
+      );
+      scheduleSlotReports();
+      return true;
+    }
     const state = api.getAppState() as {
       zoom?: { value?: number };
       scrollX?: number;
@@ -9619,7 +9686,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     const insetTop = measured.top + (mobileRef.current ? 0 : safeCssPx("--lc-safe-top"));
     const origin = pageBoundsRef.current?.minY ?? 0;
     let frames = offsetPageFrames(peekPdfReadingFrames(filmScope), origin);
-    if (!frames.some((frame) => frame.pageId === pageId)) {
+    // Only a PDF has page slots to read: on a note, the search for them
+    // walked every element and measured the slot, at every jump.
+    if (pdfDocumentRef.current && !frames.some((frame) => frame.pageId === pageId)) {
       frames = pageFramesFromPdfSlot(
         contentSlotNodeRef.current,
         pageBoundsRef.current,
@@ -9710,6 +9779,104 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
     return true;
   }, [applyDocumentFrameHeight, scheduleSlotReports]);
   const scrollToPdfPageRef = useLatest<(pageId: number, opts?: { hold?: boolean }) => boolean>(jumpToPdfPage);
+
+  /** A text document laid out on the board: markdown, code, text, EPUB. Not a PDF. */
+  const textDocumentOnBoard = () =>
+    Boolean(pageContentRef.current && pageBoundsRef.current) &&
+    !pdfDocumentRef.current &&
+    peekPdfReadingFrames(filmScope).length === 0;
+
+  /** The document's laid-out height in scene units, for a reading place. */
+  const readingDocHeight = () => {
+    const measured = pageContentHeightRef.current;
+    if (measured != null && measured > 0) return measured;
+    const bounds = pageBoundsRef.current;
+    return bounds ? bounds.maxY - bounds.minY : 0;
+  };
+
+  /**
+   * Scroll reading: put scene line `line` just under the top chrome, at the
+   * zoom the camera is at. The same writes as a page jump, so the slot, the
+   * ink and the next pan all start from the new camera.
+   */
+  const jumpCameraToLine = (line: number): boolean => {
+    const api = apiRef.current;
+    if (!api || !Number.isFinite(line)) return false;
+    const state = api.getAppState() as {
+      zoom?: { value?: number };
+      scrollX?: number;
+      width?: number;
+      height?: number;
+      offsetLeft?: number;
+      offsetTop?: number;
+    };
+    const prev = liveCameraRef.current;
+    const zoom = state.zoom?.value ?? prev?.zoom ?? 1;
+    if (!(zoom > 0)) return false;
+    const inset = measureChromeInsets(
+      boardRef.current,
+      toolbarHeightRef.current,
+      mapChromeHiddenRef.current,
+      mobileRef.current,
+    );
+    const placed = clampPanScroll(
+      state.scrollX ?? prev?.scrollX ?? 0,
+      scrollYForLine(line, zoom, inset.top),
+      zoom,
+    );
+    const { viewWidth, viewHeight } = liveBoardViewSize(boardBoxOf(boardRef.current), state);
+    userAdjustedCameraRef.current = true;
+    pendingVisualScrollRef.current = null;
+    if (visualScrollRafRef.current) {
+      cancelAnimationFrame(visualScrollRafRef.current);
+      visualScrollRafRef.current = 0;
+    }
+    committedPanCameraRef.current = { scrollX: placed.scrollX, scrollY: placed.scrollY, zoom };
+    liveCameraRef.current = {
+      scrollX: placed.scrollX,
+      scrollY: placed.scrollY,
+      zoom,
+      width: viewWidth || prev?.width || state.width || 800,
+      height: viewHeight || prev?.height || state.height || 800,
+      offsetLeft: prev?.offsetLeft ?? state.offsetLeft ?? 0,
+      offsetTop: prev?.offsetTop ?? state.offsetTop ?? 0,
+      live: false,
+    };
+    clearPanOffsetsRef.current();
+    api.updateScene({
+      appState: { scrollX: placed.scrollX, scrollY: placed.scrollY },
+      captureUpdate: CaptureUpdateAction.NEVER,
+    });
+    placeContentSlotAtRef.current(placed.scrollX, placed.scrollY, zoom);
+    void rasterInkRef.current?.syncCamera();
+    scheduleSlotReports();
+    return true;
+  };
+
+  /** Pages reading: hold this text page and bring the camera to it. */
+  const holdTextPage = (frame: PageFrame): boolean => {
+    lockPageSpan(frame);
+    // Without a fit the lock only bounds the camera: move it onto the page.
+    if (pageFitRef.current == null) return jumpCameraToLine(frame.minY);
+    void rasterInkRef.current?.syncCamera();
+    scheduleSlotReports();
+    return true;
+  };
+
+  /**
+   * Back to a text document's reading place. Pages reading holds the page the
+   * place falls on (fitted, when a fit is on); scroll reading puts its line
+   * under the top chrome.
+   */
+  const goToReadingPlace = (place: ReadingPlace): boolean => {
+    const bounds = pageBoundsRef.current;
+    if (!bounds || !textDocumentOnBoard()) return false;
+    const line = readingPlaceLine(place, bounds, readingDocHeight());
+    if (!pageLockRef.current) return jumpCameraToLine(line);
+    const frames = textPageFrames();
+    const index = pageIndexAtLine(frames, line);
+    return index >= 0 && holdTextPage(frames[index]!);
+  };
 
   useImperativeHandle(
     ref,
@@ -10185,17 +10352,20 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         runFit(undefined, "keepY");
       },
       jumpToPageFrame: (frame) => {
-        const jumped = jumpToPdfPage(frame.pageId, { hold: false, frameMinY: frame.minY });
-        if (jumped && pageFitRef.current != null) applyPageFit();
+        // A page turn landing locks its page and then jumps to it: the lock's
+        // fit has the camera there already.
+        const fitted = jumpLandsOnFittedLock(fittedLockRef.current, pageLockRef.current, pageFitRef.current != null, frame.minY);
+        const jumped = jumpToPdfPage(frame.pageId, { hold: false, frameMinY: frame.minY, fitted });
+        if (jumped && pageFitRef.current != null && !fitted) applyPageFit();
         return jumped;
       },
-      captureSceneFrame: async (frame, scale) => {
+      captureSceneFrame: async (frame, scale, options) => {
         const api = apiRef.current;
         if (!api || frame.width < 1 || frame.height < 1) return null;
         const ops = rasterInkRef.current?.getOpsInBounds({
           minX: frame.x, minY: frame.y, maxX: frame.x + frame.width, maxY: frame.y + frame.height,
         }) ?? [];
-        return renderSceneFrameCanvas(api, ops, frame, scale, pageExportLayers(), true);
+        return renderSceneFrameCanvas(api, ops, frame, scale, pageExportLayers(), true, "all", options?.signal);
       },
       captureSceneMarks: async (frame, scale) => {
         const api = apiRef.current;
@@ -10212,6 +10382,20 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           minX: frame.x, minY: frame.y, maxX: frame.x + frame.width, maxY: frame.y + frame.height,
         }) ?? [];
         return renderSceneFrameCanvas(api, ops, frame, scale, pageExportLayers(), true, "pdf");
+      },
+      inkSignatureIn: (frame) => {
+        const ops = rasterInkRef.current?.getOpsInBounds({
+          minX: frame.x, minY: frame.y, maxX: frame.x + frame.width, maxY: frame.y + frame.height,
+        }) ?? [];
+        // Order-free: the same strokes read in another order are the same ink.
+        let sum = 0;
+        let spread = 0;
+        for (const op of ops) {
+          const id = op.id ?? op.seq ?? op.points.length;
+          sum = (sum + id) | 0;
+          spread ^= Math.imul(id + 1, 2654435761);
+        }
+        return `${ops.length}.${(sum >>> 0).toString(36)}.${(spread >>> 0).toString(36)}`;
       },
       livePageCopy: (frame, host) => {
         const layers = pageExportLayers();
@@ -10337,6 +10521,18 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           publishPdfFilmCurrent(filmScope, savedPage);
           return;
         }
+        /*
+         * Pages reading holds a text page already: the one the fit showed
+         * while the document opened, its first. Clamped into that page, the
+         * saved camera reopened every note on page 1. Hold the page the saved
+         * view showed instead.
+         */
+        if (pageLockRef.current && textDocumentOnBoard() && typeof saved.scrollY === "number") {
+          const frames = textPageFrames();
+          const { viewHeight } = liveBoardViewSize(boardBoxOf(boardRef.current), api.getAppState() as { width?: number; height?: number });
+          const shown = pageShownByCamera(frames, { scrollY: saved.scrollY, zoom }, viewHeight || viewH);
+          if (shown >= 0 && holdTextPage(frames[shown]!)) return;
+        }
         // Inside the page: a place saved while the page's scroll limit was
         // wrong (past its end) would otherwise reopen on empty board.
         const placed = typeof saved.scrollX === "number" && typeof saved.scrollY === "number"
@@ -10353,6 +10549,24 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         rasterInkRef.current?.syncCamera();
         scheduleSlotReports();
       },
+      readingPlace: () => {
+        const bounds = pageBoundsRef.current;
+        if (!bounds || !textDocumentOnBoard()) return null;
+        const inset = measureChromeInsets(
+          boardRef.current,
+          toolbarHeightRef.current,
+          mapChromeHiddenRef.current,
+          mobileRef.current,
+        );
+        return readingPlaceAt({
+          bounds,
+          docHeight: readingDocHeight(),
+          held: pageLockRef.current,
+          camera: getViewport(),
+          insetTop: inset.top,
+        });
+      },
+      goToReadingPlace: (place) => goToReadingPlace(place),
       appendScratchPage: (skeletons: Skeleton[]) => {
         const api = apiRef.current;
         if (!api || skeletons.length === 0) return 0;
@@ -11344,12 +11558,6 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       {interactive && <PadTitle ref={padTitleRef} />}
       {interactive && <PageIndicator ref={pageIndicatorRef} />}
       {interactive && <FlickPredictHud ref={flickPredictHudRef} />}
-      {interactive && (
-        <ScrollBackHold
-          boardRef={boardRef}
-          onScrollBack={() => apiRef.current?.scrollToContent()}
-        />
-      )}
       {inkWheel && !(presetEditor && !wheelPeek) && (
         <InkToolWheel
           open

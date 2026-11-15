@@ -25,3 +25,20 @@ export function touchPointersIn(root: Element): Map<number, { x: number; y: numb
   return new Map([...touches].filter(([, touch]) => touch.target instanceof Node && root.contains(touch.target))
     .map(([id, touch]) => [id, { x: touch.x, y: touch.y }]));
 }
+
+/**
+ * Bring a handler's own list of the fingers down on `root` in line with the
+ * ones really down.
+ *
+ * A handler on an element misses a lift that a window listener kept to
+ * itself: a page turn lining up a flick behind the one going over. That
+ * finger stayed on the handler's list, and the next touch counted as a
+ * second finger: a pinch began, moved the page, and, its own lift kept away
+ * too, never ended, so pages stopped turning. The list here always sees the
+ * lift (it listens first, on the window).
+ */
+export function syncTouchPointers(own: Map<number, { x: number; y: number }>, root: Element): void {
+  const live = touchPointersIn(root);
+  for (const id of [...own.keys()]) if (!live.has(id)) own.delete(id);
+  for (const [id, touch] of live) own.set(id, touch);
+}

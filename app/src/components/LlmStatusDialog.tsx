@@ -59,11 +59,6 @@ export function LlmStatusDialog({
         icon={<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" aria-hidden="true"><path d="M4 3h16v14H8l-4 4V3Z"/><path d="M8 8h8m-8 4h5"/></svg>}
       >
         <div className="lc-settings-choice lc-dialog-body">
-          {firstRun ? (
-            <p className="lc-settings-hint lc-llm-first-run-hint">
-              The agent and coach need one. Ink, reading, sync and tests work without it.
-            </p>
-          ) : null}
           <HoldButton
             holdMs={LIBRARY_HOLD_MS}
             label={firstRun ? "Set up a model" : "Open Settings"}

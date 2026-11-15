@@ -242,6 +242,16 @@ describe("Board", () => {
     );
   });
 
+  it("holds the page a restored camera showed in Pages reading instead of clamping into page 1", () => {
+    const src = readFileSync(join(here, "Board.tsx"), "utf8");
+    const restore = src.slice(src.indexOf("restoreView: (saved)"), src.indexOf("readingPlace: () =>"));
+    const hold = restore.indexOf("holdTextPage(frames[shown]!)");
+    expect(restore).toMatch(/pageShownByCamera\(frames, \{ scrollY: saved\.scrollY, zoom \}/);
+    expect(hold).toBeGreaterThan(-1);
+    // Before the clamp, which would pull the saved camera into the held page.
+    expect(hold).toBeLessThan(restore.indexOf("clampPanScroll(saved.scrollX, saved.scrollY, zoom)"));
+  });
+
   it("grows the ink clip to the writing so the screen cannot cut it", () => {
     const src = readFileSync(join(here, "Board.tsx"), "utf8");
     const vis = src.slice(

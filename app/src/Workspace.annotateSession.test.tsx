@@ -17,6 +17,7 @@ import { clearDocSource, getDocSource, setDocSource } from "./util/docSourceStor
 import { HOLD_FILL_MS } from "./util/gesture";
 import type { DocSourceLiveCapture } from "./util/docSourceUpdate";
 import { encodeInkOps } from "./canvas/inkCodec";
+import { loadReadingPlace, saveReadingPlace } from "./util/readingPosition";
 
 type PaperProps = ComponentProps<typeof import("./modes/AnnotateDocument").AnnotateDocument>;
 type SelectionProps = ComponentProps<typeof import("./modes/DocSelectionLayer").DocSelectionLayer>;
@@ -187,6 +188,7 @@ beforeEach(() => {
     hasRasterInk: vi.fn(() => false), isPdfInkLayoutPending: vi.fn(() => false), isInking: vi.fn(() => false),
     restoreBoard: noop(), setElements: noop(), applyThemeInk: noop(), stripCoachViz: noop(),
     waitForTemplate: vi.fn(async () => {}), settleFitView: vi.fn(async () => {}), restoreView: noop(),
+    readingPlace: vi.fn(() => null), goToReadingPlace: vi.fn(() => true),
     primeInkSnap: vi.fn(async () => {}), syncDocumentScrollBounds: noop(), armReadingScroll: noop(), fitCodeToSource: noop(),
     getInkOpCount: vi.fn(() => 0), getInkRevision: vi.fn(() => 0), dirtyInkPageCount: vi.fn(() => 0),
     takeDirtyInkPages: vi.fn(() => new Map()), markInkPagesFlushed: noop(),
@@ -261,6 +263,57 @@ it("opens markdown with its marks and saved width, reports height to the page, a
   expect(mocks.boardProps!.pageContentHeight).toBe(annotatePageHeight(2400));
   await act(async () => { mocks.paper!.onMeasure?.(3200); });
   expect(mocks.boardProps!.pageContentHeight).toBe(annotatePageHeight(3200));
+  expect(mocks.save).not.toHaveBeenCalled();
+});
+
+it("reopens a note at the place it was read to on this device, after the session's own camera", async () => {
+  saveReadingPlace("first", { y: 8420, height: 113574 });
+  await mount();
+  expect(mocks.board.goToReadingPlace).toHaveBeenCalledWith({ y: 8420, height: 113574 });
+  const restore = vi.mocked(mocks.board.restoreView).mock.invocationCallOrder[0]!;
+  expect(vi.mocked(mocks.board.goToReadingPlace).mock.invocationCallOrder[0]).toBeGreaterThan(restore);
+});
+
+it("reopens a note never saved (only read) at its place too", async () => {
+  mocks.docs.clear();
+  saveReadingPlace("first", { y: 3000, height: 50000 });
+  await mount();
+  expect(mocks.board.restoreView).not.toHaveBeenCalled();
+  expect(mocks.board.goToReadingPlace).toHaveBeenCalledWith({ y: 3000, height: 50000 });
+});
+
+it("keeps a read-only note's id on its tab while it opens, so a relaunch reopens the same set", async () => {
+  mocks.docs.clear();
+  await mount({ ...tab, docId: "launch-1" });
+  // Clearing it before the open read the record minted a new id each launch.
+  expect(mocks.shell.patchTab).not.toHaveBeenCalledWith(tab.id, { docId: null });
+  expect(mocks.shell.patchTab).toHaveBeenCalledWith(tab.id, expect.objectContaining({ docId: "launch-1" }));
+});
+
+it("reopens a note only read, under a new id, at the place its content was read to", async () => {
+  mocks.docs.clear();
+  saveReadingPlace({ docId: "launch-1", hash: hashMarkdown("# First") }, { y: 5541, height: 113753 });
+  vi.mocked(mocks.board.readingPlace).mockReturnValue({ y: 0, height: 113754 });
+  await mount({ ...tab, docId: "launch-2" });
+  expect(mocks.board.goToReadingPlace).toHaveBeenCalledWith({ y: 5541, height: 113753 });
+});
+
+it("leaves a note saved after its last reading on the session's camera", async () => {
+  saveReadingPlace("first", { y: 8420, height: 113574 });
+  mocks.docs.set("first", { ...doc(), updatedAt: Date.now() + 60_000 });
+  await mount();
+  expect(mocks.board.restoreView).toHaveBeenCalled();
+  expect(mocks.board.goToReadingPlace).not.toHaveBeenCalled();
+});
+
+it("keeps the place of a note while it is read, without saving the note", async () => {
+  vi.mocked(mocks.board.readingPlace).mockReturnValue({ y: 640, height: 2400 });
+  await mount();
+  await advance(1000);
+  expect(loadReadingPlace("first")).toEqual({ y: 640, height: 2400 });
+  vi.mocked(mocks.board.readingPlace).mockReturnValue({ y: 1900, height: 2400 });
+  await advance(1000);
+  expect(loadReadingPlace("first")).toEqual({ y: 1900, height: 2400 });
   expect(mocks.save).not.toHaveBeenCalled();
 });
 

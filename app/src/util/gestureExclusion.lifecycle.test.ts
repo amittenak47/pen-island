@@ -38,6 +38,24 @@ describe("Android gesture guard ownership", () => {
     ]);
   });
 
+  it("leaves a reading surface unmeasured while the page mask inside it changes", async () => {
+    const node = surface();
+    const mask = document.createElement("div");
+    mask.className = "lc-page-mask";
+    const facing = document.createElement("div");
+    mask.append(facing);
+    node.append(mask);
+    const frame = vi.fn(() => [{ x: 0, y: 60, width: 64, height: 1200 }]);
+    releases.push(protectGestureSurface(node, frame)); await flush();
+    expect(frame).toHaveBeenCalledTimes(1);
+    // A page turn landing: the facing page's copy restyled, the mask shown again.
+    facing.style.clipPath = "none";
+    mask.hidden = true;
+    mask.hidden = false;
+    await flush();
+    expect(frame).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps the reader protected when another tab or drawing tool releases", async () => {
     const stopReading = protect(surface(), true);
     const stopWriting = protect(surface()); await flush();

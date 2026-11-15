@@ -337,6 +337,7 @@ export function uninstallDebugLog(): void {
 const HOT = new Set([
   "getViewportBounds", "sceneToClient", "isInking", "getInkRevision", "getInkOpCount",
   "readingPageFrames", "readingPageBox", "dirtyInkPageCount", "getElements", "getStrokes", "getInkStrokes",
+  "readingPlace",
 ]);
 
 /**

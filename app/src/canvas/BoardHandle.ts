@@ -14,6 +14,7 @@ import type { InkStroke, SceneElementLike } from "./capture";
 import type { EncodedInk } from "./inkCodec";
 import type { PageFrame } from "./inkPageIndex";
 import type { InkOp } from "./rasterInk";
+import type { ReadingPlace } from "./readingPlace";
 
 export interface BoardBlob {
   /**
@@ -317,10 +318,14 @@ export interface BoardHandle {
   zoomedIntoPage(): boolean;
   /** Put this slot's top at the top of the view — or, with a page fit, the whole slot in the middle of it. */
   jumpToPageFrame(frame: PageFrame): boolean;
-  /** The page, its marks and its ink for a scene rectangle, as pixels. */
+  /**
+   * The page, its marks and its ink for a scene rectangle, as pixels.
+   * `signal` calls it off part-way: it rejects, and draws nothing more.
+   */
   captureSceneFrame(
     frame: { x: number; y: number; width: number; height: number },
     scale: number,
+    options?: { signal?: AbortSignal },
   ): Promise<HTMLCanvasElement | null>;
   /**
    * A PDF's page bitmaps, its ink and shapes for a scene rectangle: what
@@ -335,6 +340,12 @@ export interface BoardHandle {
     frame: { x: number; y: number; width: number; height: number },
     scale: number,
   ): Promise<HTMLCanvasElement | null>;
+  /**
+   * Which ink lies over a scene rectangle, as a short string that changes
+   * when a stroke there is added, erased or undone: what a page's kept
+   * picture is checked against.
+   */
+  inkSignatureIn?(frame: { x: number; y: number; width: number; height: number }): string;
   /**
    * A live copy of the page's text over a scene rectangle, laid out in scene
    * units, to mount inside `host` (see `livePageCopy`). Null for a PDF.
@@ -362,9 +373,22 @@ export interface BoardHandle {
   isPdfInkLayoutPending(): boolean;
   /**
    * Reopen camera: PDF jumps to the saved page at today's fit zoom;
-   * single-page docs restore scroll/zoom as written.
+   * single-page docs restore scroll/zoom as written. With a text page held
+   * (Pages reading), the page in the middle of the saved view is held.
    */
   restoreView(saved: { scrollX: number; scrollY: number; zoom: number; pdfPage?: number }): void;
+  /**
+   * Where the reader is in a text document (markdown, code, text, EPUB): the
+   * held page's top in Pages reading, else the line under the top chrome.
+   * Null for a PDF, or before the document has a height.
+   */
+  readingPlace(): ReadingPlace | null;
+  /**
+   * Back to a place from {@link readingPlace}: Pages reading holds the page it
+   * falls on, scroll reading puts it under the top chrome. False when there
+   * is nothing to go to yet (no text layout, or a PDF).
+   */
+  goToReadingPlace(place: ReadingPlace): boolean;
   /**
    * Glide the page `dy` screen pixels down (up when negative), as the wheel
    * moves it: an in-page link's jump. A touch stops it like a coast.

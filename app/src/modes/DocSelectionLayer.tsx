@@ -277,8 +277,27 @@ function liveSubMarkIds(footnotes: readonly DocFootnote[]): Set<string> {
   return ids;
 }
 
-function documentUsesPdfPlacement(body: HTMLElement): boolean {
-  return Boolean(body.querySelector(".lc-pdf-doc, [data-pdf-page]"));
+const pdfDocsIn = new WeakMap<HTMLElement, HTMLCollectionOf<Element>>();
+
+/**
+ * Whether the body holds a PDF (its pages, `data-pdf-page`, live inside the
+ * `.lc-pdf-doc` root). A search of the body for one walked every element of
+ * a note, which has none, each time the marks in view changed: every page
+ * turn. The browser keeps a live list by class, cheap to count until the
+ * body changes.
+ */
+export function documentUsesPdfPlacement(body: HTMLElement): boolean {
+  let docs = pdfDocsIn.get(body);
+  if (!docs) {
+    docs = body.getElementsByClassName("lc-pdf-doc");
+    pdfDocsIn.set(body, docs);
+  }
+  if (docs.length > 0) return true;
+  // Pages placed in the body itself, without the document around them.
+  for (let child = body.firstElementChild; child; child = child.nextElementSibling) {
+    if (child.hasAttribute("data-pdf-page")) return true;
+  }
+  return false;
 }
 
 export interface DocSelectionResult {
