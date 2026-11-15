@@ -341,6 +341,12 @@ export interface BoardHandle {
     scale: number,
   ): Promise<HTMLCanvasElement | null>;
   /**
+   * Which ink lies over a scene rectangle, as a short string that changes
+   * when a stroke there is added, erased or undone: what a page's kept
+   * picture is checked against.
+   */
+  inkSignatureIn?(frame: { x: number; y: number; width: number; height: number }): string;
+  /**
    * A live copy of the page's text over a scene rectangle, laid out in scene
    * units, to mount inside `host` (see `livePageCopy`). Null for a PDF.
    */

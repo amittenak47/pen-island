@@ -62,6 +62,12 @@ export interface TurnFrame {
    */
   toBlur?: CanvasImageSource | null;
   /**
+   * A book's sheet turned with no picture of the spread it goes to (`to`
+   * null, a live spread turn): a stand-in for its back, the page that lands
+   * on the left, at any size. Without one the back is plain paper.
+   */
+  back?: CanvasImageSource | null;
+  /**
    * The booktabs sticking out past each page (single sheets only). They go
    * with the part of the sheet they hang from: flat, or folded over with it.
    * The canvas needs room around the page for them.
@@ -374,12 +380,17 @@ function drawSlice(
   dw: number,
 ): void {
   if (!image) return;
+  // Each picture at its own size: a page's small stand-in can turn with a
+  // full picture of the other.
+  const size = image as { width?: unknown; height?: unknown };
+  const iw = typeof size.width === "number" && size.width > 0 ? size.width : frame.sourceWidth;
+  const ih = typeof size.height === "number" && size.height > 0 ? size.height : frame.sourceHeight;
   ctx.drawImage(
     image,
-    sx * frame.sourceWidth,
+    sx * iw,
     0,
-    sw * frame.sourceWidth,
-    frame.sourceHeight,
+    sw * iw,
+    ih,
     dx,
     0,
     dw,
@@ -513,7 +524,8 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
       ctx.save();
       ctx.translate(w, 0);
       ctx.scale(-1, 1);
-      drawUnder(ctx, frame, g.progress, 0, 0.5, 0, w);
+      if (frame.to) drawUnder(ctx, frame, g.progress, 0, 0.5, 0, w);
+      else if (frame.back) ctx.drawImage(frame.back, 0, 0, w, H);
       ctx.restore();
     } else {
       ctx.fillStyle = frame.paper;

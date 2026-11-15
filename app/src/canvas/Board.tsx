@@ -10383,6 +10383,20 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
         }) ?? [];
         return renderSceneFrameCanvas(api, ops, frame, scale, pageExportLayers(), true, "pdf");
       },
+      inkSignatureIn: (frame) => {
+        const ops = rasterInkRef.current?.getOpsInBounds({
+          minX: frame.x, minY: frame.y, maxX: frame.x + frame.width, maxY: frame.y + frame.height,
+        }) ?? [];
+        // Order-free: the same strokes read in another order are the same ink.
+        let sum = 0;
+        let spread = 0;
+        for (const op of ops) {
+          const id = op.id ?? op.seq ?? op.points.length;
+          sum = (sum + id) | 0;
+          spread ^= Math.imul(id + 1, 2654435761);
+        }
+        return `${ops.length}.${(sum >>> 0).toString(36)}.${(spread >>> 0).toString(36)}`;
+      },
       livePageCopy: (frame, host) => {
         const layers = pageExportLayers();
         return layers ? livePageCopy(layers, frame, host) : null;

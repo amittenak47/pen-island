@@ -11510,6 +11510,7 @@ export const Workspace = memo(function Workspace({
           spread={annotateSource.docType === "pdf" ? pdfSpread : textSpread}
           paged={annotateSource.docType === "pdf"}
           fit={pageFitShare(pageFit)}
+          docKey={annotateSource.hash || null}
         />
       ) : null}
       <DialogPresence>{active && artifactPicker && <ArtifactPicker parent={artifactPicker.parent} associations={artifactPicker.associations}

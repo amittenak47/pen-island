@@ -26,10 +26,10 @@ describe("flatSheet", () => {
 describe("the page being turned to", () => {
   /** A 2D context that records which pictures were drawn, and at what alpha. */
   function recordingContext() {
-    const drawn: Array<{ image: unknown; alpha: number }> = [];
+    const drawn: Array<{ image: unknown; alpha: number; args: unknown[] }> = [];
     let alpha = 1;
     const target: Record<string, unknown> = {
-      drawImage: (image: unknown) => drawn.push({ image, alpha }),
+      drawImage: (image: unknown, ...args: unknown[]) => drawn.push({ image, alpha, args }),
       createLinearGradient: () => ({ addColorStop: () => {} }),
       getTransform: () => ({ d: 1 }),
     };
@@ -76,6 +76,29 @@ describe("the page being turned to", () => {
     expect(p1).toBeGreaterThan(0.9);
     const softLate = late.drawn.find((d) => d.image === soft);
     expect(softLate === undefined || softLate.alpha < 0.05).toBe(true);
+  });
+
+  it("draws a small stand-in for the page turned to at its own size, beside a full picture of the other", () => {
+    const from = { width: 400, height: 600 } as unknown as HTMLCanvasElement;
+    const small = { width: 100, height: 150 } as unknown as HTMLCanvasElement;
+    const { ctx, drawn } = recordingContext();
+    paintTurn(ctx, { ...frame(200), from, to: small, toBlur: null });
+    const under = drawn.find((d) => d.image === small)!;
+    // The whole stand-in, not a 400 by 600 corner of it.
+    expect(under.args.slice(0, 4)).toEqual([0, 0, 100, 150]);
+    expect(drawn.find((d) => d.image === from)!.args.slice(0, 4)).toEqual([0, 0, 400, 600]);
+  });
+
+  it("puts a book sheet's stand-in on its back when it has no picture of the spread it goes to", () => {
+    const back = { width: 100, height: 150 } as unknown as HTMLCanvasElement;
+    const book = { ...frame(0), layout: "book" as const, width: 800, from: null, to: null, toBlur: null, back, corner: { x: 120, y: 600 } };
+    const live = recordingContext();
+    paintTurn(live.ctx, book);
+    expect(live.drawn.some((d) => d.image === back)).toBe(true);
+    // A pictured turn draws its back from the picture.
+    const pictured = recordingContext();
+    paintTurn(pictured.ctx, { ...book, to: { width: 800, height: 600 } as unknown as HTMLCanvasElement });
+    expect(pictured.drawn.some((d) => d.image === back)).toBe(false);
   });
 
   it("draws no softened copy when there is none", () => {

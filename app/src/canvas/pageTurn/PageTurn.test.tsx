@@ -17,6 +17,26 @@ vi.mock("./paintTurn", () => ({
 }));
 
 const gesture = vi.hoisted(() => ({ release: vi.fn(), protect: vi.fn() }));
+
+// The note's kept page pictures: none unless a test hands some out, and none written.
+const thumbs = vi.hoisted(() => ({
+  picture: vi.fn((_key: string | null, _index: number): HTMLCanvasElement | null => null),
+  keep: vi.fn(async (_key: string, _index: number, _picture: HTMLCanvasElement, _ink: string, _near?: boolean) => {}),
+}));
+vi.mock("./pageThumbs", async (importOriginal) => ({
+  ...await importOriginal<typeof import("./pageThumbs")>(),
+  thumbPicture: thumbs.picture,
+  keepThumb: thumbs.keep,
+}));
+/** A kept picture that says which page it is of. */
+const keptPicture = (key: string | null, index: number) => {
+  if (!key) return null;
+  const canvas = document.createElement("canvas");
+  canvas.width = 100;
+  canvas.height = 150;
+  canvas.dataset.page = String(index);
+  return canvas;
+};
 vi.mock("../../util/gestureExclusion", async (importOriginal) => ({
   ...await importOriginal<typeof import("../../util/gestureExclusion")>(),
   protectGestureSurface: gesture.protect,
@@ -72,6 +92,8 @@ beforeEach(() => {
     setTransform: vi.fn(), drawImage: vi.fn(), fillRect: vi.fn(), clearRect: vi.fn(),
   } as unknown as CanvasRenderingContext2D);
   gesture.release.mockClear();
+  thumbs.picture.mockReset().mockReturnValue(null);
+  thumbs.keep.mockReset().mockResolvedValue(undefined);
   gesture.protect.mockReset().mockReturnValue(gesture.release);
   vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
   vi.stubGlobal("PointerEvent", TestPointerEvent);
@@ -120,11 +142,11 @@ it("stops a pending page prefetch when focus leaves the pane", async () => {
   expect(board.captureSceneQuick).toHaveBeenCalledTimes(1);
 });
 
-function mount(turnEnabled = true, fit: number | null = null, paged = true) {
+function mount(turnEnabled = true, fit: number | null = null, paged = true, docKey: string | null = null) {
   const ref = { current: board as unknown as BoardHandle };
   act(() =>
     root.render(
-      <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled={turnEnabled} spread={paged} paged={paged} fit={fit} />,
+      <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled={turnEnabled} spread={paged} paged={paged} fit={fit} docKey={docKey} />,
     ),
   );
   // A PDF's pages, painted: a turn to an unpainted page holds back.
@@ -856,7 +878,7 @@ describe("a text spread turned live, with the facing page on the right", () => {
 
 describe("flicking through a text spread", () => {
   const textFrames = Array.from({ length: 8 }, (_, i) => ({ pageId: i + 1, minY: i * 600, maxY: (i + 1) * 600 }));
-  const setUp = () => {
+  const setUp = (docKey: string | null = null) => {
     board.readingPageFrames.mockReturnValue(textFrames);
     view = { x: 0, y: 0, width: 400, height: 600, zoom: 1 };
     pageBox = { minX: 0, maxX: 200, minY: 0, maxY: 600 };
@@ -881,7 +903,7 @@ describe("flicking through a text spread", () => {
     const ref = { current: board as unknown as BoardHandle };
     act(() =>
       root.render(
-        <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} />,
+        <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} docKey={docKey} />,
       ),
     );
     host.append(mask);
@@ -930,6 +952,45 @@ describe("flicking through a text spread", () => {
     expect(copies).toHaveLength(2);
   });
 
+  it("turns the pages it goes past over their kept pictures, the sheet's back too, and draws the page it stops on in place of its picture", async () => {
+    thumbs.picture.mockImplementation(keptPicture);
+    const { copies, facing } = setUp("doc");
+    await flick();
+    expect(copies).toHaveLength(1);
+    vi.mocked(paintTurn).mockClear();
+    thumbs.picture.mockClear();
+    // Flicked on at once: the right page coming into view is its kept picture.
+    await flick();
+    expect(copies).toHaveLength(1);
+    const passed = facing.lastElementChild as HTMLElement;
+    expect(passed.querySelector("canvas.lc-page-turn-thumb")).not.toBeNull();
+    expect(thumbs.picture).toHaveBeenCalledWith(expect.any(String), 5);
+    // The back of the lifting sheet is the page that lands on the left: the
+    // turn's own copy of its picture.
+    const back = vi.mocked(paintTurn).mock.calls.at(-1)![1].back as HTMLCanvasElement;
+    expect(thumbs.picture).toHaveBeenCalledWith(expect.any(String), 4);
+    expect([back.width, back.height]).toEqual([100, 150]);
+    // Stopped: the page is drawn, and its picture goes from under it.
+    await wait(450);
+    expect(copies).toHaveLength(2);
+    expect(passed.contains(copies[1])).toBe(true);
+    expect(passed.querySelector("canvas.lc-page-turn-thumb")).toBeNull();
+  });
+
+  it("pictures the note's pages small while the reader rests, from here outward, and only once", async () => {
+    setUp("doc");
+    await vi.waitFor(() => expect(thumbs.keep).toHaveBeenCalledTimes(8), { timeout: 5000, interval: 50 });
+    expect(thumbs.keep.mock.calls.map(([, index]) => index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
+    // The open spread and the next were pictured for turning already, and
+    // are shrunk; the pages further on are taken at thumb size.
+    const thumbScale = board.captureSceneFrame.mock.calls.filter((call) => (call as unknown[])[1] === 0.5);
+    expect(thumbScale).toHaveLength(4);
+    expect(thumbs.keep.mock.calls.every(([, , picture]) => picture.width === 100 && picture.height === 300)).toBe(true);
+    // Every page pictured and no ink since: the next rest takes none.
+    await wait(1700);
+    expect(thumbs.keep).toHaveBeenCalledTimes(8);
+  });
+
   it("waits for the finger to leave the glass before drawing the page it stopped on", async () => {
     const { copies, facing } = setUp();
     await flick();
@@ -969,6 +1030,34 @@ it("turns single text pages flicked through over plain paper: the board shows th
   await flick();
   expect(board.jumpToPageFrame).toHaveBeenLastCalledWith(expect.objectContaining({ pageId: 4 }));
   expect(board.livePageCopy).toHaveBeenCalledTimes(1);
+  board.livePageCopy.mockReset().mockReturnValue(null);
+});
+
+it("turns a single text page flicked past over the part of its kept picture the view shows", async () => {
+  board.readingPageFrames.mockReturnValue([...FRAMES, { pageId: 4, minY: 1860, maxY: 2460 }]);
+  board.jumpToPageFrame.mockImplementation((frame) => { view = { ...view, y: frame.minY }; return true; });
+  board.livePageCopy.mockImplementation(() => document.createElement("div"));
+  pageBox = { minX: 0, maxX: 400, minY: 620, maxY: 1220 };
+  thumbs.picture.mockImplementation(keptPicture);
+  mount(true, null, false, "doc");
+  const flick = async () => {
+    pointer("pointerdown", 380, 300);
+    pointer("pointermove", 300, 300);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 150)); });
+    pointer("pointermove", 20, 300);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    pointer("pointerup", 20, 300);
+    for (let i = 0; i < 6; i += 1) await settle();
+  };
+  await flick();
+  vi.mocked(paintTurn).mockClear();
+  await flick();
+  expect(board.jumpToPageFrame).toHaveBeenLastCalledWith(expect.objectContaining({ pageId: 4 }));
+  expect(board.livePageCopy).toHaveBeenCalledTimes(1);
+  // Page 4's picture, 100 by 150 for its 400 by 600 box, not a full-size sheet of paper.
+  const to = vi.mocked(paintTurn).mock.calls.at(-1)![1].to as HTMLCanvasElement;
+  expect([to.width, to.height]).toEqual([100, 150]);
+  expect(thumbs.picture).toHaveBeenCalledWith(expect.any(String), 3);
   board.livePageCopy.mockReset().mockReturnValue(null);
 });
 
