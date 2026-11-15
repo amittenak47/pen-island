@@ -23,7 +23,6 @@
 import type { PageFrame } from "../inkPageIndex";
 
 export const PAGE_THUMB_DB = "whiteboard.pageThumbs";
-export const PAGE_THUMB_DB_VERSION = 1;
 const BOOKS = "books";
 const PIXELS = "pixels";
 
@@ -137,24 +136,41 @@ export function thumbBookKey(
   return `${doc}\x1f${frames.length}.${size}.${h.toString(36)}\x1f${p.toString(36)}`;
 }
 
+/**
+ * The store, at whatever version it is. One found without its stores (made
+ * by something that only opened it, a probe from DevTools say) is opened one
+ * version on, which makes them: opened as it was, no picture could be kept.
+ */
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  const opened = new Promise<IDBDatabase>((resolve, reject) => {
-    if (typeof indexedDB === "undefined") {
-      reject(new Error("this device has no IndexedDB"));
-      return;
-    }
-    const request = indexedDB.open(PAGE_THUMB_DB, PAGE_THUMB_DB_VERSION);
+  const open = (version?: number) => new Promise<IDBDatabase>((resolve, reject) => {
+    const request = version === undefined ? indexedDB.open(PAGE_THUMB_DB) : indexedDB.open(PAGE_THUMB_DB, version);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(BOOKS)) db.createObjectStore(BOOKS);
       if (!db.objectStoreNames.contains(PIXELS)) db.createObjectStore(PIXELS);
     };
-    request.onsuccess = () => resolve(request.result);
+    request.onsuccess = () => {
+      const db = request.result;
+      // Another window making the stores: let it, and open again after.
+      db.onversionchange = () => {
+        db.close();
+        if (dbPromise === opened) dbPromise = null;
+      };
+      resolve(db);
+    };
     request.onerror = () => reject(request.error ?? new Error("could not open the page picture store"));
-    request.onblocked = () => reject(new Error("another window holds an older page picture store"));
-  }).catch((cause: unknown) => {
-    dbPromise = null;
+    request.onblocked = () => reject(new Error("another window holds the page picture store open"));
+  });
+  const opened: Promise<IDBDatabase> = (async () => {
+    if (typeof indexedDB === "undefined") throw new Error("this device has no IndexedDB");
+    const db = await open();
+    if (db.objectStoreNames.contains(BOOKS) && db.objectStoreNames.contains(PIXELS)) return db;
+    const next = db.version + 1;
+    db.close();
+    return open(next);
+  })().catch((cause: unknown) => {
+    if (dbPromise === opened) dbPromise = null;
     throw cause;
   });
   dbPromise = opened;

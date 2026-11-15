@@ -74,6 +74,18 @@ describe("a note's kept page pictures", () => {
     expect((thumbPicture(key, 4) as unknown as { page: number }).page).toBe(44);
   });
 
+  it("keeps pictures in a store something else opened first and left without its stores", async () => {
+    await new Promise<void>((resolve) => {
+      const request = indexedDB.open("whiteboard.pageThumbs");
+      request.onsuccess = () => { request.result.close(); resolve(); };
+    });
+    const key = thumbBookKey("doc", frames, box, "dark")!;
+    await keepThumb(key, 2, page(2), "ink");
+    relaunch();
+    await openThumbBook(key).loaded;
+    expect(thumbInk(key, 2)).toBe("ink");
+  });
+
   it("decodes the pages around where the reader is, more of them ahead, and lets go of the rest", async () => {
     const key = thumbBookKey("doc", frames, box, "dark")!;
     for (let i = 0; i < 60; i += 1) await keepThumb(key, i, page(i), "", false);
