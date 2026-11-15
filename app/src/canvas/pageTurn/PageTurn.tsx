@@ -138,6 +138,12 @@ const FLICK_ON_PX = 12;
 /** A turn this soon after the last landing is flicking through: no new pictures, see `flicking`. */
 const FLICK_THROUGH_MS = 800;
 /**
+ * The glass over the page text stays this long after the last landing (see
+ * `raiseGlass`): long enough for the next flick of a hand going through,
+ * too soon for a press on the new page that means to select.
+ */
+const GLASS_REST_MS = 250;
+/**
  * A facing page left as plain paper by a turn flicked through is drawn this
  * long after the last landing or touch, with no hand on the glass: the hand
  * has stopped there. See `fillPaperFacing`.
@@ -2276,6 +2282,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     /** Line up one more turn `direction`, behind any already lined up the same way. */
     const queueTurn = (direction: Direction) => {
       notePageTurn(filmScope);
+      turnsTaken += 1;
       const count = queued?.direction === direction ? queued.count : 0;
       queued = { direction, count: Math.min(KEY_QUEUE_MAX, count + 1) };
     };
@@ -2352,10 +2359,90 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const el = host();
       if (el && mouse && !turnRef.current) el.style.cursor = edge ? "grab" : "";
     };
+    /*
+     * Glass over the page text while flicking through.
+     *
+     * Every touch starts with the browser looking up what is under the
+     * finger: three times on the way down (the touch's area, its point, the
+     * pointer's target) and once on the way up. Over a text page that walked
+     * every positioned box in the note, and a note of math has thousands of
+     * KaTeX parts: 10-15 ms each time on the tablet, about 150 ms of a run of
+     * eight flicks, to find a word or the board behind, which a flick has no
+     * use for. While a sheet moves, and `GLASS_REST_MS` after it lands, the
+     * board's own `::after` lies over the text (see `.lc-board[data-turn-glass]`
+     * in styles.css): the lookup ends on it at once, on the board.
+     *
+     * Over the text, presses reach the board and not the text: a hold to
+     * select is not taken. So the glass is not up for long after a landing,
+     * comes off at once when a press turns nothing (a tap: what it tapped is
+     * looked up again, under no glass), and is never up while the text is
+     * being marked or edited.
+     */
+    let turnsTaken = 0;
+    let glassTimer = 0;
+    let glassPress: { id: number; taken: number; timer: number } | null = null;
+    const glassUp = () => boardSurface()?.dataset.turnGlass === "on";
+    const raiseGlass = () => {
+      if (disposed) return;
+      const surface = boardSurface();
+      const text = surface?.querySelector(":scope > .lc-page-content-slot");
+      if (!surface || !text) return;
+      if (surface.classList.contains("lc-board-highlighting") || text.classList.contains("lc-page-content-editing")) return;
+      window.clearTimeout(glassTimer);
+      glassTimer = 0;
+      if (surface.dataset.turnGlass !== "on") surface.dataset.turnGlass = "on";
+    };
+    const lowerGlass = () => {
+      window.clearTimeout(glassTimer);
+      glassTimer = 0;
+      if (glassPress) window.clearTimeout(glassPress.timer);
+      glassPress = null;
+      const surface = boardSurface();
+      // Left in place, off: raising it again is a style change, not a new box.
+      if (surface?.dataset.turnGlass === "on") surface.dataset.turnGlass = "";
+    };
+    /** Off once no sheet is moving and `GLASS_REST_MS` have gone by since the last landing. */
+    const lowerGlassAtRest = () => {
+      window.clearTimeout(glassTimer);
+      glassTimer = 0;
+      if (disposed || !glassUp()) return;
+      // A sheet still moving asks again when it is done (see `setTurning`).
+      if (turnRef.current || active || liveTurns.size > 0) return;
+      const wait = GLASS_REST_MS - (performance.now() - lastLandAt);
+      if (wait > 0) glassTimer = window.setTimeout(lowerGlassAtRest, wait);
+      else lowerGlass();
+    };
+    /** A press on the glass: off if it has turned no page by the time a flick would have. */
+    const pressOnGlass = (event: PointerEvent, taken: number) => {
+      if (!event.isPrimary || turnsTaken !== taken || !glassUp()) return;
+      if (glassPress) window.clearTimeout(glassPress.timer);
+      const id = event.pointerId;
+      glassPress = {
+        id,
+        taken,
+        timer: window.setTimeout(() => {
+          if (glassPress?.id !== id) return;
+          glassPress = null;
+          if (turnsTaken === taken && active?.id !== id) lowerGlass();
+        }, BODY_FLICK_WINDOW_MS),
+      };
+    };
+    /** Let go: a press that turned nothing was a tap, and what handles it reads the text under it. */
+    const liftOffGlass = (event: PointerEvent) => {
+      const press = glassPress;
+      if (!press || press.id !== event.pointerId) return;
+      window.clearTimeout(press.timer);
+      glassPress = null;
+      if (turnsTaken === press.taken) lowerGlass();
+    };
     const setTurning = (on: boolean) => {
       if (on) window.getSelection()?.removeAllRanges();
       const el = host();
       if (el && mouse) el.style.cursor = on ? "grabbing" : "";
+      if (on) {
+        turnsTaken += 1;
+        raiseGlass();
+      } else lowerGlassAtRest();
     };
     // While a page turns, nothing on it selects.
     const noSelect = (event: Event) => {
@@ -2522,7 +2609,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return true;
     };
 
-    const onDown = (event: PointerEvent) => {
+    const turnDown = (event: PointerEvent) => {
       const underWay = active != null && (
         Math.abs(active.atX - active.fromX) >= REACH_DRAG_PX ||
         event.timeStamp - active.trail[0]!.t >= STRAY_AFTER_MS);
@@ -2804,7 +2891,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       if (!active && event.pointerType === "pen" && !event.relatedTarget) setHover(null);
     };
 
-    const onUp = (event: PointerEvent) => {
+    const turnUp = (event: PointerEvent) => {
       if (cancelling) return;
       if (strays.delete(event.pointerId)) {
         event.stopImmediatePropagation();
@@ -2903,6 +2990,16 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       if (keyTurn(direction, queued ? QUICK_TURN_MS : AUTO_TURN_MS)) event.preventDefault();
     };
 
+    const onDown = (event: PointerEvent) => {
+      const taken = turnsTaken;
+      turnDown(event);
+      pressOnGlass(event, taken);
+    };
+    const onUp = (event: PointerEvent) => {
+      if (cancelling) return;
+      turnUp(event);
+      liftOffGlass(event);
+    };
     window.addEventListener("pointerdown", onDown, true);
     window.addEventListener("pointermove", onMove, true);
     window.addEventListener("pointerout", onOut, true);
@@ -2943,6 +3040,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         turn.spreadLive?.right?.remove();
         layers.delete(turn);
       }
+      // The glass goes with the turns: the board takes touches as it did.
+      window.clearTimeout(glassTimer);
+      if (glassPress) window.clearTimeout(glassPress.timer);
+      const glassOn = boardSurface();
+      if (glassOn) delete glassOn.dataset.turnGlass;
     };
   }, [boardRef, filmScope, hostSelector, turnEnabled]);
 

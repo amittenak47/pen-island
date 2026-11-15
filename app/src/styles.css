@@ -2496,6 +2496,22 @@ body[data-lc-sash-drag] .lc-board-chrome-slot {
   pointer-events: none;
 }
 
+/* Pages reading, flicking through: glass over the page text (PageTurn's
+ * `raiseGlass`). The browser looks up what is under each touch through every
+ * positioned box below it, thousands in a page of math. This layer is the
+ * board's own, so a touch ends on it at once, on the board. Over the text
+ * (z-index 1), under the ink and everything else on the board. */
+.lc-board[data-turn-glass]::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+}
+.lc-board[data-turn-glass="on"]::after {
+  pointer-events: auto;
+}
+
 /* Shown in place of the panes while pages are compared, or on the way out
  * when nothing turned out to differ. */
 .lc-hub-conflict-checking {

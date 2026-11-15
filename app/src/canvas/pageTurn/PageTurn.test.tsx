@@ -1017,6 +1017,57 @@ describe("flicking through a text spread", () => {
     expect(copies).toHaveLength(2);
     expect(stopped.contains(copies[1])).toBe(true);
   });
+
+  it("lays glass over the page text while flicking through, off soon after it lands and for a press that turns nothing", async () => {
+    setUp();
+    // The board, with the note's text in its slot.
+    const surface = document.createElement("div");
+    surface.className = "lc-board";
+    const text = document.createElement("div");
+    text.className = "lc-page-content-slot";
+    surface.append(text);
+    host.prepend(surface);
+    text.classList.add("lc-page-content-selectable");
+    // Text being marked takes its own touches: never under glass.
+    surface.classList.add("lc-board-highlighting");
+    await flick();
+    expect(surface.dataset.turnGlass).toBeUndefined();
+    surface.classList.remove("lc-board-highlighting");
+    await flick();
+    // Landed: the next touch ends on the board at once.
+    expect(surface.dataset.turnGlass).toBe("on");
+    // A tap turns nothing: off, so whatever handles it finds the text.
+    pointer("pointerdown", 100, 300);
+    expect(surface.dataset.turnGlass).toBe("on");
+    pointer("pointerup", 100, 300);
+    expect(surface.dataset.turnGlass).toBe("");
+    await flick();
+    expect(surface.dataset.turnGlass).toBe("on");
+    // Flicked back, and the hand rests.
+    pointer("pointerdown", 20, 580);
+    pointer("pointermove", 100, 585);
+    await wait(50);
+    pointer("pointermove", 380, 585);
+    await wait(60);
+    pointer("pointerup", 380, 585);
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[4], minY: textFrames[4].minY });
+    expect(surface.dataset.turnGlass).toBe("on");
+    await wait(100);
+    expect(surface.dataset.turnGlass).toBe("on");
+    await wait(250);
+    expect(surface.dataset.turnGlass).toBe("");
+    await flick();
+    expect(surface.dataset.turnGlass).toBe("on");
+    // Turning off goes with it.
+    const ref = { current: board as unknown as BoardHandle };
+    act(() =>
+      root.render(
+        <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled={false} spread paged={false} fit={1} />,
+      ),
+    );
+    expect(surface.dataset.turnGlass).toBeUndefined();
+  });
 });
 
 it("turns single text pages flicked through over plain paper: the board shows the page once it lands", async () => {
