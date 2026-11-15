@@ -149,6 +149,8 @@ const GLASS_REST_MS = 250;
  * has stopped there. See `fillPaperFacing`.
  */
 const PAPER_FILL_MS = 300;
+/** A page left for the facing slot shows its soft kept picture this long, unless a turn takes it first, then its sharp copy. See `standIn`. */
+const STAND_IN_SHARPEN_MS = 300;
 /** How long a turn waits for the next page's picture before turning over plain paper. */
 const TO_PICTURE_GRACE_MS = 80;
 /** Let go before the pictures were taken: how long to wait for them before simply going. */
@@ -456,6 +458,35 @@ function pageBoxScene(b: BoardHandle, frame: PageFrame): Scene | null {
   const box = b.readingPageBox();
   if (!box) return null;
   return { x: box.minX, y: frame.minY, width: box.maxX - box.minX, height: box.maxY - box.minY };
+}
+
+/**
+ * Page `frame`'s own HTML in `holder`, a `w` by `H` sheet of paper: its
+ * text at once, its ink when that is ready, unless `kept` says the holder
+ * has gone by then. False if there is no page there to copy.
+ */
+function fillPage(b: BoardHandle, holder: HTMLElement, frame: PageFrame, w: number, H: number, surface: HTMLElement, kept: () => boolean): boolean {
+  const scene = pageBoxScene(b, frame);
+  if (!scene || !(scene.width > 0)) return false;
+  const copy = b.livePageCopy(scene, surface);
+  if (!copy) return false;
+  const paper = turnPaperColor(paperColor(), false);
+  const k = w / scene.width;
+  copy.style.transformOrigin = "0 0";
+  copy.style.transform = `scale(${k})`;
+  holder.appendChild(copy);
+  const cut = (frame.maxY - scene.y + CUT_BLEED) * k;
+  const blank = cut < H ? document.createElement("div") : null;
+  if (blank) {
+    Object.assign(blank.style, { position: "absolute", left: "0", right: "0", top: `${Math.max(0, cut)}px`, bottom: "0", background: paper });
+    holder.appendChild(blank);
+  }
+  void b.captureSceneMarks(scene, shotScale(w, scene.width)).then((marks) => {
+    if (!marks || !kept()) return;
+    Object.assign(marks.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%" });
+    holder.insertBefore(marks, blank);
+  }, () => {});
+  return true;
 }
 
 /** The book of kept pictures for this note as the board cuts it now (see `pageThumbs`). */
@@ -986,6 +1017,54 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       void Promise.all([liveShot, facingShot]).finally(() => { refreshing = false; });
     };
 
+    /*
+     * The page just left, for the slot, when there is no picture of it yet.
+     *
+     * A turn flicked onto a page shows it live, and its picture waits for the
+     * hand to rest (`refresh`). Left empty, the slot was plain paper there,
+     * black in a dark palette: for the whole of the next turn when the hand
+     * came back to turn on from the other page, or for the second or two the
+     * picture took after a tap. Its kept picture (see `pageThumbs`) takes a
+     * few milliseconds; a page with none yet is copied. A kept picture is
+     * small and soft, so once no turn has taken the page over, it is copied
+     * over the picture, sharp, until `refresh` has a picture of it.
+     */
+    let sharpenTimer = 0;
+    const standIn = (b: BoardHandle, frames: readonly PageFrame[], i: number, el: HTMLElement): HTMLElement[] => {
+      const page = frames[i];
+      const pane = document.querySelector<HTMLElement>(hostSelector);
+      const surface = pane?.querySelector<HTMLElement>(".lc-board") ?? pane;
+      const w = el.offsetWidth;
+      const H = el.offsetHeight;
+      if (!page || !surface || !(w > 0) || !(H > 0)) return [];
+      const holder = document.createElement("div");
+      Object.assign(holder.style, { position: "absolute", inset: "0", overflow: "hidden", background: turnPaperColor(paperColor(), false) });
+      const kept = thumbPicture(thumbBookFor(docKeyRef.current, b, frames), i);
+      const shown = kept ? thumbElement(kept) : null;
+      const copy = () => fillPage(b, holder, page, w, H, surface, () => holder.isConnected);
+      window.clearTimeout(sharpenTimer);
+      sharpenTimer = 0;
+      if (!shown) {
+        copy();
+        return [holder];
+      }
+      holder.appendChild(shown);
+      const sharpen = () => {
+        sharpenTimer = 0;
+        // Gone: turned over, pictured, or swapped back.
+        if (disposed || holder.parentNode !== el) return;
+        // A turn under way covers it or carries it off; one that falls back leaves it.
+        if (turnRef.current) {
+          sharpenTimer = window.setTimeout(sharpen, STAND_IN_SHARPEN_MS);
+          return;
+        }
+        holder.replaceChildren();
+        if (!copy()) holder.appendChild(shown);
+      };
+      sharpenTimer = window.setTimeout(sharpen, STAND_IN_SHARPEN_MS);
+      return [holder];
+    };
+
     const onDown = (event: PointerEvent) => {
       if (!event.isPrimary || event.button !== 0) return;
       const b = boardRef.current;
@@ -1001,7 +1080,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const i = frames.findIndex((f) => same(f, held));
       const facing = i >= 0 ? frames[i % 2 === 0 ? i + 1 : i - 1] : undefined;
       if (!facing) return;
-      el.replaceChildren(...(live && same(live.page, held) ? [live.canvas] : []));
+      el.replaceChildren(...(live && same(live.page, held) ? [live.canvas] : standIn(b, frames, i, el)));
       shows = held.minY;
       lockedRef.current = facing;
       b.setPageLock(facing);
@@ -1017,6 +1096,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     return () => {
       disposed = true;
       cancelAnimationFrame(refreshFrame);
+      window.clearTimeout(sharpenTimer);
       unsubscribe();
       window.clearInterval(timer);
       window.removeEventListener("pointerdown", onDown, true);
@@ -1223,35 +1303,6 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         under.insertBefore(marks, blank);
       }, () => {});
       return under;
-    };
-
-    /**
-     * Page `frame`'s own HTML in `holder`, a `w` by `H` sheet of paper: its
-     * text at once, its ink when that is ready, unless `kept` says the holder
-     * has gone by then. False if there is no page there to copy.
-     */
-    const fillPage = (b: BoardHandle, holder: HTMLElement, frame: PageFrame, w: number, H: number, surface: HTMLElement, kept: () => boolean): boolean => {
-      const scene = pageBoxScene(b, frame);
-      if (!scene || !(scene.width > 0)) return false;
-      const copy = b.livePageCopy(scene, surface);
-      if (!copy) return false;
-      const paper = turnPaperColor(paperColor(), false);
-      const k = w / scene.width;
-      copy.style.transformOrigin = "0 0";
-      copy.style.transform = `scale(${k})`;
-      holder.appendChild(copy);
-      const cut = (frame.maxY - scene.y + CUT_BLEED) * k;
-      const blank = cut < H ? document.createElement("div") : null;
-      if (blank) {
-        Object.assign(blank.style, { position: "absolute", left: "0", right: "0", top: `${Math.max(0, cut)}px`, bottom: "0", background: paper });
-        holder.appendChild(blank);
-      }
-      void b.captureSceneMarks(scene, shotScale(w, scene.width)).then((marks) => {
-        if (!marks || !kept()) return;
-        Object.assign(marks.style, { position: "absolute", left: "0", top: "0", width: "100%", height: "100%" });
-        holder.insertBefore(marks, blank);
-      }, () => {});
-      return true;
     };
 
     /**
