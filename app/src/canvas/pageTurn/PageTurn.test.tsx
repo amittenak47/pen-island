@@ -11,7 +11,8 @@ import { touchPointersIn } from "../touchPointers";
 
 // Gesture tests inspect the frame submitted to the renderer. Actual canvas
 // shading is checked separately in the browser, not by jsdom's missing canvas.
-vi.mock("./paintTurn", () => ({
+vi.mock("./paintTurn", async (importOriginal) => ({
+  bookBack: (await importOriginal<typeof import("./paintTurn")>()).bookBack,
   paintTurn: vi.fn(),
   flatSheet: vi.fn(() => [{ x: 0, y: 0 }, { x: 300, y: 0 }, { x: 300, y: 600 }, { x: 0, y: 600 }]),
 }));
@@ -177,6 +178,17 @@ function pointer(type: string, x: number, y: number, pointerType = "touch", time
   act(() => {
     host.dispatchEvent(event);
   });
+}
+
+/** A live copy for each page the board is asked for, by the top of its scene. */
+function copiesByPage(): Map<number, HTMLElement> {
+  const copies = new Map<number, HTMLElement>();
+  board.livePageCopy.mockImplementation((...args: unknown[]) => {
+    const copy = document.createElement("div");
+    copies.set((args[0] as { y: number }).y, copy);
+    return copy;
+  });
+  return copies;
 }
 
 /** Let a turn's pictures land: a few promise turns, not a frame. */
@@ -754,8 +766,7 @@ it("turns a text spread at once without pictures: the next right page live under
   board.readingPageFrames.mockReturnValue(textFrames);
   view = { x: 0, y: 0, width: 400, height: 600, zoom: 1 };
   pageBox = { minX: 0, maxX: 200, minY: 0, maxY: 600 };
-  const copy = document.createElement("div");
-  board.livePageCopy.mockReturnValue(copy);
+  const copies = copiesByPage();
   const hole = document.createElement("div");
   hole.className = "lc-page-mask-hole";
   hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
@@ -778,9 +789,17 @@ it("turns a text spread at once without pictures: the next right page live under
   // No page cloned and styled into a picture: that was the second's wait.
   expect(board.captureSceneFrame).not.toHaveBeenCalled();
   const under = host.querySelector<HTMLElement>(".lc-page-turn-under");
+  const copy = copies.get(1800)!;
   expect(under?.contains(copy)).toBe(true);
   // The next spread's right page, in the right half.
   expect((copy.parentElement as HTMLElement).style.left).toBe("200px");
+  // On the sheet's back, folded over, the next spread's left page: it has
+  // no kept picture, so a copy, not paper. The canvas leaves it clear.
+  const back = copies.get(1200)!.parentElement as HTMLElement;
+  expect(under?.contains(back)).toBe(true);
+  expect(back.style.transform).toMatch(/^matrix\(/);
+  expect(back.style.clipPath).toMatch(/^polygon\(/);
+  expect(vi.mocked(paintTurn).mock.calls.at(-1)![1].liveBack).toBe(true);
   pointer("pointermove", 20, 585);
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
   pointer("pointerup", 20, 585);
@@ -927,30 +946,33 @@ describe("flicking through a text spread", () => {
 
   it("turns the pages it goes past over plain paper, and draws only the page it stops on", async () => {
     const { copies, facing } = setUp();
-    // The first turn of a run shows its page: one flick reads as it always did.
+    // The first turn of a run shows its pages: one flick reads as it always
+    // did. The next right page, and the sheet's back, which has no kept
+    // picture (page 3, landing on the left).
     await flick();
     expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
-    expect(copies).toHaveLength(1);
-    expect(facing.contains(copies[0])).toBe(true);
-    // Flicked on at once: no page copied and laid out for a page gone past.
+    expect(copies).toHaveLength(2);
+    expect(facing.contains(copies[1])).toBe(true);
+    // Flicked on at once: no page copied and laid out for a page gone past,
+    // nor for the back of the sheet.
     await flick();
     expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[4], minY: textFrames[4].minY });
-    expect(copies).toHaveLength(1);
+    expect(copies).toHaveLength(2);
     const passed = facing.lastElementChild as HTMLElement;
     expect(passed.childElementCount).toBe(0);
     await flick();
     expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[6], minY: textFrames[6].minY });
-    expect(copies).toHaveLength(1);
+    expect(copies).toHaveLength(2);
     expect(passed.isConnected).toBe(false);
     // The hand has stopped: the facing page it stopped on is drawn, once.
     const stopped = facing.lastElementChild as HTMLElement;
     expect(facing.childElementCount).toBe(1);
     expect(stopped.childElementCount).toBe(0);
     await wait(450);
-    expect(copies).toHaveLength(2);
-    expect(stopped.contains(copies[1])).toBe(true);
+    expect(copies).toHaveLength(3);
+    expect(stopped.contains(copies[2])).toBe(true);
     await wait(400);
-    expect(copies).toHaveLength(2);
+    expect(copies).toHaveLength(3);
   });
 
   it("turns the pages it goes past over their kept pictures, the sheet's back too, and draws the page it stops on in place of its picture", async () => {
@@ -1006,17 +1028,18 @@ describe("flicking through a text spread", () => {
     await flick();
     await flick();
     const stopped = facing.lastElementChild as HTMLElement;
-    expect(copies).toHaveLength(1);
+    // The first turn's two (its right page and its sheet's back), no more.
+    expect(copies).toHaveLength(2);
     // A finger resting on the page body, not turning.
     pointer("pointerdown", 100, 300);
     await wait(500);
-    expect(copies).toHaveLength(1);
+    expect(copies).toHaveLength(2);
     pointer("pointerup", 100, 300);
     await wait(150);
-    expect(copies).toHaveLength(1);
-    await wait(300);
     expect(copies).toHaveLength(2);
-    expect(stopped.contains(copies[1])).toBe(true);
+    await wait(300);
+    expect(copies).toHaveLength(3);
+    expect(stopped.contains(copies[2])).toBe(true);
   });
 
   /** The facing slot where the board shows it, and the board putting it on the left while it holds a right page. */
@@ -1214,6 +1237,90 @@ it("turns a single text page flicked past over the part of its kept picture the 
   const to = vi.mocked(paintTurn).mock.calls.at(-1)![1].to as HTMLCanvasElement;
   expect([to.width, to.height]).toEqual([100, 150]);
   expect(thumbs.picture).toHaveBeenCalledWith(expect.any(String), 3);
+  board.livePageCopy.mockReset().mockReturnValue(null);
+});
+
+it("turns a live spread back from the left page as it is, a lip of the earlier page at the edge", async () => {
+  const textFrames = [1, 2, 3, 4].map((pageId, i) => ({ pageId, minY: i * 600, maxY: i * 600 + 600 }));
+  board.readingPageFrames.mockReturnValue(textFrames);
+  // Open on the second spread, pages 3 and 4.
+  view = { x: 0, y: 1200, width: 400, height: 600, zoom: 1 };
+  pageBox = { minX: 0, maxX: 200, minY: 1200, maxY: 1800 };
+  const copies = copiesByPage();
+  const hole = document.createElement("div");
+  hole.className = "lc-page-mask-hole";
+  hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+  const mask = document.createElement("div");
+  mask.className = "lc-page-mask";
+  mask.append(hole);
+  const ref = { current: board as unknown as BoardHandle };
+  act(() =>
+    root.render(
+      <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} />,
+    ),
+  );
+  host.append(mask);
+  // Taken by the left strip and drawn in a little.
+  pointer("pointerdown", 20, 300);
+  pointer("pointermove", 50, 300);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  const under = host.querySelector<HTMLElement>(".lc-page-turn-under");
+  // Under the sheet, the earlier spread's left page (page 1).
+  expect(under?.contains(copies.get(0)!)).toBe(true);
+  // The returning sheet is page 3, the left page on screen, still lying on
+  // the left page but for a lip at the edge: it was paper over the whole of
+  // it from the first touch.
+  const back = copies.get(1200)!.parentElement as HTMLElement;
+  expect(under?.contains(back)).toBe(true);
+  const [a, b, c, d, e] = back.style.transform.match(/-?[\d.e]+/g)!.map(Number);
+  expect([a, b, c, d].map((v) => Math.round(v * 100) / 100)).toEqual([1, 0, 0, 1]);
+  expect(e).toBeGreaterThan(0);
+  expect(e).toBeLessThan(80);
+  expect(vi.mocked(paintTurn).mock.calls.at(-1)![1].liveBack).toBe(true);
+  // Carried across, it lands on the earlier spread.
+  pointer("pointermove", 380, 300);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+  pointer("pointerup", 380, 300);
+  for (let i = 0; i < 6; i += 1) await settle();
+  expect(board.jumpToPageFrame).toHaveBeenCalledWith({ ...textFrames[0], minY: textFrames[0].minY });
+  expect(host.querySelector(".lc-page-turn-under")).toBeNull();
+  board.readingPageFrames.mockReturnValue(FRAMES);
+  board.livePageCopy.mockReset().mockReturnValue(null);
+});
+
+it("turns a live spread back over the left page's kept picture, with no copy of it", async () => {
+  const textFrames = [1, 2, 3, 4].map((pageId, i) => ({ pageId, minY: i * 600, maxY: i * 600 + 600 }));
+  board.readingPageFrames.mockReturnValue(textFrames);
+  // Open on the second spread, pages 3 and 4.
+  view = { x: 0, y: 1200, width: 400, height: 600, zoom: 1 };
+  pageBox = { minX: 0, maxX: 200, minY: 1200, maxY: 1800 };
+  thumbs.picture.mockImplementation(keptPicture);
+  const copies = copiesByPage();
+  const hole = document.createElement("div");
+  hole.className = "lc-page-mask-hole";
+  hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+  const mask = document.createElement("div");
+  mask.className = "lc-page-mask";
+  mask.append(hole);
+  const ref = { current: board as unknown as BoardHandle };
+  act(() =>
+    root.render(
+      <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} docKey="doc" />,
+    ),
+  );
+  host.append(mask);
+  pointer("pointerdown", 20, 300);
+  pointer("pointermove", 50, 300);
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+  // Page 3's kept picture is the back, drawn by the canvas as before.
+  const frame = vi.mocked(paintTurn).mock.calls.at(-1)![1];
+  expect((frame.back as HTMLCanvasElement | null)?.width).toBe(100);
+  expect(frame.liveBack).toBe(false);
+  expect(copies.has(1200)).toBe(false);
+  pointer("pointerup", 50, 300);
+  for (let i = 0; i < 6; i += 1) await settle();
+  thumbs.picture.mockReset().mockReturnValue(null);
+  board.readingPageFrames.mockReturnValue(FRAMES);
   board.livePageCopy.mockReset().mockReturnValue(null);
 });
 

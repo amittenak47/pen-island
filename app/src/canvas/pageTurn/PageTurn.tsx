@@ -24,7 +24,7 @@ import { peekPdfFilmCurrent, publishPdfReadAhead, publishPdfPreloadPages, peekPd
 import { waitForPdfTurnPreview } from "./pdfTurnPreview";
 import { constrainCorner, cornerForCrease, cornerForGrip, turnCommits, type Point } from "./curl";
 import type { TurnEdge } from "./paintTurn";
-import { flatSheet, paintTurn, type TurnLayout } from "./paintTurn";
+import { bookBack, flatSheet, paintTurn, type TurnLayout } from "./paintTurn";
 import { boardResizeDeferred } from "../../util/splitResize";
 import { afterBootSettled, isBootSettled } from "../../util/bootSettled";
 import { isCameraBusy } from "../../util/cameraBusy";
@@ -645,7 +645,7 @@ interface Turn {
    * the board, as live copies inside `under` — see `planSpreadTurn`. The right
    * one may be in the facing page's slot instead (`liveSpread`).
    */
-  spreadLive?: { left: HTMLElement | null; right: HTMLElement | null };
+  spreadLive?: { left: HTMLElement | null; right: HTMLElement | null; back?: HTMLElement | null };
   /** Flicked through: `spreadLive`'s pages are not copied, only kept pictures or paper (see `liveSpread`). */
   paper?: boolean;
   /** A live spread's stand-in for the back of its sheet: the kept picture of the page landing on the left. */
@@ -1321,8 +1321,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      * drawn once it rests (see `fillPaperFacing`); the board itself shows
      * the other one.
      *
-     * The back of the sheet, the page landing on the left, has no copy
-     * either way: it shows that page's kept picture, or paper.
+     * The back of the sheet, the page landing on the left, shows that
+     * page's kept picture. A turn that is not a flick copies the page when
+     * it has none (`back`, placed by `bookBack`): a sheet coming back starts
+     * with all of its back lying on the left page, and drawn as paper the
+     * whole page went blank at the touch, with no lip. Flicked, it is paper.
      */
     const liveSpread = (b: BoardHandle, turn: Turn, frames: readonly PageFrame[], other: number, paper = false): HTMLElement | null => {
       const pane = document.querySelector<HTMLElement>(hostSelector);
@@ -1348,7 +1351,17 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         return holder;
       };
       turn.paper = paper;
-      turn.back = thumbCopy(thumbPicture(book, turn.direction === "next" ? other : other + 2));
+      const backAt = turn.direction === "next" ? other : other + 2;
+      turn.back = thumbCopy(thumbPicture(book, backAt));
+      let back: HTMLElement | null = null;
+      if (!turn.back && !paper && frames[backAt]) {
+        back = document.createElement("div");
+        Object.assign(back.style, {
+          position: "absolute", top: "0", left: "0", width: `${w}px`, height: `${H}px`, overflow: "hidden",
+          background, transformOrigin: "0 0", clipPath: "inset(100%)",
+        });
+        if (!fillPage(b, back, frames[backAt], w, H, surface, () => !turn.done)) back = null;
+      }
       const under = document.createElement("div");
       under.className = "lc-page-turn-under";
       under.setAttribute("aria-hidden", "true");
@@ -1368,8 +1381,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         right.style.left = "0";
         facing.appendChild(right);
       }
-      for (const holder of [left, right]) if (holder && !holder.parentNode) under.appendChild(holder);
-      turn.spreadLive = { left, right };
+      for (const holder of [left, right, back]) if (holder && !holder.parentNode) under.appendChild(holder);
+      turn.spreadLive = { left, right, back };
       return under;
     };
 
@@ -1377,9 +1390,14 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     const clipUnder = (turn: Turn) => {
       if (!turn.under) return;
       if (turn.spreadLive) {
-        const right = turn.spreadLive.right;
-        if (!right) return;
+        const { right, back } = turn.spreadLive;
         const w = turn.rect.width / 2, H = turn.rect.height;
+        if (back) {
+          const at = bookBack({ width: w, height: H, corner: turn.corner, bottom: turn.bottom, restY: turn.restY });
+          back.style.transform = at?.transform ?? "";
+          back.style.clipPath = at?.clipPath ?? "inset(100%)";
+        }
+        if (!right) return;
         const flat = flatSheet({ layout: "book", width: w, height: H, corner: turn.corner, bottom: turn.bottom, restY: turn.restY });
         const sheet = flat.length >= 3 ? `M${flat.map((p) => `${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join("L")}Z` : "";
         // On: the next page where the sheet has come off it. Back: the
@@ -1998,6 +2016,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         sheetOnly: turn.sheetOnly,
         toBlur: softenedPicture(turn.images.to),
         back: turn.back ?? null,
+        liveBack: Boolean(turn.spreadLive?.back),
         fromEdge: turn.margin && turn.images.from ? edges.get(turn.images.from) ?? null : null,
         toEdge: turn.margin && turn.images.to ? edges.get(turn.images.to) ?? null : null,
         fromMarks: turn.images.from ? marksAlone.get(turn.images.from) ?? null : null,

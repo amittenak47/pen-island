@@ -80,6 +80,13 @@ export interface TurnFrame {
    * strongly than the print: at the print's strength a wash all but vanished.
    */
   fromMarks?: CanvasImageSource | null;
+  /**
+   * A book's turning sheet has a live copy of its back under the canvas (see
+   * {@link bookBack}): the flap is left clear but for its shading, and that
+   * page shows through it. Without one the flap is the left page of `to`,
+   * or `back`, or paper.
+   */
+  liveBack?: boolean;
 }
 
 /** How strongly the front shows through the back of a single sheet. */
@@ -428,6 +435,32 @@ export function flatSheet(
   return sheetPart(g, frame.width, frame.height, false);
 }
 
+/**
+ * Where the live copy of a book's turning sheet's back goes ({@link
+ * TurnFrame.liveBack}): a CSS transform and clip for an element one page in
+ * size at the spread's top left, holding the page the flap shows.
+ *
+ * It is the canvas's own flap as an element: the page mirrored into the
+ * sheet, the sheet reflected across the fold, and the whole moved past the
+ * spine. Null while nothing is folded over. `width` is the sheet's, half the
+ * spread, as for {@link flatSheet}.
+ */
+export function bookBack(
+  frame: Pick<TurnFrame, "width" | "height" | "corner" | "bottom" | "restY">,
+): { transform: string; clipPath: string } | null {
+  const w = frame.width;
+  const g = curlGeometry(frame.corner, w, frame.height, frame.bottom, frame.restY);
+  const flap = sheetPart(g, w, frame.height, true);
+  if (flap.length < 3) return null;
+  const [a, b, c, d, e, f] = foldReflection(g);
+  // Mirrored (x to w - x), reflected, then past the spine (w).
+  const m = [-a, -b, c, d, a * w + e + w, b * w + f].map((v) => Number(v.toFixed(5)) || 0);
+  return {
+    transform: `matrix(${m.join(", ")})`,
+    clipPath: `polygon(${flap.map((p) => `${(w - p.x).toFixed(2)}px ${p.y.toFixed(2)}px`).join(", ")})`,
+  };
+}
+
 export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): number {
   if (heldBySide(frame)) return paintSideFold(ctx, frame);
   const { width: W, height: H } = frame;
@@ -477,6 +510,11 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     ctx.beginPath();
     ctx.rect(0, 0, w, H);
     ctx.clip();
+    // Only on the uncovered side: past the fold the gradient's first stop
+    // carries on, and a page left clear for a live copy (the sheet still
+    // flat, or a live back) would be dimmed by it.
+    tracePolygon(ctx, halfPlane(fp, n, 1, 4 * (w + H)));
+    ctx.clip();
     const shadow = ctx.createLinearGradient(fp.x, fp.y, fp.x + n.x * span * 1.6, fp.y + n.y * span * 1.6);
     shadow.addColorStop(0, `rgba(0,0,0,${0.23 * lift})`);
     shadow.addColorStop(0.25, `rgba(0,0,0,${0.12 * lift})`);
@@ -515,7 +553,9 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     ctx.transform(a, b, c, d, e, f);
     tracePolygon(ctx, flap);
     ctx.clip();
-    if (book) {
+    if (book && frame.liveBack) {
+      // That page is the live copy under the canvas: only the shading goes on.
+    } else if (book) {
       // The back of this page is the left page of the next spread, mirrored
       // into the sheet so it reads the right way round once it lands. Paper
       // first: a live spread turn has no picture of it yet.
