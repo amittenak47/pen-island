@@ -8840,6 +8840,14 @@ body[data-lc-sash-drag="horizontal"] {
   opacity: 1;
 }
 
+/* Its spinner stands still while nothing is busy. Turning unseen, it had the
+ * browser draw about 11 frames a second for as long as the page was open,
+ * and each second of frames runs Chromium's look for pop-up ads under the
+ * screen's centre: 15-20 ms over a note of math on the tablet. */
+.lc-spread-toggle:not(.is-busy) .lc-spread-busy .lc-spinner {
+  animation-play-state: paused;
+}
+
 /* Fill form: the button is also the badge that says the PDF has fields. */
 .lc-form-fill-toggle {
   position: relative;
