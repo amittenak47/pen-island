@@ -1508,6 +1508,52 @@ it("turns the windows with a hand drifting a little, and cuts by clip paths once
   board.jumpToPageFrame.mockImplementation(() => true);
 });
 
+it("keeps the board's page layers ready for a turn back on a touch screen: at rest, through a landing, until turning stops", async () => {
+  const before = window.matchMedia;
+  window.matchMedia = ((query: string) => ({
+    matches: query === "(pointer: coarse)", media: query, onchange: null,
+    addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+  })) as unknown as typeof window.matchMedia;
+  try {
+    const textFrames = [1, 2, 3, 4].map((pageId, i) => ({ pageId, minY: i * 600, maxY: i * 600 + 600 }));
+    board.readingPageFrames.mockReturnValue(textFrames);
+    view = { x: 0, y: 1200, width: 400, height: 600, zoom: 1 };
+    pageBox = { minX: 0, maxX: 200, minY: 1200, maxY: 1800 };
+    copiesByPage();
+    const { mask } = spreadMask();
+    const ref = { current: board as unknown as BoardHandle };
+    const render = (turnEnabled: boolean) => act(() =>
+      root.render(
+        <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled={turnEnabled} spread paged={false} fit={1} />,
+      ),
+    );
+    render(true);
+    host.append(mask);
+    lendableLayers();
+    // At rest: made ready before any turn, so the first one back does not
+    // have to paint and raster them as new layers.
+    await vi.waitFor(() => expect(board.pageLayers).toHaveBeenCalledWith(true), { timeout: 3000, interval: 50 });
+    // A turn back carried across lands, and they stay ready for the next.
+    pointer("pointerdown", 20, 300);
+    pointer("pointermove", 50, 300);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    pointer("pointermove", 380, 300);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    pointer("pointerup", 380, 300);
+    for (let i = 0; i < 6; i += 1) await settle();
+    expect(board.jumpToPageFrame).toHaveBeenCalledWith({ ...textFrames[0], minY: textFrames[0].minY });
+    expect(board.pageLayers).toHaveBeenLastCalledWith(true);
+    // Turning off: let go.
+    render(false);
+    expect(board.pageLayers).toHaveBeenLastCalledWith(false);
+  } finally {
+    window.matchMedia = before;
+    board.readingPageFrames.mockReturnValue(FRAMES);
+    board.livePageCopy.mockReset().mockReturnValue(null);
+    board.jumpToPageFrame.mockImplementation(() => true);
+  }
+});
+
 it("lends the board's page to a turn flicked back right after landing, with nothing copied", async () => {
   const textFrames = [1, 2, 3, 4, 5, 6].map((pageId, i) => ({ pageId, minY: i * 600, maxY: i * 600 + 600 }));
   board.readingPageFrames.mockReturnValue(textFrames);

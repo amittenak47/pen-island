@@ -358,9 +358,11 @@ export interface BoardHandle {
    * The layers that draw the held page and what lies on it (its text, the
    * page's own marks, the ink, the scene's overlays and chrome), for a page
    * turn to move as one sheet. Each keeps its own transform; a turn moves
-   * them with `rotate` and `translate`. `true` gives them their own
-   * compositor layers for the turn, as a pan's ride does; `false` lets them
-   * go unless the camera is moving.
+   * them with `rotate` and `translate`. `true` holds them on compositor
+   * layers of their own, told about `rotate` and `translate` too, at the
+   * zoom the board is at, through pans and between turns, until `false`
+   * lets them go (unless the camera is moving) or the zoom changes (see
+   * `pageLayerWillChange`).
    */
   pageLayers?(promote?: boolean): HTMLElement[];
   /**

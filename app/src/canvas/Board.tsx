@@ -14,6 +14,7 @@ import { makeFingerRest } from "./fingerRest";
 import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
 import { createCameraController, type CameraController } from "./cameraController";
+import { pageLayerWillChange } from "./pageLayerHint";
 import { syncTouchPointers } from "./touchPointers";
 import {
   CaptureUpdateAction,
@@ -2302,12 +2303,19 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [refreshPanRideNodes]);
 
   /**
+   * The zoom a page turn holds the page's layers on their own compositor
+   * layers at, between its turns (see `pageLayers`); null when none does.
+   */
+  const pageLayersHeldRef = useRef<number | null>(null);
+
+  /**
    * GPU-promote the nodes that already take `translate3d`, not every page slot
    * under an ancestor class. A document-wide `will-change` restyled the book.
+   * Held for page turns, they stay promoted at rest (see `pageLayerWillChange`).
    */
   const setPanRideWillChange = useCallback(
     (on: boolean) => {
-      const value = on ? "transform" : "";
+      const value = pageLayerWillChange(on, pageLayersHeldRef.current, readScrollRef.current().zoom);
       const apply = (node: HTMLElement | null | undefined) => {
         if (!node) return;
         if (node.style.willChange !== value) node.style.willChange = value;
@@ -10403,8 +10411,13 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       },
       pageLayers: (promote) => {
         // The same nodes a pan's ride moves, and the slots that carry the page.
-        if (promote) setPanRideWillChange(true);
-        else if (promote === false && !cameraController.motionActive.current) setPanRideWillChange(false);
+        if (promote) {
+          pageLayersHeldRef.current = readScrollRef.current().zoom;
+          setPanRideWillChange(true);
+        } else if (promote === false) {
+          pageLayersHeldRef.current = null;
+          setPanRideWillChange(cameraController.motionActive.current);
+        }
         return [contentSlotNodeRef.current, marksSlotNodeRef.current, linedSlotNodeRef.current, ...ensurePanRideNodes()]
           .filter((node): node is HTMLElement => node instanceof HTMLElement && node.isConnected);
       },

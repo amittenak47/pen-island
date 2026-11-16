@@ -25,6 +25,7 @@ import { waitForPdfTurnPreview } from "./pdfTurnPreview";
 import { constrainCorner, cornerForCrease, cornerForGrip, curlGeometry, sheetPart, turnCommits, type Point } from "./curl";
 import type { TurnEdge } from "./paintTurn";
 import { bookBack, bookFlap, flatSheet, paintTurn, type TurnLayout } from "./paintTurn";
+import { PAGE_LAYER_WILL_CHANGE } from "../pageLayerHint";
 import { boardResizeDeferred } from "../../util/splitResize";
 import { afterBootSettled, isBootSettled } from "../../util/bootSettled";
 import { isCameraBusy } from "../../util/cameraBusy";
@@ -167,7 +168,20 @@ const WINDOW_SLIVER_PX = 3;
  * them is handed to the compositor without laying out the board's layers
  * again (13 ms a frame on the tablet, for a note of 60,000 elements).
  */
-const LENT_WILL_CHANGE = "transform, rotate, translate";
+const LENT_WILL_CHANGE = PAGE_LAYER_WILL_CHANGE;
+
+/**
+ * Whether the board's page layers stay ready for a turn back between turns
+ * (`BoardHandle.pageLayers`): on a touch screen, where a hand flicks back
+ * right after a page lands. Made ready only when a turn starts, a flick back
+ * spent most of its quarter second painting and rastering them; it ran at
+ * 20 to 30 frames a second on the tablet. Kept ready, its layers cost about
+ * 30 MB of the GPU's memory. A desktop's pointer turns pages less, and its
+ * text, on a layer of its own, loses the subpixel smoothing it has on the page.
+ */
+function keepPageLayersReady(): boolean {
+  return typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+}
 /**
  * A flick commits on its pace alone: let go at least this fast (px per ms)
  * along the turn, having carried the sheet at least `FLICK_COMMIT_MIN_PX`.
@@ -1265,6 +1279,17 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     };
   }, [boardRef, filmScope, hostSelector, lockActive, textSpread]);
 
+  /*
+   * The board's page layers, kept ready for a turn back between turns (see
+   * `keepPageLayersReady`), are let go once turning, the page lock or the
+   * spread ends.
+   */
+  useEffect(() => {
+    if (!turnEnabled || !lockActive || !textSpread) return;
+    const held = boardRef.current;
+    return () => { (boardRef.current ?? held)?.pageLayers?.(false); };
+  }, [boardRef, lockActive, textSpread, turnEnabled]);
+
   useEffect(() => {
     if (!turnEnabled) return;
 
@@ -1931,7 +1956,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         el.style.translate = translate;
         el.style.willChange = willChange;
       }
-      board()?.pageLayers?.(false);
+      // Kept ready for the next turn where hands flick back at once.
+      board()?.pageLayers?.(keepPageLayersReady() && textSpreadRef.current);
       if (borrowed.blank) {
         const { el, rotate, translate, origin, clipPath, willChange } = borrowed.blank;
         el.style.rotate = rotate;
@@ -2093,6 +2119,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         const zoom = view.zoom ?? 1;
         const rest = restZoomRef.current ?? (restZoomRef.current = zoom);
         if (Math.abs(zoom / rest - 1) > 0.02) return;
+        // At rest at the page's own zoom: its layers made ready for a turn back.
+        if (textSpreadRef.current && !pagedRef.current && lockedRef.current && keepPageLayersReady()) b.pageLayers?.(true);
         const frames = b.readingPageFrames();
         if (frames.length === 0) return;
         const at = currentIndex(frames, lockedRef.current, view);
