@@ -6,7 +6,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { BoardHandle } from "../BoardHandle";
 import { markBootSettled } from "../../util/bootSettled";
 import { glide, glideSlope, inTab, launchFor, PageTurn, rollMs, takeShot, turnPaperColor } from "./PageTurn";
-import { flatSheet, paintTurn } from "./paintTurn";
+import { bookFlap, flatSheet, paintTurn } from "./paintTurn";
+import { curlGeometry, foldSide, sheetPart, type Point } from "./curl";
 import { touchPointersIn } from "../touchPointers";
 
 // Gesture tests inspect the frame submitted to the renderer. Actual canvas
@@ -248,6 +249,90 @@ function nested(...transforms: string[]): Matrix {
 
 /** Leaves everything where it was, to a twentieth of a pixel. */
 const UNMOVED = [1, 0, 0, 1, 0, 0].map((v) => expect.closeTo(v, 1));
+
+/** Where a matrix puts a point. */
+function apply([a, b, c, d, e, f]: Matrix, p: Point): Point {
+  return { x: a * p.x + c * p.y + e, y: b * p.x + d * p.y + f };
+}
+
+/** A matrix undone. */
+function inverse([a, b, c, d, e, f]: Matrix): Matrix {
+  const k = a * d - b * c;
+  return [d / k, -b / k, -c / k, a / k, (c * f - d * e) / k, (b * e - a * f) / k];
+}
+
+/**
+ * Whether a window (a box `width` wide from its top left, turned by its
+ * transform in its holder) shows point `p` of the holder, past `margin`.
+ */
+function windowShows(win: HTMLElement, p: Point, margin = 0.5, transform = win.style.transform): boolean {
+  const local = apply(inverse(matrixOf(transform)), p);
+  const width = parseFloat(win.style.width);
+  const height = parseFloat(win.style.height);
+  return local.x > margin && local.x < width - margin && local.y > margin && local.y < height - margin;
+}
+
+/** Whether `p` is inside a convex polygon (either winding); on an edge counts. */
+function insidePolygon(polygon: readonly Point[], p: Point): boolean {
+  let sign = 0;
+  for (let i = 0; i < polygon.length; i += 1) {
+    const a = polygon[i]!;
+    const b = polygon[(i + 1) % polygon.length]!;
+    const cross = (b.x - a.x) * (p.y - a.y) - (b.y - a.y) * (p.x - a.x);
+    if (Math.abs(cross) < 1e-9) continue;
+    if (sign === 0) sign = Math.sign(cross);
+    else if (Math.sign(cross) !== sign) return false;
+  }
+  return polygon.length >= 3;
+}
+
+/** A copy's page, the window that page shows through, and the holder that window turns in (see `slideOn`). */
+function throughWindow(copy: HTMLElement) {
+  const page = copy.parentElement as HTMLElement;
+  const win = page.parentElement as HTMLElement;
+  return { page, win, holder: win.parentElement as HTMLElement };
+}
+
+/** The page in a holder's one window. */
+function pageIn(holder: HTMLElement): HTMLElement {
+  return holder.firstElementChild!.firstElementChild as HTMLElement;
+}
+
+/** An inline style's properties and their values. */
+function styleOf(css: string | null): Map<string, string> {
+  const el = document.createElement("div");
+  el.setAttribute("style", css ?? "");
+  return new Map(Array.from({ length: el.style.length }, (_, i) => [el.style[i]!, el.style.getPropertyValue(el.style[i]!)]));
+}
+
+/**
+ * Every inline style change under `roots` from now on, as the element, what
+ * changed, and its `will-change` then. A frame that changes only the
+ * transforms of elements on layers of their own goes straight to the
+ * compositor; anything else lays out the board's layers for it again.
+ */
+function watchStyles(...roots: HTMLElement[]) {
+  const changes: { el: HTMLElement; changed: string[]; willChange: string }[] = [];
+  const take = (records: MutationRecord[]) => {
+    records.forEach((r, i) => {
+      const el = r.target as HTMLElement;
+      // Each change on its own: up to the element's next one, or what it has now.
+      const next = records.slice(i + 1).find((s) => s.target === el);
+      const [a, b] = [styleOf(r.oldValue), styleOf(next ? next.oldValue : el.getAttribute("style"))];
+      const changed = [...new Set([...a.keys(), ...b.keys()])].filter((key) => a.get(key) !== b.get(key));
+      if (changed.length) changes.push({ el, changed, willChange: b.get("will-change") ?? "" });
+    });
+  };
+  const observer = new MutationObserver(take);
+  for (const root of roots) observer.observe(root, { attributes: true, attributeFilter: ["style"], attributeOldValue: true, subtree: true });
+  return { changes, stop: () => { take(observer.takeRecords()); observer.disconnect(); } };
+}
+
+/** The sheet as the last frame painted it, in the right page's own pixels. */
+function lastSheet() {
+  const frame = vi.mocked(paintTurn).mock.calls.at(-1)![1];
+  return { width: frame.width / 2, height: frame.height, corner: frame.corner, bottom: frame.bottom, restY: frame.restY ?? (frame.bottom ? frame.height : 0) };
+}
 
 /** Let a turn's pictures land: a few promise turns, not a frame. */
 async function pictures() {
@@ -849,14 +934,16 @@ it("turns a text spread at once without pictures: the next right page live under
   const under = host.querySelector<HTMLElement>(".lc-page-turn-under");
   const copy = copies.get(1800)!;
   expect(under?.contains(copy)).toBe(true);
-  // The next spread's right page, in the right half.
-  expect((copy.parentElement as HTMLElement).style.left).toBe("200px");
+  // The next spread's right page, in the right half, through a window.
+  expect(throughWindow(copy).holder.style.left).toBe("200px");
   // On the sheet's back, folded over, the next spread's left page: it has
-  // no kept picture, so a copy, not paper. The canvas leaves it clear.
-  const back = copies.get(1200)!.parentElement as HTMLElement;
-  expect(under?.contains(back)).toBe(true);
-  expect(back.style.transform).toMatch(/^matrix\(/);
-  expect(back.style.clipPath).toMatch(/^polygon\(/);
+  // no kept picture, so a copy, not paper. The canvas leaves it clear. Its
+  // box moves to the flap; a window in it cuts the page at the fold.
+  const back = throughWindow(copies.get(1200)!);
+  expect(under?.contains(back.holder)).toBe(true);
+  expect(back.holder.style.transform).toMatch(/^matrix\(/);
+  expect(back.win.style.transform).toMatch(/^matrix\(/);
+  expect(back.holder.style.clipPath).toBe("");
   expect(vi.mocked(paintTurn).mock.calls.at(-1)![1].liveBack).toBe(true);
   pointer("pointermove", 20, 585);
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
@@ -919,7 +1006,7 @@ describe("a text spread turned live, with the facing page on the right", () => {
     pointer("pointerdown", 380, 580);
     pointer("pointermove", 300, 585);
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
-    const holder = copy.parentElement as HTMLElement;
+    const { holder } = throughWindow(copy);
     expect(holder.parentElement).toBe(facing);
     expect(holder.style.left).toBe("0px");
     expect(host.querySelector(".lc-page-turn-under")?.contains(copy)).toBe(false);
@@ -936,6 +1023,179 @@ describe("a text spread turned live, with the facing page on the right", () => {
     expect(facing.contains(shown)).toBe(false);
     expect(added.filter((node) => node === holder)).toHaveLength(1);
     expect(holder.style.clipPath).toBe("none");
+  });
+
+  it("turns on by transforms alone, each on a layer of its own: nothing painted or laid out again in a frame", async () => {
+    const { facing } = setUp();
+    copiesByPage();
+    pointer("pointerdown", 380, 580);
+    pointer("pointermove", 300, 585);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    const under = host.querySelector<HTMLElement>(".lc-page-turn-under")!;
+    // Frames with the sheet moving, the hand drifting up and down too.
+    const watch = watchStyles(facing, under);
+    for (const [x, y] of [[260, 590], [220, 570], [170, 588], [120, 560]]) {
+      pointer("pointermove", x!, y!);
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+    }
+    watch.stop();
+    expect(watch.changes.length).toBeGreaterThan(0);
+    // A clip path changed is the page painted again; a transform changed on
+    // an element with no layer of its own lays out the board's for it again.
+    const slow = watch.changes.filter(({ changed, willChange }) => changed.join() !== "transform" || !willChange.includes("transform"));
+    expect(slow.map(({ changed, willChange }) => `${changed.join()} [${willChange}]`)).toEqual([]);
+    pointer("pointerup", 120, 560);
+    for (let i = 0; i < 6; i += 1) await settle();
+  });
+
+  it("holds each transform of a turn on in an animation of its own, and lets go of them all with the turn", async () => {
+    // Elements that animate, as in a browser: each animation keeps the
+    // transform it holds where the test can read it.
+    const held: { el: HTMLElement; cancelled: boolean }[] = [];
+    class TestKeyframeEffect {
+      constructor(private el: HTMLElement, keyframes: Keyframe[]) { this.setKeyframes(keyframes); }
+      setKeyframes(keyframes: Keyframe[]) { this.el.dataset.held = String(keyframes[0]!.transform); }
+    }
+    vi.stubGlobal("KeyframeEffect", TestKeyframeEffect);
+    Object.defineProperty(Element.prototype, "animate", {
+      configurable: true,
+      value: function (this: HTMLElement, keyframes: Keyframe[]) {
+        const animation = {
+          effect: new TestKeyframeEffect(this, keyframes),
+          cancelled: false,
+          cancel: () => { animation.cancelled = true; delete this.dataset.held; },
+        };
+        held.push(Object.assign(animation, { el: this }));
+        return animation;
+      },
+    });
+    try {
+      const { facing } = setUp();
+      const copies = copiesByPage();
+      pointer("pointerdown", 380, 580);
+      pointer("pointermove", 300, 585);
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      const right = throughWindow(copies.get(1800)!);
+      const back = throughWindow(copies.get(1200)!);
+      const moving = [right.win, right.page, back.holder, back.win, back.page];
+      expect(held.map(({ el }) => el)).toEqual(expect.arrayContaining(moving));
+      // Frames with the sheet moving change no style at all: each transform
+      // is its animation's, changed there.
+      const watch = watchStyles(facing, host.querySelector<HTMLElement>(".lc-page-turn-under")!);
+      for (const [x, y] of [[260, 590], [180, 560]]) {
+        pointer("pointermove", x!, y!);
+        await act(async () => { await new Promise((resolve) => setTimeout(resolve, 30)); });
+      }
+      watch.stop();
+      expect(watch.changes.map(({ changed }) => changed.join())).toEqual([]);
+      expect(held).toHaveLength(moving.length);
+      // And they still cut where the sheet is.
+      const sheet = lastSheet();
+      const g = curlGeometry(sheet.corner, sheet.width, sheet.height, sheet.bottom, sheet.restY);
+      const uncovered = sheetPart(g, sheet.width, sheet.height, true);
+      const grid = Array.from({ length: 10 * 12 }, (_, i) => ({ x: 10 + (i % 10) * 20, y: 25 + Math.floor(i / 10) * 50 }))
+        .filter((p) => Math.abs(foldSide(g, p)) > 1);
+      expect(grid.filter((p) => windowShows(right.win, p, 0.5, right.win.dataset.held) !== insidePolygon(uncovered, p))).toEqual([]);
+      expect(nested(right.win.dataset.held!, right.page.dataset.held!)).toEqual(UNMOVED);
+      expect(matrixOf(back.holder.dataset.held!)).toEqual(bookFlap(sheet)!.matrix.map((v) => expect.closeTo(v, 2)));
+      // Landed: the right page whole as the facing page, and nothing held,
+      // or the removed sheet's back would be kept alive by its animations.
+      pointer("pointermove", 20, 585);
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+      pointer("pointerup", 20, 585);
+      for (let i = 0; i < 6; i += 1) await settle();
+      expect(board.jumpToPageFrame).toHaveBeenCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
+      expect(held.filter(({ cancelled }) => !cancelled).map(({ el }) => el)).toEqual([]);
+      expect([right.win.style.transform, right.page.style.transform]).toEqual(["", ""]);
+      expect(Array.from(facing.children)).toEqual([right.holder]);
+    } finally {
+      delete (Element.prototype as { animate?: unknown }).animate;
+    }
+  });
+
+  it("cuts a fold that leans less than half a pixel over the page upright: no window is turned for it", async () => {
+    setUp();
+    const copies = copiesByPage();
+    // Taken by the side strip halfway down.
+    pointer("pointerdown", 390, 300);
+    pointer("pointermove", 330, 300.2);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    pointer("pointermove", 200, 300.2);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    const right = throughWindow(copies.get(1800)!);
+    const back = throughWindow(copies.get(1200)!);
+    const turned = (el: HTMLElement) => { const [, b, c] = matrixOf(el.style.transform); return Math.abs(b) + Math.abs(c) > 1e-9; };
+    // The sheet leans a little, as one held mid-side does as it rolls.
+    let sheet = lastSheet();
+    let g = curlGeometry(sheet.corner, sheet.width, sheet.height, sheet.bottom, sheet.restY);
+    expect(g.foldNormal.y).not.toBe(0);
+    expect(Math.abs(g.foldNormal.y) * sheet.height).toBeLessThan(0.5);
+    expect([right.win, right.page, back.holder, back.win, back.page].filter(turned)).toEqual([]);
+    // Still cut at the fold, within half a pixel.
+    const near = (p: Point) => Math.abs(foldSide(g, p)) < 0.5 + 1e-6;
+    expect([{ x: g.foldPoint.x, y: 0 }, { x: g.foldPoint.x, y: 600 }].every((p) => near(p) || windowShows(right.win, p, 0) === foldSide(g, p) > 0)).toBe(true);
+    // A real slant turns them.
+    pointer("pointermove", 150, 420);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    sheet = lastSheet();
+    g = curlGeometry(sheet.corner, sheet.width, sheet.height, sheet.bottom, sheet.restY);
+    expect(Math.abs(g.foldNormal.y) * sheet.height).toBeGreaterThan(0.5);
+    expect(turned(right.win)).toBe(true);
+    pointer("pointerup", 150, 420);
+    for (let i = 0; i < 6; i += 1) await settle();
+  });
+
+  it("shows the next right page just where the sheet has come off it, and the sheet's back just on the flap", async () => {
+    const { facing } = setUp();
+    const copies = copiesByPage();
+    // Taken by the bottom corner: the fold slants.
+    pointer("pointerdown", 380, 580);
+    pointer("pointermove", 300, 585);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    const right = throughWindow(copies.get(1800)!);
+    const back = throughWindow(copies.get(1200)!);
+    // The windows are no bigger than the page needs: a page-size layer
+    // hanging thousands of pixels past it is painted again as it slides.
+    for (const { win } of [right, back]) expect(parseFloat(win.style.width)).toBeLessThanOrEqual(Math.hypot(200, 600) + 200 + 2);
+    // Just lifted, past the middle, and nearly over.
+    for (const [x, y] of [[330, 590], [180, 560], [-120, 520]]) {
+      pointer("pointermove", x!, y!);
+      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+      const sheet = lastSheet();
+      const g = curlGeometry(sheet.corner, sheet.width, sheet.height, sheet.bottom, sheet.restY);
+      expect(Math.abs(g.foldNormal.y)).toBeGreaterThan(0.01);
+      // Points across the page, none within a pixel of the fold.
+      const grid = Array.from({ length: 10 * 12 }, (_, i) => ({ x: 10 + (i % 10) * 20, y: 25 + Math.floor(i / 10) * 50 }))
+        .filter((p) => Math.abs(foldSide(g, p)) > 1 && Math.abs(foldSide(g, { x: sheet.width - p.x, y: p.y })) > 1);
+      // The next right page (page 4), in the facing slot, through a window
+      // whose edge is the fold: it shows where the flap lay before it was
+      // lifted, and nowhere the sheet still lies flat.
+      expect(right.holder.parentElement).toBe(facing);
+      expect(right.holder.style.clipPath).toBe("");
+      expect(nested(right.win.style.transform, right.page.style.transform)).toEqual(UNMOVED);
+      const uncovered = sheetPart(g, sheet.width, sheet.height, true);
+      expect(grid.filter((p) => windowShows(right.win, p) !== insidePolygon(uncovered, p))).toEqual([]);
+      expect(grid.some((p) => windowShows(right.win, p))).toBe(true);
+      expect(grid.every((p) => windowShows(right.win, p))).toBe(false);
+      // The sheet's back (page 3) in its box, moved where the flap is as a
+      // whole; the window in it shows the page only on the flap.
+      const flap = bookFlap(sheet)!;
+      expect(matrixOf(back.holder.style.transform)).toEqual(flap.matrix.map((v) => expect.closeTo(v, 2)));
+      expect(back.holder.style.clipPath).toBe("");
+      expect(nested(back.win.style.transform, back.page.style.transform)).toEqual(UNMOVED);
+      expect(grid.filter((p) => windowShows(back.win, p) !== insidePolygon(flap.clip, p))).toEqual([]);
+      expect(grid.some((p) => windowShows(back.win, p))).toBe(true);
+    }
+    // Carried over and let go, it lands: page 4 is the facing page, whole,
+    // its paper its own.
+    pointer("pointermove", 20, 585);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 100)); });
+    pointer("pointerup", 20, 585);
+    for (let i = 0; i < 6; i += 1) await settle();
+    expect(board.jumpToPageFrame).toHaveBeenCalledWith({ ...textFrames[2], minY: textFrames[2].minY });
+    expect(Array.from(facing.children)).toEqual([right.holder]);
+    expect([right.win.style.transform, right.page.style.transform]).toEqual(["", ""]);
+    expect(right.holder.style.background).not.toBe("");
   });
 
   it("takes its right page out of the facing slot when the sheet falls back", async () => {
@@ -1017,7 +1277,7 @@ describe("flicking through a text spread", () => {
     expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[4], minY: textFrames[4].minY });
     expect(copies).toHaveLength(2);
     const passed = facing.lastElementChild as HTMLElement;
-    expect(passed.childElementCount).toBe(0);
+    expect(pageIn(passed).childElementCount).toBe(0);
     await flick();
     expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[6], minY: textFrames[6].minY });
     expect(copies).toHaveLength(2);
@@ -1025,7 +1285,7 @@ describe("flicking through a text spread", () => {
     // The hand has stopped: the facing page it stopped on is drawn, once.
     const stopped = facing.lastElementChild as HTMLElement;
     expect(facing.childElementCount).toBe(1);
-    expect(stopped.childElementCount).toBe(0);
+    expect(pageIn(stopped).childElementCount).toBe(0);
     await wait(450);
     expect(copies).toHaveLength(3);
     expect(stopped.contains(copies[2])).toBe(true);
@@ -1231,6 +1491,11 @@ describe("flicking through a text spread", () => {
     await wait(30);
     const last = vi.mocked(paintTurn).mock.calls.at(-1)![1];
     expect([last.back, last.liveBack]).toEqual([null, true]);
+    // Moved to the flap with the sheet, and shown on it: next to the spine
+    // in its own pixels, where the sheet's free edge is folded over.
+    const back = throughWindow(copies[before]!);
+    expect(back.holder.style.transform).toMatch(/^matrix\(/);
+    expect(windowShows(back.win, { x: 5, y: 300 })).toBe(true);
     pointer("pointerup", 151, 585);
     for (let i = 0; i < 4; i += 1) await settle();
   });
