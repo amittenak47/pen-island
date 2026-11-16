@@ -150,6 +150,14 @@ const GLASS_REST_MS = 250;
  * has stopped there. See `fillPaperFacing`.
  */
 const PAPER_FILL_MS = 300;
+/**
+ * On a touch screen, longer: a hand flicking back through pages came back
+ * for the next one about a quarter of a second after each landing, just as
+ * the page was drawn, and that flick's first frames carried the copy (40 ms
+ * cloning it, its layout forced by the touch, 30 ms painting it). Stopped to
+ * read, the page is drawn a third of a second later than it was.
+ */
+const PAPER_FILL_TOUCH_MS = 650;
 /** A page left for the facing slot shows its soft kept picture this long, unless a turn takes it first, then its sharp copy. See `standIn`. */
 const STAND_IN_SHARPEN_MS = 300;
 /** How long a turn waits for the next page's picture before turning over plain paper. */
@@ -181,6 +189,25 @@ const LENT_WILL_CHANGE = PAGE_LAYER_WILL_CHANGE;
  */
 function keepPageLayersReady(): boolean {
   return typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches;
+}
+
+/** How long a facing page a flick left waits to be drawn (see `fillPaperFacing`). */
+function paperFillMs(): number {
+  return keepPageLayersReady() ? PAPER_FILL_TOUCH_MS : PAPER_FILL_MS;
+}
+
+/**
+ * On a touch screen, the facing page's holder kept a window ready for the
+ * next turn back, as the board's page layers are (see `keepPageLayersReady`):
+ * the turn turns it about its top left and its children back (`cutAbove`),
+ * and made ready only then, it was painted and rastered again at the turn's
+ * start, a page of math in the frame the turn could least afford.
+ */
+function keepFacingReady(holder: HTMLElement): void {
+  if (!keepPageLayersReady()) return;
+  holder.style.transformOrigin = "0 0";
+  holder.style.willChange = "transform";
+  for (const kid of Array.from(holder.children)) if (kid instanceof HTMLElement) kid.style.willChange = "transform";
 }
 /**
  * A flick commits on its pace alone: let go at least this fast (px per ms)
@@ -1934,11 +1961,15 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      * of their layers and its paper goes back to the holder.
      */
     const restWindows = (page: HolderWindows, done: boolean) => {
+      // Staying as the facing page on a touch screen: still ready for the
+      // next turn back (see `keepFacingReady`).
+      const ready = done && keepPageLayersReady();
       for (const el of [...page.windows, page.page]) {
         el.style.transform = "";
-        if (done) el.style.willChange = "";
+        if (done && !ready) el.style.willChange = "";
       }
       if (done) page.holder.style.background = page.page.style.background;
+      if (ready) keepFacingReady(page.holder);
     };
 
     /**
@@ -2744,7 +2775,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       }
       const flipping = flicking();
       lastLandAt = performance.now();
-      if (paperFacing && !paperFillTimer) paperFillTimer = window.setTimeout(fillPaperFacing, PAPER_FILL_MS);
+      if (paperFacing && !paperFillTimer) paperFillTimer = window.setTimeout(fillPaperFacing, paperFillMs());
       // The kept pictures the next turns this way will want, out of the landing's frame.
       if (!pagedRef.current) window.setTimeout(() => { if (!disposed) warmThumbs(b, turn.to, frames.length > 0 ? frames : undefined); }, 0);
       // Mid-flick, the next picture waits for the hand to rest. So does a
@@ -2757,8 +2788,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     /**
      * The facing page a turn flicked through left as plain paper (see
      * `liveSpread`), drawn once the hand stops on it: no turn going, none
-     * lined up, no finger down, and `PAPER_FILL_MS` since the last landing or
+     * lined up, no finger down, and `paperFillMs` since the last landing or
      * touch. A hand still flicking turns it over first, and it is never drawn.
+     * On a touch screen it is kept ready for a turn back (`keepFacingReady`).
      */
     let paperFacing: { holder: HTMLElement; w: number; H: number } | null = null;
     let paperFillTimer = 0;
@@ -2771,7 +2803,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         paperFacing = null;
         return;
       }
-      const wait = PAPER_FILL_MS - (performance.now() - Math.max(lastLandAt, lastPressAt));
+      const wait = paperFillMs() - (performance.now() - Math.max(lastLandAt, lastPressAt));
       const pane = document.querySelector<HTMLElement>(hostSelector);
       if (wait > 0 || turnRef.current || active || queued || (pane && touchPointersIn(pane).size > 0)) {
         paperFillTimer = window.setTimeout(fillPaperFacing, Math.max(50, wait));
@@ -2791,6 +2823,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         // Its kept picture goes: the copy's text over it would show double.
         p.holder.replaceChildren();
         fillPage(b, p.holder, frame, p.w, p.H, surface, () => p.holder.isConnected);
+        keepFacingReady(p.holder);
       }
     };
 

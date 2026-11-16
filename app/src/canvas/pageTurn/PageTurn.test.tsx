@@ -1100,6 +1100,35 @@ describe("flicking through a text spread", () => {
     expect(stopped.contains(copies[2])).toBe(true);
   });
 
+  it("on a touch screen, draws the page it stopped on later, for a hand still flicking, and keeps it ready for a turn back", async () => {
+    const before = window.matchMedia;
+    window.matchMedia = ((query: string) => ({
+      matches: query === "(pointer: coarse)", media: query, onchange: null,
+      addEventListener() {}, removeEventListener() {}, addListener() {}, removeListener() {}, dispatchEvent: () => false,
+    })) as unknown as typeof window.matchMedia;
+    try {
+      const { copies, facing } = setUp();
+      await flick();
+      await flick();
+      const stopped = facing.lastElementChild as HTMLElement;
+      expect(copies).toHaveLength(2);
+      // When a desktop draws it, a hand flicking back is on its way: not yet.
+      await wait(450);
+      expect(copies).toHaveLength(2);
+      await wait(400);
+      expect(copies).toHaveLength(3);
+      expect(stopped.contains(copies[2])).toBe(true);
+      // A window of its own already, its children too: the next turn back
+      // does not paint it again as a new layer.
+      expect([stopped.style.transformOrigin, stopped.style.willChange]).toEqual(["0 0", "transform"]);
+      expect(Array.from(stopped.children, (kid) => (kid as HTMLElement).style.willChange)).toEqual(
+        Array.from(stopped.children, () => "transform"),
+      );
+    } finally {
+      window.matchMedia = before;
+    }
+  });
+
   /** The facing slot where the board shows it, and the board putting it on the left while it holds a right page. */
   const placeFacing = (facing: HTMLElement) => {
     facing.getBoundingClientRect = () => {
