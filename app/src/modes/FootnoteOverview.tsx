@@ -36,7 +36,7 @@ import {
   remapColorToPalette,
   stepFallbackPalette,
 } from "../util/inkPaletteHistory";
-import { footnoteThemeVars } from "../util/footnoteTheme";
+import { FOOTNOTE_THEMED, footnoteThemeVars } from "../util/footnoteTheme";
 import { fitTextareaHeight } from "../util/fitTextareaHeight";
 import { normalizeExternalUrl } from "../util/openExternal";
 import {
@@ -909,7 +909,7 @@ export function FootnoteOverview({
         style={{ zIndex: 232 }}
       />
       <motion.div
-        className={`lc-doc-sheet lc-footnote-overview${taskClass}${isAiTab && !footnote.pending ? " is-chatbot-complete" : ""}`}
+        className={`lc-doc-sheet lc-footnote-overview ${FOOTNOTE_THEMED}${taskClass}${isAiTab && !footnote.pending ? " is-chatbot-complete" : ""}`}
         ref={panelRef}
         role="dialog"
         aria-label={
@@ -1176,7 +1176,7 @@ export function FootnoteOverview({
                       key={mark.id}
                       className={`lc-footnote-overview-link-row${
                         activeSubMarkId === mark.id ? " is-selected" : ""
-                      }`}
+                      }${mark.color ? ` ${FOOTNOTE_THEMED}` : ""}`}
                       style={
                         mark.color
                           ? footnoteThemeVars(

@@ -40,6 +40,8 @@ import { ArtifactPicker } from "./ArtifactPicker";
 import { HOLD_FILL_MS } from "../util/gesture";
 import { resetLibraryDeleteArmForTests } from "../util/armedDelete";
 import { resetArtifactLocksForTests } from "../util/artifactLocks";
+import { FOOTNOTE_THEMED } from "../util/footnoteTheme";
+import { footnoteMarkerMismatches } from "../util/footnoteThemeTestKit";
 
 const parent = { kind: "whiteboard" as const, id: "nb1" };
 const thread = { kind: "thread" as const, rootId: "t1" };
@@ -458,7 +460,8 @@ it("holds a kind to underline it and filter the catalog", async () => {
 it("opens the footnotes submenu from the start adornment", async () => {
   const onToggleFootnote = vi.fn();
   await mount({
-    footnoteChoices: [{ id: "f1", title: "Lemma", number: 2, selected: false }],
+    footnoteChoices: [{ id: "f1", title: "Lemma", number: 2, selected: false,
+      color: "#7c3aed", palette: ["#7c3aed", "#4c1d95", "#c4b5fd", "#ede9fe"] }],
     onToggleFootnote,
   });
   expect(document.querySelector('[aria-label="Footnotes"]')).toBeTruthy();
@@ -468,6 +471,12 @@ it("opens the footnotes submenu from the start adornment", async () => {
   act(() => document.querySelector<HTMLButtonElement>('[aria-label="Footnotes"]')!.click());
   const menu = document.querySelector('[aria-label="Page footnotes"]');
   expect(menu).toBeTruthy();
+  // The chip wears its footnote's colour, and the badge inside picks it up.
+  const chip = document.querySelector<HTMLElement>('[aria-label="2. Lemma"]')!;
+  expect(chip.style.getPropertyValue("--lc-fn-color")).toBe("#7c3aed");
+  expect(chip.classList.contains(FOOTNOTE_THEMED)).toBe(true);
+  expect(chip.querySelector(".lc-fn-badge")!.matches(":root .lc-footnote-chip.lc-fn-themed .lc-fn-badge")).toBe(true);
+  expect(footnoteMarkerMismatches(document.body)).toEqual([]);
   act(() => document.querySelector<HTMLButtonElement>('[aria-label="2. Lemma"]')!.click());
   expect(onToggleFootnote).toHaveBeenCalledWith("f1");
 });

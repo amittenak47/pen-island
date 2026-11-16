@@ -20042,10 +20042,16 @@ button.lc-row-selected:hover:not(:disabled) {
  * The leading `:root` is load-bearing against dark-theme kind defaults.
  * Primary (`--lc-fn-color`) owns the edge; light/deep from the board palette
  * soften fill and label when present.
+ *
+ * `.lc-fn-themed` marks an element that wears the footnote vars inline
+ * (`FOOTNOTE_THEMED` in footnoteTheme.ts). Never `[style*="--lc-fn-color"]`:
+ * a style-attribute test before the last part of a selector makes Blink walk
+ * the subtree of every element whose inline style changes, and a page turn
+ * writes the 60,000-node page slot every frame (about 5 ms each on the tablet).
  */
-:root .lc-doc-footnote[style*="--lc-fn-color"],
-:root .lc-fn-badge[style*="--lc-fn-color"],
-:root .lc-footnote-chip[style*="--lc-fn-color"] .lc-fn-badge {
+:root .lc-doc-footnote.lc-fn-themed,
+:root .lc-fn-badge.lc-fn-themed,
+:root .lc-footnote-chip.lc-fn-themed .lc-fn-badge {
   --lc-fn-fill: var(--lc-fn-badge-fill, var(--lc-fn-color));
   --lc-fn-edge: var(--lc-fn-color);
   --lc-fn-text: var(--lc-fn-badge-ink, #000);
@@ -21185,8 +21191,8 @@ button.lc-row-selected:hover:not(:disabled) {
  * (palette mixed into the theme panel), so type stays readable on Storm as
  * well as on a light pastel card. Nested chips use `--lc-fn-chip`.
  */
-.lc-footnote-overview[style*="--lc-fn-color"],
-.lc-footnote-overview.is-task[style*="--lc-fn-color"] {
+.lc-footnote-overview.lc-fn-themed,
+.lc-footnote-overview.is-task.lc-fn-themed {
   background: var(--lc-fn-wash, color-mix(in srgb, var(--lc-fn-light) 42%, var(--overlay-bg, var(--panel))));
   border-color: color-mix(in srgb, var(--lc-fn-color) 72%, var(--lc-fn-deep));
   color: var(--lc-fn-ink, var(--lc-fn-deep, var(--ink)));
@@ -21202,29 +21208,29 @@ button.lc-row-selected:hover:not(:disabled) {
  * Same wash family as the card, so underline / copy / chat / + and thread
  * turns sit on the palette instead of a black chip.
  */
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-mark-tool,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-add,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-task-back,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-title.is-editing,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-doc-sheet-marks .lc-agent-scope-option,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-link-list .lc-agent-scope-option,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-entry-hold,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-entry-hold.lc-hold-danger,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-thread .lc-agent-turn,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-composer textarea,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-task-field,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-add-link input,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-color-dot,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-panel-reset,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-panel-mini,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-secondary {
+.lc-footnote-overview.lc-fn-themed .lc-footnote-mark-tool,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-add,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-task-back,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-title.is-editing,
+.lc-footnote-overview.lc-fn-themed .lc-doc-sheet-marks .lc-agent-scope-option,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-link-list .lc-agent-scope-option,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-entry-hold,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-entry-hold.lc-hold-danger,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-thread .lc-agent-turn,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-composer textarea,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-task-field,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-add-link input,
+.lc-footnote-overview.lc-fn-themed .lc-color-dot,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-panel-reset,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-panel-mini,
+.lc-footnote-overview.lc-fn-themed .lc-secondary {
   background: var(--lc-fn-chip, var(--lc-fn-wash)) !important;
   color: var(--lc-fn-ink, var(--ink)) !important;
   border-color: color-mix(in srgb, var(--lc-fn-mid) 50%, transparent);
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-doc-sheet-excerpt,
-.lc-footnote-overview.is-task[style*="--lc-fn-color"] .lc-doc-sheet-excerpt {
+.lc-footnote-overview.lc-fn-themed .lc-doc-sheet-excerpt,
+.lc-footnote-overview.is-task.lc-fn-themed .lc-doc-sheet-excerpt {
   background: color-mix(
     in srgb,
     var(--lc-fn-color) 18%,
@@ -21235,54 +21241,54 @@ button.lc-row-selected:hover:not(:disabled) {
   color: var(--lc-fn-ink, var(--lc-fn-deep, var(--ink)));
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-agent-turn-role,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-task-title,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-title-display,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-entry-text,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-section-toggle,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-block-toggle {
+.lc-footnote-overview.lc-fn-themed .lc-agent-turn-role,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-task-title,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-title-display,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-entry-text,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-section-toggle,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-block-toggle {
   color: var(--lc-fn-ink, var(--lc-fn-deep, var(--ink)));
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-mark-tool {
+.lc-footnote-overview.lc-fn-themed .lc-footnote-mark-tool {
   border-color: color-mix(in srgb, var(--lc-fn-mid) 55%, transparent);
   color: var(--lc-fn-ink, var(--ink)) !important;
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-mark-tool.is-active {
+.lc-footnote-overview.lc-fn-themed .lc-footnote-mark-tool.is-active {
   border-color: var(--lc-fn-color);
   color: var(--lc-fn-color) !important;
   background: color-mix(in srgb, var(--lc-fn-color) 22%, var(--lc-fn-chip, var(--lc-fn-wash))) !important;
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-thread .lc-agent-turn-user {
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-thread .lc-agent-turn-user {
   background: color-mix(in srgb, var(--lc-fn-color) 24%, var(--lc-fn-chip, var(--lc-fn-wash))) !important;
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-section {
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-section {
   background: color-mix(in srgb, var(--lc-fn-mid) 16%, transparent);
   border: 1px solid color-mix(in srgb, var(--lc-fn-mid) 38%, transparent);
   border-radius: var(--lc-r-block);
   padding: 4px 6px;
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-add,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-overview-section-head .lc-agent-turn-role {
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-add,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-overview-section-head .lc-agent-turn-role {
   color: var(--lc-fn-ink, var(--lc-fn-deep, var(--ink))) !important;
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-secondary,
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-task-back {
+.lc-footnote-overview.lc-fn-themed .lc-secondary,
+.lc-footnote-overview.lc-fn-themed .lc-footnote-task-back {
   color: color-mix(in srgb, var(--lc-fn-ink, var(--lc-fn-deep)) 72%, var(--lc-fn-mid));
   border-color: color-mix(in srgb, var(--lc-fn-mid) 45%, transparent);
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-footnote-chip {
+.lc-footnote-overview.lc-fn-themed .lc-footnote-chip {
   border-color: var(--lc-fn-color);
   color: var(--lc-fn-color);
 }
 
-.lc-footnote-overview[style*="--lc-fn-color"] .lc-muted {
+.lc-footnote-overview.lc-fn-themed .lc-muted {
   color: var(--lc-fn-muted, color-mix(in srgb, var(--lc-fn-ink, var(--lc-fn-deep)) 62%, var(--lc-fn-wash, transparent)));
 }
 
@@ -22603,7 +22609,7 @@ button.lc-row-selected:hover:not(:disabled) {
   mix-blend-mode: multiply;
 }
 
-:root .lc-doc-footnote-band[style*="--lc-fn-color"] {
+:root .lc-doc-footnote-band.lc-fn-themed {
   --lc-fn-edge: var(--lc-fn-color);
   /* One wash. Mixing in a second tinted wash raised opacity to 42.4%. */
   background: color-mix(in srgb, var(--lc-fn-color) 20%, transparent);
@@ -23889,7 +23895,7 @@ html[data-corners="rounded"] {
 }
 
 /* The footnote panel's shadow, before a palette is applied: square and soft. */
-.lc-doc-sheet.lc-footnote-overview:not([style*="--lc-fn-color"]) {
+.lc-doc-sheet.lc-footnote-overview:not(.lc-fn-themed) {
   box-shadow: 0 1px 2px rgb(0 0 0 / 10%), 0 14px 30px -16px rgb(0 0 0 / 30%);
 }
 
