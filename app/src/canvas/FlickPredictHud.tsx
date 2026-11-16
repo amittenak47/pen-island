@@ -32,7 +32,8 @@ export const FlickPredictHud = forwardRef<FlickPredictHudHandle, Record<never, n
         },
         hide() {
           const node = nodeRef.current;
-          if (!node) return;
+          // Told so on every frame the page moves: hidden already, nothing to write.
+          if (!node || (node.hidden && !node.textContent)) return;
           lastRef.current = { live: -1, pred: -1, err: Number.NaN };
           node.hidden = true;
           node.textContent = "";
