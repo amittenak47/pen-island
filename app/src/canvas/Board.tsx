@@ -155,7 +155,7 @@ import {
 } from "./documentRotateCamera";
 import { paintExcalidrawCanvases } from "./excalidrawCanvasSize";
 import { documentLayerHeight, documentLayers } from "./documentLayer";
-import { placeLazyWindow, releaseLazyBlocks } from "./lazyBlockWindow";
+import { followScrollWindow, placeLazyWindow, releaseLazyBlocks } from "./lazyBlockWindow";
 import { jumpLandsOnFittedLock } from "./fittedLock";
 import {
   contentSlotCssTransform,
@@ -2867,6 +2867,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       // cached, but measure fresh boxes when ink next needs host clips.
       if (boardRef.current) invalidateBoardScrollHostLayout(boardRef.current);
       syncMarksSlotFrom(node, false);
+      // Scroll reading: what the view can reach is drawn before it gets
+      // there, the rest hidden (Pages reading windows its own page).
+      if (!pageLockRef.current && next.zoom > 0) {
+        const viewH = liveCameraRef.current?.height || boardRef.current?.clientHeight || 0;
+        if (viewH > 0) followScrollWindow(node, -next.top / next.zoom, (viewH - next.top) / next.zoom);
+      }
     }
     return next;
   };
@@ -9595,7 +9601,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       publishBooktabPages(filmScope, []);
       pageLockRef.current = null;
       pageShownRef.current = null;
-      // Scroll reading: off-screen blocks go back to the browser's own skipping.
+      // Scroll reading windows the blocks from the next placement (`followScrollWindow`).
       if (contentSlotNodeRef.current) releaseLazyBlocks(contentSlotNodeRef.current);
       const cam = committedPanCameraRef.current;
       placePageMask(cam.scrollX, cam.scrollY, cam.zoom);
