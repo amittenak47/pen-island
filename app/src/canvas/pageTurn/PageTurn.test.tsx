@@ -1330,11 +1330,11 @@ describe("flicking through a text spread", () => {
     setUp("doc");
     await vi.waitFor(() => expect(thumbs.keep).toHaveBeenCalledTimes(8), { timeout: 5000, interval: 50 });
     expect(thumbs.keep.mock.calls.map(([, index]) => index)).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
-    // The open spread and the next were pictured for turning already, and
-    // are shrunk; the four pages further on are taken at thumb size, in one
-    // picture of them all.
+    // The open spread and the two after it were pictured for turning
+    // already, and are shrunk; the two pages further on are taken at thumb
+    // size, in one picture of them both.
     const thumbScale = board.captureSceneFrame.mock.calls.filter((call) => (call as unknown[])[1] === 0.5);
-    expect(thumbScale.map((call) => (call as unknown[])[0])).toEqual([{ x: 0, y: 2400, width: 200, height: 2400 }]);
+    expect(thumbScale.map((call) => (call as unknown[])[0])).toEqual([{ x: 0, y: 3600, width: 200, height: 1200 }]);
     expect(thumbs.keep.mock.calls.every(([, , picture]) => picture.width === 100 && picture.height === 300)).toBe(true);
     // Every page pictured and no ink since: the next rest takes none.
     await wait(1700);
@@ -1677,6 +1677,107 @@ describe("flicking through a text spread", () => {
     );
     expect(surface.dataset.turnGlass).toBeUndefined();
   });
+});
+
+describe("sharp pictures around a text spread at rest", () => {
+  // Fourteen pages; the spread (4, 5) is open, its left page held.
+  const textFrames = Array.from({ length: 14 }, (_, i) => ({ pageId: i + 1, minY: i * 600, maxY: (i + 1) * 600 }));
+  const setUp = () => {
+    vi.stubGlobal("devicePixelRatio", 1.7);
+    board.readingPageFrames.mockReturnValue(textFrames);
+    view = { x: 0, y: 2400, width: 400, height: 600, zoom: 1 };
+    pageBox = { minX: 0, maxX: 200, minY: 0, maxY: 600 };
+    // The camera goes where the turn lands.
+    board.jumpToPageFrame.mockImplementation((frame) => { view = { ...view, y: frame.minY }; return true; });
+    board.livePageCopy.mockImplementation(() => document.createElement("div"));
+    const hole = document.createElement("div");
+    hole.className = "lc-page-mask-hole";
+    hole.getBoundingClientRect = () => ({ left: 0, top: 0, width: 400, height: 600, right: 400, bottom: 600, x: 0, y: 0, toJSON() {} });
+    const facing = document.createElement("div");
+    facing.className = "lc-page-mask-facing";
+    facing.style.left = "50%";
+    hole.append(facing);
+    const mask = document.createElement("div");
+    mask.className = "lc-page-mask";
+    mask.append(hole);
+    const ref = { current: board as unknown as BoardHandle };
+    act(() =>
+      root.render(
+        <PageTurn boardRef={ref} filmScope="t1" hostSelector='[data-lc-tab="t1"]' lockActive turnEnabled spread paged={false} fit={1} />,
+      ),
+    );
+    host.append(mask);
+  };
+  /** Each page pictured so far, in order, with the scale it was taken at. */
+  const pictured = () => board.captureSceneFrame.mock.calls.map((call) => {
+    const [scene, scale] = call as unknown as [{ y: number }, number];
+    return [scene.y / 600, scale] as const;
+  });
+  const pages = () => pictured().map(([page]) => page);
+  const flick = async (direction: "next" | "prev") => {
+    const [from, mid, to] = direction === "next" ? [380, 300, 20] : [20, 100, 380];
+    pointer("pointerdown", from, 580);
+    pointer("pointermove", mid, 585);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 50)); });
+    pointer("pointermove", to, 585);
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 60)); });
+    pointer("pointerup", to, 585);
+    for (let i = 0; i < 4; i += 1) await settle();
+  };
+  const wait = (ms: number) => act(async () => { await new Promise((resolve) => setTimeout(resolve, ms)); });
+  /** The hand rests until `count` pictures in all have been taken. */
+  const rested = (count: number) =>
+    vi.waitFor(() => expect(board.captureSceneFrame).toHaveBeenCalledTimes(count), { timeout: 6000, interval: 50 });
+  afterEach(() => {
+    board.readingPageFrames.mockReturnValue(FRAMES);
+    board.livePageCopy.mockReset().mockReturnValue(null);
+  });
+
+  it("pictures the open spread and two spreads either side at the screen's own pixels, nearest first, the way it last went first", async () => {
+    setUp();
+    await rested(10);
+    // Three pages either side, rounded up to whole spreads: a turn shows
+    // both pages of the spread it turns to.
+    expect(pages()).toEqual([4, 5, 6, 7, 3, 2, 8, 9, 1, 0]);
+    expect(pictured().every(([, scale]) => scale === 1.7)).toBe(true);
+    // All kept: a still page looked at again takes none.
+    await wait(1700);
+    expect(board.captureSceneFrame).toHaveBeenCalledTimes(10);
+  }, 15000);
+
+  it("turns over those pictures in a run of flicks that stays among them, on and back, with no live page", async () => {
+    setUp();
+    await rested(10);
+    vi.mocked(paintTurn).mockClear();
+    await flick("next");
+    await flick("next");
+    expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[8], minY: textFrames[8].minY });
+    await flick("prev");
+    await flick("prev");
+    expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[4], minY: textFrames[4].minY });
+    // Every frame of every turn drew pictures: none turned over copies of
+    // the pages, kept pictures or paper.
+    const frames = vi.mocked(paintTurn).mock.calls.map(([, frame]) => frame);
+    expect(frames.length).toBeGreaterThan(0);
+    expect(frames.filter((frame) => !frame.from || !frame.to)).toEqual([]);
+    expect(board.livePageCopy).not.toHaveBeenCalled();
+    expect(host.querySelector(".lc-page-turn-under")).toBeNull();
+    expect(board.captureSceneFrame).toHaveBeenCalledTimes(10);
+  }, 15000);
+
+  it("lets go of the pictures that fall out of reach as it moves on, and takes only the new ones at the next rest", async () => {
+    setUp();
+    await rested(10);
+    await flick("next");
+    await rested(12);
+    expect(pages().slice(10)).toEqual([10, 11]);
+    await flick("prev");
+    await rested(14);
+    // Pages 0 and 1 fell out of reach a spread on, and were let go.
+    expect(pages().slice(12)).toEqual([1, 0]);
+    await wait(1700);
+    expect(board.captureSceneFrame).toHaveBeenCalledTimes(14);
+  }, 20000);
 });
 
 it("turns single text pages flicked through over plain paper: the board shows the page once it lands", async () => {
