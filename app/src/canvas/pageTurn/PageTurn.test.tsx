@@ -1129,6 +1129,112 @@ describe("flicking through a text spread", () => {
     }
   });
 
+  it("copies the pages a flicked-through turn shows once the hand holds the sheet still: the next right page, then the sheet's back", async () => {
+    thumbs.picture.mockImplementation(keptPicture);
+    const { copies, facing } = setUp("doc");
+    await flick();
+    const before = copies.length;
+    // At once, on again: flicked through, over kept pictures. Held past halfway.
+    pointer("pointerdown", 380, 580);
+    pointer("pointermove", 300, 585);
+    await wait(30);
+    pointer("pointermove", 150, 585);
+    await wait(60);
+    expect(copies).toHaveLength(before);
+    const right = facing.lastElementChild as HTMLElement;
+    expect(right.querySelector("canvas.lc-page-turn-thumb")).not.toBeNull();
+    // A tremor is no move.
+    pointer("pointermove", 153, 584);
+    await wait(250);
+    // Held still: the right page it uncovers, in place of its picture, then
+    // the sheet's back, live under the canvas, which draws only its shading
+    // over it.
+    expect(copies).toHaveLength(before + 2);
+    expect(right.contains(copies[before]!)).toBe(true);
+    expect(right.querySelector("canvas.lc-page-turn-thumb")).toBeNull();
+    const under = host.querySelector<HTMLElement>(".lc-page-turn-under")!;
+    expect(under.contains(copies[before + 1]!)).toBe(true);
+    vi.mocked(paintTurn).mockClear();
+    pointer("pointermove", 152, 585);
+    await wait(30);
+    const last = vi.mocked(paintTurn).mock.calls.at(-1)![1];
+    expect([last.back, last.liveBack]).toEqual([null, true]);
+    pointer("pointerup", 152, 585);
+    for (let i = 0; i < 4; i += 1) await settle();
+    expect(board.jumpToPageFrame).toHaveBeenLastCalledWith({ ...textFrames[4], minY: textFrames[4].minY });
+    // Drawn already: the page it landed facing is not drawn again once the hand stops.
+    await wait(900);
+    expect(copies).toHaveLength(before + 2);
+  });
+
+  it("copies nothing while the hand keeps the sheet moving, even slowly", async () => {
+    thumbs.picture.mockImplementation(keptPicture);
+    const { copies } = setUp("doc");
+    await flick();
+    const before = copies.length;
+    pointer("pointerdown", 380, 580);
+    pointer("pointermove", 300, 585);
+    // 20 px every 100 ms: moving on, not held.
+    for (let x = 280; x >= 160; x -= 20) {
+      await wait(100);
+      pointer("pointermove", x, 585);
+    }
+    expect(copies).toHaveLength(before);
+    // Held still from there: now the pages come.
+    await wait(260);
+    expect(copies).toHaveLength(before + 2);
+    pointer("pointerup", 160, 585);
+    for (let i = 0; i < 4; i += 1) await settle();
+  });
+
+  it("lets a move already on its way through before it copies a page for a held sheet", async () => {
+    thumbs.picture.mockImplementation(keptPicture);
+    const { copies } = setUp("doc");
+    await flick();
+    const before = copies.length;
+    let pending = true;
+    Object.defineProperty(navigator, "scheduling", { configurable: true, value: { isInputPending: () => pending } });
+    try {
+      pointer("pointerdown", 380, 580);
+      pointer("pointermove", 300, 585);
+      await wait(30);
+      pointer("pointermove", 150, 585);
+      // Held still, but input the page has not handled yet is waiting.
+      await wait(300);
+      expect(copies).toHaveLength(before);
+      pending = false;
+      await wait(100);
+      expect(copies).toHaveLength(before + 2);
+      pointer("pointerup", 150, 585);
+      for (let i = 0; i < 4; i += 1) await settle();
+    } finally {
+      delete (navigator as Navigator & { scheduling?: unknown }).scheduling;
+    }
+  });
+
+  it("trades the sheet's back, a kept picture, for the page itself while a hand holds the sheet still", async () => {
+    thumbs.picture.mockImplementation(keptPicture);
+    const { copies } = setUp("doc");
+    // The first turn of a run: its right page is copied at once, and its
+    // back is the kept picture of the page landing on the left.
+    pointer("pointerdown", 380, 580);
+    pointer("pointermove", 300, 585);
+    await wait(30);
+    pointer("pointermove", 150, 585);
+    await wait(30);
+    const before = copies.length;
+    expect(vi.mocked(paintTurn).mock.calls.at(-1)![1].back).not.toBeNull();
+    await wait(250);
+    expect(copies).toHaveLength(before + 1);
+    vi.mocked(paintTurn).mockClear();
+    pointer("pointermove", 151, 585);
+    await wait(30);
+    const last = vi.mocked(paintTurn).mock.calls.at(-1)![1];
+    expect([last.back, last.liveBack]).toEqual([null, true]);
+    pointer("pointerup", 151, 585);
+    for (let i = 0; i < 4; i += 1) await settle();
+  });
+
   /** The facing slot where the board shows it, and the board putting it on the left while it holds a right page. */
   const placeFacing = (facing: HTMLElement) => {
     facing.getBoundingClientRect = () => {
