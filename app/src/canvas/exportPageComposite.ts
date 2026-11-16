@@ -187,17 +187,23 @@ function fontDataUrl(url: string): Promise<string | null> {
 
 let fontCssCache: { key: string; css: Promise<string> } | null = null;
 
-/**
- * `@font-face` rules for the faces the page has actually loaded, with their
- * files inlined. An SVG drawn as an image may not fetch anything, so the
- * stylesheet's `url(./fonts/…)` faces silently fall back to the default serif
- * — which is what made captured markdown pages look like a different app.
- */
-function embeddedFontCss(): Promise<string> {
+/** The faces the page has loaded, as family|weight|style. */
+function loadedFaces(): Set<string> {
   const loaded = new Set<string>();
   document.fonts?.forEach((face) => {
     if (face.status === "loaded") loaded.add(`${face.family.replace(/["']/g, "")}|${face.weight}|${face.style}`);
   });
+  return loaded;
+}
+
+/**
+ * `@font-face` rules for the faces the page has actually loaded, with their
+ * files inlined. An SVG drawn as an image may not fetch anything, so the
+ * stylesheet's `url(./fonts/…)` faces silently fall back to the default serif
+ * (which is what made captured markdown pages look like a different app).
+ */
+function embeddedFontCss(): Promise<string> {
+  const loaded = loadedFaces();
   const key = Array.from(loaded).sort().join(",");
   if (fontCssCache?.key === key) return fontCssCache.css;
 
@@ -289,13 +295,14 @@ function paintedSum(img: HTMLImageElement, width: number, height: number): numbe
  * went out with KaTeX's italic letters missing and its lines set in the
  * fallback's metrics, and a turned page then landed with its math popping
  * in and its text moving a few millimetres. Paint it small until it stops
- * changing.
+ * changing. True if it did; false if it was still changing when the wait
+ * ran out, or could not be looked at.
  */
-async function settleImageFonts(img: HTMLImageElement, width: number, height: number, signal?: AbortSignal): Promise<void> {
-  if (typeof document === "undefined") return;
+async function settleImageFonts(img: HTMLImageElement, width: number, height: number, signal?: AbortSignal): Promise<boolean> {
+  if (typeof document === "undefined") return false;
   const start = performance.now();
   let last = paintedSum(img, width, height);
-  if (last === null) return;
+  if (last === null) return false;
   let changedAt = start;
   while (performance.now() - start < FONT_SETTLE_MAX_MS) {
     await new Promise((resolve) => window.setTimeout(resolve, FONT_SETTLE_STEP_MS));
@@ -306,14 +313,48 @@ async function settleImageFonts(img: HTMLImageElement, width: number, height: nu
       last = sum;
       changedAt = performance.now();
     } else if (performance.now() - changedAt >= FONT_SETTLE_MS) {
-      return;
+      return true;
     }
   }
+  return false;
+}
+
+/**
+ * The font state each note's page-turn pictures have waited out (see
+ * `settleImageFonts`), by the note's root element on the board.
+ *
+ * Every picture is an image of its own with the same faces inlined, and the
+ * wait is 4-5 looks 40 ms apart for each, twice a picture (the page and its
+ * marks): about 0.35 s of each 0.85 s picture on the tablet, the main thread
+ * idle through most of it. On the tablet the fonts were in at the first look
+ * in every picture: after a cold start, a reload, and memory pressure that
+ * let go of what it could. So a note waits once, and again only when its
+ * fonts could come out differently: another face loaded on the page (an edit
+ * that brings in new glyphs from a face not used before loads it there), the
+ * app's CSS or theme changed, the text size around the note (a text zoom or
+ * another reading size), or another note (a new root element).
+ */
+const settledFonts = new WeakMap<Element, string>();
+
+/** What a picture's fonts depend on, apart from the note itself (see `settledFonts`). */
+function fontState(slot: HTMLElement): string {
+  const parent = slot.parentElement;
+  const text = parent ? getComputedStyle(parent) : null;
+  return [
+    Array.from(loadedFaces()).sort().join(","),
+    stylesheetKey(),
+    document.documentElement.dataset.theme ?? "",
+    text?.fontFamily ?? "",
+    text?.fontSize ?? "",
+    window.devicePixelRatio || 1,
+  ].join("|");
 }
 
 /**
  * Rasterize an HTML subtree (slot-local CSS = scene units) into the export
- * canvas for the overlapping scene rect.
+ * canvas for the overlapping scene rect. With a `note` (a page-turn
+ * picture's), its fonts are waited for once (`settledFonts`); an export
+ * waits for every picture's.
  */
 async function drawDomSlot(
   ctx: CanvasRenderingContext2D,
@@ -322,6 +363,7 @@ async function drawDomSlot(
   exportBounds: SceneBounds,
   drawScale: number,
   signal?: AbortSignal,
+  note?: Element,
 ): Promise<boolean> {
   const overlap = intersectBounds(pageBounds, exportBounds);
   if (!overlap) return false;
@@ -345,6 +387,8 @@ async function drawDomSlot(
   clone.style.margin = "0";
   clone.removeAttribute("aria-hidden");
 
+  // Read with the CSS it goes with, before anything can change in between.
+  const fonts = note ? fontState(slot) : "";
   const css = themeScopedCss(collectStylesheetText()) + "\n" + (await embeddedFontCss());
   const wrapper = document.createElement("div");
   // At least the slot's own layout box: the marks layer runs wider than the
@@ -381,7 +425,10 @@ async function drawDomSlot(
   await checkpoint(signal);
   const img = await loadImage(`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`);
   await checkpoint(signal);
-  if (css.includes("@font-face")) await settleImageFonts(img, pixelW, pixelH, signal);
+  if (css.includes("@font-face") && !(note && settledFonts.get(note) === fonts)) {
+    const settled = await settleImageFonts(img, pixelW, pixelH, signal);
+    if (note && settled) settledFonts.set(note, fonts);
+  }
   // Drawing it at full size lays out and paints the whole picture again.
   await checkpoint(signal);
   const dx = (overlap.minX - exportBounds.minX) * drawScale;
@@ -595,13 +642,16 @@ export async function compositePageLayers(
   const { pageBounds, contentSlot, marksSlot } = layers;
   if (!intersectBounds(pageBounds, exportBounds)) return;
   stopIfCalledOff(signal);
+  // A page turn's picture (one with a signal) waits for its note's fonts
+  // once; the note is the document's root on the board, its marks with it.
+  const note = signal ? contentSlot?.firstElementChild ?? contentSlot ?? undefined : undefined;
 
   if (contentSlot) {
     const drewPdf = drawPdfCanvases(ctx, contentSlot, pageBounds, exportBounds, drawScale);
     // Markdown / statement: foreignObject. Also retry when PDF canvases were
     // blank or only partially drew — ink-only exports used to skip the DOM path.
     if (!drewPdf && !pdfOnly) {
-      await drawDomSlot(ctx, contentSlot, pageBounds, exportBounds, drawScale, signal);
+      await drawDomSlot(ctx, contentSlot, pageBounds, exportBounds, drawScale, signal, note);
     }
   }
   if (pdfOnly) return;
@@ -609,7 +659,7 @@ export async function compositePageLayers(
   // Marks / highlights / footnotes always attempt independently of content path.
   if (marksSlot && marksSlot.childElementCount > 0) {
     await checkpoint(signal);
-    await drawDomSlot(ctx, marksSlot, pageBounds, exportBounds, drawScale, signal);
+    await drawDomSlot(ctx, marksSlot, pageBounds, exportBounds, drawScale, signal, note);
   }
 }
 

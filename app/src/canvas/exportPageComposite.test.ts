@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { compositePageLayers, livePageCopy, resolveExportPaperColor } from "./exportPageComposite";
 
@@ -435,5 +435,87 @@ describe("livePageCopy", () => {
     host.remove();
     expect(Array.from(copy.querySelectorAll("p"), (p) => p.textContent)).toEqual(["", "b", "", "", "c", ""]);
     expect(measured).toEqual(["a", "b", "pinned", "empty", "c", "d"]);
+  });
+});
+
+describe("waiting for a picture's fonts", () => {
+  const bounds = { minX: 0, minY: 0, maxX: 200, maxY: 100 };
+  let style: HTMLStyleElement;
+  /** Small paints of a picture, each a look at whether its fonts have landed. */
+  let looks = 0;
+  beforeEach(() => {
+    // A face in the app's CSS: every picture carries "@font-face".
+    style = document.createElement("style");
+    style.textContent = '@font-face { font-family: "Doc"; src: url(doc.woff2); }';
+    document.head.append(style);
+    looks = 0;
+    if (typeof window.CSSFontFaceRule === "undefined") vi.stubGlobal("CSSFontFaceRule", class {});
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(_value: string) { queueMicrotask(() => this.onload?.()); }
+    });
+    // The same paint every look: the fonts are in from the first.
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockImplementation(((..._args: unknown[]) => ({
+      drawImage: () => { looks += 1; },
+      getImageData: (_x: number, _y: number, w: number, h: number) => ({ data: new Uint8ClampedArray(w * h * 4) }),
+    })) as unknown as HTMLCanvasElement["getContext"]);
+  });
+  afterEach(() => {
+    style.remove();
+    delete document.documentElement.dataset.theme;
+    document.body.textContent = "";
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+  /** A note on the board: its slot, inside a parent that sets its text. */
+  const note = () => {
+    const parent = document.createElement("div");
+    parent.style.fontSize = "16px";
+    const slot = document.createElement("div");
+    slot.innerHTML = "<article><p>Page one</p></article>";
+    parent.append(slot);
+    document.body.append(parent);
+    return { parent, slot };
+  };
+  /** How many looks one picture of `slot` took: a page turn's (with a signal), or an export's. */
+  const looksFor = async (slot: HTMLElement, turn = true) => {
+    const before = looks;
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D, bounds, 1,
+      { contentSlot: slot, marksSlot: null, pageBounds: bounds, paperColor: "#fff" },
+      turn ? { signal: new AbortController().signal } : {});
+    return looks - before;
+  };
+
+  it("waits for a page-turn picture's fonts once for a note, not for every picture of it", async () => {
+    const { slot } = note();
+    expect(await looksFor(slot)).toBeGreaterThan(1);
+    expect(await looksFor(slot)).toBe(0);
+    expect(await looksFor(slot)).toBe(0);
+  });
+
+  it("waits again when what sets the fonts changes: the theme, the text size, another note", async () => {
+    const { parent, slot } = note();
+    expect(await looksFor(slot)).toBeGreaterThan(1);
+    document.documentElement.dataset.theme = "dark";
+    expect(await looksFor(slot)).toBeGreaterThan(1);
+    expect(await looksFor(slot)).toBe(0);
+    // A text zoom or another reading size.
+    parent.style.fontSize = "20px";
+    expect(await looksFor(slot)).toBeGreaterThan(1);
+    expect(await looksFor(slot)).toBe(0);
+    // Another note in the same slot.
+    slot.innerHTML = "<article><p>Another note</p></article>";
+    expect(await looksFor(slot)).toBeGreaterThan(1);
+    expect(await looksFor(slot)).toBe(0);
+    // A new face in the app's CSS.
+    style.textContent += ' @font-face { font-family: "Math"; src: url(math.woff2); }';
+    expect(await looksFor(slot)).toBeGreaterThan(1);
+  });
+
+  it("still waits for the fonts of every export", async () => {
+    const { slot } = note();
+    expect(await looksFor(slot)).toBeGreaterThan(1);
+    expect(await looksFor(slot, false)).toBeGreaterThan(1);
+    expect(await looksFor(slot, false)).toBeGreaterThan(1);
   });
 });
