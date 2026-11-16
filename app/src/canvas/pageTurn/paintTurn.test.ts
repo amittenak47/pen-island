@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { MARKS_THROUGH, PRINT_THROUGH, flatSheet, paintTurn, underBlur } from "./paintTurn";
+import { curlGeometry, foldReflection } from "./curl";
+import { MARKS_THROUGH, PRINT_THROUGH, bookBack, bookFlap, flatSheet, paintTurn, underBlur } from "./paintTurn";
 
 describe("flatSheet", () => {
   const frame = { layout: "sheet" as const, width: 400, height: 600, bottom: false };
@@ -107,5 +108,72 @@ describe("the page being turned to", () => {
     expect(drawn.every((d) => d.image !== soft)).toBe(true);
     expect(underBlur(0)).toBe(1);
     expect(underBlur(1)).toBe(0);
+  });
+});
+
+describe("the back of a book's turning sheet, live", () => {
+  // One page of a 400 x 600 spread: the sheet is 200 wide, bound at x 200.
+  const sheet = { width: 200, height: 600, bottom: true };
+  const matrix = (transform: string) => transform.match(/-?[\d.e]+/g)!.map(Number);
+  const apply = ([a, b, c, d, e, f]: number[], x: number, y: number) => ({ x: a * x + c * y + e, y: b * x + d * y + f });
+
+  it("is nowhere while the sheet lies flat", () => {
+    expect(bookBack({ ...sheet, corner: { x: 200, y: 600 } })).toBeNull();
+  });
+
+  it("lies on the left page, the right way round, once the sheet is over", () => {
+    const back = bookBack({ ...sheet, corner: { x: -200, y: 600 } })!;
+    const m = matrix(back.transform);
+    expect(m.map((v) => Math.round(v * 1000) / 1000)).toEqual([1, 0, 0, 1, 0, 0]);
+    expect(back.clipPath).toBe("polygon(200.00px 0.00px, 0.00px 0.00px, 0.00px 600.00px, 200.00px 600.00px)");
+  });
+
+  it("puts each point of the page where the canvas's flap would draw it", () => {
+    // A corner peel part way over, the fold on a slant.
+    const frame = { ...sheet, corner: { x: 40, y: 430 } };
+    const m = matrix(bookBack(frame)!.transform);
+    const r = foldReflection(curlGeometry(frame.corner, 200, 600, true));
+    for (const [x, y] of [[0, 0], [150, 600], [60, 300], [200, 580]] as const) {
+      // The canvas: the page mirrored into the sheet, reflected, past the spine.
+      const want = apply(r, 200 - x, y);
+      const got = apply(m, x, y);
+      expect(got.x).toBeCloseTo(want.x + 200, 1);
+      expect(got.y).toBeCloseTo(want.y, 1);
+    }
+  });
+
+  it("moves the page as a turn and a shift, its flap where its clip lands", () => {
+    const at = bookFlap({ ...sheet, corner: { x: 40, y: 430 } })!;
+    const [a, b, c, d] = at.matrix;
+    // No mirror: a rotation, which `rotate` and `translate` can play.
+    expect(a * d - b * c).toBeCloseTo(1, 6);
+    expect(c).toBeCloseTo(-b, 6);
+    expect(d).toBeCloseTo(a, 6);
+    at.clip.forEach((p, i) => {
+      const q = apply(at.matrix, p.x, p.y);
+      expect(q.x).toBeCloseTo(at.flap[i]!.x, 6);
+      expect(q.y).toBeCloseTo(at.flap[i]!.y, 6);
+    });
+    // Fully over, it is the left page where it lies.
+    expect(bookFlap({ ...sheet, corner: { x: -200, y: 600 } })!.matrix.map((v) => Math.round(v * 1000) / 1000 + 0)).toEqual([1, 0, 0, 1, 0, 0]);
+  });
+
+  it("leaves the canvas's flap clear for it, with only the shading drawn", () => {
+    const filled: unknown[] = [];
+    const target: Record<string, unknown> = {
+      createLinearGradient: () => ({ addColorStop: () => {} }),
+      getTransform: () => ({ d: 1 }),
+    };
+    target.fillRect = () => filled.push(target.fillStyle);
+    const ctx = new Proxy(target, { get: (t, key) => (key in t ? t[key as string] : () => {}) }) as unknown as CanvasRenderingContext2D;
+    const frame = {
+      layout: "book" as const, width: 400, height: 600, from: null, to: null, sourceWidth: 1, sourceHeight: 1,
+      corner: { x: -120, y: 300 }, bottom: true, restY: 300, paper: "paper",
+    };
+    paintTurn(ctx, frame);
+    expect(filled).toContain("paper");
+    filled.length = 0;
+    paintTurn(ctx, { ...frame, liveBack: true });
+    expect(filled).not.toContain("paper");
   });
 });

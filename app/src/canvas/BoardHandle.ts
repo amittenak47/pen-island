@@ -355,6 +355,17 @@ export interface BoardHandle {
     host: Element,
   ): HTMLElement | null;
   /**
+   * The layers that draw the held page and what lies on it (its text, the
+   * page's own marks, the ink, the scene's overlays and chrome), for a page
+   * turn to move as one sheet. Each keeps its own transform; a turn moves
+   * them with `rotate` and `translate`. `true` holds them on compositor
+   * layers of their own, told about `rotate` and `translate` too, at the
+   * zoom the board is at, through pans and between turns, until `false`
+   * lets them go (unless the camera is moving) or the zoom changes (see
+   * `pageLayerWillChange`).
+   */
+  pageLayers?(promote?: boolean): HTMLElement[];
+  /**
    * Remember which PDF page to paint/restore before the stack exists.
    * Camera jumps once that page's div is laid out. Prevents decoding page 1
    * on reopen. `hold: false` publishes C without locking pan.

@@ -80,6 +80,14 @@ export interface TurnFrame {
    * strongly than the print: at the print's strength a wash all but vanished.
    */
   fromMarks?: CanvasImageSource | null;
+  /**
+   * A book's turning sheet has its back live under the canvas: a copy of
+   * that page (see {@link bookBack}), or the board's own page moved to the
+   * flap ({@link bookFlap}). The flap is left clear but for its shading, and
+   * that page shows through it. Without one the flap is the left page of
+   * `to`, or `back`, or paper.
+   */
+  liveBack?: boolean;
 }
 
 /** How strongly the front shows through the back of a single sheet. */
@@ -428,6 +436,54 @@ export function flatSheet(
   return sheetPart(g, frame.width, frame.height, false);
 }
 
+/**
+ * Where the live copy of a book's turning sheet's back goes ({@link
+ * TurnFrame.liveBack}): a CSS transform and clip for an element one page in
+ * size at the spread's top left, holding the page the flap shows.
+ *
+ * It is the canvas's own flap as an element: the page mirrored into the
+ * sheet, the sheet reflected across the fold, and the whole moved past the
+ * spine. Null while nothing is folded over. `width` is the sheet's, half the
+ * spread, as for {@link flatSheet}.
+ */
+export function bookBack(
+  frame: Pick<TurnFrame, "width" | "height" | "corner" | "bottom" | "restY">,
+): { transform: string; clipPath: string } | null {
+  const at = bookFlap(frame);
+  if (!at) return null;
+  const m = at.matrix.map((v) => Number(v.toFixed(5)) || 0);
+  return {
+    transform: `matrix(${m.join(", ")})`,
+    clipPath: `polygon(${at.clip.map((p) => `${p.x.toFixed(2)}px ${p.y.toFixed(2)}px`).join(", ")})`,
+  };
+}
+
+/**
+ * The folded-over part of a book's turning sheet, as {@link bookBack}
+ * places it, in numbers.
+ *
+ * `matrix` (a to f, as a canvas or CSS matrix) takes a point of the page on
+ * the sheet's back, from that page's own top left, to the spread: mirrored
+ * into the sheet (x to w - x), reflected across the fold, moved past the
+ * spine. The mirror and the reflection cancel, so it is a turn and a shift.
+ * `clip` is the flap in that page's pixels, `flap` the same in the spread's.
+ * Null while nothing is folded over.
+ */
+export function bookFlap(
+  frame: Pick<TurnFrame, "width" | "height" | "corner" | "bottom" | "restY">,
+): { matrix: number[]; clip: Point[]; flap: Point[] } | null {
+  const w = frame.width;
+  const g = curlGeometry(frame.corner, w, frame.height, frame.bottom, frame.restY);
+  const part = sheetPart(g, w, frame.height, true);
+  if (part.length < 3) return null;
+  const [a, b, c, d, e, f] = foldReflection(g);
+  return {
+    matrix: [-a, -b, c, d, a * w + e + w, b * w + f],
+    clip: part.map((p) => ({ x: w - p.x, y: p.y })),
+    flap: part.map((p) => ({ x: a * p.x + c * p.y + e + w, y: b * p.x + d * p.y + f })),
+  };
+}
+
 export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): number {
   if (heldBySide(frame)) return paintSideFold(ctx, frame);
   const { width: W, height: H } = frame;
@@ -477,6 +533,11 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     ctx.beginPath();
     ctx.rect(0, 0, w, H);
     ctx.clip();
+    // Only on the uncovered side: past the fold the gradient's first stop
+    // carries on, and a page left clear for a live copy (the sheet still
+    // flat, or a live back) would be dimmed by it.
+    tracePolygon(ctx, halfPlane(fp, n, 1, 4 * (w + H)));
+    ctx.clip();
     const shadow = ctx.createLinearGradient(fp.x, fp.y, fp.x + n.x * span * 1.6, fp.y + n.y * span * 1.6);
     shadow.addColorStop(0, `rgba(0,0,0,${0.23 * lift})`);
     shadow.addColorStop(0.25, `rgba(0,0,0,${0.12 * lift})`);
@@ -515,7 +576,9 @@ export function paintTurn(ctx: CanvasRenderingContext2D, frame: TurnFrame): numb
     ctx.transform(a, b, c, d, e, f);
     tracePolygon(ctx, flap);
     ctx.clip();
-    if (book) {
+    if (book && frame.liveBack) {
+      // That page is the live copy under the canvas: only the shading goes on.
+    } else if (book) {
       // The back of this page is the left page of the next spread, mirrored
       // into the sheet so it reads the right way round once it lands. Paper
       // first: a live spread turn has no picture of it yet.
