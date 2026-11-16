@@ -80,8 +80,18 @@ const penWrites = (pointerType: string, tool: ToolName | undefined) =>
 function turnGripAt(rect: DOMRect, x: number, y: number, pointerType: string, tool: ToolName | undefined) {
   return penWrites(pointerType, tool) ? turnCornerAt(rect, x, y) : turnEdgeAt(rect, x, y);
 }
-/** Pictures kept for turns: this page and its neighbours — in a spread, three spreads' worth. */
+/** Pictures kept for turns: this page and its neighbours. */
 const SHOT_CACHE = 8;
+/**
+ * A text spread's turns, taken while the reader rests: the open spread and
+ * this many either side (see `sharpWindow`). Three pages either side were
+ * asked for; a turn shows both pages of the spread it turns to, so they are
+ * whole spreads, four pages either side. A run of flicks among them turns
+ * over pictures only, as sharp as the page at rest.
+ */
+const SHARP_SPREADS = 2;
+/** Pictures kept for a text spread: its window, and no more. */
+const SPREAD_SHOT_CACHE = 2 + 4 * SHARP_SPREADS;
 /** How long the view must sit still before the next turn's pictures are taken. */
 const PREFETCH_IDLE_MS = 600;
 /**
@@ -285,6 +295,34 @@ function shotScale(clientWidth: number, sceneWidth: number): number {
 }
 
 /**
+ * Pixels per scene unit for a text spread's page pictures: the screen's own,
+ * up to 2 a CSS px. A page is shown at half the spread, so each is a quarter
+ * of a screenful: about 2 MB at the tablet's 1.7, ten of them about 21 MB.
+ * The facing page at rest is one of them, and so is every page a turn among
+ * them shows, flicked or held.
+ */
+function spreadShotScale(clientWidth: number, sceneWidth: number): number {
+  const dpr = typeof window !== "undefined" ? Math.min(2, window.devicePixelRatio || 1) : 1;
+  return sceneWidth > 0 ? dpr * (clientWidth / sceneWidth) : dpr;
+}
+
+/**
+ * The pages a text spread's turns can show within `SHARP_SPREADS` turns of
+ * the spread whose left page is `start`, in the order they are pictured: that
+ * spread, then the spreads out from it, the way the reader last went first,
+ * and of each spread the page nearer the open one first.
+ */
+export function sharpWindow(start: number, count: number, heading: Direction): number[] {
+  const pages = [start, start + 1];
+  for (let k = 1; k <= SHARP_SPREADS; k += 1) {
+    const on = [start + 2 * k, start + 2 * k + 1];
+    const back = [start - 2 * k + 1, start - 2 * k];
+    pages.push(...(heading === "next" ? [...on, ...back] : [...back, ...on]));
+  }
+  return pages.filter((i) => i >= 0 && i < count);
+}
+
+/**
  * Find `selector` in the tab, and keep it while it stays there and matches.
  *
  * The page mask and the marks layers come after the document in the tab, so
@@ -466,14 +504,28 @@ function pdfPagePainted(hostSelector: string, pageId: number): boolean {
   return Boolean(canvases && Array.from(canvases).some((c) => c.width > 8 && c.height > 8));
 }
 
-type ShotCache = Map<string, Promise<HTMLCanvasElement | null>>;
+/** Pictures taken, by what they show; at most `limit` kept (`SHOT_CACHE` without one). */
+type ShotCache = Map<string, Promise<HTMLCanvasElement | null>> & { limit?: number };
 
 /**
- * A picture of part of the document, taken once.
- *
- * Keyed on what it shows — where, at what scale, with which ink, from which
- * paint — so a stroke added since, a zoom or a sharper paint takes a fresh
- * one. At most a few kept: each is a screenful of pixels.
+ * What a picture shows (where, at what scale, with which ink, from which
+ * paint, in which palette), so a stroke added since, a zoom or a sharper
+ * paint takes a fresh one.
+ */
+function shotKey(b: BoardHandle, scene: Scene, scale: number, cutY: number, signature: string, quick = false): string {
+  return [scene.x, scene.y, scene.width, scene.height, scale, b.getInkRevision(), Math.min(cutY, 1e9)]
+    .map((n) => Math.round(n * 100) / 100)
+    .join(":") + `@${signature}#${paletteSignature()}${quick ? "~quick" : ""}`;
+}
+
+/** Let go of every picture but those keyed in `keep`, taken or still being taken. */
+function keepShots(shots: ShotCache, keep: ReadonlySet<string>): void {
+  for (const key of Array.from(shots.keys())) if (!keep.has(key)) shots.delete(key);
+}
+
+/**
+ * A picture of part of the document, taken once (see `shotKey`). At most a
+ * few kept: each is a screenful of pixels.
  */
 export function takeShot(
   shots: ShotCache,
@@ -488,9 +540,7 @@ export function takeShot(
   /** Calls a new picture off part-way: see `restingPictureSignal`. */
   signal?: AbortSignal,
 ): Promise<HTMLCanvasElement | null> {
-  const key = [scene.x, scene.y, scene.width, scene.height, scale, b.getInkRevision(), Math.min(cutY, 1e9)]
-    .map((n) => Math.round(n * 100) / 100)
-    .join(":") + `@${signature}#${paletteSignature()}${quick ? "~quick" : ""}`;
+  const key = shotKey(b, scene, scale, cutY, signature, quick);
   let taken = shots.get(key);
   if (!taken && onlyIfTaken) return Promise.resolve(null);
   if (!taken) {
@@ -517,7 +567,7 @@ export function takeShot(
     });
     taken = pending;
     shots.set(key, taken);
-    while (shots.size > SHOT_CACHE) shots.delete(shots.keys().next().value!);
+    while (shots.size > (shots.limit ?? SHOT_CACHE)) shots.delete(shots.keys().next().value!);
   }
   return taken;
 }
@@ -1148,7 +1198,13 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
    */
   const restZoomRef = useRef<number | null>(null);
   /** Pictures of pages taken ahead of a turn, keyed by what they show. */
-  const shotsRef = useRef(new Map<string, Promise<HTMLCanvasElement | null>>());
+  const shotsRef = useRef<ShotCache>(new Map());
+  /**
+   * A text spread's: the pages within `SHARP_SPREADS` turns of the open
+   * spread (`sharpWindow`), its facing page's among them. The window moves
+   * with the reader, and what falls out of it is let go at the next rest.
+   */
+  const spreadShotsRef = useRef<ShotCache>(Object.assign(new Map(), { limit: SPREAD_SHOT_CACHE }));
   /**
    * The facing page a live spread turn landed with: its live copy, handed to
    * the facing slot instead of a picture taken on landing (half a second of
@@ -1158,7 +1214,10 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
   const facingHandoffRef = useRef<{ minY: number } | null>(null);
   /** When the last turn landed: within `FLICK_THROUGH_MS`, a hand is flicking through. */
   const landedAtRef = useRef(-Infinity);
-  useEffect(() => () => shotsRef.current.clear(), []);
+  useEffect(() => () => {
+    shotsRef.current.clear();
+    spreadShotsRef.current.clear();
+  }, []);
 
   // Lift the side stacks — the menu toolbar, the mode toggle and their
   // checkers — clear of the sheet's bottom corners, where a thumb turns
@@ -1373,10 +1432,11 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const hole = el.parentElement?.getBoundingClientRect();
       const heldScene = pageBoxScene(b, held);
       if (!hole || !heldScene) return;
-      const scale = shotScale(hole.width / 2, heldScene.width);
+      // The turns' pictures of these pages (see `spreadPageShot`), not taken twice.
+      const scale = spreadShotScale(hole.width / 2, heldScene.width);
       refreshing = true;
       const signal = restingPictureSignal();
-      const liveShot = takeShot(shotsRef.current, b, heldScene, scale, held.maxY, "", false, false, signal).then((canvas) => {
+      const liveShot = takeShot(spreadShotsRef.current, b, heldScene, scale, held.maxY, "", false, false, signal).then((canvas) => {
         if (!disposed && canvas && lockedRef.current === held) live = { page: held, canvas };
       });
       if (!facing) {
@@ -1387,7 +1447,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       }
       const scene = pageBoxScene(b, facing);
       if (!scene) { void liveShot.finally(() => { refreshing = false; }); return; }
-      const facingShot = takeShot(shotsRef.current, b, scene, scale, facing.maxY, "", false, false, signal).then((canvas) => {
+      const facingShot = takeShot(spreadShotsRef.current, b, scene, scale, facing.maxY, "", false, false, signal).then((canvas) => {
         // A turn under way may be building its right page in this slot.
         if (disposed || !canvas || lockedRef.current !== held || el.hidden || turnRef.current) return;
         if (el.firstElementChild !== canvas) el.replaceChildren(canvas);
@@ -2514,14 +2574,18 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           board() === b && b.getViewportBounds()?.y === view.y && b.getViewportBounds()?.zoom === view.zoom;
         const signal = restingPictureSignal();
         if (textSpreadRef.current) {
-          // This spread, and the ones either side of it, page by page.
+          // This spread, and two either side of it, page by page, nearest
+          // first. What the reader has moved away from goes before any is
+          // taken, so no more than one window's pictures are ever held.
           const start = at - (at % 2);
           const pageShot = spreadPageShot(b, frames, signal);
           if (!pageShot) return;
+          const near = sharpWindow(start, frames.length, heading);
+          keepShots(spreadShotsRef.current, new Set(near.map(pageShot.key)));
           prefetching = true;
           void (async () => {
             try {
-              for (const i of [start, start + 1, start + 2, start + 3, start - 2, start - 1]) {
+              for (const i of near) {
                 if (!current()) return;
                 await pageShot(i);
               }
@@ -2585,17 +2649,32 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return r && r.width > 16 && r.height > 8 ? r : null;
     };
 
-    /** Take (or find) the picture of page `i` of a text spread, at the size it is shown. */
+    /**
+     * Take (or find) the picture of page `i` of a text spread, at the size it
+     * is shown, in the screen's own pixels; `key` says which picture that is.
+     */
     const spreadPageShot = (b: BoardHandle, frames: readonly PageFrame[], signal?: AbortSignal) => {
       const r = spreadRect();
       const first = frames[0] ? pageBoxScene(b, frames[0]) : null;
       if (!r || !first) return null;
-      const scale = shotScale(r.width / 2, first.width);
-      return (i: number, onlyIfTaken = pagedRef.current): Promise<HTMLCanvasElement | null> => {
+      const scale = spreadShotScale(r.width / 2, first.width);
+      const sceneOf = (i: number) => {
         const f = frames[i];
         const scene = f ? pageBoxScene(b, f) : null;
-        return f && scene ? shot(b, scene, scale, f.maxY, f.pageId, onlyIfTaken, signal).then((picture) => withMarks(b, scene, picture)) : Promise.resolve(null);
+        return f && scene ? { f, scene } : null;
       };
+      const take = (i: number, onlyIfTaken = false): Promise<HTMLCanvasElement | null> => {
+        const page = sceneOf(i);
+        if (!page) return Promise.resolve(null);
+        const { f, scene } = page;
+        return takeShot(spreadShotsRef.current, b, scene, scale, f.maxY, "", onlyIfTaken, false, signal)
+          .then((picture) => withMarks(b, scene, picture));
+      };
+      const key = (i: number) => {
+        const page = sceneOf(i);
+        return page ? shotKey(b, page.scene, scale, page.f.maxY, "") : "";
+      };
+      return Object.assign(take, { key });
     };
 
     /** The kept pictures a turn from `page` will want, decoded ahead (see `pageThumbs`). */
