@@ -107,6 +107,14 @@ export const MAX_PIN_DRIFT = 1;
 export const TILE_BUDGET_FACTOR = 3.5;
 export const TILE_BUDGET_MIN = 24;
 export const TILE_BUDGET_MAX = 160;
+/**
+ * Squares a draw lets go of at most; any more go a frame at a time.
+ *
+ * Hydrating brings back every stored square of the note, and the first draw
+ * after it closed all those past the budget at once: 24-31 ms on the tablet,
+ * inside the first touch after a rest, whose page turn moves the camera.
+ */
+export const EVICT_PER_DRAW = 32;
 
 export interface TileRange {
   minTx: number;
@@ -350,6 +358,8 @@ export class InkTileCache {
   private clip: SceneBounds | null = null;
   private drawCount = 0;
   private budget = TILE_BUDGET_MIN;
+  /** A pass letting go of squares still past the budget (see `EVICT_PER_DRAW`). */
+  private evictHandle = 0;
   private pending: PendingTile[] = [];
   private visibleMisses = 1;
   private idleHandle = 0;
@@ -822,6 +832,8 @@ export class InkTileCache {
 
   dispose(): void {
     this.unregisterWork();
+    if (this.evictHandle) this.cancel(this.evictHandle);
+    this.evictHandle = 0;
     if (this.persistTimer != null) clearTimeout(this.persistTimer);
     this.persistTimer = null;
     this.persistQueue.clear();
@@ -1191,13 +1203,19 @@ export class InkTileCache {
     return tile;
   }
 
-  private evict(): void {
+  private evict(most = Infinity): void {
     if (this.tiles.size <= this.budget) return;
     const bySeen = [...this.tiles.values()].sort((a, b) => a.usedAt - b.usedAt);
-    const drop = this.tiles.size - this.budget;
+    const drop = Math.min(most, this.tiles.size - this.budget);
     for (let i = 0; i < drop; i++) {
       this.dropTile(bySeen[i].key);
       this.persistQueue.delete(bySeen[i].key);
+    }
+    if (this.tiles.size > this.budget && !this.evictHandle) {
+      this.evictHandle = this.schedule(() => {
+        this.evictHandle = 0;
+        this.evict(EVICT_PER_DRAW);
+      });
     }
   }
 
@@ -1363,7 +1381,7 @@ export class InkTileCache {
 
     this.pending = missed;
     this.visibleMisses = missed.length;
-    this.evict();
+    this.evict(EVICT_PER_DRAW);
     if (missed.length === 0 && this.persistDirty) {
       this.persistDirty = false;
       for (const tile of this.tiles.values()) this.schedulePersist(tile);

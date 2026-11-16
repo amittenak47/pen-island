@@ -21,6 +21,7 @@ import {
   TILE_OVERLAP_PX,
   TILE_PX,
   TILE_BUDGET_MAX,
+  EVICT_PER_DRAW,
 } from "./inkTiles";
 import { NO_PRESSURE, type InkDrawOp, type InkOp, type ViewportTransform } from "./rasterInk";
 
@@ -743,6 +744,38 @@ describe("InkTileCache", () => {
       while (waiting.length) { waiting.shift()!(); await Promise.resolve(); await Promise.resolve(); }
       await vi.waitFor(() => expect(ready).toHaveBeenCalled());
       expect(cache.size).toBe(10);
+    } finally {
+      cache.dispose(); load.mockRestore(); vi.unstubAllGlobals();
+    }
+  });
+
+  it("lets go of the stored squares past its budget a few at a time, not all in the first draw after them", async () => {
+    const rows = Array.from({ length: 200 }, (_, i) => ({
+      level: 0, tx: 1000 + i, ty: 1000, blob: new Blob(), width: 256, height: 256,
+    }));
+    const load = vi.spyOn(tileStore, "loadPersistedInkTiles").mockResolvedValue(rows as never);
+    let closed = 0;
+    vi.stubGlobal("createImageBitmap", vi.fn(async () => ({ close: () => { closed += 1; }, width: 256, height: 256 })));
+    const ready = vi.fn();
+    const { cache, scheduled } = makeCache({ persist: true, onTilesReady: ready });
+    try {
+      cache.syncOpsDeferred([draw([0, 0], [40, 0])]);
+      await vi.waitFor(() => expect(ready).toHaveBeenCalled());
+      expect(cache.size).toBe(200);
+      // The camera moves (a page turn's touch): the draw closes a few.
+      cache.draw(destinationContext().ctx, screen(1), 1);
+      expect(closed).toBe(EVICT_PER_DRAW);
+      // The rest go on the frames after, as few each, down to the budget.
+      const each: number[] = [];
+      for (let i = 0; i < 20 && scheduled.length; i++) {
+        const before = closed;
+        scheduled.shift()!();
+        each.push(closed - before);
+      }
+      expect(Math.max(...each)).toBeLessThanOrEqual(EVICT_PER_DRAW);
+      expect(cache.size).toBeLessThanOrEqual(TILE_BUDGET_MAX);
+      expect(cache.size + closed).toBeGreaterThanOrEqual(200);
+      expect(scheduled).toHaveLength(0);
     } finally {
       cache.dispose(); load.mockRestore(); vi.unstubAllGlobals();
     }

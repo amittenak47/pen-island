@@ -24,7 +24,7 @@ import { peekPdfFilmCurrent, publishPdfReadAhead, publishPdfPreloadPages, peekPd
 import { waitForPdfTurnPreview } from "./pdfTurnPreview";
 import { constrainCorner, cornerForCrease, cornerForGrip, curlGeometry, sheetPart, turnCommits, type Point } from "./curl";
 import type { TurnEdge } from "./paintTurn";
-import { bookBack, bookFlap, flatSheet, paintTurn, type TurnLayout } from "./paintTurn";
+import { bookFlap, flatSheet, paintTurn, type TurnLayout } from "./paintTurn";
 import { PAGE_LAYER_WILL_CHANGE } from "../pageLayerHint";
 import { boardResizeDeferred } from "../../util/splitResize";
 import { afterBootSettled, isBootSettled } from "../../util/bootSettled";
@@ -159,11 +159,14 @@ const PAPER_FILL_MS = 300;
  */
 const PAPER_FILL_TOUCH_MS = 650;
 /**
- * How long a lent turn back, taken after a rest on a touch screen, shows the
- * pages it uncovers as their kept pictures before copying them for a hand
- * still holding the sheet (see `liveSpread`). A flick has let go by then.
+ * A hand that has held the sheet this still (`HELD_STILL_PX`) this long is
+ * reading under it: the pages the turn shows as kept pictures or paper are
+ * copied in sharp, one a frame (see `sharpenHeld`). A flick has let go long
+ * before.
  */
-const SOFT_UNDER_MS = 200;
+const HELD_STILL_MS = 180;
+/** Moved no more than this (CSS px) since then: still, the finger's tremor included. */
+const HELD_STILL_PX = 8;
 /** A page left for the facing slot shows its soft kept picture this long, unless a turn takes it first, then its sharp copy. See `standIn`. */
 const STAND_IN_SHARPEN_MS = 300;
 /** How long a turn waits for the next page's picture before turning over plain paper. */
@@ -200,6 +203,12 @@ function keepPageLayersReady(): boolean {
 /** How long a facing page a flick left waits to be drawn (see `fillPaperFacing`). */
 function paperFillMs(): number {
   return keepPageLayersReady() ? PAPER_FILL_TOUCH_MS : PAPER_FILL_MS;
+}
+
+/** Input on its way to the page and not yet handled, moves included, where the browser can tell. */
+function inputPending(): boolean {
+  const scheduling = (navigator as Navigator & { scheduling?: { isInputPending?: (o?: { includeContinuous?: boolean }) => boolean } }).scheduling;
+  return scheduling?.isInputPending?.({ includeContinuous: true }) === true;
 }
 
 /**
@@ -705,15 +714,30 @@ interface Turn {
    * the board, as live copies inside `under` — see `planSpreadTurn`. The right
    * one may be in the facing page's slot instead (`liveSpread`).
    */
-  spreadLive?: { left: HTMLElement | null; right: HTMLElement | null; back?: HTMLElement | null };
+  spreadLive?: {
+    left: HTMLElement | null;
+    right: HTMLElement | null;
+    back?: HTMLElement | null;
+    /** Turning on, the next right page and the sheet's back, each shown through a window (see `slideOn`). */
+    windows?: { right: HolderWindows | null; back: HolderWindows | null };
+  };
   /** Flicked through: `spreadLive`'s pages are not copied, only kept pictures or paper (see `liveSpread`). */
   paper?: boolean;
   /**
-   * Pages under a lent turn back shown as their kept pictures for now, to be
-   * copied in only while the hand holds the sheet (see `liveSpread`); `right`
-   * says the right page, which lands as the facing page, is still one.
+   * The pages the turn shows as kept pictures or paper, nearest the fold
+   * first, copied in sharp only while a hand holds the sheet still (see
+   * `sharpenHeld`); `back` is the sheet's back turning on. `right` says the
+   * right page, which lands as the facing page, is still soft; `sharpRight`
+   * that it was copied so. `copyNext` copies the first, saying whether any
+   * are left; `hand` is where the hand last moved, and when.
    */
-  soft?: { pages: { into: HTMLElement; frame: PageFrame; picture: HTMLElement; side: "left" | "right" }[]; right: boolean };
+  soft?: {
+    pages: { into: HTMLElement | null; frame: PageFrame; picture: HTMLElement | null; side: "left" | "right" | "back" }[];
+    right: boolean;
+    sharpRight?: boolean;
+    copyNext?: () => boolean;
+    hand?: { x: number; y: number; at: number; timer: number; frame: number };
+  };
   /** A live spread's stand-in for the back of its sheet: the kept picture of the page landing on the left. */
   back?: CanvasImageSource | null;
   /** Turning back, the board's own page is the back of the sheet, moved to it (see `borrowBoard`). */
@@ -866,6 +890,146 @@ function windowBox(reach: number): HTMLElement {
   return box;
 }
 
+/** Half a window's height for a turn over `rect`: more than its diagonal. */
+function windowReach(rect: { width: number; height: number }): number {
+  return Math.ceil(2 * (rect.width + rect.height));
+}
+
+/**
+ * Half a window's height for a `w` by `H` page turning on (`slideOn`): as far
+ * as any point of the page can be from the fold's point, which lies within a
+ * sheet's width of the page, and no further.
+ *
+ * Bigger, it hangs past the margin Chromium keeps painted around a moving
+ * layer: windows the size of `windowReach` were painted again on the
+ * tablet in every frame that slid them.
+ */
+function onReach(w: number, H: number): number {
+  return Math.ceil(Math.hypot(w, H) + w) + 1;
+}
+
+/** A `w` by `H` page on `paper` inside a window, turned back as it turns: its own compositor layer. */
+function windowPage(w: number, H: number, paper: string): HTMLElement {
+  const page = document.createElement("div");
+  Object.assign(page.style, {
+    position: "absolute", left: "0", top: "0", width: `${w}px`, height: `${H}px`,
+    background: paper, transformOrigin: "0 0", willChange: "transform",
+  });
+  return page;
+}
+
+/** How long `slideTo` holds a transform: longer than any hand holds a sheet. Let go of with the turn. */
+const SLIDE_HOLD_MS = 3_600_000;
+/** The animation holding each element's transform (see `slideTo`). */
+const slides = new WeakMap<HTMLElement, Animation>();
+
+/**
+ * Give `el` this transform for the frame, held by an animation of its own
+ * rather than set in its style.
+ *
+ * On the tablet's WebView a transform set in style, layer or not, lays out
+ * the board's layers for the compositor again in every frame it changes:
+ * 4-9 ms on a note of math. One an animation holds goes to the compositor
+ * as it is, as long as it stays level (turned at all, it is laid out again
+ * too: see `slideOn`), and a new value is the same animation's keyframes
+ * changed. Where nothing can animate (tests), its style.
+ */
+function slideTo(el: HTMLElement, transform: string): void {
+  if (typeof el.animate !== "function") {
+    el.style.transform = transform;
+    return;
+  }
+  const keyframes = [{ transform }, { transform }];
+  const held = slides.get(el);
+  const effect = held?.effect;
+  if (effect instanceof KeyframeEffect) effect.setKeyframes(keyframes);
+  else slides.set(el, el.animate(keyframes, { duration: SLIDE_HOLD_MS, fill: "forwards" }));
+}
+
+/**
+ * Let go of the transform `slideTo` held: the style's shows again. A held
+ * animation keeps its element, and the page copy around it, alive.
+ */
+function stopSlide(el: HTMLElement): void {
+  slides.get(el)?.cancel();
+  slides.delete(el);
+}
+
+/**
+ * Show a page held in one window only on the side of the line through `q`
+ * that `n` (a unit normal) points to: the window set along the line, the
+ * page in it turned back to where it was. Transforms only, held (`slideTo`)
+ * once the turn moves; in style for where it starts.
+ */
+function slideWindow(shown: HolderWindows, q: Point, n: Point, reach: number, held = true): void {
+  const t = halfPlane(q, n, -reach);
+  const [win, back] = [affineCss(t), affineCss(affineInverse(t))];
+  if (held) {
+    slideTo(shown.windows[0]!, win);
+    slideTo(shown.page, back);
+  } else {
+    shown.windows[0]!.style.transform = win;
+    shown.page.style.transform = back;
+  }
+}
+
+/** Let go of everything `slideOn` held for these windows. */
+function stopSliding(windows: { right: HolderWindows | null; back: HolderWindows | null } | undefined): void {
+  for (const shown of [windows?.right, windows?.back]) {
+    if (shown) for (const el of [shown.holder, ...shown.windows, shown.page]) stopSlide(el);
+  }
+}
+
+/**
+ * Cut a live spread turning on where its sheet is now: the next right page
+ * past the fold, where the sheet has come off it, and the sheet's back
+ * moved to the flap and cut at the fold. `sheet` is in the right page's
+ * own pixels, `width` half the spread.
+ *
+ * Both are windows (`slideWindow`), and the back's box moves as a whole,
+ * every transform held by an animation (`slideTo`). They were clip paths
+ * and a transform with no layer of its own, changed every frame: each frame
+ * painted the next page again and laid out the board's layers for the
+ * compositor again, 11-14 ms of the tablet's main thread for a note of math.
+ *
+ * The fold is a straight line through the page, so a window cuts exactly
+ * where a clip path did, with no slivers at the page's edges (`cutAbove`
+ * has those): the holders clip to the page.
+ */
+function slideOn(
+  windows: { right: HolderWindows | null; back: HolderWindows | null },
+  sheet: { width: number; height: number; corner: Point; bottom: boolean; restY: number },
+  reach: number,
+): void {
+  const w = sheet.width;
+  let at = sheet;
+  let g = curlGeometry(at.corner, w, at.height, at.bottom, at.restY);
+  // A fold leaning less than half a pixel over the page is cut upright. A
+  // turned window is laid out for the compositor again in every frame that
+  // moves it, however it is moved (see `slideTo`), and a sheet held mid-side
+  // leans by that little as it rolls (see `step`): on the tablet, two frames
+  // in three of a run of flicks. The sheet's shading keeps the true fold.
+  if (g.foldNormal.y !== 0 && Math.abs(g.foldNormal.y) * at.height < 0.5) {
+    at = { ...at, corner: { x: g.corner.x, y: g.rest.y } };
+    g = curlGeometry(at.corner, w, at.height, at.bottom, at.restY);
+  }
+  const q = g.foldPoint;
+  const n = g.foldNormal;
+  // The fold's normal points to the flap's side: the page uncovered there.
+  if (windows.right) slideWindow(windows.right, q, n, reach);
+  const back = windows.back;
+  if (!back) return;
+  const flap = bookFlap(at);
+  if (!flap) {
+    // Nothing folded over.
+    slideWindow(back, { x: w + 1, y: 0 }, { x: 1, y: 0 }, reach);
+    return;
+  }
+  slideTo(back.holder, affineCss(flap.matrix as Affine));
+  // The back is the sheet's page mirrored (x to w - x), its fold too.
+  slideWindow(back, { x: w - q.x, y: q.y }, { x: -n.x, y: n.y }, reach);
+}
+
 /**
  * The point `el` turns about, in `surface`'s own pixels: its box by the
  * offsets up to `surface` (which leave its transform out), plus its
@@ -992,6 +1156,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
    * pictures wait until the hand has rested.
    */
   const facingHandoffRef = useRef<{ minY: number } | null>(null);
+  /** When the last turn landed: within `FLICK_THROUGH_MS`, a hand is flicking through. */
+  const landedAtRef = useRef(-Infinity);
   useEffect(() => () => shotsRef.current.clear(), []);
 
   // Lift the side stacks — the menu toolbar, the mode toggle and their
@@ -1279,17 +1445,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return [holder];
     };
 
-    const onDown = (event: PointerEvent) => {
-      if (!event.isPrimary || event.button !== 0) return;
-      const b = boardRef.current;
-      const el = facingEl();
-      const held = lockedRef.current;
-      if (!b || !el || el.hidden || !held || turnRef.current) return;
-      const r = el.getBoundingClientRect();
-      if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) return;
-      // The outer edge is the turn's, while turning is on.
-      const hole = el.parentElement?.getBoundingClientRect();
-      if (hole && turnEnabledRef.current && turnGripAt(hole, event.clientX, event.clientY, event.pointerType, b.getActiveTool?.())) return;
+    /** Make the facing page the held one. */
+    const swap = (b: BoardHandle, el: HTMLElement, held: PageFrame) => {
       const frames = b.readingPageFrames();
       const i = frames.findIndex((f) => same(f, held));
       const facing = i >= 0 ? frames[i % 2 === 0 ? i + 1 : i - 1] : undefined;
@@ -1300,6 +1457,50 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       b.setPageLock(facing);
     };
 
+    /*
+     * A finger on the facing page while flicking through is the next flick,
+     * nearly always, and a flick needs the board where it is. Going over to
+     * the facing page there cost the flick's first frame 60-90 ms on the
+     * tablet (the camera's move laid out and pre-painted on the touch, its
+     * repaint the frame after) and the landing as much again to come back. So
+     * the swap waits for the lift, and a press a turn took never swaps. A pen
+     * with a drawing tool up writes, and swaps at once.
+     */
+    let swapOnLift: { id: number; held: PageFrame } | null = null;
+
+    const onDown = (event: PointerEvent) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      swapOnLift = null;
+      const b = boardRef.current;
+      const el = facingEl();
+      const held = lockedRef.current;
+      if (!b || !el || el.hidden || !held || turnRef.current) return;
+      const r = el.getBoundingClientRect();
+      if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) return;
+      // The outer edge is the turn's, while turning is on.
+      const hole = el.parentElement?.getBoundingClientRect();
+      const tool = b.getActiveTool?.();
+      if (hole && turnEnabledRef.current && turnGripAt(hole, event.clientX, event.clientY, event.pointerType, tool)) return;
+      if (turnEnabledRef.current && !penWrites(event.pointerType, tool) &&
+          performance.now() - landedAtRef.current < FLICK_THROUGH_MS) {
+        swapOnLift = { id: event.pointerId, held };
+        return;
+      }
+      swap(b, el, held);
+    };
+    const onLift = (event: PointerEvent) => {
+      const wait = swapOnLift;
+      // A turn ends the board's own gesture with a cancel of its own.
+      if (!wait || wait.id !== event.pointerId || (event.type === "pointercancel" && !event.isTrusted)) return;
+      swapOnLift = null;
+      if (event.type !== "pointerup") return;
+      const b = boardRef.current;
+      const el = facingEl();
+      // A turn took the press, or the page moved on under it.
+      if (!b || !el || el.hidden || turnRef.current || lockedRef.current !== wait.held) return;
+      swap(b, el, wait.held);
+    };
+
     refresh();
     const unsubscribe = subscribePdfFilmCurrent(filmScope, () => {
       cancelAnimationFrame(refreshFrame);
@@ -1307,6 +1508,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     });
     const timer = window.setInterval(refresh, 700);
     window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onLift, true);
+    window.addEventListener("pointercancel", onLift, true);
     return () => {
       disposed = true;
       cancelAnimationFrame(refreshFrame);
@@ -1314,6 +1517,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       unsubscribe();
       window.clearInterval(timer);
       window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onLift, true);
+      window.removeEventListener("pointercancel", onLift, true);
       facingEl()?.replaceChildren();
     };
   }, [boardRef, filmScope, hostSelector, lockActive, textSpread]);
@@ -1554,7 +1759,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
      * when the board holds the right one: either costs nothing, and is
      * sharp. Turning on, the page is not on screen: a turn that is not a
      * flick copies it when it has no kept picture (`back`, placed by
-     * `bookBack`). Otherwise the back is the page's kept picture, or paper.
+     * `slideOn`). Otherwise the back is the page's kept picture, or paper.
      */
     const liveSpread = (b: BoardHandle, turn: Turn, frames: readonly PageFrame[], other: number, paper = false): HTMLElement | null => {
       const pane = document.querySelector<HTMLElement>(hostSelector);
@@ -1565,6 +1770,9 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const background = turnPaperColor(paperColor(), false);
       const book = thumbBookFor(docKeyRef.current, b, frames);
       if (book) openThumbBook(book);
+      // Lent, windows reach past the spread's edges; turning on, past the page's.
+      const reach = turn.direction === "next" ? onReach(w, H) : windowReach(turn.rect);
+      const onWindows: NonNullable<NonNullable<Turn["spreadLive"]>["windows"]> = { right: null, back: null };
       const page = (i: number, side: "left" | "right"): HTMLElement | null => {
         const frame = frames[i];
         const holder = document.createElement("div");
@@ -1574,34 +1782,39 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         });
         // Lent, the holder stays put and its page shows through windows in
         // it that turn (see `cutAbove`): past the sheet's edge, and for the
-        // right page on the spine's side of the fold too. The paper goes in
-        // with the page, or the holder would show it everywhere.
-        let into = holder;
+        // right page on the spine's side of the fold too. Turning on, the
+        // right page shows through one, past the fold (`slideOn`). The paper
+        // goes in with the page, or the holder would show it everywhere.
+        let into: HTMLElement = holder;
         const lender = turn.borrowed;
-        if (lender) {
-          const windows = Array.from({ length: side === "right" ? 2 : 1 }, () => windowBox(lender.reach));
+        const on = !lender && turn.direction === "next" && side === "right";
+        if (lender || on) {
+          const windows = Array.from({ length: lender && side === "right" ? 2 : 1 }, () => windowBox(reach));
           windows.reduce<HTMLElement>((at, box) => { at.appendChild(box); return box; }, holder);
-          into = document.createElement("div");
-          Object.assign(into.style, {
-            position: "absolute", left: "0", top: "0", width: `${w}px`, height: `${H}px`,
-            background, transformOrigin: "0 0", willChange: "transform",
-          });
+          into = windowPage(w, H, background);
           windows[windows.length - 1]!.appendChild(into);
           holder.style.background = "";
-          lender.pages[side] = { holder, windows, page: into };
+          const through = { holder, windows, page: into };
+          if (lender) lender.pages[side] = through;
+          else {
+            onWindows.right = through;
+            // Nothing past the fold yet.
+            slideWindow(through, { x: w + 1, y: 0 }, { x: 1, y: 0 }, reach, false);
+          }
         }
         // A spread's last page can be missing: plain paper, as the board shows it.
         // Lent on a touch screen, a page with a kept picture shows that for
-        // now, and is copied only for a hand that holds the sheet (see below).
+        // now (see below). Either way it is copied only for a hand that holds
+        // the sheet still (`sharpenHeld`).
         const softFirst = Boolean(lender) && !paper && keepPageLayersReady();
         const kept = frame && (paper || softFirst) ? thumbPicture(book, i) : null;
         const shown = kept ? thumbElement(kept) : null;
         if (shown) into.appendChild(shown);
-        if (frame && !paper && shown && softFirst) {
+        if (frame && (paper || (shown && softFirst))) {
           turn.soft ??= { pages: [], right: false };
           turn.soft.pages.push({ into, frame, picture: shown, side });
           if (side === "right") turn.soft.right = true;
-        } else if (frame && !paper) fillPage(b, into, frame, w, H, surface, () => !turn.done);
+        } else if (frame) fillPage(b, into, frame, w, H, surface, () => !turn.done);
         // Its half of the spine's shadow, over it, while windows cut (see `cutAbove`).
         if (lender?.spine) into.appendChild(spineHalf(lender.spine, lender.spineHalves, side === "left" ? w - lender.spine.half : -lender.spine.half, H));
         return holder;
@@ -1610,16 +1823,33 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const backAt = turn.direction === "next" ? other : other + 2;
       // Before the copies below go in: it reads where the board's layers are.
       turn.borrowed = borrowBoard(b, turn, frames, backAt);
-      turn.back = turn.borrowed ? null : facingPicture(turn, frames, backAt) ?? thumbCopy(thumbPicture(book, backAt));
-      let back: HTMLElement | null = null;
-      if (!turn.back && !turn.borrowed && !paper && turn.direction === "next" && frames[backAt]) {
-        back = document.createElement("div");
-        Object.assign(back.style, {
+      const facingBack = turn.borrowed ? null : facingPicture(turn, frames, backAt);
+      turn.back = turn.borrowed ? null : facingBack ?? thumbCopy(thumbPicture(book, backAt));
+      /**
+       * The sheet's back turning on, live: a page-size box moved to the flap,
+       * with the page in a window in it cut at the fold (`slideOn`). Nothing
+       * shows until it is placed.
+       */
+      const backBox = (): HolderWindows => {
+        const box = document.createElement("div");
+        Object.assign(box.style, {
           position: "absolute", top: "0", left: "0", width: `${w}px`, height: `${H}px`, overflow: "hidden",
-          background, transformOrigin: "0 0", clipPath: "inset(100%)",
+          transformOrigin: "0 0", willChange: "transform",
         });
-        if (!fillPage(b, back, frames[backAt], w, H, surface, () => !turn.done)) back = null;
+        const windows = [windowBox(reach)];
+        const into = windowPage(w, H, background);
+        box.appendChild(windows[0]!).appendChild(into);
+        const through = { holder: box, windows, page: into };
+        slideWindow(through, { x: w + 1, y: 0 }, { x: 1, y: 0 }, reach, false);
+        return through;
+      };
+      let back: HolderWindows | null = null;
+      const backSoft = !turn.borrowed && !facingBack && turn.direction === "next" && frames[backAt];
+      if (backSoft && !turn.back && !paper) {
+        back = backBox();
+        if (!fillPage(b, back.page, frames[backAt]!, w, H, surface, () => !turn.done)) back = null;
       }
+      onWindows.back = back;
       const under = document.createElement("div");
       under.className = "lc-page-turn-under";
       under.setAttribute("aria-hidden", "true");
@@ -1628,7 +1858,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       if (turn.borrowed) under.style.overflow = "hidden";
       const left = turn.direction === "prev" ? page(other, "left") : null;
       const right = page(other + 1, "right");
-      if (right) right.style.clipPath = "inset(100%)";
+      // Hidden until cut, unless it shows through a window.
+      if (right && onWindows.right?.holder !== right) right.style.clipPath = "inset(100%)";
       /*
        * The right page becomes the facing page when the turn lands. Built in
        * the facing page's slot, above what it shows now, it stays there: moved
@@ -1641,39 +1872,115 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         right.style.left = "0";
         facing.appendChild(right);
       }
-      for (const holder of [left, right, back]) if (holder && !holder.parentNode) under.appendChild(holder);
-      turn.spreadLive = { left, right, back };
+      for (const holder of [left, right, back?.holder]) if (holder && !holder.parentNode) under.appendChild(holder);
+      turn.spreadLive = { left, right, back: back?.holder ?? null, windows: turn.direction === "next" ? onWindows : undefined };
       /*
        * A turn back taken after a rest, on a touch screen, starts on the kept
        * pictures of the pages it uncovers. Copying them both first was about
        * 90 ms of script, 40 ms laying them out and 30 ms painting them before
        * its first frame on the tablet: a flick back from a page read for a
-       * moment ran at 20 frames a second. A flick lets go long before
-       * `SOFT_UNDER_MS` and copies nothing, as a hand flicking through does;
-       * a hand still holding the sheet then is reading under it, and gets the
-       * pages themselves, one a frame, left first, as it uncovers them.
+       * moment ran at 20 frames a second. A flicked turn shows kept pictures
+       * or paper for the same reason. A flick lets go long before any of
+       * them is wanted sharp; a hand holding the sheet still is reading under
+       * it, and gets the pages themselves (`sharpenHeld`), the sheet's back
+       * turning on last.
        */
-      if (turn.soft?.pages.length) {
-        const sharpen = () => {
-          const soft = turn.soft;
-          const next = soft?.pages.shift();
-          if (!soft || !next || turn.done || !turn.borrowed) return;
-          if (active?.turn !== turn) {
-            soft.pages.length = 0;
-            return;
-          }
-          if (fillPage(b, next.into, next.frame, w, H, surface, () => !turn.done)) {
-            next.picture.remove();
-            if (next.side === "right") soft.right = false;
+      if (backSoft && !back) {
+        turn.soft ??= { pages: [], right: false };
+        turn.soft.pages.push({ into: null, frame: frames[backAt]!, picture: null, side: "back" });
+      }
+      const soft = turn.soft;
+      if (soft?.pages.length) {
+        soft.copyNext = () => {
+          const next = soft.pages.shift();
+          if (!next) return false;
+          if (next.side === "back") {
+            // As a turn that is not a flick shows it from the start (above).
+            const box = backBox();
+            if (turn.spreadLive && fillPage(b, box.page, next.frame, w, H, surface, () => !turn.done)) {
+              under.appendChild(box.holder);
+              turn.spreadLive.back = box.holder;
+              onWindows.back = box;
+              turn.back = null;
+              draw(turn);
+            }
+          } else if (next.into && fillPage(b, next.into, next.frame, w, H, surface, () => !turn.done)) {
+            next.picture?.remove();
+            if (next.side === "right") {
+              soft.right = false;
+              soft.sharpRight = true;
+            }
             // The spine's shadow stays over the page (see `spineHalf`).
             const half = next.into.querySelector(":scope > .lc-page-turn-spine");
             if (half) next.into.appendChild(half);
           }
-          if (soft.pages.length) requestAnimationFrame(() => window.setTimeout(sharpen, 0));
+          return soft.pages.length > 0;
         };
-        window.setTimeout(sharpen, SOFT_UNDER_MS);
       }
       return under;
+    };
+
+    /** Called off: the hand moved on, let go, or the turn is gone. */
+    const stopSharpening = (turn: Turn) => {
+      const hand = turn.soft?.hand;
+      if (!hand) return;
+      window.clearTimeout(hand.timer);
+      cancelAnimationFrame(hand.frame);
+      hand.timer = 0;
+      hand.frame = 0;
+    };
+
+    /**
+     * The hand holding a sheet, for `sharpenHeld`: once it has moved past
+     * `HELD_STILL_PX` from where it last did, it is moving, and the wait for
+     * it to hold still starts over.
+     */
+    const noteHand = (turn: Turn, x: number, y: number) => {
+      const soft = turn.soft;
+      if (!soft?.pages.length || !soft.copyNext) return;
+      const hand = soft.hand;
+      if (hand && Math.abs(x - hand.x) <= HELD_STILL_PX && Math.abs(y - hand.y) <= HELD_STILL_PX) return;
+      stopSharpening(turn);
+      soft.hand = { x, y, at: performance.now(), timer: 0, frame: 0 };
+      soft.hand.timer = window.setTimeout(() => sharpenHeld(turn), HELD_STILL_MS);
+    };
+
+    /**
+     * A hand that holds the sheet still is reading under it: the pages the
+     * turn shows as kept pictures or paper come in sharp, one a frame, the
+     * one nearest the fold first (turning on, the next right page, then the
+     * sheet's back; turning back, the left page, then the right).
+     *
+     * A copy is a block of 40-78 ms on the tablet, so each waits for the
+     * frame before it, and none starts once the hand has moved on or let go:
+     * a hand that starts to move during one gets one late frame. A hand that
+     * holds still again picks up where it stopped.
+     */
+    const sharpenHeld = (turn: Turn) => {
+      const soft = turn.soft;
+      const hand = soft?.hand;
+      if (!soft || !hand) return;
+      hand.timer = 0;
+      if (turn.done || active?.turn !== turn || !soft.copyNext) return;
+      const quiet = performance.now() - hand.at;
+      if (quiet < HELD_STILL_MS) {
+        hand.timer = window.setTimeout(() => sharpenHeld(turn), HELD_STILL_MS - quiet);
+        return;
+      }
+      const afterFrame = () => {
+        hand.frame = requestAnimationFrame(() => {
+          hand.frame = 0;
+          hand.timer = window.setTimeout(() => sharpenHeld(turn), 0);
+        });
+      };
+      // A move on its way and not yet handled goes first. Without this the
+      // tablet started the next copy with the hand's move waiting behind it,
+      // two late frames (78, 89 ms) where one was due.
+      if (inputPending()) {
+        afterFrame();
+        return;
+      }
+      if (soft.copyNext()) afterFrame();
     };
 
     /**
@@ -1723,7 +2030,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const blankEl = hole?.querySelector<HTMLElement>(":scope > .lc-page-mask-blank") ?? null;
       const spineEl = hole?.querySelector<HTMLElement>(":scope > .lc-page-mask-spine") ?? null;
       // Windows past the spread's edges: longer than its diagonal both ways.
-      const reach = Math.ceil(2 * (turn.rect.width + turn.rect.height));
+      const reach = windowReach(turn.rect);
       const spine = spineEl && !spineEl.hidden ? {
         el: spineEl, clipPath: spineEl.style.clipPath, visibility: spineEl.style.visibility,
         half: spineEl.offsetWidth / 2, look: getComputedStyle(spineEl).backgroundImage,
@@ -2014,6 +2321,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       // next turn back (see `keepFacingReady`).
       const ready = done && keepPageLayersReady();
       for (const el of [...page.windows, page.page]) {
+        stopSlide(el);
         el.style.transform = "";
         if (done && !ready) el.style.willChange = "";
       }
@@ -2095,13 +2403,13 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     const clipUnder = (turn: Turn) => {
       if (!turn.under) return;
       if (turn.spreadLive) {
-        const { right, back } = turn.spreadLive;
+        const { right, windows } = turn.spreadLive;
         const w = turn.rect.width / 2, H = turn.rect.height;
         const sheetAt = { width: w, height: H, corner: turn.corner, bottom: turn.bottom, restY: turn.restY };
-        if (back) {
-          const at = bookBack(sheetAt);
-          back.style.transform = at?.transform ?? "";
-          back.style.clipPath = at?.clipPath ?? "inset(100%)";
+        // Turning on: cut by windows, transforms only.
+        if (windows) {
+          slideOn(windows, sheetAt, onReach(w, H));
+          return;
         }
         // The board's own page as the flap: moved there, and shown through
         // the pages above it, cut there.
@@ -2114,11 +2422,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         if (!right || turn.borrowed?.cuts === "windows") return;
         const flat = flatSheet({ layout: "book", ...sheetAt });
         const sheet = flat.length >= 3 ? pathOf(flat) : "";
-        // On: the next page where the sheet has come off it. Back: the
-        // returning page where it lies flat, less the flap lying over it.
-        right.style.clipPath = turn.direction === "next"
-          ? (sheet ? `path(evenodd, "M0 0H${w}V${H}H0Z${sheet}")` : "none")
-          : !sheet ? "inset(100%)"
+        // The returning page where it lies flat, less the flap lying over it.
+        right.style.clipPath = !sheet ? "inset(100%)"
           : lent ? `path(evenodd, "${sheet}${pathOf(lent.flap, w)}")`
           : `path("${sheet}")`;
         return;
@@ -2755,6 +3060,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       if (turn.done) return;
       turn.done = true;
       turn.abort.abort();
+      stopSharpening(turn);
       // Settled back flat, or landed already: the board has its page back.
       returnBoard(turn);
       liveTurns.delete(turn);
@@ -2776,6 +3082,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         turn.under?.remove();
         // Not landed: its right page, built in the facing slot, goes too.
         turn.spreadLive?.right?.remove();
+        stopSliding(turn.spreadLive?.windows);
         layers.delete(turn);
         if (turn.marksHidden) {
           turn.marksHidden = false;
@@ -2808,8 +3115,10 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const frames = turn.spreadLive ? b.readingPageFrames() : [];
       const facingPage = frames[frames.findIndex((f) => Math.abs(f.minY - turn.to.minY) < 0.5) + 1];
       if (facingCopy && facingEl && facingPage && !facingEl.hidden) {
-        // Shown through windows while the board's page was lent: whole now.
-        if (lentPages?.right?.holder === facingCopy) restWindows(lentPages.right, true);
+        // Shown through windows while the board's page was lent, or past the
+        // fold turning on: whole now.
+        const through = lentPages?.right ?? turn.spreadLive?.windows?.right;
+        if (through?.holder === facingCopy) restWindows(through, true);
         if (facingCopy.parentNode === facingEl) {
           // Built in the slot (see `liveSpread`): it stays as laid out.
           facingCopy.style.clipPath = "none";
@@ -2820,10 +3129,14 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         }
         facingHandoffRef.current = { minY: facingPage.minY };
         if (turn.spreadLive) turn.spreadLive.right = null;
-        paperFacing = turn.paper || turn.soft?.right ? { holder: facingCopy, w: turn.rect.width / 2, H: turn.rect.height } : null;
+        // Still soft: drawn once the hand stops. Copied while the hand held
+        // the sheet: ready for a turn back, as one drawn then would be.
+        paperFacing = turn.soft?.right ? { holder: facingCopy, w: turn.rect.width / 2, H: turn.rect.height } : null;
+        if (turn.soft?.sharpRight && !lentPages?.right) keepFacingReady(facingCopy);
       }
       const flipping = flicking();
       lastLandAt = performance.now();
+      landedAtRef.current = lastLandAt;
       if (paperFacing && !paperFillTimer) paperFillTimer = window.setTimeout(fillPaperFacing, paperFillMs());
       // The kept pictures the next turns this way will want, out of the landing's frame.
       if (!pagedRef.current) window.setTimeout(() => { if (!disposed) warmThumbs(b, turn.to, frames.length > 0 ? frames : undefined); }, 0);
@@ -3430,6 +3743,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           turn.canvas.remove();
           turn.under?.remove();
           turn.spreadLive?.right?.remove();
+          stopSliding(turn.spreadLive?.windows);
           layers.delete(turn);
         }
         return;
@@ -3544,6 +3858,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         if (active.trail.length > 12) active.trail.shift();
       }
       const turn = active.turn;
+      if (!release) noteHand(turn, event.clientX, event.clientY);
       const w = turn.layout === "book" ? turn.rect.width / 2 : turn.rect.width;
       // A caught sheet moves on from where it was caught, at the hand's pace:
       // one to one by its corner, twice that by its crease.
@@ -3835,6 +4150,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         turn.canvas.remove();
         turn.under?.remove();
         turn.spreadLive?.right?.remove();
+        stopSliding(turn.spreadLive?.windows);
         layers.delete(turn);
       }
       // The glass goes with the turns: the board takes touches as it did.
