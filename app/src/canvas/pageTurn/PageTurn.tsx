@@ -22,7 +22,7 @@ import type { BoardHandle, ToolName } from "../BoardHandle";
 import type { PageFrame } from "../inkPageIndex";
 import { peekPdfFilmCurrent, publishPdfReadAhead, publishPdfPreloadPages, peekPdfPreloadPages, subscribePdfFilmCurrent, wakePdfPaintPump } from "../../modes/pdfFilm";
 import { waitForPdfTurnPreview } from "./pdfTurnPreview";
-import { constrainCorner, cornerForCrease, cornerForGrip, turnCommits, type Point } from "./curl";
+import { constrainCorner, cornerForCrease, cornerForGrip, curlGeometry, sheetPart, turnCommits, type Point } from "./curl";
 import type { TurnEdge } from "./paintTurn";
 import { bookBack, bookFlap, flatSheet, paintTurn, type TurnLayout } from "./paintTurn";
 import { boardResizeDeferred } from "../../util/splitResize";
@@ -155,6 +155,19 @@ const STAND_IN_SHARPEN_MS = 300;
 const TO_PICTURE_GRACE_MS = 80;
 /** Let go before the pictures were taken: how long to wait for them before simply going. */
 const PICTURE_WAIT_MS = 1200;
+/**
+ * The widest sliver, in view pixels, that windows may leave at the spread's
+ * top or bottom edge while they cut the pages above a lent page (see
+ * `cutAbove`). Paper shows there, where those pages' margins would.
+ */
+const WINDOW_SLIVER_PX = 3;
+/**
+ * What moves with a lent page, told so: each of `rotate`, `translate` and
+ * `transform` turned into a layer of its own, so a frame that changes only
+ * them is handed to the compositor without laying out the board's layers
+ * again (13 ms a frame on the tablet, for a note of 60,000 elements).
+ */
+const LENT_WILL_CHANGE = "transform, rotate, translate";
 /**
  * A flick commits on its pace alone: let go at least this fast (px per ms)
  * along the turn, having carried the sheet at least `FLICK_COMMIT_MIN_PX`.
@@ -691,14 +704,113 @@ interface BorrowedBoard {
   origin: Point;
   /** The board's layers, each with the point it turns about (board pixels). */
   layers: { el: HTMLElement; pivot: Point; rotate: string; translate: string; willChange: string }[];
-  /** The paper below the page's cut, moved with it and clipped to the flap; its pivot in spread pixels. */
-  blank: { el: HTMLElement; pivot: Point; rotate: string; translate: string; origin: string; clipPath: string } | null;
-  /** The facing page above the board, cut where the sheet crosses onto it. */
-  facing: { el: HTMLElement; clipPath: string } | null;
-  /** The spine's shadow, cut the same way; `half` is half its width. */
-  spine: { el: HTMLElement; clipPath: string; half: number } | null;
+  /** The paper below the page's cut, moved with it; its pivot in spread pixels. */
+  blank: { el: HTMLElement; pivot: Point; rotate: string; translate: string; origin: string; clipPath: string; willChange: string } | null;
+  /**
+   * The facing page above the board, cut where the sheet crosses onto it.
+   * `paper` is its own background colour, which its windows carry instead
+   * while they are windows (see `cutAbove`).
+   */
+  facing: { el: HTMLElement; clipPath: string; background: string; paper: string } | null;
+  /** What shows the facing page, each a window onto itself (see `cutAbove`). */
+  shown: PageWindow[];
+  /** The earlier spread's pages under the turn, built as windows (see `liveSpread`). */
+  pages: { left: HolderWindows | null; right: HolderWindows | null };
+  /**
+   * The mask's hole, the spread, clipping what moves in it, and paper of
+   * ours there above and below the lent page that moves with it: where a
+   * window leaves a sliver at the spread's top or bottom edge, paper shows,
+   * not the board's text beyond the page.
+   */
+  hole: { el: HTMLElement; overflow: string } | null;
+  strips: HTMLElement[];
+  /** Half a window's height: more than the spread's diagonal. */
+  reach: number;
+  /**
+   * The spine's shadow, cut the same way by clip paths; `half` is half its
+   * width, `look` its gradient. While windows cut, it is hidden and each
+   * page shown through one carries its own half of it (`spineHalves`).
+   */
+  spine: { el: HTMLElement; clipPath: string; visibility: string; half: number; look: string } | null;
+  spineHalves: HTMLElement[];
   /** The layers have been given their own compositor layers. */
   promoted: boolean;
+  /** How the layers above are cut this frame: by windows, or by clip paths. */
+  cuts: "windows" | "clip" | null;
+}
+
+/**
+ * The facing page's element as a window onto itself, and what it had, to put
+ * back. A picture, with nothing in it to turn back, is put in a box of ours
+ * (`wrapped`), which is the window. An element with children (a copy) is its
+ * own window: it turns, its children turn back about their pivots.
+ */
+interface PageWindow {
+  el: HTMLElement;
+  rotate: string;
+  translate: string;
+  origin: string;
+  willChange: string;
+  kids: { el: HTMLElement; pivot: Point; rotate: string; translate: string; willChange: string }[];
+  wrapped: { picture: HTMLElement; style: string | null } | null;
+  /** In a picture's box, the spine's shadow on the page's spine side, `dx` from its top left. */
+  spineHalf: { el: HTMLElement; dx: number } | null;
+}
+
+/** One of the earlier spread's pages: a holder that stays put, windows in it that turn, the page in them. */
+interface HolderWindows {
+  holder: HTMLElement;
+  windows: HTMLElement[];
+  page: HTMLElement;
+}
+
+/** A 2D transform (a, b, c, d, e, f): x' = a x + c y + e, y' = b x + d y + f. */
+type Affine = [number, number, number, number, number, number];
+
+const affineThen = (m: Affine, n: Affine): Affine => [
+  m[0] * n[0] + m[2] * n[1], m[1] * n[0] + m[3] * n[1],
+  m[0] * n[2] + m[2] * n[3], m[1] * n[2] + m[3] * n[3],
+  m[0] * n[4] + m[2] * n[5] + m[4], m[1] * n[4] + m[3] * n[5] + m[5],
+];
+
+const affineInverse = ([a, b, c, d, e, f]: Affine): Affine => {
+  const k = a * d - b * c;
+  return [d / k, -b / k, -c / k, a / k, (c * f - d * e) / k, (b * e - a * f) / k];
+};
+
+const affineCss = (m: Affine): string => `matrix(${m.map((v, i) => Number(v.toFixed(i < 4 ? 6 : 3)) || 0).join(", ")})`;
+
+/**
+ * A window onto the side of a line that `n` (a unit normal) points to, the
+ * line through `q`: its local x runs from the line along `n`, its local y
+ * along the line, from `from` along it past `q`. A box with its top left at
+ * its parent's, `transform-origin` 0 0, clipping to its own size.
+ */
+const halfPlane = (q: Point, n: Point, from: number): Affine => [n.x, n.y, -n.y, n.x, q.x - n.y * from, q.y + n.x * from];
+
+/**
+ * The spine's shadow as a page shown through a window carries it, `left`
+ * from that page's top left: hidden until windows cut (see `cutAbove`).
+ */
+function spineHalf(spine: NonNullable<BorrowedBoard["spine"]>, halves: HTMLElement[], left: number, H: number): HTMLElement {
+  const half = document.createElement("div");
+  half.className = "lc-page-turn-spine";
+  Object.assign(half.style, {
+    position: "absolute", left: `${left}px`, top: "0", width: `${2 * spine.half}px`, height: `${H}px`,
+    backgroundImage: spine.look, transformOrigin: "0 0", pointerEvents: "none", display: "none",
+  });
+  halves.push(half);
+  return half;
+}
+
+/** A box of ours to be a window: clips, turns, its own compositor layer. */
+function windowBox(reach: number): HTMLElement {
+  const box = document.createElement("div");
+  Object.assign(box.style, {
+    position: "absolute", left: "0", top: "0", width: `${reach}px`, height: `${2 * reach}px`,
+    overflow: "hidden", transformOrigin: "0 0", willChange: "transform",
+  });
+  return box;
 }
 
 /**
@@ -1396,11 +1508,31 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           position: "absolute", top: "0", left: side === "right" ? `${w}px` : "0",
           width: `${w}px`, height: `${H}px`, overflow: "hidden", background,
         });
+        // Lent, the holder stays put and its page shows through windows in
+        // it that turn (see `cutAbove`): past the sheet's edge, and for the
+        // right page on the spine's side of the fold too. The paper goes in
+        // with the page, or the holder would show it everywhere.
+        let into = holder;
+        const lender = turn.borrowed;
+        if (lender) {
+          const windows = Array.from({ length: side === "right" ? 2 : 1 }, () => windowBox(lender.reach));
+          windows.reduce<HTMLElement>((at, box) => { at.appendChild(box); return box; }, holder);
+          into = document.createElement("div");
+          Object.assign(into.style, {
+            position: "absolute", left: "0", top: "0", width: `${w}px`, height: `${H}px`,
+            background, transformOrigin: "0 0", willChange: "transform",
+          });
+          windows[windows.length - 1]!.appendChild(into);
+          holder.style.background = "";
+          lender.pages[side] = { holder, windows, page: into };
+        }
         // A spread's last page can be missing: plain paper, as the board shows it.
-        if (frame && !paper) fillPage(b, holder, frame, w, H, surface, () => !turn.done);
+        if (frame && !paper) fillPage(b, into, frame, w, H, surface, () => !turn.done);
         const kept = frame && paper ? thumbPicture(book, i) : null;
         const shown = kept ? thumbElement(kept) : null;
-        if (shown) holder.appendChild(shown);
+        if (shown) into.appendChild(shown);
+        // Its half of the spine's shadow, over it, while windows cut (see `cutAbove`).
+        if (lender?.spine) into.appendChild(spineHalf(lender.spine, lender.spineHalves, side === "left" ? w - lender.spine.half : -lender.spine.half, H));
         return holder;
       };
       turn.paper = paper;
@@ -1421,6 +1553,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       under.className = "lc-page-turn-under";
       under.setAttribute("aria-hidden", "true");
       Object.assign(under.style, { width: `${turn.rect.width}px`, height: `${H}px` });
+      // Its windows slide past the spread's edges: the desk stays the desk.
+      if (turn.borrowed) under.style.overflow = "hidden";
       const left = turn.direction === "prev" ? page(other, "left") : null;
       const right = page(other + 1, "right");
       if (right) right.style.clipPath = "inset(100%)";
@@ -1487,6 +1621,68 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const hole = maskHole();
       const blankEl = hole?.querySelector<HTMLElement>(":scope > .lc-page-mask-blank") ?? null;
       const spineEl = hole?.querySelector<HTMLElement>(":scope > .lc-page-mask-spine") ?? null;
+      // Windows past the spread's edges: longer than its diagonal both ways.
+      const reach = Math.ceil(2 * (turn.rect.width + turn.rect.height));
+      const spine = spineEl && !spineEl.hidden ? {
+        el: spineEl, clipPath: spineEl.style.clipPath, visibility: spineEl.style.visibility,
+        half: spineEl.offsetWidth / 2, look: getComputedStyle(spineEl).backgroundImage,
+      } : null;
+      const spineHalves: HTMLElement[] = [];
+      // The facing page's paper goes with what shows it, so that only the
+      // part of it the sheet has not covered is drawn.
+      const paper = facingShown ? getComputedStyle(facingShown).backgroundColor : "";
+      const shown: PageWindow[] = [];
+      for (const el of facingShown ? Array.from(facingShown.children) : []) {
+        if (!(el instanceof HTMLElement)) continue;
+        let win = el;
+        let wrapped: PageWindow["wrapped"] = null;
+        if (el.childElementCount === 0) {
+          // A picture has nothing in it to turn back: a box of ours is the
+          // window, and the picture in it turns back. Moving a canvas is not
+          // laying out a page.
+          win = windowBox(reach);
+          wrapped = { picture: el, style: el.getAttribute("style") };
+          el.before(win);
+          win.appendChild(el);
+          // Its size, as the slot gives its own picture (`.lc-page-mask-facing > canvas`), and paper behind it.
+          Object.assign(el.style, {
+            position: "absolute", left: "0", top: "0", display: "block", width: `${turn.rect.width / 2}px`, height: `${turn.rect.height}px`,
+            background: paper, transformOrigin: "0 0", willChange: "transform",
+          });
+        }
+        // Over a picture, the spine's shadow on its spine side, turned back
+        // with it: a layer of its own, or each frame it turns paints it again.
+        const half = wrapped && spine ? spineHalf(spine, spineHalves, 0, turn.rect.height) : null;
+        if (half) {
+          half.style.willChange = "transform";
+          win.appendChild(half);
+        }
+        shown.push({
+          el: win, rotate: win.style.rotate, translate: win.style.translate, origin: win.style.transformOrigin, willChange: win.style.willChange, wrapped,
+          spineHalf: half && spine ? { el: half, dx: -spine.half } : null,
+          kids: wrapped ? [] : Array.from(win.children).filter((kid): kid is HTMLElement => kid instanceof HTMLElement).map((kid) => ({
+            el: kid,
+            pivot: pivotIn(kid, win) ?? { x: 0, y: 0 },
+            rotate: kid.style.rotate, translate: kid.style.translate, willChange: kid.style.willChange,
+          })),
+        });
+      }
+      // Paper above and below the lent page, moved with it (see `placeBorrowed`).
+      // Last in the hole, which the board reads by place (blank, facing,
+      // spine), and under what is in it: the hole stacks its own children.
+      const stripPaper = blankEl ? getComputedStyle(blankEl).backgroundColor : paper;
+      const strips = hole ? [-reach, turn.rect.height].map((top) => {
+        const strip = document.createElement("div");
+        strip.className = "lc-page-turn-strip";
+        Object.assign(strip.style, {
+          position: "absolute", left: "0", top: `${top}px`, width: `${turn.rect.width / 2}px`, height: `${reach}px`,
+          background: stripPaper, transformOrigin: "0 0", willChange: "transform", pointerEvents: "none", zIndex: "-1",
+        });
+        hole.appendChild(strip);
+        return strip;
+      }) : [];
+      const holeClip = hole ? { el: hole, overflow: hole.style.overflow } : null;
+      if (hole) hole.style.overflow = "hidden";
       boardLender = turn;
       return {
         origin,
@@ -1495,19 +1691,28 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           el: blankEl,
           pivot: { x: blankEl.style.left === "50%" ? turn.rect.width / 2 : 0, y: parseFloat(blankEl.style.top) || 0 },
           rotate: blankEl.style.rotate, translate: blankEl.style.translate, origin: blankEl.style.transformOrigin, clipPath: blankEl.style.clipPath,
+          willChange: blankEl.style.willChange,
         } : null,
-        facing: facingShown ? { el: facingShown, clipPath: facingShown.style.clipPath } : null,
-        spine: spineEl && !spineEl.hidden ? { el: spineEl, clipPath: spineEl.style.clipPath, half: spineEl.offsetWidth / 2 } : null,
+        facing: facingShown ? { el: facingShown, clipPath: facingShown.style.clipPath, background: facingShown.style.background, paper } : null,
+        shown,
+        pages: { left: null, right: null },
+        hole: holeClip,
+        strips,
+        reach,
+        spine,
+        spineHalves,
         promoted: false,
+        cuts: null,
       };
     };
 
     /**
-     * Move the lent page to the flap, and cut the layers above it there.
-     * Style changes on a few elements a frame: no layout, nothing painted
-     * again but the cuts.
+     * Move the lent page to the flap, with the paper below its cut and the
+     * paper of ours above and below it. Transforms only, on layers of their
+     * own (`LENT_WILL_CHANGE`): no layout, nothing painted again. The pages
+     * above are cut in `cutAbove`.
      */
-    const placeBorrowed = (borrowed: BorrowedBoard, flap: ReturnType<typeof bookFlap>, w: number, H: number) => {
+    const placeBorrowed = (borrowed: BorrowedBoard, flap: ReturnType<typeof bookFlap>) => {
       // Nothing folded over: the turn has landed, and the page is under the
       // pages it lands on wherever it is.
       if (!flap) return;
@@ -1519,33 +1724,196 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       if (!borrowed.promoted) {
         borrowed.promoted = true;
         board()?.pageLayers?.(true);
-        if (borrowed.blank) borrowed.blank.el.style.transformOrigin = "0 0";
+        if (borrowed.blank) Object.assign(borrowed.blank.el.style, { transformOrigin: "0 0", willChange: LENT_WILL_CHANGE });
       }
       const { x: sx, y: sy } = borrowed.origin;
       for (const { el, pivot } of borrowed.layers) {
         // A camera settling mid-turn lets the board's layers go: keep them.
-        if (el.style.willChange !== "transform") el.style.willChange = "transform";
+        if (el.style.willChange !== LENT_WILL_CHANGE) el.style.willChange = LENT_WILL_CHANGE;
         el.style.rotate = rotate;
         el.style.translate = shift(pivot.x - sx, pivot.y - sy);
       }
       if (borrowed.blank) {
-        // Clipped to the flap: nothing above it covers the desk around the
-        // spread, and the paper stuck out past the sheet there.
         const { el, pivot } = borrowed.blank;
         el.style.rotate = rotate;
         el.style.translate = shift(pivot.x, pivot.y);
-        el.style.clipPath = `polygon(${flap.clip.map((p) => `${(p.x - pivot.x).toFixed(1)}px ${(p.y - pivot.y).toFixed(1)}px`).join(", ")})`;
+        // The hole clips it to the spread, and past the fold the facing page
+        // covers it. Without one, clipped to the flap.
+        if (!borrowed.facing) el.style.clipPath = `polygon(${flap.clip.map((p) => `${(p.x - pivot.x).toFixed(1)}px ${(p.y - pivot.y).toFixed(1)}px`).join(", ")})`;
       }
-      if (borrowed.facing) {
-        const { el, clipPath } = borrowed.facing;
-        el.style.clipPath = flap.flap.some((p) => p.x > w) ? `path(evenodd, "M0 0H${w}V${H}H0Z${pathOf(flap.flap, w)}")` : clipPath;
+      // The paper above and below the page, with it.
+      for (const strip of borrowed.strips) {
+        const top = parseFloat(strip.style.top) || 0;
+        strip.style.transform = affineCss([a, b, c, d, c * top + e, d * top + f - top]);
       }
+    };
+
+    /**
+     * Cut the pages above the lent one where its flap lies: the earlier
+     * spread's left page (under the turn), its right page where the sheet
+     * lies flat, and the facing page.
+     *
+     * Each is a window onto its page that turns: a box clipping to itself,
+     * set along a line, with the page in it turned back to where it was. The
+     * earlier left page shows past the sheet's edge, its right page there too
+     * but on the spine's side of the fold, the facing page beyond the fold.
+     * The compositor moves them, and nothing is painted again: a clip path
+     * changed every frame painted all three pages again, and a lent turn back
+     * ran at 30 frames a second on the tablet, where a turn on ran at 84.
+     *
+     * The flap's top and bottom edges are not those lines. A hand drifting
+     * up or down slants the sheet and carries it a little way with it, and
+     * they stand off the spread's edges: slivers there, where those pages'
+     * margins are, show paper (see `borrowBoard`'s strips). Once a sliver
+     * would be wider than `WINDOW_SLIVER_PX` (a hand drifting far, a corner
+     * peeled), clip paths cut them exactly, and the right page's is cut in
+     * `clipUnder`.
+     */
+    const cutAbove = (turn: Turn, borrowed: BorrowedBoard, lent: ReturnType<typeof bookFlap>, w: number, H: number) => {
+      const { left, right } = borrowed.pages;
+      const facing = borrowed.facing;
+      const g = curlGeometry(turn.corner, w, H, turn.bottom, turn.restY);
+      // The fold, in the right page's own pixels, its normal toward the
+      // page under it; and its direction.
+      const n = g.foldNormal;
+      const q = g.foldPoint;
+      const along = { x: -n.y, y: n.x };
+      let mode: "windows" | "clip" = "windows";
+      // Where a facing element that is its own window starts along the fold.
+      let from = 0;
+      if (lent) {
+        // How far the flap's top and bottom edges stand off the spread's, at
+        // either end of the page: the sheet slants with a drifting hand, and
+        // follows it up or down a fifth as far.
+        const [, mb, , md, , mf] = lent.matrix as Affine;
+        const top = Math.max(mf, mf + mb * w);
+        const bottom = H - Math.min(mf + md * H, mf + md * H + mb * w);
+        if (Math.max(top, bottom) > WINDOW_SLIVER_PX) mode = "clip";
+        // Its own box must hold all of the page beyond the fold.
+        const beyond = sheetPart(g, w, H, true);
+        if (beyond.length > 0) {
+          const offs = beyond.map((p) => (p.x - q.x) * along.x + (p.y - q.y) * along.y);
+          const outs = beyond.map((p) => (p.x - q.x) * n.x + (p.y - q.y) * n.y);
+          from = Math.min(...offs);
+          if (borrowed.shown.some((s) => !s.wrapped) && (Math.max(...offs) - from > H + WINDOW_SLIVER_PX || Math.max(...outs) > w + WINDOW_SLIVER_PX)) mode = "clip";
+        }
+      }
+      if (borrowed.cuts !== mode) {
+        borrowed.cuts = mode;
+        if (mode === "windows") {
+          for (const page of [left, right]) if (page) page.holder.style.clipPath = "none";
+          if (facing) {
+            facing.el.style.clipPath = facing.clipPath;
+            facing.el.style.background = "transparent";
+          }
+          for (const s of borrowed.shown) {
+            if (s.wrapped) continue;
+            s.el.style.transformOrigin = "0 0";
+            s.el.style.willChange = "transform";
+            for (const kid of s.kids) kid.el.style.willChange = "transform";
+          }
+          // The spine's shadow, cut every frame, was a frame's paint: each page
+          // carries its own half of it instead.
+          if (borrowed.spine) borrowed.spine.el.style.visibility = "hidden";
+          for (const half of borrowed.spineHalves) half.style.display = "block";
+        } else {
+          for (const page of [left, right]) if (page) restWindows(page, false);
+          for (const s of borrowed.shown) restWindow(s);
+          if (facing) facing.el.style.background = facing.background;
+          if (borrowed.spine) borrowed.spine.el.style.visibility = borrowed.spine.visibility;
+          for (const half of borrowed.spineHalves) half.style.display = "none";
+        }
+      }
+      if (mode === "windows") {
+        // Nothing folded over, the sheet flat on the right: the earlier
+        // spread whole, the facing page under it. A line past the facing
+        // page's far side puts it out of its window.
+        if (!lent) {
+          for (const page of [left, right]) if (page) restWindows(page, false);
+          for (const s of borrowed.shown) placeWindow(s, { x: w + 1, y: 0 }, { x: 1, y: 0 }, -borrowed.reach);
+          return;
+        }
+        const [ma, mb, , , me, mf] = lent.matrix as Affine;
+        // Past the sheet's edge: away from the page lent to it.
+        const out = { x: -ma, y: -mb };
+        const reach = borrowed.reach;
+        if (left) {
+          const t = halfPlane({ x: me, y: mf }, out, -reach);
+          left.windows[0]!.style.transform = affineCss(t);
+          left.page.style.transform = affineCss(affineInverse(t));
+        }
+        if (right) {
+          const near = halfPlane(q, { x: -n.x, y: -n.y }, -reach);
+          const past = halfPlane({ x: me - w, y: mf }, out, -reach);
+          right.windows[0]!.style.transform = affineCss(near);
+          right.windows[1]!.style.transform = affineCss(affineThen(affineInverse(near), past));
+          right.page.style.transform = affineCss(affineInverse(past));
+        }
+        for (const s of borrowed.shown) placeWindow(s, q, n, s.wrapped ? -reach : from);
+        return;
+      }
+      if (!lent) return;
       if (borrowed.spine) {
         const { el, clipPath, half } = borrowed.spine;
-        el.style.clipPath = flap.flap.some((p) => p.x > w - half)
-          ? `path(evenodd, "M0 0H${2 * half}V${H}H0Z${pathOf(flap.flap, w - half)}")`
+        el.style.clipPath = lent.flap.some((p) => p.x > w - half)
+          ? `path(evenodd, "M0 0H${2 * half}V${H}H0Z${pathOf(lent.flap, w - half)}")`
           : clipPath;
       }
+      if (left) left.holder.style.clipPath = `path(evenodd, "M0 0H${w}V${H}H0Z${pathOf(lent.flap)}")`;
+      if (facing) {
+        facing.el.style.clipPath = lent.flap.some((p) => p.x > w) ? `path(evenodd, "M0 0H${w}V${H}H0Z${pathOf(lent.flap, w)}")` : facing.clipPath;
+      }
+    };
+
+    /** Set a facing page's window along the line through `q` facing `n`, its page turned back. */
+    const placeWindow = (s: PageWindow, q: Point, n: Point, from: number) => {
+      const t = halfPlane(q, n, from);
+      if (s.wrapped) {
+        s.el.style.transform = affineCss(t);
+        s.wrapped.picture.style.transform = affineCss(affineInverse(t));
+        if (s.spineHalf) s.spineHalf.el.style.transform = affineCss(affineThen(affineInverse(t), [1, 0, 0, 1, s.spineHalf.dx, 0]));
+        return;
+      }
+      // Its own window: it turns about its top left, its children back about
+      // their pivots, as the board's layers turn (see `placeBorrowed`).
+      const back = affineInverse(t);
+      const deg = (Math.atan2(n.y, n.x) * 180) / Math.PI;
+      s.el.style.rotate = `${deg.toFixed(4)}deg`;
+      s.el.style.translate = `${t[4].toFixed(2)}px ${t[5].toFixed(2)}px`;
+      for (const kid of s.kids) {
+        const { x, y } = kid.pivot;
+        kid.el.style.rotate = `${(-deg).toFixed(4)}deg`;
+        kid.el.style.translate = `${(back[0] * x + back[2] * y + back[4] - x).toFixed(2)}px ${(back[1] * x + back[3] * y + back[5] - y).toFixed(2)}px`;
+      }
+    };
+
+    /** A facing page's window as it was. */
+    const restWindow = (s: PageWindow) => {
+      if (s.wrapped) {
+        s.el.style.transform = "";
+        s.wrapped.picture.style.transform = "";
+        if (s.spineHalf) s.spineHalf.el.style.transform = "";
+        return;
+      }
+      s.el.style.rotate = s.rotate;
+      s.el.style.translate = s.translate;
+      for (const kid of s.kids) {
+        kid.el.style.rotate = kid.rotate;
+        kid.el.style.translate = kid.translate;
+      }
+    };
+
+    /**
+     * One of the earlier spread's pages, whole through its windows. `done`:
+     * it stays (the right page, as the facing page), so its windows let go
+     * of their layers and its paper goes back to the holder.
+     */
+    const restWindows = (page: HolderWindows, done: boolean) => {
+      for (const el of [...page.windows, page.page]) {
+        el.style.transform = "";
+        if (done) el.style.willChange = "";
+      }
+      if (done) page.holder.style.background = page.page.style.background;
     };
 
     /**
@@ -1565,14 +1933,41 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       }
       board()?.pageLayers?.(false);
       if (borrowed.blank) {
-        const { el, rotate, translate, origin, clipPath } = borrowed.blank;
+        const { el, rotate, translate, origin, clipPath, willChange } = borrowed.blank;
         el.style.rotate = rotate;
         el.style.translate = translate;
         el.style.transformOrigin = origin;
         el.style.clipPath = clipPath;
+        el.style.willChange = willChange;
       }
-      if (borrowed.facing) borrowed.facing.el.style.clipPath = borrowed.facing.clipPath;
-      if (borrowed.spine) borrowed.spine.el.style.clipPath = borrowed.spine.clipPath;
+      for (const s of borrowed.shown) {
+        if (s.wrapped) {
+          // The picture back where it was, as it was, and our box gone.
+          const { picture, style } = s.wrapped;
+          if (style === null) picture.removeAttribute("style");
+          else picture.setAttribute("style", style);
+          if (s.el.parentNode) s.el.replaceWith(picture);
+          continue;
+        }
+        restWindow(s);
+        s.el.style.transformOrigin = s.origin;
+        s.el.style.willChange = s.willChange;
+        for (const kid of s.kids) kid.el.style.willChange = kid.willChange;
+      }
+      if (borrowed.facing) {
+        borrowed.facing.el.style.clipPath = borrowed.facing.clipPath;
+        borrowed.facing.el.style.background = borrowed.facing.background;
+      }
+      for (const strip of borrowed.strips) strip.remove();
+      if (borrowed.hole) borrowed.hole.el.style.overflow = borrowed.hole.overflow;
+      if (borrowed.spine) {
+        borrowed.spine.el.style.clipPath = borrowed.spine.clipPath;
+        borrowed.spine.el.style.visibility = borrowed.spine.visibility;
+      }
+      // The board's spine shows its shadow again: the pages' halves go.
+      for (const half of borrowed.spineHalves) half.remove();
+      // The earlier spread's pages stay as they are: under the turn's layers
+      // until those go, and the right one, landed, is the facing page (`land`).
     };
 
     /**
@@ -1594,7 +1989,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     const clipUnder = (turn: Turn) => {
       if (!turn.under) return;
       if (turn.spreadLive) {
-        const { left, right, back } = turn.spreadLive;
+        const { right, back } = turn.spreadLive;
         const w = turn.rect.width / 2, H = turn.rect.height;
         const sheetAt = { width: w, height: H, corner: turn.corner, bottom: turn.bottom, restY: turn.restY };
         if (back) {
@@ -1603,13 +1998,14 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           back.style.clipPath = at?.clipPath ?? "inset(100%)";
         }
         // The board's own page as the flap: moved there, and shown through
-        // a cut in the earlier spread's left page.
+        // the pages above it, cut there.
         const lent = turn.borrowed ? bookFlap(sheetAt) : null;
         if (turn.borrowed) {
-          placeBorrowed(turn.borrowed, lent, w, H);
-          if (left) left.style.clipPath = lent ? `path(evenodd, "M0 0H${w}V${H}H0Z${pathOf(lent.flap)}")` : "none";
+          placeBorrowed(turn.borrowed, lent);
+          cutAbove(turn, turn.borrowed, lent, w, H);
         }
-        if (!right) return;
+        // Shown through windows instead (see `cutAbove`).
+        if (!right || turn.borrowed?.cuts === "windows") return;
         const flat = flatSheet({ layout: "book", ...sheetAt });
         const sheet = flat.length >= 3 ? pathOf(flat) : "";
         // On: the next page where the sheet has come off it. Back: the
@@ -2293,6 +2689,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       b.setPageLock(turn.to);
       b.jumpToPageFrame({ ...turn.to, minY: turn.to.minY + turn.offsetInPage });
       // With the camera's jump: no frame shows the lent page twice, or home.
+      const lentPages = turn.borrowed?.pages ?? null;
       returnBoard(turn);
       heading = turn.direction;
       // The spread lands with its left page held: the right one, which the
@@ -2303,6 +2700,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       const frames = turn.spreadLive ? b.readingPageFrames() : [];
       const facingPage = frames[frames.findIndex((f) => Math.abs(f.minY - turn.to.minY) < 0.5) + 1];
       if (facingCopy && facingEl && facingPage && !facingEl.hidden) {
+        // Shown through windows while the board's page was lent: whole now.
+        if (lentPages?.right?.holder === facingCopy) restWindows(lentPages.right, true);
         if (facingCopy.parentNode === facingEl) {
           // Built in the slot (see `liveSpread`): it stays as laid out.
           facingCopy.style.clipPath = "none";
