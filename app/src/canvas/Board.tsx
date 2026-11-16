@@ -14,7 +14,7 @@ import { makeFingerRest } from "./fingerRest";
 import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
 import { createCameraController, type CameraController } from "./cameraController";
-import { pageLayerWillChange } from "./pageLayerHint";
+import { pageLayerWillChange, scrollRestHold } from "./pageLayerHint";
 import { syncTouchPointers } from "./touchPointers";
 import {
   CaptureUpdateAction,
@@ -2335,7 +2335,19 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const clearPanOffsets = useCallback(cameraController.clearPanOffsets, [setPagePanOffset]);
   const clearPanOffsetsRef = useLatest(clearPanOffsets);
 
-  const settleCameraPulse = useCallback(cameraController.settleCameraPulse, [docFlags, setPanRideWillChange]);
+  /** The zoom scroll reading last came to rest at, for `scrollRestHold`. */
+  const scrollRestZoomRef = useRef<number | null>(null);
+  const settleCameraPulse = useCallback(() => {
+    // Scroll reading on a touch screen: the page's layers stay ready between
+    // flings (see `scrollRestHold`). Pages reading holds them for its turns.
+    if (!pageLockRef.current && !readingZoomRef.current && pageContentRef.current &&
+        typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches) {
+      const zoom = readScrollRef.current().zoom;
+      pageLayersHeldRef.current = scrollRestHold(scrollRestZoomRef.current, zoom);
+      scrollRestZoomRef.current = zoom;
+    }
+    cameraController.settleCameraPulse();
+  }, [docFlags, setPanRideWillChange]);
   const settleCameraPulseRef = useLatest(settleCameraPulse);
 
   const pulseCameraMotion = useCallback(() => {
