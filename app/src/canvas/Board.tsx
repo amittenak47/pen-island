@@ -15,6 +15,7 @@ import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
 import { createCameraController, type CameraController } from "./cameraController";
 import { pageLayerWillChange, scrollRestHold } from "./pageLayerHint";
+import { lowerScrollGlass, raiseScrollGlass } from "./scrollGlass";
 import { syncTouchPointers } from "./touchPointers";
 import {
   CaptureUpdateAction,
@@ -2346,6 +2347,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       pageLayersHeldRef.current = scrollRestHold(scrollRestZoomRef.current, zoom);
       scrollRestZoomRef.current = zoom;
     }
+    lowerScrollGlass(boardRef.current);
     cameraController.settleCameraPulse();
   }, [docFlags, setPanRideWillChange]);
   const settleCameraPulseRef = useLatest(settleCameraPulse);
@@ -2358,6 +2360,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       if (!panRidePrimedRef.current) refreshPanRideNodes();
       panRidePrimedRef.current = false;
       rasterInkRef.current?.setCameraMoving(true);
+      // Scroll reading: the text under glass while the page moves (see
+      // `raiseScrollGlass`). Pages reading lays its own over turning sheets.
+      if (!pageLockRef.current) raiseScrollGlass(boardRef.current, contentSlotNodeRef.current);
       // First pan frame already wrote translate3d. Hide on-screen text next
       // frame so the opening sample stays a transform.
       if (cameraLiveClassRafRef.current) {
@@ -7554,7 +7559,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [scrollMode]);
 
   useEffect(() => {
-    const releaseCamera = cameraController.releaseCamera;
+    const releaseCamera = () => {
+      lowerScrollGlass(boardRef.current);
+      cameraController.releaseCamera();
+    };
     if (splitPaused) releaseCamera();
     return releaseCamera;
   }, [splitPaused, docFlags, setPanRideWillChange]);
