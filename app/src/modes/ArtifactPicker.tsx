@@ -17,7 +17,7 @@ import { isArtifactLocked, setArtifactLocked } from "../util/artifactLocks";
 import { syncArtifactParent } from "../util/artifactSync";
 import { shouldDismissBackdrop } from "../util/backdropDismiss";
 import { footnoteChipLabel } from "../util/docFootnotes";
-import { footnoteThemeVars } from "../util/footnoteTheme";
+import { FOOTNOTE_THEMED, footnoteThemeVars } from "../util/footnoteTheme";
 import { ArtifactKindIcon, artifactKindLabel } from "./ArtifactKindIcon";
 import { LibraryPadlock, PadlockReveal } from "./LibraryPadlock";
 import "./artifacts.css";
@@ -721,7 +721,7 @@ export function ArtifactPicker({
                 role="menuitemcheckbox"
                 aria-checked={mark.selected}
                 aria-label={chipLabel}
-                className={`lc-footnote-chip${mark.selected ? " is-picked" : ""}`}
+                className={`lc-footnote-chip ${FOOTNOTE_THEMED}${mark.selected ? " is-picked" : ""}`}
                 style={footnoteThemeVars(mark.color, mark.palette ?? [])}
                 onClick={() => onToggleFootnote?.(mark.id)}
               >

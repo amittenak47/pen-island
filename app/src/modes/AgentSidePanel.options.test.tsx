@@ -3,6 +3,8 @@ import { act, type ComponentProps } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { AgentSidePanel } from "./AgentSidePanel";
+import { FOOTNOTE_THEMED } from "../util/footnoteTheme";
+import { footnoteMarkerMismatches } from "../util/footnoteThemeTestKit";
 
 vi.mock("../util/mobile", () => ({ useIsMobile: () => false }));
 let root: Root;
@@ -88,6 +90,14 @@ it("keeps footnote selection live and sends attached notes independently of Ink"
   tap(button("Footnotes"));
   const note = document.querySelector<HTMLButtonElement>('.lc-agent-footnote-menu .lc-footnote-chip')!;
   expect(note.getAttribute("aria-checked")).toBe("true");
+  // The attached chip and the menu chip both wear the mark's colour for the badge rule.
+  const chips = [...document.querySelectorAll<HTMLElement>(".lc-footnote-chip")];
+  expect(chips).toHaveLength(2);
+  for (const chip of chips) {
+    expect(chip.style.getPropertyValue("--lc-fn-color")).not.toBe("");
+    expect(chip.classList.contains(FOOTNOTE_THEMED)).toBe(true);
+  }
+  expect(footnoteMarkerMismatches(document.body)).toEqual([]);
   tap(note);
   expect(toggle).toHaveBeenCalledWith("fn");
   expect(button("Footnotes").getAttribute("aria-expanded")).toBe("true");

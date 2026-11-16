@@ -14,6 +14,8 @@ import type { DocFootnote } from "../util/docFootnotes";
 import type { PageFrame } from "../canvas/inkPageIndex";
 import { publishDocPlacementRev, publishPdfViewPages, resetPdfFilmScopes } from "./pdfFilm";
 import { makeDocFlagHolds, resetDocCameraForTests } from "../canvas/docSelectionGesture";
+import { FOOTNOTE_THEMED } from "../util/footnoteTheme";
+import { footnoteMarkerMismatches } from "../util/footnoteThemeTestKit";
 
 const MARK: DocFootnote = {
   id: "same",
@@ -274,6 +276,32 @@ describe("marks made on a wider copy of the same page", () => {
       return result;
     };
     expect(styles(true)).toEqual(styles(false));
+  });
+
+  it("marks every coloured band, chip and sub-mark for the colour rules, and nothing else", () => {
+    const palette = ["#7c3aed", "#4c1d95", "#c4b5fd", "#ede9fe"];
+    const sub = { excerpt: "Contents", start: 0, end: 8, bands: REGION_MARK.bands };
+    const mark: DocFootnote = { ...REGION_MARK, color: "#7c3aed", palette, subMarks: [
+      { ...sub, id: "own", kind: "highlight", color: "#c4b5fd", palette },
+      { ...sub, id: "borrowed", kind: "underline" },
+    ] };
+    // No colour on the footnote either: its sub-mark has none to borrow.
+    const bare: DocFootnote = { ...REGION_MARK, id: "bare", subMarks: [{ ...sub, id: "plain", kind: "underline" }] };
+    const { host, root } = mountScaled(0.5, "", [mark, bare]);
+    try {
+      act(() => window.dispatchEvent(new Event("resize")));
+      const pack = host.querySelector<HTMLElement>('.lc-doc-footnote-pack[data-footnote-id="region"]')!;
+      const band = pack.querySelector<HTMLElement>(".lc-doc-footnote-band")!;
+      const chip = host.querySelector<HTMLElement>('.lc-doc-footnote-bookmark[data-lc-id="region"]')!;
+      for (const el of [pack, band, chip]) {
+        expect(el.style.getPropertyValue("--lc-fn-color")).toBe("#7c3aed");
+        expect(el.classList.contains(FOOTNOTE_THEMED)).toBe(true);
+      }
+      const subs = [...host.querySelectorAll<HTMLElement>(".lc-doc-submark-paint")];
+      expect(subs.map((el) => el.style.getPropertyValue("--lc-fn-color"))).toEqual(["#c4b5fd", "#7c3aed", ""]);
+      expect(subs.map((el) => el.classList.contains(FOOTNOTE_THEMED))).toEqual([true, true, false]);
+      expect(footnoteMarkerMismatches(document.body)).toEqual([]);
+    } finally { act(() => root.unmount()); }
   });
 
   it("preserves the authored bands relative to their page, excluding earlier page gaps", () => {

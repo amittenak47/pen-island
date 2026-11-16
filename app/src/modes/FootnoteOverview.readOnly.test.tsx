@@ -7,6 +7,8 @@ import { act } from "react";
 
 import { FootnoteOverview, type FootnoteOverviewProps } from "./FootnoteOverview";
 import type { DocFootnote } from "../util/docFootnotes";
+import { FOOTNOTE_THEMED } from "../util/footnoteTheme";
+import { footnoteMarkerMismatches } from "../util/footnoteThemeTestKit";
 
 const MARK: DocFootnote = {
   id: "same",
@@ -132,10 +134,28 @@ describe("FootnoteOverview readOnly", () => {
     for (const variable of ["--lc-fn-color", "--lc-fn-wash", "--lc-fn-ink"]) {
       expect(mini.style.getPropertyValue(variable)).toBe(card.style.getPropertyValue(variable));
     }
+    expect(card.classList.contains(FOOTNOTE_THEMED)).toBe(true);
+    expect(mini.classList.contains(FOOTNOTE_THEMED)).toBe(true);
+    expect(footnoteMarkerMismatches(document.body)).toEqual([]);
     act(() => mini.querySelector<HTMLButtonElement>('[aria-label="Close mini note"]')!.click());
     expect(document.querySelector('.lc-footnote-mini-note')).toBeNull();
     expect(document.querySelector('[aria-label="Footnote 2"]')).not.toBeNull();
     expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("marks the card and its coloured sub-mark rows for the colour rules, and nothing else", () => {
+    const sub = { excerpt: "Contents", start: 0, end: 4 };
+    mount(false, { ...MARK, subMarks: [
+      { ...sub, id: "tinted", kind: "highlight", color: "#7c3aed", palette: ["#7c3aed", "#4c1d95", "#c4b5fd", "#ede9fe"] },
+      { ...sub, id: "plain", kind: "underline" },
+    ] }, { displayTheme: { color: "#0d9488", palette: ["#0d9488", "#115e59", "#5eead4", "#ccfbf1"] } });
+    const card = document.querySelector<HTMLElement>(".lc-footnote-overview")!;
+    expect(card.style.getPropertyValue("--lc-fn-color")).toBe("#0d9488");
+    expect(card.classList.contains(FOOTNOTE_THEMED)).toBe(true);
+    const rows = [...document.querySelectorAll<HTMLElement>(".lc-footnote-overview-link-row")];
+    expect(rows.map((row) => row.style.getPropertyValue("--lc-fn-color"))).toEqual(["#7c3aed", ""]);
+    expect(rows.map((row) => row.classList.contains(FOOTNOTE_THEMED))).toEqual([true, false]);
+    expect(footnoteMarkerMismatches(document.body)).toEqual([]);
   });
 
   it("reads a conflict copy in a mini without offering editing or a tab of a different copy", async () => {
