@@ -158,6 +158,12 @@ const PAPER_FILL_MS = 300;
  * read, the page is drawn a third of a second later than it was.
  */
 const PAPER_FILL_TOUCH_MS = 650;
+/**
+ * How long a lent turn back, taken after a rest on a touch screen, shows the
+ * pages it uncovers as their kept pictures before copying them for a hand
+ * still holding the sheet (see `liveSpread`). A flick has let go by then.
+ */
+const SOFT_UNDER_MS = 200;
 /** A page left for the facing slot shows its soft kept picture this long, unless a turn takes it first, then its sharp copy. See `standIn`. */
 const STAND_IN_SHARPEN_MS = 300;
 /** How long a turn waits for the next page's picture before turning over plain paper. */
@@ -702,6 +708,12 @@ interface Turn {
   spreadLive?: { left: HTMLElement | null; right: HTMLElement | null; back?: HTMLElement | null };
   /** Flicked through: `spreadLive`'s pages are not copied, only kept pictures or paper (see `liveSpread`). */
   paper?: boolean;
+  /**
+   * Pages under a lent turn back shown as their kept pictures for now, to be
+   * copied in only while the hand holds the sheet (see `liveSpread`); `right`
+   * says the right page, which lands as the facing page, is still one.
+   */
+  soft?: { pages: { into: HTMLElement; frame: PageFrame; picture: HTMLElement; side: "left" | "right" }[]; right: boolean };
   /** A live spread's stand-in for the back of its sheet: the kept picture of the page landing on the left. */
   back?: CanvasImageSource | null;
   /** Turning back, the board's own page is the back of the sheet, moved to it (see `borrowBoard`). */
@@ -1579,10 +1591,17 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
           lender.pages[side] = { holder, windows, page: into };
         }
         // A spread's last page can be missing: plain paper, as the board shows it.
-        if (frame && !paper) fillPage(b, into, frame, w, H, surface, () => !turn.done);
-        const kept = frame && paper ? thumbPicture(book, i) : null;
+        // Lent on a touch screen, a page with a kept picture shows that for
+        // now, and is copied only for a hand that holds the sheet (see below).
+        const softFirst = Boolean(lender) && !paper && keepPageLayersReady();
+        const kept = frame && (paper || softFirst) ? thumbPicture(book, i) : null;
         const shown = kept ? thumbElement(kept) : null;
         if (shown) into.appendChild(shown);
+        if (frame && !paper && shown && softFirst) {
+          turn.soft ??= { pages: [], right: false };
+          turn.soft.pages.push({ into, frame, picture: shown, side });
+          if (side === "right") turn.soft.right = true;
+        } else if (frame && !paper) fillPage(b, into, frame, w, H, surface, () => !turn.done);
         // Its half of the spine's shadow, over it, while windows cut (see `cutAbove`).
         if (lender?.spine) into.appendChild(spineHalf(lender.spine, lender.spineHalves, side === "left" ? w - lender.spine.half : -lender.spine.half, H));
         return holder;
@@ -1624,6 +1643,36 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       }
       for (const holder of [left, right, back]) if (holder && !holder.parentNode) under.appendChild(holder);
       turn.spreadLive = { left, right, back };
+      /*
+       * A turn back taken after a rest, on a touch screen, starts on the kept
+       * pictures of the pages it uncovers. Copying them both first was about
+       * 90 ms of script, 40 ms laying them out and 30 ms painting them before
+       * its first frame on the tablet: a flick back from a page read for a
+       * moment ran at 20 frames a second. A flick lets go long before
+       * `SOFT_UNDER_MS` and copies nothing, as a hand flicking through does;
+       * a hand still holding the sheet then is reading under it, and gets the
+       * pages themselves, one a frame, left first, as it uncovers them.
+       */
+      if (turn.soft?.pages.length) {
+        const sharpen = () => {
+          const soft = turn.soft;
+          const next = soft?.pages.shift();
+          if (!soft || !next || turn.done || !turn.borrowed) return;
+          if (active?.turn !== turn) {
+            soft.pages.length = 0;
+            return;
+          }
+          if (fillPage(b, next.into, next.frame, w, H, surface, () => !turn.done)) {
+            next.picture.remove();
+            if (next.side === "right") soft.right = false;
+            // The spine's shadow stays over the page (see `spineHalf`).
+            const half = next.into.querySelector(":scope > .lc-page-turn-spine");
+            if (half) next.into.appendChild(half);
+          }
+          if (soft.pages.length) requestAnimationFrame(() => window.setTimeout(sharpen, 0));
+        };
+        window.setTimeout(sharpen, SOFT_UNDER_MS);
+      }
       return under;
     };
 
@@ -2771,7 +2820,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
         }
         facingHandoffRef.current = { minY: facingPage.minY };
         if (turn.spreadLive) turn.spreadLive.right = null;
-        paperFacing = turn.paper ? { holder: facingCopy, w: turn.rect.width / 2, H: turn.rect.height } : null;
+        paperFacing = turn.paper || turn.soft?.right ? { holder: facingCopy, w: turn.rect.width / 2, H: turn.rect.height } : null;
       }
       const flipping = flicking();
       lastLandAt = performance.now();
