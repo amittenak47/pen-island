@@ -25,3 +25,18 @@ export function pageLayerWillChange(moving: boolean, heldAt: number | null, zoom
   if (heldAt != null && heldAt > 0 && Math.abs(zoom - heldAt) <= heldAt * 1e-4) return PAGE_LAYER_WILL_CHANGE;
   return moving ? "transform" : "";
 }
+
+/**
+ * Scroll reading on a touch screen: the zoom to hold the page's layers at
+ * once the camera rests (see `pageLayerWillChange`), or null to let them go.
+ *
+ * Promoted only while the camera moved, each fling started by painting the
+ * board's page again as a layer of its own (8-10 ms of paint and its raster
+ * on the tablet, in the fling's first frame), and each rest painted it once
+ * more as it let go. Held at a zoom the page has already rested at, they
+ * stay ready between flings. A pinch's new zoom rests once unheld, so the
+ * page is drawn sharp at it, and is held from the next rest on.
+ */
+export function scrollRestHold(lastRestZoom: number | null, zoom: number): number | null {
+  return lastRestZoom != null && lastRestZoom > 0 && Math.abs(zoom - lastRestZoom) <= lastRestZoom * 1e-4 ? zoom : null;
+}

@@ -14,7 +14,8 @@ import { makeFingerRest } from "./fingerRest";
 import { selectionCaptureFrame } from "./selectionCapture";
 import { sceneToScreen } from "./camera";
 import { createCameraController, type CameraController } from "./cameraController";
-import { pageLayerWillChange } from "./pageLayerHint";
+import { pageLayerWillChange, scrollRestHold } from "./pageLayerHint";
+import { lowerScrollGlass, raiseScrollGlass } from "./scrollGlass";
 import { syncTouchPointers } from "./touchPointers";
 import {
   CaptureUpdateAction,
@@ -155,7 +156,7 @@ import {
 } from "./documentRotateCamera";
 import { paintExcalidrawCanvases } from "./excalidrawCanvasSize";
 import { documentLayerHeight, documentLayers } from "./documentLayer";
-import { placeLazyWindow, releaseLazyBlocks } from "./lazyBlockWindow";
+import { followScrollWindow, placeLazyWindow, releaseLazyBlocks } from "./lazyBlockWindow";
 import { jumpLandsOnFittedLock } from "./fittedLock";
 import {
   contentSlotCssTransform,
@@ -2335,7 +2336,20 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   const clearPanOffsets = useCallback(cameraController.clearPanOffsets, [setPagePanOffset]);
   const clearPanOffsetsRef = useLatest(clearPanOffsets);
 
-  const settleCameraPulse = useCallback(cameraController.settleCameraPulse, [docFlags, setPanRideWillChange]);
+  /** The zoom scroll reading last came to rest at, for `scrollRestHold`. */
+  const scrollRestZoomRef = useRef<number | null>(null);
+  const settleCameraPulse = useCallback(() => {
+    // Scroll reading on a touch screen: the page's layers stay ready between
+    // flings (see `scrollRestHold`). Pages reading holds them for its turns.
+    if (!pageLockRef.current && !readingZoomRef.current && pageContentRef.current &&
+        typeof window.matchMedia === "function" && window.matchMedia("(pointer: coarse)").matches) {
+      const zoom = readScrollRef.current().zoom;
+      pageLayersHeldRef.current = scrollRestHold(scrollRestZoomRef.current, zoom);
+      scrollRestZoomRef.current = zoom;
+    }
+    lowerScrollGlass(boardRef.current);
+    cameraController.settleCameraPulse();
+  }, [docFlags, setPanRideWillChange]);
   const settleCameraPulseRef = useLatest(settleCameraPulse);
 
   const pulseCameraMotion = useCallback(() => {
@@ -2346,6 +2360,9 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       if (!panRidePrimedRef.current) refreshPanRideNodes();
       panRidePrimedRef.current = false;
       rasterInkRef.current?.setCameraMoving(true);
+      // Scroll reading: the text under glass while the page moves (see
+      // `raiseScrollGlass`). Pages reading lays its own over turning sheets.
+      if (!pageLockRef.current) raiseScrollGlass(boardRef.current, contentSlotNodeRef.current);
       // First pan frame already wrote translate3d. Hide on-screen text next
       // frame so the opening sample stays a transform.
       if (cameraLiveClassRafRef.current) {
@@ -2867,6 +2884,12 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       // cached, but measure fresh boxes when ink next needs host clips.
       if (boardRef.current) invalidateBoardScrollHostLayout(boardRef.current);
       syncMarksSlotFrom(node, false);
+      // Scroll reading: what the view can reach is drawn before it gets
+      // there, the rest hidden (Pages reading windows its own page).
+      if (!pageLockRef.current && next.zoom > 0) {
+        const viewH = liveCameraRef.current?.height || boardRef.current?.clientHeight || 0;
+        if (viewH > 0) followScrollWindow(node, -next.top / next.zoom, (viewH - next.top) / next.zoom);
+      }
     }
     return next;
   };
@@ -7536,7 +7559,10 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
   }, [scrollMode]);
 
   useEffect(() => {
-    const releaseCamera = cameraController.releaseCamera;
+    const releaseCamera = () => {
+      lowerScrollGlass(boardRef.current);
+      cameraController.releaseCamera();
+    };
     if (splitPaused) releaseCamera();
     return releaseCamera;
   }, [splitPaused, docFlags, setPanRideWillChange]);
@@ -9595,7 +9621,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
       publishBooktabPages(filmScope, []);
       pageLockRef.current = null;
       pageShownRef.current = null;
-      // Scroll reading: off-screen blocks go back to the browser's own skipping.
+      // Scroll reading windows the blocks from the next placement (`followScrollWindow`).
       if (contentSlotNodeRef.current) releaseLazyBlocks(contentSlotNodeRef.current);
       const cam = committedPanCameraRef.current;
       placePageMask(cam.scrollX, cam.scrollY, cam.zoom);

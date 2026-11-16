@@ -141,6 +141,8 @@ it("keeps sample, coalesced ride, in-flight rebase, pulse settle and idle commit
     readingZoomRef: cell(null), splitPausedRef: cell(false), handPanningRef: cell(false), inertiaFrameRef: cell(0),
     scrollModeRef: cell(false), lockedScrollXRef: cell(null), pendingPdfPageRef: cell(0),
     pageBoundsRef: cell(null), pageContentRef: cell(true), stampTrashPosRef: cell(null),
+    // Scroll reading's glass over the text (see `raiseScrollGlass`): no board here to lay it on.
+    pageLockRef: cell(null), boardRef: cell(null), contentSlotNodeRef: cell(null), raiseScrollGlass: () => {},
     filmScope: "characterization", docFlags, rasterInkRef: cell(ink),
     ensurePanRideNodes: () => [overlay], refreshPanRideNodes: () => record("refreshPanRideNodes"),
     linedSlotNodeRef: cell(lined), lastLinedSlotRef: cell({ phase: 3 }),

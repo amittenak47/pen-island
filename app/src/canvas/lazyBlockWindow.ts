@@ -141,10 +141,11 @@ function hideLazyBlocksOutside(slot: HTMLElement, top: number, bottom: number): 
   return changed;
 }
 
-/** Back to `auto`, for scroll reading or another document. */
+/** Back to `auto`, for another document, or for scroll reading to window again (`followScrollWindow`). */
 export function releaseLazyBlocks(slot: HTMLElement): void {
   pending.get(slot)?.();
   pending.delete(slot);
+  dropScrollWindow(slot);
   const layout = layouts.get(slot);
   const blocks = layout ? layout.blocks : Array.from(slot.querySelectorAll<HTMLElement>('[style*="contain-intrinsic-size"]'));
   for (const el of blocks) {
@@ -251,6 +252,7 @@ export function placeLazyWindow(slot: HTMLElement, at: number, pageH: number, la
   if (!(pageH > 0) || !Number.isFinite(at)) return;
   pending.get(slot)?.();
   pending.delete(slot);
+  dropScrollWindow(slot);
   revealLazyBlocksBetween(slot, at - NEAR_BACK * pageH, at + NEAR_AHEAD * pageH);
   const far = () => {
     pending.delete(slot);
@@ -262,6 +264,162 @@ export function placeLazyWindow(slot: HTMLElement, at: number, pageH: number, la
     pending.set(slot, later(far));
   };
   pending.set(slot, later(wide));
+}
+
+/**
+ * Scroll reading, in screens (the view's own height): drawn either side of
+ * the view at all times; when the view comes this close to the edge of what
+ * is drawn, `SCROLL_AHEAD` more go in at once.
+ *
+ * Left to `auto`, Blink checked every lazy block on every frame the page
+ * moved (4-5 ms a frame on the tablet) and drew each one as it came within
+ * reach: on a chapter of math about every 210 px, 25-40 ms of layout,
+ * pre-paint and paint in one frame, eight of them a fling (36-47 fps).
+ */
+const SCROLL_NEAR = 1;
+/** Drawn ahead, the way the view is going, whenever the near window runs out: a fling's worth and more, one frame's work. */
+const SCROLL_AHEAD = 3;
+/** Once the view has rested: room for a few flings either way before the next update. */
+const SCROLL_WIDE_BACK = 3;
+const SCROLL_WIDE_AHEAD = 5;
+/** And then out to these, a rest later. Blocks past them are hidden at each rest. */
+const SCROLL_FAR_BACK = 6;
+const SCROLL_FAR_AHEAD = 10;
+
+interface ScrollWindow {
+  /** What is known drawn around the view, in slot units. */
+  lo: number;
+  hi: number;
+  top: number;
+  bottom: number;
+  /** The way the view last moved: 1 down the note, -1 up. */
+  dir: 1 | -1;
+  movedAt: number;
+  /** 0: windows the near view only; 1: the wide window is drawn; 2: the far one too. */
+  stage: 0 | 1 | 2;
+  timer: number;
+  idle: number;
+}
+
+const scrollWindows = new WeakMap<HTMLElement, ScrollWindow>();
+/** A slot found with no lazy blocks, not searched again before this time: each placement would walk the note. */
+const noLazyUntil = new WeakMap<HTMLElement, number>();
+
+function dropScrollWindow(slot: HTMLElement): void {
+  const w = scrollWindows.get(slot);
+  if (!w) return;
+  window.clearTimeout(w.timer);
+  cancelIdle(w.idle);
+  scrollWindows.delete(slot);
+}
+
+function cancelIdle(handle: number): void {
+  if (!handle) return;
+  if (typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(handle);
+  else window.clearTimeout(handle);
+}
+
+/**
+ * Scroll reading: the view is `top` to `bottom` (slot units). Draw what can
+ * be seen from it before it is seen, and hide what is far, as Pages reading
+ * does (`placeLazyWindow`): no block is left to `auto` and its observer.
+ *
+ * Called with every placement of the page, moving or not. A screen either
+ * side is always drawn; when the view runs past that, three screens ahead
+ * go in at once, in the frame that needs them, then nothing more for two
+ * screens of travel. Wider windows, and hiding what fell out of them, wait
+ * for the view to rest (no movement and no finger on the glass for
+ * `REST_MS`).
+ */
+export function followScrollWindow(slot: HTMLElement, top: number, bottom: number): void {
+  const h = bottom - top;
+  if (!(h > 0) || !Number.isFinite(top) || !Number.isFinite(bottom)) return;
+  const now = performance.now();
+  let w = scrollWindows.get(slot);
+  if (!w) {
+    // The first placement: the near view drawn, every other block hidden now.
+    if ((noLazyUntil.get(slot) ?? -Infinity) > now) return;
+    if (!lazyLayout(slot)) {
+      noLazyUntil.set(slot, now + 1000);
+      return;
+    }
+    const lo = top - SCROLL_NEAR * h;
+    const hi = bottom + SCROLL_NEAR * h;
+    showLazyBlocksBetween(slot, lo, hi);
+    w = { lo, hi, top, bottom, dir: 1, movedAt: now, stage: 0, timer: 0, idle: 0 };
+    scrollWindows.set(slot, w);
+    armScrollRest(slot, w);
+    return;
+  }
+  if (top === w.top && bottom === w.bottom) return;
+  if (top !== w.top) w.dir = top > w.top ? 1 : -1;
+  w.top = top;
+  w.bottom = bottom;
+  w.movedAt = now;
+  w.stage = 0;
+  cancelIdle(w.idle);
+  w.idle = 0;
+  if (top - SCROLL_NEAR * h < w.lo || bottom + SCROLL_NEAR * h > w.hi) {
+    const lo = top - (w.dir < 0 ? SCROLL_AHEAD : SCROLL_NEAR) * h;
+    const hi = bottom + (w.dir > 0 ? SCROLL_AHEAD : SCROLL_NEAR) * h;
+    revealLazyBlocksBetween(slot, lo, hi);
+    // A jump past what is drawn starts a new run; blocks left behind go at the next rest.
+    const joins = lo <= w.hi && hi >= w.lo;
+    w.lo = joins ? Math.min(w.lo, lo) : lo;
+    w.hi = joins ? Math.max(w.hi, hi) : hi;
+  }
+  armScrollRest(slot, w);
+}
+
+/** Widen the scroll window once the view has rested; again at the next rest. */
+function armScrollRest(slot: HTMLElement, w: ScrollWindow): void {
+  if (w.timer || w.idle || w.stage >= 2) return;
+  const wait = () => {
+    const now = performance.now();
+    const quiet = now - Math.max(w.movedAt, pressedAt);
+    const up = pressed.size === 0 || now - pressedAt >= STUCK_MS;
+    return quiet >= REST_MS && up ? 0 : Math.max(50, REST_MS - quiet);
+  };
+  const check = () => {
+    w.timer = 0;
+    if (scrollWindows.get(slot) !== w) return;
+    const left = wait();
+    if (left > 0) {
+      w.timer = window.setTimeout(check, left);
+      return;
+    }
+    const run = () => {
+      w.idle = 0;
+      if (scrollWindows.get(slot) !== w) return;
+      // Moved or touched while it waited for the main thread: rest again.
+      if (wait() > 0) {
+        armScrollRest(slot, w);
+        return;
+      }
+      // Screens up the note and down it, `ahead` the way the view last went.
+      const h = w.bottom - w.top;
+      const up = (behind: number, ahead: number) => w.top - (w.dir > 0 ? behind : ahead) * h;
+      const down = (behind: number, ahead: number) => w.bottom + (w.dir > 0 ? ahead : behind) * h;
+      if (w.stage === 0) {
+        hideLazyBlocksOutside(slot, up(SCROLL_FAR_BACK, SCROLL_FAR_AHEAD), down(SCROLL_FAR_BACK, SCROLL_FAR_AHEAD));
+        w.lo = up(SCROLL_WIDE_BACK, SCROLL_WIDE_AHEAD);
+        w.hi = down(SCROLL_WIDE_BACK, SCROLL_WIDE_AHEAD);
+        w.stage = 1;
+      } else {
+        w.lo = up(SCROLL_FAR_BACK, SCROLL_FAR_AHEAD);
+        w.hi = down(SCROLL_FAR_BACK, SCROLL_FAR_AHEAD);
+        w.stage = 2;
+      }
+      revealLazyBlocksBetween(slot, w.lo, w.hi);
+      // The rest starts over for the next step.
+      w.movedAt = performance.now();
+      armScrollRest(slot, w);
+    };
+    w.idle = typeof window.requestIdleCallback === "function"
+      ? window.requestIdleCallback(run, { timeout: 600 })
+      : window.setTimeout(run, 0);
+  };
+  w.timer = window.setTimeout(check, Math.max(50, REST_MS - (performance.now() - w.movedAt)));
 }
 
 /**

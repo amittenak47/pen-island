@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   drawLazyBlocksIn,
+  followScrollWindow,
   placeLazyWindow,
   releaseLazyBlocks,
   showLazyBlocksBetween,
@@ -195,5 +196,73 @@ describe("lazy blocks in Pages reading", () => {
     placeLazyWindow(slot, 0, 100, later);
     expect(showLazyBlocksBetween(slot, 0, 100)).toBe(0);
     expect(slot.querySelector("p")!.getAttribute("style")).toBeNull();
+  });
+});
+
+describe("lazy blocks in scroll reading", () => {
+  /** Each block's state as a letter: v drawn, h hidden, a left to the browser's own skipping. */
+  const letters = (shown: () => string[]) => shown().map((v) => v[0]).join("");
+
+  it("draws the view and a screen either side at once, and hides the rest: no block is left to the browser's own skipping", () => {
+    const { slot, shown } = note(30);
+    // The view is 1000 to 1300 (blocks 10 to 12), a screen of 300.
+    followScrollWindow(slot, 1000, 1300);
+    expect(letters(shown)).toBe("hhhhhhvvvvvvvvvvvhhhhhhhhhhhhh");
+    releaseLazyBlocks(slot);
+    expect(shown().every((v) => v === "auto")).toBe(true);
+  });
+
+  it("draws three screens further ahead in one go, only when the view comes within a screen of what is drawn", () => {
+    const { slot, shown } = note(40);
+    followScrollWindow(slot, 1000, 1300);
+    const states: string[] = [letters(shown)];
+    // Down 100 units a frame.
+    for (let top = 1100; top <= 1800; top += 100) {
+      followScrollWindow(slot, top, top + 300);
+      states.push(letters(shown));
+    }
+    const changedAt = states.slice(1).map((s, i) => (s !== states[i] ? 1100 + i * 100 : 0)).filter(Boolean);
+    expect(changedAt).toEqual([1100, 1800]);
+    // The first: the view's screen ahead ran past what was drawn, so three screens beyond the view are drawn at once.
+    expect(states[1]).toBe("hhhhhhvvvvvvvvvvvvvvvvvvhhhhhhhhhhhhhhhh");
+    // Going back up, ahead is up.
+    for (let top = 1700; top >= 300; top -= 100) followScrollWindow(slot, top, top + 300);
+    expect(shown().slice(0, 3)).toEqual(["visible", "visible", "visible"]);
+  });
+
+  it("widens once the view has rested: far blocks hidden, three screens behind and five ahead drawn, then six and ten a rest later; not while it moves", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance", "Date"] });
+    try {
+      const { slot, shown } = note(60);
+      // Well past the last touch an earlier test made (the clock starts again with fake timers).
+      vi.advanceTimersByTime(10_000);
+      // A fling: the view moves down every frame for a second and a half.
+      let top = 1000;
+      for (let t = 0; t < 1500; t += 16) {
+        followScrollWindow(slot, top, top + 300);
+        top += 10;
+        vi.advanceTimersByTime(16);
+      }
+      top -= 10;
+      /** Blocks `from` to `to` drawn, the rest of `count` hidden. */
+      const run = (from: number, to: number, count = 60) => "h".repeat(from) + "v".repeat(to - from + 1) + "h".repeat(count - to - 1);
+      // While it moved: the near window, and three screens ahead twice, nothing hidden, nothing wider.
+      const moving = letters(shown);
+      expect(moving).toBe(run(6, 28));
+      vi.advanceTimersByTime(700);
+      expect(letters(shown)).toBe(moving);
+      vi.advanceTimersByTime(200);
+      // Rested at 1930 to 2230: 1030 to 3730 drawn; what it drew on the way stays, being near.
+      expect(letters(shown)).toBe(run(6, 37));
+      vi.advanceTimersByTime(900);
+      // A rest later, 130 to 5230.
+      expect(letters(shown)).toBe(run(1, 52));
+      // Moved far up, a rest hides what is now far below: past six screens under the view (2500), up being ahead.
+      followScrollWindow(slot, 400, 700);
+      vi.advanceTimersByTime(900);
+      expect(letters(shown)).toBe(run(0, 25));
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
