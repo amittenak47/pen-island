@@ -21,6 +21,16 @@ const NEAR_AHEAD = 4;
 /** Pages drawn once the hand rests: room for a few quick turns either way before the next update. */
 const WIDE_BACK = 4;
 const WIDE_AHEAD = 8;
+/**
+ * And then out to these, a rest later: a run of quick turns from a rest draws
+ * nothing as it lands for six turns on or three back. Each landing that did
+ * (two pages, every one past the second of a run) cost 40-45 ms of style,
+ * layout and pre-paint on the tablet, in the next flick's first frame. Drawn
+ * blocks past the screen cost little after: none of them is painted, and a
+ * hit test passes each by its bounds (`drawBlock`).
+ */
+const FAR_BACK = 8;
+const FAR_AHEAD = 16;
 
 /** Where each lazy block sits, in the slot's own units, taken once per layout. */
 interface LazyLayout {
@@ -118,6 +128,19 @@ function revealLazyBlocksBetween(slot: HTMLElement, top: number, bottom: number)
   return changed;
 }
 
+/** Hide the lazy blocks outside `top` to `bottom`, drawing none. How many changed. */
+function hideLazyBlocksOutside(slot: HTMLElement, top: number, bottom: number): number {
+  const layout = lazyLayout(slot);
+  if (!layout) return 0;
+  let changed = 0;
+  layout.blocks.forEach((el, i) => {
+    if ((layout.bottoms[i]! >= top && layout.tops[i]! <= bottom) || el.style.contentVisibility === "hidden") return;
+    el.style.contentVisibility = "hidden";
+    changed += 1;
+  });
+  return changed;
+}
+
 /** Back to `auto`, for scroll reading or another document. */
 export function releaseLazyBlocks(slot: HTMLElement): void {
   pending.get(slot)?.();
@@ -138,13 +161,77 @@ export function releaseLazyBlocks(slot: HTMLElement): void {
 /** Run `work` when the main thread is free; returns how to call it off. */
 export type LaterFn = (work: () => void) => () => void;
 
-const whenIdle: LaterFn = (work) => {
-  if (typeof window.requestIdleCallback === "function") {
-    const id = window.requestIdleCallback(work, { timeout: 600 });
-    return () => window.cancelIdleCallback(id);
-  }
-  const id = window.setTimeout(work, 200);
-  return () => window.clearTimeout(id);
+/**
+ * How long the hand must have been off the glass before the wider window is
+ * drawn. A hand flicking through presses again well inside this.
+ */
+const REST_MS = 800;
+/** A pointer reported down this long with nothing since lost its lift. */
+const STUCK_MS = 5000;
+
+/** Pointers on the glass now, and when one last went down or came up. */
+const pressed = new Set<number>();
+let pressedAt = -Infinity;
+if (typeof window !== "undefined") {
+  const opts = { capture: true, passive: true } as const;
+  window.addEventListener("pointerdown", (event) => {
+    pressed.add(event.pointerId);
+    pressedAt = performance.now();
+  }, opts);
+  const lift = (event: PointerEvent) => {
+    // A page turn ends the board's own gesture with a pointercancel of its
+    // own, the finger still down and turning the sheet.
+    if (event.type === "pointercancel" && !event.isTrusted) return;
+    pressed.delete(event.pointerId);
+    pressedAt = performance.now();
+  };
+  window.addEventListener("pointerup", lift, opts);
+  window.addEventListener("pointercancel", lift, opts);
+  window.addEventListener("blur", () => pressed.clear());
+}
+
+/**
+ * Run `work` once the hand has rested `REST_MS` and the main thread is free.
+ *
+ * Free alone was too soon. Between two quick turns there is idle time, and
+ * the wider window drawn there (a few blocks shown, a few hidden: 1-2 ms of
+ * script) cost the next frame 57-92 ms of style, layout and pre-paint on the
+ * tablet, the frame the next flick's sheet should have lifted in.
+ */
+const whenRested: LaterFn = (work) => {
+  const since = performance.now();
+  let timer = 0;
+  let idle = 0;
+  const wait = () => {
+    const now = performance.now();
+    const quiet = now - Math.max(since, pressedAt);
+    const up = pressed.size === 0 || now - pressedAt >= STUCK_MS;
+    return quiet >= REST_MS && up ? 0 : Math.max(50, REST_MS - quiet);
+  };
+  const check = () => {
+    timer = 0;
+    const left = wait();
+    if (left > 0) {
+      timer = window.setTimeout(check, left);
+      return;
+    }
+    const run = () => {
+      idle = 0;
+      // A press while it waited for the main thread starts the rest over.
+      if (wait() > 0) check();
+      else work();
+    };
+    idle = typeof window.requestIdleCallback === "function"
+      ? window.requestIdleCallback(run, { timeout: 600 })
+      : window.setTimeout(run, 0);
+  };
+  timer = window.setTimeout(check, REST_MS);
+  return () => {
+    window.clearTimeout(timer);
+    if (!idle) return;
+    if (typeof window.cancelIdleCallback === "function") window.cancelIdleCallback(idle);
+    else window.clearTimeout(idle);
+  };
 };
 
 /**
@@ -157,19 +244,24 @@ const whenIdle: LaterFn = (work) => {
  * the frame a turn lands is the one the quick turns can least afford, and
  * drawing the whole wider window there, a dozen pages of math every second
  * or third turn, was its slowest part. The wider window, and hiding what
- * fell out of it, wait for the main thread to be free.
+ * fell out of it, wait for the hand to rest (`whenRested`); the far window
+ * waits for the next rest, so that no frame draws both.
  */
-export function placeLazyWindow(slot: HTMLElement, at: number, pageH: number, later: LaterFn = whenIdle): void {
+export function placeLazyWindow(slot: HTMLElement, at: number, pageH: number, later: LaterFn = whenRested): void {
   if (!(pageH > 0) || !Number.isFinite(at)) return;
   pending.get(slot)?.();
   pending.delete(slot);
-  const wide = () => showLazyBlocksBetween(slot, at - WIDE_BACK * pageH, at + WIDE_AHEAD * pageH);
   revealLazyBlocksBetween(slot, at - NEAR_BACK * pageH, at + NEAR_AHEAD * pageH);
-  const cancel = later(() => {
+  const far = () => {
     pending.delete(slot);
-    wide();
-  });
-  pending.set(slot, cancel);
+    revealLazyBlocksBetween(slot, at - FAR_BACK * pageH, at + FAR_AHEAD * pageH);
+  };
+  const wide = () => {
+    hideLazyBlocksOutside(slot, at - FAR_BACK * pageH, at + FAR_AHEAD * pageH);
+    revealLazyBlocksBetween(slot, at - WIDE_BACK * pageH, at + WIDE_AHEAD * pageH);
+    pending.set(slot, later(far));
+  };
+  pending.set(slot, later(wide));
 }
 
 /**

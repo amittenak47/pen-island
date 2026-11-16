@@ -79,8 +79,8 @@ describe("lazy blocks in Pages reading", () => {
     expect(late.style.contentVisibility).toBe("visible");
   });
 
-  it("draws the open page's spread at once, and the wider window when the hand rests", () => {
-    const { slot, shown } = note(20);
+  it("draws the open page's spread at once, the wider window when the hand rests and the far one at the next rest", () => {
+    const { slot, shown } = note(40);
     const later: (() => void)[] = [];
     const cancelled: number[] = [];
     const fake = (work: () => void) => {
@@ -88,28 +88,80 @@ describe("lazy blocks in Pages reading", () => {
       return () => cancelled.push(i);
     };
     const letters = () => shown().map((v) => v[0]).join("");
-    // First page shown, at 600 with pages 100 high: 2 pages back to 4 ahead,
-    // 400 to 1000, now (blocks 3 to 10, those touching an edge included).
-    placeLazyWindow(slot, 600, 100, fake);
-    expect(letters()).toBe("aaavvvvvvvvaaaaaaaaa");
-    // 4 pages back to 8 ahead, 200 to 1400, once the hand rests: blocks 1 to 14.
+    const runs = (...parts: [string, number][]) => parts.map(([c, n]) => c.repeat(n)).join("");
+    // First page shown, at 1600 with pages 100 high: 2 pages back to 4 ahead,
+    // 1400 to 2000, now (blocks 13 to 20, those touching an edge included).
+    placeLazyWindow(slot, 1600, 100, fake);
+    expect(letters()).toBe(runs(["a", 13], ["v", 8], ["a", 19]));
+    // Rested: 4 back to 8 ahead drawn (blocks 11 to 24), and what lies past
+    // 8 back and 16 ahead hidden (all but blocks 7 to 32).
     expect(later).toHaveLength(1);
     later[0]!();
-    expect(letters()).toBe("hvvvvvvvvvvvvvvhhhhh");
-    // A turn on: its spread and the next are drawn already, so the rest waits.
-    placeLazyWindow(slot, 800, 100, fake);
+    expect(letters()).toBe(runs(["h", 7], ["a", 4], ["v", 14], ["a", 8], ["h", 7]));
+    // Rested again: out to 8 back and 16 ahead.
     expect(later).toHaveLength(2);
-    expect(shown()[16]).toBe("hidden");
-    // Another turn before the rest happened: the wait starts over.
-    placeLazyWindow(slot, 1000, 100, fake);
-    expect(cancelled).toEqual([1]);
-    later[2]!();
-    // 600 to 1800: blocks 5 to 18.
-    expect(letters()).toBe("hhhhhvvvvvvvvvvvvvvh");
-    // A run of quick turns past it: the spread after the next comes now, and
-    // nothing is hidden until the hand rests.
-    placeLazyWindow(slot, 1600, 100, fake);
-    expect(letters()).toBe("hhhhhvvvvvvvvvvvvvvv");
+    later[1]!();
+    expect(letters()).toBe(runs(["h", 7], ["v", 26], ["h", 7]));
+    // A run of quick turns on from the rest: six land with nothing to draw,
+    // each starting the wait over.
+    const drawn = letters();
+    for (let turn = 1; turn <= 6; turn += 1) {
+      placeLazyWindow(slot, 1600 + turn * 200, 100, fake);
+      expect(letters()).toBe(drawn);
+    }
+    expect(cancelled).toEqual([2, 3, 4, 5, 6]);
+    // The seventh draws the spread after the next (2800 to 3400: blocks 33
+    // and 34), and still hides nothing until the hand rests.
+    placeLazyWindow(slot, 3000, 100, fake);
+    expect(letters()).toBe(runs(["h", 7], ["v", 28], ["h", 5]));
+  });
+
+  it("draws nothing as a run of three quick turns back from a rest lands", () => {
+    const { slot, shown } = note(40);
+    const later: (() => void)[] = [];
+    const fake = (work: () => void) => {
+      later.push(work);
+      return () => {};
+    };
+    placeLazyWindow(slot, 2400, 100, fake);
+    later.shift()!();
+    later.shift()!();
+    const drawn = shown().join();
+    for (let turn = 1; turn <= 3; turn += 1) {
+      placeLazyWindow(slot, 2400 - turn * 200, 100, fake);
+      expect(shown().join()).toBe(drawn);
+    }
+  });
+
+  it("draws the wider window only once the hand has rested, not between two quick flicks", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "performance", "Date"] });
+    try {
+      const { slot, shown } = note(20);
+      const press = (type: string) => {
+        const event = new Event(type);
+        Object.defineProperty(event, "pointerId", { value: 7 });
+        window.dispatchEvent(event);
+      };
+      const letters = () => shown().map((v) => v[0]).join("");
+      placeLazyWindow(slot, 600, 100);
+      expect(letters()).toBe("aaavvvvvvvvaaaaaaaaa");
+      // The next flick goes down while the main thread is free: a finger on the glass is no rest.
+      vi.advanceTimersByTime(300);
+      press("pointerdown");
+      vi.advanceTimersByTime(1500);
+      expect(letters()).toBe("aaavvvvvvvvaaaaaaaaa");
+      // Lifted, the rest starts from the lift.
+      press("pointerup");
+      vi.advanceTimersByTime(700);
+      expect(letters()).toBe("aaavvvvvvvvaaaaaaaaa");
+      vi.advanceTimersByTime(200);
+      expect(letters()).toBe("avvvvvvvvvvvvvvaaaaa");
+      // And the far window a rest later.
+      vi.advanceTimersByTime(900);
+      expect(letters()).toBe("vvvvvvvvvvvvvvvvvvvv");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("draws a jump's page at once even with a wait pending", () => {

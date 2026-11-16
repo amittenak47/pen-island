@@ -992,6 +992,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
    * pictures wait until the hand has rested.
    */
   const facingHandoffRef = useRef<{ minY: number } | null>(null);
+  /** When the last turn landed: within `FLICK_THROUGH_MS`, a hand is flicking through. */
+  const landedAtRef = useRef(-Infinity);
   useEffect(() => () => shotsRef.current.clear(), []);
 
   // Lift the side stacks — the menu toolbar, the mode toggle and their
@@ -1279,17 +1281,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       return [holder];
     };
 
-    const onDown = (event: PointerEvent) => {
-      if (!event.isPrimary || event.button !== 0) return;
-      const b = boardRef.current;
-      const el = facingEl();
-      const held = lockedRef.current;
-      if (!b || !el || el.hidden || !held || turnRef.current) return;
-      const r = el.getBoundingClientRect();
-      if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) return;
-      // The outer edge is the turn's, while turning is on.
-      const hole = el.parentElement?.getBoundingClientRect();
-      if (hole && turnEnabledRef.current && turnGripAt(hole, event.clientX, event.clientY, event.pointerType, b.getActiveTool?.())) return;
+    /** Make the facing page the held one. */
+    const swap = (b: BoardHandle, el: HTMLElement, held: PageFrame) => {
       const frames = b.readingPageFrames();
       const i = frames.findIndex((f) => same(f, held));
       const facing = i >= 0 ? frames[i % 2 === 0 ? i + 1 : i - 1] : undefined;
@@ -1300,6 +1293,50 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       b.setPageLock(facing);
     };
 
+    /*
+     * A finger on the facing page while flicking through is the next flick,
+     * nearly always, and a flick needs the board where it is. Going over to
+     * the facing page there cost the flick's first frame 60-90 ms on the
+     * tablet (the camera's move laid out and pre-painted on the touch, its
+     * repaint the frame after) and the landing as much again to come back. So
+     * the swap waits for the lift, and a press a turn took never swaps. A pen
+     * with a drawing tool up writes, and swaps at once.
+     */
+    let swapOnLift: { id: number; held: PageFrame } | null = null;
+
+    const onDown = (event: PointerEvent) => {
+      if (!event.isPrimary || event.button !== 0) return;
+      swapOnLift = null;
+      const b = boardRef.current;
+      const el = facingEl();
+      const held = lockedRef.current;
+      if (!b || !el || el.hidden || !held || turnRef.current) return;
+      const r = el.getBoundingClientRect();
+      if (event.clientX < r.left || event.clientX > r.right || event.clientY < r.top || event.clientY > r.bottom) return;
+      // The outer edge is the turn's, while turning is on.
+      const hole = el.parentElement?.getBoundingClientRect();
+      const tool = b.getActiveTool?.();
+      if (hole && turnEnabledRef.current && turnGripAt(hole, event.clientX, event.clientY, event.pointerType, tool)) return;
+      if (turnEnabledRef.current && !penWrites(event.pointerType, tool) &&
+          performance.now() - landedAtRef.current < FLICK_THROUGH_MS) {
+        swapOnLift = { id: event.pointerId, held };
+        return;
+      }
+      swap(b, el, held);
+    };
+    const onLift = (event: PointerEvent) => {
+      const wait = swapOnLift;
+      // A turn ends the board's own gesture with a cancel of its own.
+      if (!wait || wait.id !== event.pointerId || (event.type === "pointercancel" && !event.isTrusted)) return;
+      swapOnLift = null;
+      if (event.type !== "pointerup") return;
+      const b = boardRef.current;
+      const el = facingEl();
+      // A turn took the press, or the page moved on under it.
+      if (!b || !el || el.hidden || turnRef.current || lockedRef.current !== wait.held) return;
+      swap(b, el, wait.held);
+    };
+
     refresh();
     const unsubscribe = subscribePdfFilmCurrent(filmScope, () => {
       cancelAnimationFrame(refreshFrame);
@@ -1307,6 +1344,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
     });
     const timer = window.setInterval(refresh, 700);
     window.addEventListener("pointerdown", onDown, true);
+    window.addEventListener("pointerup", onLift, true);
+    window.addEventListener("pointercancel", onLift, true);
     return () => {
       disposed = true;
       cancelAnimationFrame(refreshFrame);
@@ -1314,6 +1353,8 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       unsubscribe();
       window.clearInterval(timer);
       window.removeEventListener("pointerdown", onDown, true);
+      window.removeEventListener("pointerup", onLift, true);
+      window.removeEventListener("pointercancel", onLift, true);
       facingEl()?.replaceChildren();
     };
   }, [boardRef, filmScope, hostSelector, lockActive, textSpread]);
@@ -2824,6 +2865,7 @@ export function PageTurn({ boardRef, filmScope, hostSelector, lockActive, turnEn
       }
       const flipping = flicking();
       lastLandAt = performance.now();
+      landedAtRef.current = lastLandAt;
       if (paperFacing && !paperFillTimer) paperFillTimer = window.setTimeout(fillPaperFacing, paperFillMs());
       // The kept pictures the next turns this way will want, out of the landing's frame.
       if (!pagedRef.current) window.setTimeout(() => { if (!disposed) warmThumbs(b, turn.to, frames.length > 0 ? frames : undefined); }, 0);
