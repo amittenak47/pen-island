@@ -4,7 +4,8 @@ import { createRoot } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { FootnoteNoteWorkspace, footnoteNoteTab } from "./FootnoteNoteWorkspace";
 import { ANNOTATE_LIBRARY_EVENT, type AnnotateDoc } from "../util/annotateStore";
-import { footnoteThemeVars } from "../util/footnoteTheme";
+import { FOOTNOTE_THEMED, footnoteThemeVars } from "../util/footnoteTheme";
+import { footnoteMarkerMismatches } from "../util/footnoteThemeTestKit";
 import type { AnnotateTab, FootnoteNoteRef } from "../util/tabs";
 import { takeMiniNoteRestore } from "../util/miniNoteWindows";
 
@@ -50,6 +51,8 @@ describe("full footnote note tabs", () => {
     for (const key of ["--lc-fn-color", "--lc-fn-wash", "--lc-fn-ink"]) {
       expect(reader.style.getPropertyValue(key)).toBe((theme as Record<string, string>)[key]);
     }
+    expect(reader.classList.contains(FOOTNOTE_THEMED)).toBe(true);
+    expect(footnoteMarkerMismatches(document.body)).toEqual([]);
     await vi.waitFor(() => expect(mocks.shell.setShellLoadActive).toHaveBeenCalledWith(false));
     act(() => document.querySelector<HTMLButtonElement>('[aria-label="Close note tab"]')!.click());
     expect(mocks.shell.closeTab).toHaveBeenCalledWith(tab.id);

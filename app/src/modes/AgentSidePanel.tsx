@@ -43,7 +43,7 @@ import {
   saveAgentReasoningLevel,
   type AgentReasoningLevel,
 } from "../util/agentPrefs";
-import { footnoteThemeVars } from "../util/footnoteTheme";
+import { FOOTNOTE_THEMED, footnoteThemeVars } from "../util/footnoteTheme";
 import { normalizePalette, paletteForMarkIndex } from "../util/inkPaletteHistory";
 import { useIsMobile } from "../util/mobile";
 import { PHOTO_ATTACH_LIMIT, pickPhotos } from "../util/photoAttach";
@@ -2586,7 +2586,7 @@ export function AgentSidePanel({
                 return (
                 <HoldButton
                   key={mark.id}
-                  className={`lc-footnote-chip lc-hold-danger${overflow ? " is-overflow" : ""}`}
+                  className={`lc-footnote-chip lc-hold-danger ${FOOTNOTE_THEMED}${overflow ? " is-overflow" : ""}`}
                   label={chipLabel}
                   ariaLabel={`Hold to remove ${chipLabel}`}
                   style={footnoteThemeVars(mark.color, normalizePalette(mark.palette) ?? paletteForMarkIndex((mark.number ?? 1) - 1))}
@@ -2987,7 +2987,7 @@ export function AgentSidePanel({
             const picked = attachedMarks.some(entry => entry.id === mark.id);
             return <button key={mark.id} type="button" role="menuitemcheckbox" aria-checked={picked}
               aria-label={footnoteChipLabel(mark.number, mark.title)} disabled={annotateUnavailable}
-              className={`lc-footnote-chip${picked ? " is-picked" : ""}`}
+              className={`lc-footnote-chip ${FOOTNOTE_THEMED}${picked ? " is-picked" : ""}`}
               style={footnoteThemeVars(mark.color, normalizePalette(mark.palette) ?? paletteForMarkIndex((mark.number ?? 1) - 1))} onClick={() => onToggleAttached?.(mark.id)}>
               <span className="lc-fn-badge" aria-hidden>{mark.number ?? ""}</span>
               {mark.title?.trim() ? <span className="lc-footnote-chip-label">{mark.title.trim()}</span> : null}

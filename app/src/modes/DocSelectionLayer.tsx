@@ -100,7 +100,7 @@ import {
   onInkPaletteChange,
 } from "../canvas/inkPaletteBridge";
 import { currentInkPalette } from "../util/inkPaletteHistory";
-import { footnoteThemeVars } from "../util/footnoteTheme";
+import { FOOTNOTE_THEMED, footnoteThemeVars } from "../util/footnoteTheme";
 import { isAndroidDevice } from "../util/androidDevice";
 import { fillPdfQuoteText } from "./pdfQuoteText";
 import { PdfMarkPage } from "./PdfMarkPage";
@@ -3020,7 +3020,7 @@ export function DocSelectionLayer({
             return (
               <span
                 key={footnote.id}
-                className="lc-doc-footnote-pack"
+                className={`lc-doc-footnote-pack ${FOOTNOTE_THEMED}`}
                 // So a card can be anchored to the mark it is about — the
                 // conflict panes open one per side and need to find theirs.
                 data-footnote-id={footnote.id}
@@ -3031,7 +3031,7 @@ export function DocSelectionLayer({
                   return (
                     <div
                       key={`fn-band-${bandIndex}`}
-                      className="lc-doc-footnote-band"
+                      className={`lc-doc-footnote-band ${FOOTNOTE_THEMED}`}
                       style={{
                         left: box.left,
                         top: box.top,
@@ -3045,7 +3045,7 @@ export function DocSelectionLayer({
                 {tabRect ? overlay(booktabsHost,
                   <PdfMarkPage filmScope={cameraScope} scope={group.scope} page={booktabsHost && group.page ? tabRect : undefined} offView={offView(group.scope)}>
                   <span
-                    className={`lc-doc-footnote lc-doc-footnote-${footnote.kind} lc-doc-footnote-tab`}
+                    className={`lc-doc-footnote lc-doc-footnote-${footnote.kind} lc-doc-footnote-tab ${FOOTNOTE_THEMED}`}
                     aria-hidden="true"
                     style={{ ...tabRect, ...tint }}
                   >
@@ -3072,7 +3072,7 @@ export function DocSelectionLayer({
                     page={booktabsHost && group.page ? { left: chipLeft, top: chipTop, width: chipW, height: chipW } : undefined}>
                   <HoldButton
                     label={String(number)}
-                    className={`lc-doc-footnote lc-doc-footnote-bookmark lc-doc-footnote-${footnote.kind}${footnote.pending ? " lc-doc-footnote-pending" : ""}`}
+                    className={`lc-doc-footnote lc-doc-footnote-bookmark lc-doc-footnote-${footnote.kind} ${FOOTNOTE_THEMED}${footnote.pending ? " lc-doc-footnote-pending" : ""}`}
                     style={chipStyle}
                     dataId={footnote.id}
                     ariaLabel={`${footnoteTitle(footnote, number)} — tap to open, hold to delete`}
@@ -3134,20 +3134,21 @@ export function DocSelectionLayer({
               // underline is a rule sitting on the baseline: pad it and the rule
               // drifts off the words it belongs to.
               const box = entry.kind === "highlight" ? padQuoteRect(rect) : rect;
+              const subTint = entry.color
+                ? footnoteThemeVars(entry.color, normalizePalette(entry.palette) ?? inkPalette)
+                : subMarkTint;
               return (
               <div
                 key={`sub-${entry.id}-${index}`}
                 className={`lc-doc-submark-paint lc-doc-submark-${entry.kind}${
                   hoveredSubMarkId === entry.id ? " is-hovered" : ""
-                }`}
+                }${subTint ? ` ${FOOTNOTE_THEMED}` : ""}`}
                 style={{
                   left: box.left,
                   top: box.top,
                   width: box.width,
                   height: box.height,
-                  ...(entry.color
-                    ? footnoteThemeVars(entry.color, normalizePalette(entry.palette) ?? inkPalette)
-                    : subMarkTint),
+                  ...subTint,
                 }}
               />
               );
@@ -3157,7 +3158,9 @@ export function DocSelectionLayer({
           {subMarkLivePaint.map((rect, index) => (
             <div
               key={`sub-live-${index}`}
-              className={`lc-doc-submark-paint lc-doc-submark-live lc-doc-submark-${subMarkMode ?? "underline"}`}
+              className={`lc-doc-submark-paint lc-doc-submark-live lc-doc-submark-${subMarkMode ?? "underline"}${
+                subMarkLiveTint ? ` ${FOOTNOTE_THEMED}` : ""
+              }`}
               style={{
                 left: rect.left,
                 top: rect.top,
@@ -3181,7 +3184,7 @@ export function DocSelectionLayer({
                   <>
                     <button
                       type="button"
-                      className="lc-doc-submark-grip"
+                      className={`lc-doc-submark-grip${subMarkLiveTint ? ` ${FOOTNOTE_THEMED}` : ""}`}
                       data-grip="start"
                       style={{
                         left: startRect.left - hit / 2,
@@ -3193,7 +3196,7 @@ export function DocSelectionLayer({
                     />
                     <button
                       type="button"
-                      className="lc-doc-submark-grip"
+                      className={`lc-doc-submark-grip${subMarkLiveTint ? ` ${FOOTNOTE_THEMED}` : ""}`}
                       data-grip="end"
                       style={{
                         left: endRect.left + endRect.width - hit / 2,

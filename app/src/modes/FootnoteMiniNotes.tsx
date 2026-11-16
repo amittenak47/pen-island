@@ -2,7 +2,7 @@ import { useLayoutEffect, useRef, useState, type PointerEvent as ReactPointerEve
 import { createPortal } from "react-dom";
 import { CloseNoteIcon, ExpandNoteIcon } from "../components/NoteWindowIcons";
 import type { DocFootnote, DocFootnoteNote } from "../util/docFootnotes";
-import { footnoteThemeVars } from "../util/footnoteTheme";
+import { FOOTNOTE_THEMED, footnoteThemeVars } from "../util/footnoteTheme";
 import { FootnoteNoteBody } from "./FootnoteNoteBody";
 import { subscribePageSurfaceMove } from "./sheetAnchor";
 import { clampMiniNoteRect, firstFreeMiniNoteRect, miniNoteKey, resizeMiniNoteRect, type MiniNoteBounds,
@@ -176,7 +176,7 @@ export function FootnoteMiniNotes({ entries, getBounds, onClose, onOpenFullNote,
       if (!saved) return null;
       const rect = clampMiniNoteRect(saved, bounds);
       return <section key={key}
-      className={`lc-footnote-mini-note${entry.footnote.kind === "ai" && !entry.footnote.pending ? " is-chatbot-complete" : ""}`}
+      className={`lc-footnote-mini-note ${FOOTNOTE_THEMED}${entry.footnote.kind === "ai" && !entry.footnote.pending ? " is-chatbot-complete" : ""}`}
       role="dialog" aria-label={`Mini note ${entry.number ?? ""}.${entry.noteNumber}`}
       data-footnote-id={entry.footnoteId} data-note-id={entry.noteId}
       style={{ ...footnoteThemeVars(entry.theme.color, entry.theme.palette), ...rect, zIndex: key === front ? 2 : 1 }}

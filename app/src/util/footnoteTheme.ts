@@ -129,7 +129,20 @@ export function readableInkOn(background: string, candidates: readonly string[])
 }
 
 /**
+ * The class every element wearing {@link footnoteThemeVars} also carries.
+ *
+ * The stylesheet keys "this element has a colour the reader chose" on this
+ * class, never on `[style*="--lc-fn-color"]`. A style-attribute test outside a
+ * selector's last part makes Blink walk the whole subtree of any element whose
+ * inline style is written. The page slot of a 60,000-node note is written
+ * every frame of a page turn, and that walk cost about 5 ms a frame on the
+ * tablet. Add it in the same render that applies the vars, not per frame.
+ */
+export const FOOTNOTE_THEMED = "lc-fn-themed";
+
+/**
  * CSS custom properties for `.lc-footnote-overview` / `.lc-doc-footnote-pack`.
+ * The element that wears them also needs {@link FOOTNOTE_THEMED}.
  *
  * `--lc-fn-color` = selected primary (accents / borders — not body labels).
  * `--lc-fn-wash` / `--lc-fn-chip` = palette mixed into the theme panel.

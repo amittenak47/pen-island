@@ -4,7 +4,7 @@ import { NO_CHROME, useShell } from "../shellContext";
 import { ANNOTATE_LIBRARY_EVENT, getAnnotateDoc, type AnnotateDoc } from "../util/annotateStore";
 import { noteById, numberFootnotes } from "../util/docFootnotes";
 import { footnoteDisplayThemes } from "../util/inkPaletteHistory";
-import { footnoteThemeVars } from "../util/footnoteTheme";
+import { FOOTNOTE_THEMED, footnoteThemeVars } from "../util/footnoteTheme";
 import { openExternalUrl } from "../util/openExternal";
 import { newTabId, type AnnotateTab, type FootnoteNoteRef } from "../util/tabs";
 import { FootnoteNoteBody } from "./FootnoteNoteBody";
@@ -92,7 +92,8 @@ export function FootnoteNoteWorkspace({ tab, active, showing, splitRole }: {
   };
   return <section
     className={["lc-canvas-wrap lc-footnote-note-workspace", !showing && "lc-canvas-parked",
-      splitRole && `is-split-${splitRole}`, mark?.kind === "ai" && !mark.pending && "is-chatbot-complete"].filter(Boolean).join(" ")}
+      splitRole && `is-split-${splitRole}`, mark?.kind === "ai" && !mark.pending && "is-chatbot-complete",
+      theme && FOOTNOTE_THEMED].filter(Boolean).join(" ")}
     data-lc-tab={tab.id} aria-label="Full note"
     style={theme ? footnoteThemeVars(theme.color, theme.palette) : undefined}>
     <header className="lc-footnote-note-head">
