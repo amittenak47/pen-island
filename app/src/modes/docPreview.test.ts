@@ -34,8 +34,8 @@ describe("rendering a book-length document", () => {
       n += 1;
     }
     const html = renderMarkdown(chapters.join(""));
-    expect(html).toContain("<h1>Chapter 1</h1>");
-    expect(html).toContain(`<h1>Chapter ${n - 1}</h1>`);
+    expect(html).toContain('<h1 id="user-content-chapter-1">Chapter 1</h1>');
+    expect(html).toContain(`<h1 id="user-content-chapter-${n - 1}">Chapter ${n - 1}</h1>`);
     expect(html).not.toContain("lc-doc-truncated");
   });
 

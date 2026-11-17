@@ -32,8 +32,28 @@ import {
   type MarkdownLayoutRecord,
 } from "./markdownHtmlCache";
 import { markedTexmathDollars } from "./mdMath";
+import { anchorDocY, classifyDocLink, DOC_ID_PREFIX, findDocAnchor, headingPlainText, headingSlug } from "../util/docLinks";
 
-const markedMath = new Marked({ gfm: true, breaks: false }).use(markedTexmathDollars());
+/** Heading slugs given out in the render under way, for `-1`, `-2` on repeats. */
+let headingSlugs = new Map<string, number>();
+
+const markedMath = new Marked({ gfm: true, breaks: false }).use(markedTexmathDollars(), {
+  hooks: {
+    preprocess(markdown: string) {
+      headingSlugs = new Map();
+      return markdown;
+    },
+  },
+  renderer: {
+    // Each heading gets an id a table of contents can link to (`#intro`),
+    // prefixed as the sanitiser prefixes the note's own ids.
+    heading({ tokens, depth, text }) {
+      const slug = headingSlug(headingPlainText(text), headingSlugs);
+      const id = slug ? ` id="${DOC_ID_PREFIX}${slug}"` : "";
+      return `<h${depth}${id}>${this.parser.parseInline(tokens)}</h${depth}>\n`;
+    },
+  },
+});
 
 export interface AnnotateDocumentProps {
   source: string;
@@ -55,6 +75,10 @@ export interface AnnotateDocumentProps {
    * above it is what answers.
    */
   selectable?: boolean;
+  /** A `#name` link was tapped: its target is `y` scene units down a document `height` tall. */
+  onAnchorJump?: (y: number, height: number) => void;
+  /** A web link was tapped. */
+  onOpenLink?: (url: string) => void;
 }
 
 /**
@@ -70,12 +94,16 @@ export function renderMarkdown(source: string): string {
   const html = markedMath.parse(source, { async: false });
   const t1 = performance.now();
   const clean = DOMPurify.sanitize(html, {
-    // No `target`/`rel` juggling needed: links are inert here anyway, since
-    // the surface never receives a pointer event.
+    // No `target`/`rel` juggling needed: a tap on a link is handled by the
+    // reader (`util/docLinks.ts`), never by the browser.
     FORBID_TAGS: ["script", "style", "iframe", "object", "embed", "form", "input"],
     // KaTeX positions glyphs with inline styles; style elements stay forbidden.
     FORBID_ATTR: ["onerror", "onload", "onclick"],
     ADD_ATTR: ["style"],
+    // The note's own ids and anchor names, kept but prefixed, so a heading
+    // called "title" or "forms" can't shadow the page's own properties and
+    // a `#name` link still finds them (see `findDocAnchor`).
+    SANITIZE_NAMED_PROPS: true,
   });
   if (source.length > 20_000) {
     traceOpen("markdown rendered", {
@@ -229,8 +257,63 @@ export function applySkippableHeights(node: HTMLElement, record: MarkdownLayoutR
   return true;
 }
 
-export function AnnotateDocument({ source, onMeasure, selectable = false }: AnnotateDocumentProps) {
+export function AnnotateDocument({ source, onMeasure, selectable = false, onAnchorJump, onOpenLink }: AnnotateDocumentProps) {
   const nodeRef = useRef<HTMLDivElement | null>(null);
+  const linkHandlersRef = useRef({ onAnchorJump, onOpenLink });
+  linkHandlersRef.current = { onAnchorJump, onOpenLink };
+  /*
+   * A tap on a link. The browser's own handling would navigate the whole app
+   * (an external link) or change its address (`#name`), so it never runs: a
+   * `#name` link puts its target on screen, through the reader, and a web
+   * link opens in the browser. In Annotate mode the page takes no pointer,
+   * and the pen writes over links as over any other text.
+   */
+  useEffect(() => {
+    const node = nodeRef.current;
+    if (!node) return;
+    const follow = (anchor: HTMLAnchorElement) => {
+      // A tap that ends a selection drag is the selection's, not the link's.
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.containsNode(anchor, true)) return;
+      const link = classifyDocLink(anchor);
+      if (link.kind === "anchor") {
+        const target = findDocAnchor(node, link.fragment);
+        if (target) linkHandlersRef.current.onAnchorJump?.(anchorDocY(node, target), node.offsetHeight);
+      } else if (link.kind === "external") linkHandlersRef.current.onOpenLink?.(link.url);
+    };
+    const onClick = (event: MouseEvent) => {
+      const anchor = event.target instanceof Element ? event.target.closest("a[href]") : null;
+      if (!(anchor instanceof HTMLAnchorElement) || !node.contains(anchor)) return;
+      event.preventDefault();
+      follow(anchor);
+    };
+    /*
+     * Pages reading: a tap on the facing page goes down on its copy, the
+     * board goes over to that page under the finger, and the lift lands on
+     * the page itself. The click then belongs to the board, not the link
+     * now under the finger: look for the link there.
+     */
+    const onBoardClick = (event: MouseEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      const board = node.closest(".lc-board");
+      if (!target || !board || event.defaultPrevented || node.contains(target)) return;
+      if (target !== board && !target.closest(".lc-page-mask, .lc-page-turn-under")) return;
+      if (!board.contains(target)) return;
+      const anchor = document
+        .elementsFromPoint(event.clientX, event.clientY)
+        .map((hit) => hit.closest("a[href]"))
+        .find((hit): hit is HTMLAnchorElement => hit instanceof HTMLAnchorElement && node.contains(hit));
+      if (!anchor) return;
+      event.preventDefault();
+      follow(anchor);
+    };
+    node.addEventListener("click", onClick);
+    window.addEventListener("click", onBoardClick);
+    return () => {
+      node.removeEventListener("click", onClick);
+      window.removeEventListener("click", onBoardClick);
+    };
+  }, []);
   /*
    * Parsed off the render path, above a size where that is worth doing.
    *
