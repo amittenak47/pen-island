@@ -162,6 +162,30 @@ describe("compositePageLayers", () => {
     expect(far).not.toHaveBeenCalledWith(true);
   });
 
+  it("leaves the selection being made out of the picture, and keeps the marks beside it", async () => {
+    const sources: string[] = [];
+    vi.stubGlobal("Image", class {
+      onload?: () => void;
+      set src(value: string) { sources.push(value); queueMicrotask(() => this.onload?.()); }
+    });
+    const marks = document.createElement("div");
+    Object.defineProperty(marks, "offsetWidth", { value: 200 });
+    marks.getBoundingClientRect = () => ({ top: 0, bottom: 1000, height: 1000, width: 200 }) as DOMRect;
+    marks.innerHTML = `<div class="lc-doc-select-overlay">
+      <div class="lc-doc-marquee-band"></div><span class="lc-doc-marquee-handle"></span>
+      <div class="lc-doc-marquee-hit is-confirmed"></div><div class="lc-doc-select-rect"></div>
+      <div class="lc-doc-highlight-band"></div><div class="lc-saved-mark">kept</div></div>`;
+    await compositePageLayers({ drawImage: vi.fn() } as unknown as CanvasRenderingContext2D,
+      { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, 1,
+      { contentSlot: null, marksSlot: marks, pageBounds: { minX: 0, minY: 0, maxX: 200, maxY: 1000 }, paperColor: "#fff" });
+    const xml = decodeURIComponent(sources[0]!.slice(sources[0]!.indexOf(",") + 1));
+    const copy = new DOMParser().parseFromString(xml, "image/svg+xml");
+    expect(copy.querySelector(".lc-doc-marquee-band, .lc-doc-marquee-handle, .lc-doc-marquee-hit, .lc-doc-select-rect, .lc-doc-highlight-band")).toBeNull();
+    expect(copy.querySelector(".lc-saved-mark")?.textContent).toBe("kept");
+    // The board's own layer is untouched.
+    expect(marks.querySelector(".lc-doc-marquee-band")).not.toBeNull();
+  });
+
   it("keeps an emptied block's margins only, and an inline run beside the band whole", async () => {
     const sources: string[] = [];
     vi.stubGlobal("Image", class {
