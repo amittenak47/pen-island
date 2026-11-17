@@ -10208,6 +10208,7 @@ export const Board = forwardRef<BoardHandle, BoardProps>(function Board(
           scene?.map(e => [e.id, e.version]), rasterInkRef.current?.getRevision(),
         ]) };
       },
+      captureFeedback: () => captureFeedbackRef.current,
       exportSelectionCapture: async (bounds) => {
         const api = apiRef.current;
         const view = getViewport();
