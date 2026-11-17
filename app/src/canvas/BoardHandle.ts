@@ -252,6 +252,12 @@ export interface BoardHandle {
   /** The laid-out document slot, used to snapshot export geometry without moving the camera. */
   getDocumentExportRoot(): HTMLElement | null;
   exportSelectionCapture(bounds: { left: number; top: number; width: number; height: number }): Promise<Blob>;
+  /**
+   * The screenshot countdown and shutter the board's own captures use, for a
+   * capture taken from outside it (a selection's Screenshot). Null before the
+   * board is interactive.
+   */
+  captureFeedback(): import("./CaptureFeedback").CaptureFeedbackHandle | null;
   exportViewThumb(): Promise<{ label: string; png: string } | null>;
   /**
    * PNG of one coach diagram, cropped to the group it drew.

@@ -1,6 +1,7 @@
 package dev.lc.whiteboard.gallerysave
 
 import android.app.Activity
+import android.content.ClipData
 import android.content.ContentValues
 import android.content.Intent
 import android.os.Build
@@ -487,12 +488,20 @@ class GallerySavePlugin(private val activity: Activity) : Plugin(activity) {
                 "${activity.packageName}.fileprovider",
                 file,
             )
+            // The URI rides in ClipData as well as EXTRA_STREAM: a grant covers
+            // only the URIs in an intent's data and ClipData, and createChooser
+            // copies the ClipData to the chooser. With EXTRA_STREAM alone the
+            // chooser was refused the file (no preview), and so were targets
+            // that read it from there, such as Google's "Save to collections".
+            val clip = ClipData.newUri(activity.contentResolver, file.name, uri)
             val send = Intent(Intent.ACTION_SEND).apply {
                 type = "image/png"
                 putExtra(Intent.EXTRA_STREAM, uri)
+                clipData = clip
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             val chooser = Intent.createChooser(send, null).apply {
+                clipData = clip
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
             activity.startActivity(chooser)

@@ -227,6 +227,7 @@ import { installHandednessAttr } from "./util/inkHandedness";
 import { installUiHandednessAttr } from "./util/uiHandedness";
 import { openExternalUrl } from "./util/openExternal";
 import type { PdfJumpTarget } from "./modes/pdfLinks";
+import type { CaptureFeedbackHandle } from "./canvas/CaptureFeedback";
 import { WEB_HOME, fetchWebPage, hostLabelFromUrl, webPageWidthForViewport, type WebHtmlSource } from "./util/webPage";
 import { CodeDocument } from "./modes/CodeDocument";
 import { DocSelectionLayer, type DocSelectionResult } from "./modes/DocSelectionLayer";
@@ -470,7 +471,7 @@ import { useAsyncDialog } from "./util/useAsyncDialog";
 import { useOpenStatus } from "./util/openStatus";
 import { loadChromeFate, mayClearParkedPreparing, BOOT_DONE_HOLD_MS, LOAD_FADE_MS, LOAD_SLIDE_MS } from "./util/workspaceLoad";
 
-import { saveCaptureToDevice, describeCaptureResult } from "./util/capturePrefs";
+import { saveCaptureToDevice, describeCaptureResult, loadCaptureCountdown } from "./util/capturePrefs";
 import { captureScreenRegion } from "./util/screenRegionCapture";
 import { photoFromFile } from "./util/photoAttach";
 import { thumbnailFromPng } from "./util/photoAttach";
@@ -8162,9 +8163,26 @@ export const Workspace = memo(function Workspace({
       });
       openCoachPanel();
     };
+    /** The "Saving screenshot" pill while it is up: whatever ends the shot replaces it. */
+    let pill: CaptureFeedbackHandle | null = null;
     try {
       if (!context.isCurrent()) return false;
       if (!board || !source) throw new Error("Select a visible area first");
+      // A screenshot counts down as the board's own do, with the number on
+      // screen, and the shutter flashes as it is taken.
+      const feedback = ask ? null : board.captureFeedback();
+      if (feedback) {
+        const before = board.captureDocumentView();
+        if (!(await feedback.countdown(loadCaptureCountdown(), "Screenshot of the selection"))) return false;
+        if (!context.isCurrent()) return false;
+        // The selection's box is where it was on screen when it was taken.
+        if (!sameDocumentView(before, board.captureDocumentView())) throw new Error("The view changed before the screenshot. Select the area again.");
+        feedback.flash();
+        // Picturing the page and writing the file take a few seconds on the
+        // tablet: a pill says so until the result's toast replaces it.
+        feedback.saving("Saving screenshot");
+        pill = feedback;
+      }
       const snapshot = board.captureDocumentView();
       frozenView = structuredClone({ ...snapshot, document_hash: source.hash, title: source.name, format: source.docType });
       if (!rect) throw new Error("Selection image has no visible capture bounds.");
@@ -8177,7 +8195,13 @@ export const Workspace = memo(function Workspace({
           !sameDocumentView(snapshot, liveBoard.captureDocumentView())) {
         throw new Error("The view changed during capture. Select the area again.");
       }
-      if (!ask) { const saved = await saveCaptureToDevice(blob, "lc-selection"); setNotice(describeCaptureResult(saved)); return saved.outcome !== "failed"; }
+      if (!ask) {
+        const saved = await saveCaptureToDevice(blob, "lc-selection");
+        if (pill) pill.toast(describeCaptureResult(saved), saved.outcome === "failed" ? "error" : "ok");
+        else setNotice(describeCaptureResult(saved));
+        pill = null;
+        return saved.outcome !== "failed";
+      }
       const photo = await withTimeout(photoFromFile(new File([blob], "Selection.png", { type: "image/png" })), THUMB_EXPORT_TIMEOUT_MS, "Selection image preparation timed out");
       if (!context.isCurrent()) return false;
       validateSource();
@@ -8193,10 +8217,17 @@ export const Workspace = memo(function Workspace({
       openCoachPanel();
       return true;
     } catch (error) {
+      if (pill) {
+        pill.toast(messageOf(error), "error");
+        pill = null;
+      }
       if (!context.isCurrent()) return false;
       if (ask && frozenView) return selectionCaptureFailure(messageOf(error), selected.text, context, seedTextOnly);
       setError(messageOf(error));
       return { ok: false, error: messageOf(error) };
+    } finally {
+      // Called off part way (the selection went): no pill left behind.
+      pill?.toast("Screenshot cancelled", "error");
     }
   };
 
