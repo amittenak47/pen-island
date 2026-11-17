@@ -380,6 +380,9 @@ async function drawDomSlot(
   // A live page's frame pictures as nothing in an SVG image, and its srcdoc
   // (megabytes) made the picture take seconds to decode. Only the screen has it.
   clone.querySelectorAll("iframe").forEach((frame) => frame.remove());
+  // The selection being made is not on the page: a screenshot of it, or an
+  // export taken while it is up, shows the page and its marks without it.
+  clone.querySelectorAll(SELECTION_CHROME).forEach((node) => node.remove());
   clone.style.transform = "none";
   clone.style.left = "0";
   clone.style.top = "0";
@@ -468,6 +471,13 @@ function freezeCaptureMetrics(from: Element, to: Element): void {
 const CAPTURE_BAND_MARGIN = 48;
 /** With a `signal`, the longest the copy holds the main thread before a checkpoint. */
 const CAPTURE_SLICE_MS = 8;
+/**
+ * What a selection in progress draws in the marks layer (`DocSelectionLayer`):
+ * the box, its handles, and the tint over the words it holds. Saved marks
+ * and footnote ribbons share the layer and stay.
+ */
+export const SELECTION_CHROME =
+  ".lc-doc-marquee-band, .lc-doc-highlight-band, .lc-doc-marquee-handle, .lc-doc-marquee-hit, .lc-doc-select-rect";
 
 /**
  * The slot copied for a capture, with only the band near it filled in.
