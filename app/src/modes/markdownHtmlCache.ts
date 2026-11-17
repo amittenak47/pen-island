@@ -27,7 +27,7 @@ export const MD_LAYOUT_STORE = "markdown_layout";
 export const MD_INDEX_STORE = "markdown_index";
 
 /** Bump when `renderMarkdown`'s options or extensions change what it emits. */
-const RENDER_SCHEMA = 1;
+const RENDER_SCHEMA = 2;
 /**
  * Renders kept, least recently opened dropped first. A long note with math
  * renders to around a million characters, so the size cap is what usually

@@ -144,6 +144,8 @@ import { ensureTypingImports } from "./util/pythonImports";
 const CODE_PAGE_TAIL = 160;
 /** An HTML page's `#` link leaves its target this far under the top of the board. */
 const WEB_ANCHOR_MARGIN_PX = 16;
+/** A PDF link to a line on a page lands with this much of the page (a fraction) above that line. */
+const PDF_LINK_ROOM = 0.02;
 const newerDocSources = new Set<string>();
 const pendingSourcePrompts = new Map<string, { name: string; content: Awaited<ReturnType<typeof checkDocSource>>; linking?: boolean; documentName?: string }>();
 import { WhiteboardLibraryDialog } from "./modes/WhiteboardLibraryDialog";
@@ -224,6 +226,7 @@ import {
 import { installHandednessAttr } from "./util/inkHandedness";
 import { installUiHandednessAttr } from "./util/uiHandedness";
 import { openExternalUrl } from "./util/openExternal";
+import type { PdfJumpTarget } from "./modes/pdfLinks";
 import { WEB_HOME, fetchWebPage, hostLabelFromUrl, webPageWidthForViewport, type WebHtmlSource } from "./util/webPage";
 import { CodeDocument } from "./modes/CodeDocument";
 import { DocSelectionLayer, type DocSelectionResult } from "./modes/DocSelectionLayer";
@@ -951,6 +954,35 @@ export const Workspace = memo(function Workspace({
       setHtmlFolderPending(false);
     }
   }, [htmlFolderAsk, htmlFolderPending]);
+  /** A note's own `#` link (a table of contents): its target to the top, in Pages reading the page it falls on. */
+  const onDocAnchorJump = useCallback((y: number, height: number) => {
+    boardRef.current?.goToReadingPlace({ y, height });
+  }, []);
+  /** A web link in a note: the browser, never the app's own window. */
+  const onDocOpenLink = useCallback((url: string) => {
+    void openExternalUrl(url).catch(() => {
+      setError("could not hand the link to a browser on this device");
+    });
+  }, []);
+  /**
+   * A PDF's own link (its contents, "see page 12"): to the page it names, and
+   * to the line on it when the file says, with a little room above.
+   */
+  const onPdfLinkJump = useCallback((target: PdfJumpTarget) => {
+    const board = boardRef.current;
+    if (!board) return;
+    board.aimPdfPage(target.page);
+    const frames = board.readingPageFrames().filter((frame) => frame.pageId === target.page);
+    // A two-up sheet is two frames, left then right.
+    const frame = target.x != null && target.x >= 0.5 && frames[1] ? frames[1] : frames[0];
+    if (!frame) {
+      board.scrollToPdfPage(target.page);
+      return;
+    }
+    const height = frame.maxY - frame.minY;
+    const y = target.y == null ? frame.minY : Math.max(frame.minY, frame.minY + target.y * height - PDF_LINK_ROOM * height);
+    board.jumpToPageFrame({ ...frame, minY: y });
+  }, []);
   /** An HTML page's own `#` link: glide its target to just under the top of the board. */
   const onWebAnchor = useCallback((clientY: number) => {
     const board = document.querySelector(`[data-lc-tab="${cssEscape(tab.id)}"] .lc-board`);
@@ -11156,6 +11188,8 @@ export const Workspace = memo(function Workspace({
                       formFill={formFillOn}
                       onFormModel={onPdfFormModel}
                       onFormChange={onPdfFormChange}
+                      onLinkJump={onPdfLinkJump}
+                      onOpenLink={onDocOpenLink}
                       selectable={!annotateCode || Boolean(openFootnote) || highlighting}
                       onError={(message) => {
                         if (/cancel|abort|worker.*(destroy|terminat|not running)/i.test(message)) {
@@ -11199,6 +11233,8 @@ export const Workspace = memo(function Workspace({
                       source={annotateSource.text}
                       onMeasure={onMdInkMeasure}
                       selectable={!annotateCode || Boolean(openFootnote) || highlighting}
+                      onAnchorJump={onDocAnchorJump}
+                      onOpenLink={onDocOpenLink}
                     />
                   )}
                 </DocSelectionLayer>

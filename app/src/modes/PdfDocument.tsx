@@ -156,6 +156,7 @@ import {
   type PdfFormWidget,
 } from "./pdfForms";
 import { PdfFormBoxes, usePdfFormFill } from "./PdfFormFill";
+import { type PdfJumpTarget, usePdfLinkTaps } from "./pdfLinks";
 
 /**
  * Supersampling of the page bitmap relative to its scene size.
@@ -345,6 +346,10 @@ export interface PdfDocumentProps {
   /** What kind of form the file is, once its fields have been read. */
   onFormModel?: (model: PdfFormModel) => void;
   onFormChange?: (values: PdfFormValues) => void;
+  /** A tap on a link to somewhere in this file, while reading. */
+  onLinkJump?: (target: PdfJumpTarget) => void;
+  /** A tap on a web link, while reading. */
+  onOpenLink?: (url: string) => void;
 }
 
 const NO_FORM_VALUES: PdfFormValues = {};
@@ -639,6 +644,8 @@ export function PdfDocument({
   formFill = false,
   onFormModel,
   onFormChange,
+  onLinkJump,
+  onOpenLink,
 }: PdfDocumentProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const [pages, setPages] = useState<RenderedPage[]>([]);
@@ -2240,6 +2247,14 @@ export function PdfDocument({
     }
     return byPage;
   }, [formModel]);
+
+  usePdfLinkTaps({
+    enabled: selectable && !standalone && !paused && !offscreen,
+    host: () => hostRef.current,
+    doc: () => docRef.current,
+    onJump: onLinkJump,
+    onOpenLink,
+  });
 
   const formEditor = usePdfFormFill({
     model: formModel,
